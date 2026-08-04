@@ -1,0 +1,46 @@
+# Tracker — local development infra + service placeholders (spec §2, §13 Phase 0)
+# Cloud-agnostic. Postgres here stands in for hosted Supabase-Postgres during local dev;
+# in staging/prod, DATABASE_URL points at the real Supabase project instead.
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: tracker_local_dev
+      POSTGRES_DB: tracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker -d tracker"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --- Service placeholders (each surface is its own independently-scalable container). ---
+  # Uncommented/expanded as phases land. Kept here so the segregation is visible from day one.
+  #
+  # tracking:        build: ./api-backend  command: npm run start:tracking        (hot path — Phase 2)
+  # dashboard-api:   build: ./api-backend  command: npm run start:dashboard       (Phase 1)
+  # public-api:      build: ./api-backend  command: npm run start:public-api      (Phase 4A)
+  # platform-admin:  build: ./api-backend  command: npm run start:platform-admin  (Phase 1A)
+  # workers:         build: ./api-backend  command: npm run start:workers         (Phase 2+)
+
+volumes:
+  redis-data:
+  pg-data:

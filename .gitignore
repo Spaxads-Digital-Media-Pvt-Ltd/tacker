@@ -1,0 +1,38 @@
+# --- Local working memory (NEVER commit — see spec §0A) ---
+memory.md
+
+# --- Dependencies ---
+node_modules/
+.pnpm-store/
+
+# --- Build output ---
+dist/
+build/
+*.tsbuildinfo
+
+# --- Env / secrets (NEVER commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Logs ---
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# --- Test / coverage ---
+coverage/
+.nyc_output/
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- GeoIP local DB (downloaded at runtime, not committed) ---
+data/geoip/*.mmdb
+
+# --- Docker volumes (if bind-mounted locally) ---
+.docker-data/

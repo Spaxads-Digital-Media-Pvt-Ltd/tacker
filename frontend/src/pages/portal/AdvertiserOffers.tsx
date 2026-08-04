@@ -1,0 +1,35 @@
+import { useQuery } from '../../lib/useApi';
+import { PageHeader, Table, StatusDot, Spinner, StateBlock, type Column } from '../../components/ui';
+
+/** Advertiser portal offer DTO — revenue (their cost). Publisher payout is never exposed here. */
+interface AdvertiserOffer {
+  id: string;
+  name: string;
+  status: string;
+  destinationUrl: string;
+  payoutModel: string;
+  revenue: string;
+  currency: string;
+  createdAt: string;
+}
+
+const columns: Column<AdvertiserOffer>[] = [
+  { header: 'Offer', cell: (o) => <span className="font-medium text-fg">{o.name}</span> },
+  { header: 'Status', cell: (o) => <StatusDot value={o.status} /> },
+  { header: 'Model', cell: (o) => <span className="text-fg-secondary">{o.payoutModel}</span> },
+  { header: 'Revenue', cell: (o) => <span className="tabular-nums text-fg">{o.currency} {o.revenue}</span> },
+  { header: 'Destination', cell: (o) => <span className="font-mono tabular-nums text-tiny text-fg-muted">{o.destinationUrl.slice(0, 40)}…</span> },
+];
+
+export default function AdvertiserOffers() {
+  const { data, loading, error } = useQuery<AdvertiserOffer[]>('/api/portal/offers');
+  return (
+    <>
+      <PageHeader title="My offers" subtitle="Your offers and their destination URLs." />
+      {loading ? <StateBlock><Spinner /></StateBlock>
+        : error ? <StateBlock>{error}</StateBlock>
+        : !data || data.length === 0 ? <StateBlock>You have no offers yet.</StateBlock>
+        : <Table columns={columns} rows={data} rowKey={(o) => o.id} />}
+    </>
+  );
+}
