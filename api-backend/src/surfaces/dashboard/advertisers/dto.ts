@@ -13,6 +13,11 @@ export interface AdvertiserAdminDTO {
   contactEmail: string | null;
   billingTerms: string | null;
   defaultCurrency: string;
+  accountManagerId: string | null;
+  salesManagerId: string | null;
+  billingFrequency: string | null;
+  verificationToken: string | null;
+  hasPortalAccount: boolean;
   customFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -27,6 +32,11 @@ export function toAdminDTO(row: AdvertiserRow): AdvertiserAdminDTO {
     contactEmail: row.contact_email,
     billingTerms: row.billing_terms,
     defaultCurrency: row.default_currency,
+    accountManagerId: row.account_manager_id,
+    salesManagerId: row.sales_manager_id,
+    billingFrequency: row.billing_frequency,
+    verificationToken: row.verification_token,
+    hasPortalAccount: Boolean(row.auth_user_id),
     customFields: (row.metadata?.['custom'] as Record<string, unknown> | undefined) ?? {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,

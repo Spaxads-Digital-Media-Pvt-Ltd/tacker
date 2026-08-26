@@ -64,4 +64,3 @@ in `memory.md`.
 
 `memory.md` (gitignored, one at workspace root) records structure, decisions, conventions,
 env-var inventory (names only), and gotchas. **Read it first** when resuming or debugging.
-# tacker

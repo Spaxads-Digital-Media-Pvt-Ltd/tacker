@@ -17,8 +17,8 @@ import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 
 type Db = ReturnType<typeof dbForRequest>;
-type EntityType = 'offer' | 'publisher' | 'advertiser';
-const ENTITY_TABLE: Record<EntityType, string> = { offer: 'offers', publisher: 'publishers', advertiser: 'advertisers' };
+type EntityType = 'offer' | 'publisher' | 'advertiser' | 'partner_tier';
+const ENTITY_TABLE: Record<EntityType, string> = { offer: 'offers', publisher: 'publishers', advertiser: 'advertisers', partner_tier: 'partner_tiers' };
 
 interface TagRow { id: string; name: string; color: string | null; created_at: string; }
 const tagDTO = (r: TagRow) => ({ id: r.id, name: r.name, color: r.color, createdAt: r.created_at });
@@ -54,6 +54,19 @@ export function tagsRoutes(): Router {
     await writeAudit(req, { action: 'tag.create', entityType: 'tag', entityId: row.id, after: row });
     res.status(201);
     sendOk(res, tagDTO(row));
+  }));
+
+  // Bulk tag→entity map for list-page filtering (e.g. "filter Offers by tag"), so the caller
+  // doesn't need N+1 requests against every entity's own /:id/tags.
+  r.get('/assignments', asyncHandler(async (req, res) => {
+    const entityType = req.query['entityType'];
+    if (entityType !== 'offer' && entityType !== 'publisher' && entityType !== 'advertiser' && entityType !== 'partner_tier') {
+      throw badRequest('entityType must be offer, publisher, advertiser, or partner_tier');
+    }
+    const rows = await dbForRequest(req).selectMany<{ tag_id: string; entity_id: string }>('taggings', {
+      where: { entity_type: entityType }, limit: 10_000,
+    });
+    sendOk(res, rows.map((r) => ({ tagId: r.tag_id, entityId: r.entity_id })));
   }));
 
   r.delete('/:id', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {

@@ -48,8 +48,8 @@ function identityFrom(user: User, fallbackEmail: string) {
     email,
     // Display name for the SPA topbar — prefer the stored name, else the email local-part.
     name: umeta['name'] ? String(umeta['name']) : (email.split('@')[0] ?? email),
-    // Per-user UI accent theme (Section 6); default Theme A (Indigo).
-    theme: umeta['theme'] ? String(umeta['theme']) : 'A',
+    // Per-user UI accent theme (Section 6); default Theme F (Teal).
+    theme: umeta['theme'] ? String(umeta['theme']) : 'F',
   };
 }
 

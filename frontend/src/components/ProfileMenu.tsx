@@ -1,18 +1,16 @@
 /**
  * Top-right profile dropdown (Section 5). Opens on the avatar; light elevated panel with an identity
- * block + navigation items (Profile / Teams / Billing / Settings) and a terminal Log out (danger).
+ * block + navigation items (Profile / Billing) and a terminal Log out (danger).
  * Closes on outside-click and Esc; keyboard-accessible (menu items are real links/buttons).
  */
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { User, Users, CreditCard, Settings, LogOut, type LucideIcon } from 'lucide-react';
+import { User, CreditCard, LogOut, type LucideIcon } from 'lucide-react';
 
 interface Item { label: string; to: string; icon: LucideIcon }
 const ITEMS: Item[] = [
   { label: 'Profile', to: '/app/profile', icon: User },
-  { label: 'Teams', to: '/app/settings', icon: Users },
   { label: 'Billing', to: '/app/invoices', icon: CreditCard },
-  { label: 'Settings', to: '/app/settings', icon: Settings },
 ];
 
 export function ProfileMenu({ initials, displayName, email, onSignOut }: {
@@ -38,7 +36,7 @@ export function ProfileMenu({ initials, displayName, email, onSignOut }: {
         aria-expanded={open}
         className="flex items-center gap-2.5 rounded-[var(--radius)] px-1 py-1 transition-colors hover:bg-accent-subtle"
       >
-        <span className="grid h-8 w-8 place-items-center rounded-[10px] bg-accent text-tiny font-semibold text-white">{initials}</span>
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-tiny font-semibold text-white">{initials}</span>
         <span className="hidden text-small font-medium text-fg sm:block">{displayName}</span>
       </button>
 
@@ -46,7 +44,7 @@ export function ProfileMenu({ initials, displayName, email, onSignOut }: {
         <div role="menu" className="absolute right-0 z-50 mt-2 w-60 origin-top-right animate-fade-in rounded-card border border-border bg-elevated p-1.5 shadow-elevated">
           {/* Identity block */}
           <div className="flex items-center gap-2.5 border-b border-border px-2.5 py-2.5">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-accent text-small font-semibold text-white">{initials}</span>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-small font-semibold text-white">{initials}</span>
             <div className="min-w-0">
               <p className="truncate text-small font-semibold text-fg">{displayName}</p>
               <p className="truncate text-tiny text-fg-secondary">{email}</p>

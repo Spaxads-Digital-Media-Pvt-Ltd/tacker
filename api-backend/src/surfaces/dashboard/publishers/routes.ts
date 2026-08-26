@@ -3,6 +3,7 @@
  * self-read (owner-scoped by publisher_id === owner). Spec §1 / §3A.
  */
 import { Router } from 'express';
+import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
@@ -14,6 +15,7 @@ import { writeAudit } from '../../../lib/audit.js';
 import type { PublisherRow } from '../../../domain/entities.js';
 import { requireRole, requirePortal } from '../auth.js';
 import { accountBalance } from '../../../lib/ledger/ledger.js';
+import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
@@ -32,13 +34,15 @@ import { badRequest } from '../../../lib/http/errors.js';
 const TABLE = 'publishers';
 const POSTBACKS = 'publisher_postbacks';
 
+const requestBalancesSchema = z.object({ publisherIds: z.array(z.string().uuid()).min(1) });
+
 interface PostbackRow {
   id: string; url: string; method: string; offer_id: string | null; event: string | null;
-  status: string; created_at: string;
+  level: string; publisher_id: string; status: string; created_at: string;
 }
 const toPostbackDTO = (r: PostbackRow) => ({
   id: r.id, url: r.url, method: r.method, offerId: r.offer_id, event: r.event,
-  status: r.status, createdAt: r.created_at,
+  level: r.level, publisherId: r.publisher_id, status: r.status, createdAt: r.created_at,
 });
 
 export function publishersAdminRoutes(): Router {
@@ -68,6 +72,46 @@ export function publishersAdminRoutes(): Router {
     sendOk(res, { total, active: by['active'] ?? 0, pending: by['pending'] ?? 0, suspended: by['inactive'] ?? 0 });
   }));
 
+  // "Request Outstanding Balances" (Table Actions) — no outbound-email infra to actually send a
+  // request, so this computes each selected publisher's REAL approved-but-unpaid balance (the same
+  // ledger the publisher portal itself reads) and records it as a real audit_log entry. Registered
+  // before /:id.
+  r.post('/request-balances', requireRole('admin', 'manager'), validateBody(requestBalancesSchema), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const networkId = db.scope.networkId;
+    const b = req.body as z.infer<typeof requestBalancesSchema>;
+    const results: { publisherId: string; balance: string }[] = [];
+    for (const publisherId of b.publisherIds) {
+      const pub = await db.selectOne<PublisherRow>(TABLE, { id: publisherId });
+      if (!pub) continue;
+      const balance = await accountBalance(networkId, 'publisher', publisherId, 'approved');
+      await writeAudit(req, {
+        action: 'publisher.request_balance', entityType: 'publisher', entityId: publisherId,
+        after: { balance },
+      });
+      results.push({ publisherId, balance });
+    }
+    sendOk(res, { requested: results });
+  }));
+
+  // "Impersonate" (row menu) — mints a real Supabase magic-link for the publisher's OWN linked
+  // portal account (never a forged/self-signed token) so opening it logs in as that publisher for
+  // real. Only publishers with a linked portal account (hasPortalAccount) can be impersonated.
+  r.post('/:id/impersonate', requireRole('admin'), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const pub = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
+    if (!pub) throw notFound('Publisher not found');
+    if (!pub.auth_user_id || !pub.contact_email) {
+      throw badRequest('This partner has no linked portal account to impersonate.');
+    }
+    const { data, error } = await getSupabaseAdmin().auth.admin.generateLink({
+      type: 'magiclink', email: pub.contact_email,
+    });
+    if (error || !data?.properties?.action_link) throw badRequest('Could not generate an impersonation link.');
+    await writeAudit(req, { action: 'publisher.impersonate', entityType: 'publisher', entityId: pub.id });
+    sendOk(res, { link: data.properties.action_link });
+  }));
+
   r.get(
     '/:id',
     asyncHandler(async (req, res) => {
@@ -89,6 +133,17 @@ export function publishersAdminRoutes(): Router {
         contact_email: b.contactEmail ?? null,
         traffic_source: b.trafficSource ?? null,
         payout_terms: b.payoutTerms ?? null,
+        country: b.country ?? null,
+        payment_method: b.paymentMethod ?? null,
+        billing_frequency: b.billingFrequency ?? null,
+        tier: b.tier ?? null,
+        partner_manager_id: b.partnerManagerId ?? null,
+        account_executive_id: b.accountExecutiveId ?? null,
+        referred_by_id: b.referredById ?? null,
+        contact_name: b.contactName ?? null,
+        tax_id: b.taxId ?? null,
+        website: b.website ?? null,
+        notes: b.notes ?? null,
         ...(b.defaultAttributionWindowS !== undefined ? { default_attribution_window_s: b.defaultAttributionWindowS } : {}),
         ...(b.defaultDedupWindowS !== undefined ? { default_dedup_window_s: b.defaultDedupWindowS } : {}),
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
@@ -116,6 +171,17 @@ export function publishersAdminRoutes(): Router {
       if (b.payoutTerms !== undefined) patch['payout_terms'] = b.payoutTerms;
       if (b.defaultAttributionWindowS !== undefined) patch['default_attribution_window_s'] = b.defaultAttributionWindowS;
       if (b.defaultDedupWindowS !== undefined) patch['default_dedup_window_s'] = b.defaultDedupWindowS;
+      if (b.country !== undefined) patch['country'] = b.country;
+      if (b.paymentMethod !== undefined) patch['payment_method'] = b.paymentMethod;
+      if (b.billingFrequency !== undefined) patch['billing_frequency'] = b.billingFrequency;
+      if (b.tier !== undefined) patch['tier'] = b.tier;
+      if (b.partnerManagerId !== undefined) patch['partner_manager_id'] = b.partnerManagerId;
+      if (b.accountExecutiveId !== undefined) patch['account_executive_id'] = b.accountExecutiveId;
+      if (b.referredById !== undefined) patch['referred_by_id'] = b.referredById;
+      if (b.contactName !== undefined) patch['contact_name'] = b.contactName;
+      if (b.taxId !== undefined) patch['tax_id'] = b.taxId;
+      if (b.website !== undefined) patch['website'] = b.website;
+      if (b.notes !== undefined) patch['notes'] = b.notes;
       if (b.customFields !== undefined) patch['metadata'] = mergeCustomFields(before.metadata, b.customFields);
 
       const [row] = await db.update<PublisherRow>(TABLE, patch, { id: req.params.id });
@@ -161,6 +227,7 @@ export function publishersAdminRoutes(): Router {
     }
     const row = await db.insert<PostbackRow>(POSTBACKS, {
       publisher_id: req.params.id, url: b.url, method: b.method, offer_id: b.offerId ?? null, event: b.event ?? null,
+      level: b.level,
     });
     await writeAudit(req, { action: 'publisher.postback.create', entityType: 'publisher_postback', entityId: row.id, after: row });
     res.status(201);
@@ -175,6 +242,7 @@ export function publishersAdminRoutes(): Router {
     if (b.method !== undefined) patch['method'] = b.method;
     if (b.offerId !== undefined) patch['offer_id'] = b.offerId;
     if (b.event !== undefined) patch['event'] = b.event;
+    if (b.level !== undefined) patch['level'] = b.level;
     if (b.status !== undefined) patch['status'] = b.status;
     const [row] = await db.update<PostbackRow>(POSTBACKS, patch, { id: req.params.pbId, publisher_id: req.params.id });
     if (!row) throw notFound('Postback not found');
@@ -217,6 +285,24 @@ export function publisherPortalRoutes(): Router {
       const row = await dbForRequest(req).selectOne<PublisherRow>(TABLE, { id: ownerId });
       if (!row) throw notFound('Publisher profile not found');
       sendOk(res, toSelfDTO(row));
+    }),
+  );
+
+  // Partner Banners published to this network's Publisher portal (Communication Hub › Banners,
+  // real content — no publisher-specific targeting yet, every Publisher in the network sees the
+  // same live set). Status is derived from publish_at/expire_at, not the stored column.
+  r.get(
+    '/banners',
+    asyncHandler(async (req, res) => {
+      interface BannerRow { id: string; name: string; message: string; priority: string; status: string; publish_at: string | null; expire_at: string | null }
+      const rows = await dbForRequest(req).selectMany<BannerRow>('banners', { orderBy: 'created_at', orderDir: 'desc', limit: 20 });
+      const now = new Date();
+      const visible = rows.filter((b) =>
+        b.status !== 'draft' &&
+        (!b.publish_at || new Date(b.publish_at) <= now) &&
+        (!b.expire_at || new Date(b.expire_at) > now),
+      );
+      sendOk(res, visible.map((b) => ({ id: b.id, name: b.name, message: b.message, priority: b.priority })));
     }),
   );
 

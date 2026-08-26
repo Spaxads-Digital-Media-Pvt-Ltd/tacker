@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, StatusDot, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
 
 interface ApiKey {
   id: string; prefix: string; name: string | null; scopes: string[]; status: string;
@@ -16,9 +16,9 @@ export default function ApiKeys({ basePath }: { basePath: string }) {
   const revoke = useMutation((id: string) => api.del(`${basePath}/${id}`));
 
   const columns: Column<ApiKey>[] = [
-    { header: 'Key', cell: (k) => <span className="font-mono tabular-nums text-tiny text-fg-secondary">{k.prefix}…</span> },
+    { header: 'Key', cell: (k) => <span className="font-mono text-tiny">{k.prefix}…</span> },
     { header: 'Name', cell: (k) => k.name ?? <span className="text-fg-muted">—</span> },
-    { header: 'Status', cell: (k) => <StatusDot value={k.status} /> },
+    { header: 'Status', cell: (k) => <Badge value={k.status} /> },
     { header: 'Last used', cell: (k) => (k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : <span className="text-fg-muted">never</span>) },
     {
       header: '', className: 'text-right',

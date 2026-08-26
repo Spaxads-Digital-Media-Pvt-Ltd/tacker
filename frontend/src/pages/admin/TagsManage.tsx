@@ -33,7 +33,7 @@ export default function TagsManage() {
         </div>
         <div>
           <label className="label">Color</label>
-          <input type="color" className="h-10 w-14 rounded border border-border " value={color} onChange={(e) => setColor(e.target.value)} />
+          <input type="color" className="h-10 w-14 rounded border border-border" value={color} onChange={(e) => setColor(e.target.value)} />
         </div>
         <button type="submit" className="btn-primary" disabled={create.busy}>+ Add Tag</button>
         {create.error && <span className="text-small text-danger-text">{create.error}</span>}
@@ -45,7 +45,7 @@ export default function TagsManage() {
         : (
           <div className="flex flex-wrap gap-2">
             {data.map((t) => (
-              <span key={t.id} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-small ">
+              <span key={t.id} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-small">
                 <span className="h-3 w-3 rounded-full" style={{ background: t.color ?? '#94a3b8' }} />
                 {t.name}
                 <button className="text-fg-muted hover:text-danger-text" onClick={async () => { if (confirm(`Delete tag "${t.name}"?`)) { await del.run(t.id); refetch(); } }}>×</button>

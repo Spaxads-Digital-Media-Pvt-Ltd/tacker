@@ -23,6 +23,7 @@ export const createOfferSchema = z.object({
   previewUrl: z.string().url().max(2000).nullable().optional(),
   description: z.string().max(20_000).nullable().optional(),
   kpi: z.string().max(5000).nullable().optional(),
+  trackingDomainId: z.string().uuid().nullable().optional(),
 });
 
 export const updateOfferSchema = createOfferSchema.partial().extend({

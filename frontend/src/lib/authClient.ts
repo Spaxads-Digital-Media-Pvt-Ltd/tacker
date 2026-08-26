@@ -4,7 +4,6 @@
  */
 import { saveSession, clearSession, updateToken, type Session } from '../auth/session';
 import type { Role } from '../auth/roles';
-import { applyTheme, DEFAULT_THEME } from './themes';
 
 interface Identity {
   kind: string;
@@ -13,7 +12,6 @@ interface Identity {
   ownerId: string | null;
   email: string;
   name?: string;
-  theme?: string;
 }
 interface AuthPayload {
   accessToken: string;
@@ -38,7 +36,6 @@ function toSession(p: AuthPayload): Session {
     email: p.identity.email,
     networkId: p.identity.networkId,
     ownerId: p.identity.ownerId,
-    theme: p.identity.theme ?? DEFAULT_THEME,
     expiresAt: p.expiresAt,
   };
 }
@@ -54,7 +51,6 @@ export async function login(email: string, password: string): Promise<Session> {
   if (!res.ok || body.ok === false) throw new Error(body.error?.message ?? 'Login failed');
   const session = toSession(body.data as AuthPayload);
   saveSession(session);
-  applyTheme(session.theme); // recolor to the user's saved theme on login
   return session;
 }
 

@@ -22,13 +22,19 @@ export const updateGoalSchema = createGoalSchema.partial();
 
 export const createCreativeSchema = z.object({
   name: z.string().min(1).max(200),
-  type: z.enum(['image', 'html', 'link', 'email', 'video']).default('image'),
-  url: z.string().url().max(2000).nullable().optional(),
+  type: z.enum(['image', 'html', 'link', 'email', 'video', 'archive', 'thumbnail', 'text']).default('image'),
+  // Real uploaded files are stored as data: URIs client-side (no asset host in this app) — plain
+  // .url() rejects nothing a data: URI needs, but the length cap must fit a real small file's
+  // base64 payload, not just a link.
+  url: z.string().max(6_000_000).nullable().optional(),
   html: z.string().max(100_000).nullable().optional(),
   width: z.number().int().min(0).nullable().optional(),
   height: z.number().int().min(0).nullable().optional(),
   language: z.string().max(20).nullable().optional(),
-  status: z.enum(['active', 'archived']).default('active'),
+  status: z.enum(['active', 'paused', 'deleted']).default('active'),
+  visibleToPartners: z.boolean().default(true),
+  emailFrom: z.string().max(2000).nullable().optional(),
+  emailSubject: z.string().max(2000).nullable().optional(),
 });
 export const updateCreativeSchema = createCreativeSchema.partial();
 
@@ -53,3 +59,35 @@ export const createDealSchema = z.object({
   endsAt: z.string().datetime().nullable().optional(),
 });
 export const updateDealSchema = createDealSchema.partial();
+
+export const createForwardingRuleSchema = z.object({
+  name: z.string().min(1).max(200),
+  partnerIds: z.array(z.string().uuid()).default([]),
+  offerUrls: z.array(z.string()).default([]),
+  destination: z.string().url().max(2000).nullable().optional(),
+  countries: z.array(z.string()).default([]),
+  status: z.enum(['active', 'paused']).default('active'),
+});
+export const updateForwardingRuleSchema = createForwardingRuleSchema.partial();
+
+export const createScheduledActionSchema = z.object({
+  actionType: z.enum(['activate', 'pause', 'archive', 'cap_change']).default('pause'),
+  partnerIds: z.array(z.string().uuid()).default([]),
+  event: z.string().max(200).nullable().optional(),
+  scheduledTime: z.string().datetime().nullable().optional(),
+  internalNotes: z.string().max(2000).nullable().optional(),
+  status: z.enum(['pending', 'executed', 'cancelled']).default('pending'),
+});
+export const updateScheduledActionSchema = createScheduledActionSchema.partial();
+export type CreateScheduledAction = z.infer<typeof createScheduledActionSchema>;
+
+export const createOfferPostbackSchema = z.object({
+  publisherId: z.string().uuid(),
+  url: z.string().url().max(2000),
+  method: z.enum(['GET', 'POST']).default('GET'),
+  event: z.string().max(100).nullable().optional(),
+  level: z.enum(['conversion', 'event', 'cpc']).default('conversion'),
+});
+export const updateOfferPostbackSchema = createOfferPostbackSchema.partial().extend({
+  status: z.enum(['active', 'disabled']).optional(),
+});

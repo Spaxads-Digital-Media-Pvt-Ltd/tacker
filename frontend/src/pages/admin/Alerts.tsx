@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, StatusDot, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
 
 interface Alert {
   id: string; type: string; severity: string; entityType: string | null; entityId: string | null;
@@ -20,16 +20,16 @@ export default function Alerts() {
   const act = async (id: string, next: string) => { if (await mutate.run({ id, status: next })) refetch(); };
 
   const columns: Column<Alert>[] = [
-    { header: 'Severity', cell: (a) => <StatusDot value={SEV_TONE[a.severity] ?? a.severity} /> },
-    { header: 'Alert', cell: (a) => <div><div className="font-medium">{a.title}</div><div className="text-xs text-fg-secondary">{a.description}</div></div> },
-    { header: 'Entity', cell: (a) => a.entityType ? <span className="text-xs">{a.entityType} {a.entityId?.slice(0, 8)}…</span> : <span className="text-fg-muted">—</span> },
+    { header: 'Severity', cell: (a) => <Badge value={SEV_TONE[a.severity] ?? a.severity} /> },
+    { header: 'Alert', cell: (a) => <div><div className="font-medium">{a.title}</div><div className="text-tiny text-fg-secondary">{a.description}</div></div> },
+    { header: 'Entity', cell: (a) => a.entityType ? <span className="text-tiny">{a.entityType} {a.entityId?.slice(0, 8)}…</span> : <span className="text-fg-muted">—</span> },
     { header: 'When', cell: (a) => new Date(a.createdAt).toLocaleString() },
     {
       header: '', className: 'text-right',
       cell: (a) => (
         <div className="flex justify-end gap-2">
-          {a.status === 'open' && <button className="btn-ghost !py-1 !px-3 text-xs" onClick={() => act(a.id, 'acknowledged')}>Ack</button>}
-          {a.status !== 'resolved' && <button className="btn-ghost !py-1 !px-3 text-xs text-success-text" onClick={() => act(a.id, 'resolved')}>Resolve</button>}
+          {a.status === 'open' && <button className="btn-ghost !py-1 !px-3 text-tiny" onClick={() => act(a.id, 'acknowledged')}>Ack</button>}
+          {a.status !== 'resolved' && <button className="btn-ghost !py-1 !px-3 text-tiny text-success-text" onClick={() => act(a.id, 'resolved')}>Resolve</button>}
         </div>
       ),
     },

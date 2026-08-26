@@ -29,11 +29,11 @@ export function PostbackTester({ testPath, hint }: { testPath: string; hint?: st
 
   return (
     <div className="max-w-2xl space-y-4">
-      <p className="text-sm text-fg-secondary">
+      <p className="text-small text-fg-secondary">
         {hint ?? 'Fire a test call with sample macros ({click_id}, {payout}, {txn_id}, {country}, {device}, …) to verify connectivity. No conversion is recorded.'}
       </p>
       <form onSubmit={submit} className="space-y-3">
-        {error && <p className="text-sm text-danger-text">{error}</p>}
+        {error && <p className="text-small text-danger-text">{error}</p>}
         <Field label="Postback URL (with macros)">
           <input className="input font-mono text-sm" value={url} onChange={(e) => setUrl(e.target.value)} required />
         </Field>
@@ -60,19 +60,19 @@ export function PostbackTester({ testPath, hint }: { testPath: string; hint?: st
       {result && (
         <div className={`card border ${result.ok ? 'border-success' : 'border-danger'}`}>
           <div className="flex items-center gap-2">
-            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${result.ok ? 'bg-success-bg text-success-text' : 'bg-danger-bg text-danger-text'}`}>
+            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-tiny font-semibold ${result.ok ? 'bg-success-bg text-success-text' : 'bg-danger-bg text-danger-text'}`}>
               {result.ok ? 'Success' : 'Failed'}
             </span>
-            <span className="text-sm">HTTP {result.status ?? '—'} · {result.ms} ms</span>
+            <span className="text-small text-fg">HTTP {result.status ?? '—'} · {result.ms} ms</span>
           </div>
-          {result.error && <p className="mt-2 text-sm text-danger-text">Error: {result.error}</p>}
+          {result.error && <p className="mt-2 text-small text-danger-text">Error: {result.error}</p>}
           {result.body && (
             <div className="mt-2">
-              <p className="text-xs font-semibold text-fg-secondary">Response body (why it {result.ok ? 'passed' : 'failed'}):</p>
-              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-subtle p-2 font-mono text-xs text-fg-secondary">{result.body}</pre>
+              <p className="text-tiny font-semibold text-fg-secondary">Response body (why it {result.ok ? 'passed' : 'failed'}):</p>
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-page p-2 font-mono text-tiny text-fg">{result.body}</pre>
             </div>
           )}
-          <p className="mt-2 break-all font-mono text-xs text-fg-muted">{result.finalUrl}</p>
+          <p className="mt-2 break-all font-mono text-tiny text-fg-secondary">{result.finalUrl}</p>
         </div>
       )}
     </div>

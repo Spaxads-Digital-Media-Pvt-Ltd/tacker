@@ -13,6 +13,10 @@ export interface AdvertiserRow {
   contact_email: string | null;
   billing_terms: string | null;
   default_currency: string;
+  account_manager_id: string | null;
+  sales_manager_id: string | null;
+  billing_frequency: string | null;
+  verification_token: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -30,6 +34,17 @@ export interface PublisherRow {
   payout_terms: string | null;
   default_attribution_window_s: number;
   default_dedup_window_s: number;
+  country: string | null;
+  payment_method: string | null;
+  billing_frequency: string | null;
+  tier: string | null;
+  partner_manager_id: string | null;
+  account_executive_id: string | null;
+  referred_by_id: string | null;
+  contact_name: string | null;
+  tax_id: string | null;
+  website: string | null;
+  notes: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -59,6 +74,7 @@ export interface OfferRow {
   category: string | null;
   preview_url: string | null;
   security_code: string | null;
+  tracking_domain_id: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -92,6 +108,7 @@ export interface OfferPublisherAccessRow {
 
 export interface TrackingDomainRow {
   id: string;
+  ref: string;
   network_id: string;
   host: string;
   mode: 'subdomain' | 'custom';

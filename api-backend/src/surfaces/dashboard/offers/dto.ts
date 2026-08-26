@@ -32,6 +32,7 @@ export interface OfferAdminDTO {
   description: string | null;
   notes: string[];
   securityCode: string | null;
+  trackingDomainId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -63,6 +64,7 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     description: (meta['description'] as string | undefined) ?? null,
     notes: Array.isArray(meta['notes']) ? (meta['notes'] as string[]) : [],
     securityCode: row.security_code ?? null,
+    trackingDomainId: row.tracking_domain_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

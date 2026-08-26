@@ -1,15 +1,15 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, StatusDot, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
 import type { TrackingDomain } from '../../types';
 
 const columns: Column<TrackingDomain>[] = [
-  { header: 'Host', cell: (d) => <span className="font-mono text-xs text-fg-secondary">{d.host}{d.isPrimary && <span className="ml-2 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 ">PRIMARY</span>}</span> },
+  { header: 'Host', cell: (d) => <span className="font-mono text-xs">{d.host}{d.isPrimary && <span className="ml-2 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 ">PRIMARY</span>}</span> },
   { header: 'Mode', cell: (d) => d.mode },
-  { header: 'Status', cell: (d) => <StatusDot value={d.status} /> },
-  { header: 'Verification', cell: (d) => <StatusDot value={d.verificationState} /> },
-  { header: 'SSL', cell: (d) => <StatusDot value={d.sslStatus} /> },
+  { header: 'Status', cell: (d) => <Badge value={d.status} /> },
+  { header: 'Verification', cell: (d) => <Badge value={d.verificationState} /> },
+  { header: 'SSL', cell: (d) => <Badge value={d.sslStatus} /> },
 ];
 
 export default function TrackingDomains() {
@@ -48,7 +48,7 @@ function AddDomain({ open, onClose, onCreated }: { open: boolean; onClose: () =>
   return (
     <Modal open={open} onClose={onClose} title="Add tracking domain">
       <form onSubmit={submit} className="space-y-4">
-        {error && <p className="text-sm text-danger-text">{error}</p>}
+        {error && <p className="text-small text-danger-text">{error}</p>}
         <Field label="Mode">
           <select className="input" value={mode} onChange={(e) => setMode(e.target.value as 'subdomain' | 'custom')}>
             <option value="subdomain">Subdomain on our domain</option>

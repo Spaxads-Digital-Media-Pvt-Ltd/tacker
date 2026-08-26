@@ -11,7 +11,7 @@ export default function DebugPostbackPage() {
   return (
     <>
       <PageHeader title="Debug Postback" subtitle="Fire a debug conversion postback for an advertiser with sample macros." />
-      <div className="card space-y-4">
+      <div className="card max-w-2xl mx-auto space-y-4">
         <Field label="Advertiser">
           <select className="input max-w-md" value={advId} onChange={(e) => setAdvId(e.target.value)}>
             <option value="">Select an advertiser…</option>

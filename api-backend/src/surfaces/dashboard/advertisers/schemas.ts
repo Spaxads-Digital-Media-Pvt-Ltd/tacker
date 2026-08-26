@@ -6,6 +6,10 @@ export const createAdvertiserSchema = z.object({
   contactEmail: z.string().email().optional(),
   billingTerms: z.string().max(500).optional(),
   defaultCurrency: z.string().length(3).default('USD'),
+  accountManagerId: z.string().uuid().nullable().optional(),
+  salesManagerId: z.string().uuid().nullable().optional(),
+  billingFrequency: z.string().max(50).nullable().optional(),
+  verificationToken: z.string().max(200).nullable().optional(),
   // Values for network-defined custom fields → merged into metadata.custom.
   customFields: z.record(z.string(), z.unknown()).optional(),
 });

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(NODE_PATH=/Users/gaurijindal/.npm/_npx/e41f203b7505f1fb/node_modules node -e ' *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:4001/api/me)",
+      "Bash(curl -s -o /dev/null -w \"http_code=%{http_code}\\\\n\" http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"http_code=%{http_code}\\\\n\" http://localhost:4001/api/me)",
+      "Bash(grep -n \"Add.*Integration\\\\`}</button>\" \"/Users/gaurijindal/Desktop/Trcker 2/frontend/src/pages/admin/Integrations.tsx\")"
+    ]
+  }
+}

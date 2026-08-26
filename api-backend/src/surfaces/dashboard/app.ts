@@ -36,6 +36,32 @@ import { smartLinksRoutes } from './smart-links/routes.js';
 import { offlineRoutes } from './offline/routes.js';
 import { importExportRoutes } from './import-export/routes.js';
 import { catalogRoutes, invoiceRoutes } from './catalog/routes.js';
+import { offerTemplatesRoutes } from './offer-templates/routes.js';
+import { offerGroupsRoutes } from './offer-groups/routes.js';
+import { creativesRoutes } from './creatives/routes.js';
+import { customMetricsRoutes } from './custom-metrics/routes.js';
+import { conversionImportsRoutes } from './conversion-imports/routes.js';
+import { marketplaceProfileRoutes } from './marketplace-profile/routes.js';
+import { communicationHubRoutes } from './communication-hub/routes.js';
+import { customerValueRoutes } from './customer-value/routes.js';
+import { auditLogRoutes } from './audit-log/routes.js';
+import { trafficControlsRoutes } from './traffic-controls/routes.js';
+import { offerCustomSettingsRoutes } from './offer-custom-settings/routes.js';
+import { smartSwitchRoutes } from './smartswitch/routes.js';
+import { usersRoutes } from './users/routes.js';
+import { postbacksRoutes } from './postbacks/routes.js';
+import { partnerTiersRoutes } from './partner-tiers/routes.js';
+import { offerApplicationsRoutes } from './offer-applications/routes.js';
+import { questionnairesRoutes } from './questionnaires/routes.js';
+import { trafficBlockingRoutes } from './traffic-blocking/routes.js';
+import { trafficSourcesRoutes } from './traffic-sources/routes.js';
+import { reportingAdjustmentsRoutes } from './reporting-adjustments/routes.js';
+import { couponCodesRoutes } from './coupon-codes/routes.js';
+import { partnerInvoicesRoutes } from './partner-invoices/routes.js';
+import { linkTemplatesRoutes } from './link-templates/routes.js';
+import { postbackControlsRoutes } from './postback-controls/routes.js';
+import { advertiserInvoicesRoutes } from './advertiser-invoices/routes.js';
+import { tieredCommissionsRoutes } from './tiered-commissions/routes.js';
 
 export function buildDashboardApp(): Express {
   const app = createBaseApp('dashboard');
@@ -48,6 +74,22 @@ export function buildDashboardApp(): Express {
   authed.use(dashboardAuth);
 
   authed.get('/me', (req, res) => sendOk(res, { identity: req.identity, scope: req.scope }));
+
+  // My Account (Profile) General tab — this user's own real row (ref/name/email/role/status/
+  // created/modified), not the network-wide /api/users list.
+  authed.get('/me/account', asyncHandler(async (req, res) => {
+    const userId = (req.identity as { userId?: string }).userId;
+    if (!userId) return sendOk(res, null);
+    const { rows } = await query<{ ref: string; name: string | null; email: string; role: string; status: string; created_at: string; updated_at: string }>(
+      'SELECT ref, name, email, role, status, created_at, updated_at FROM users WHERE auth_user_id = $1 AND network_id = $2',
+      [userId, req.scope!.networkId],
+    );
+    const u = rows[0];
+    sendOk(res, u ? {
+      ref: Number(u.ref), name: u.name ?? u.email, email: u.email, role: u.role, status: u.status,
+      createdAt: u.created_at, updatedAt: u.updated_at,
+    } : null);
+  }));
 
   // Per-user UI accent theme (Section 6). Any authenticated dashboard user; persisted in the
   // Supabase user_metadata (the frontend never writes it directly — Option A).
@@ -104,6 +146,32 @@ export function buildDashboardApp(): Express {
   authed.use('/import-export', requireAdmin, importExportRoutes());
   authed.use('/catalog', requireAdmin, catalogRoutes());
   authed.use('/invoices', requireAdmin, invoiceRoutes());
+  authed.use('/offer-templates', requireAdmin, offerTemplatesRoutes());
+  authed.use('/offer-groups', requireAdmin, offerGroupsRoutes());
+  authed.use('/creatives', requireAdmin, creativesRoutes());
+  authed.use('/custom-metrics', requireAdmin, customMetricsRoutes());
+  authed.use('/marketplace-profile', requireAdmin, marketplaceProfileRoutes());
+  authed.use('/communication-hub', requireAdmin, communicationHubRoutes());
+  authed.use('/customer-value', requireAdmin, customerValueRoutes());
+  authed.use('/audit-log', requireAdmin, auditLogRoutes());
+  authed.use('/conversion-imports', requireAdmin, conversionImportsRoutes());
+  authed.use('/traffic-controls', requireAdmin, trafficControlsRoutes());
+  authed.use('/offer-custom-settings', requireAdmin, offerCustomSettingsRoutes());
+  authed.use('/smartswitch', requireAdmin, smartSwitchRoutes());
+  authed.use('/users', requireAdmin, usersRoutes());
+  authed.use('/postbacks', requireAdmin, postbacksRoutes());
+  authed.use('/partner-tiers', requireAdmin, partnerTiersRoutes());
+  authed.use('/offer-applications', requireAdmin, offerApplicationsRoutes());
+  authed.use('/questionnaires', requireAdmin, questionnairesRoutes());
+  authed.use('/traffic-blocking', requireAdmin, trafficBlockingRoutes());
+  authed.use('/traffic-sources', requireAdmin, trafficSourcesRoutes());
+  authed.use('/reporting-adjustments', requireAdmin, reportingAdjustmentsRoutes());
+  authed.use('/coupon-codes', requireAdmin, couponCodesRoutes());
+  authed.use('/partner-invoices', requireAdmin, partnerInvoicesRoutes());
+  authed.use('/link-templates', requireAdmin, linkTemplatesRoutes());
+  authed.use('/postback-controls', requireAdmin, postbackControlsRoutes());
+  authed.use('/advertiser-invoices', requireAdmin, advertiserInvoicesRoutes());
+  authed.use('/tiered-commissions', requireAdmin, tieredCommissionsRoutes());
 
   // API key management (spec §8A) — humans mint keys; their code uses them on the Public REST API.
   const adminUserId = (req: import('express').Request): string =>

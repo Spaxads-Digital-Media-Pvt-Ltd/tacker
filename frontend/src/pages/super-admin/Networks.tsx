@@ -1,16 +1,16 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, StatusDot, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
 import type { NetworkRow } from '../../types';
 
 const columns: Column<NetworkRow>[] = [
-  { header: 'Network', cell: (n) => <span className="font-medium text-fg">{n.name}</span> },
-  { header: 'Slug', cell: (n) => <span className="font-mono tabular-nums text-tiny text-fg-muted">{n.slug}</span> },
-  { header: 'Status', cell: (n) => <StatusDot value={n.status} /> },
+  { header: 'Network', cell: (n) => <span className="font-medium">{n.name}</span> },
+  { header: 'Slug', cell: (n) => <span className="font-mono text-xs">{n.slug}</span> },
+  { header: 'Status', cell: (n) => <Badge value={n.status} /> },
   { header: 'Plan', cell: (n) => n.plan_code ?? <span className="text-fg-muted">—</span> },
-  { header: 'Subscription', cell: (n) => (n.subscription_status ? <StatusDot value={n.subscription_status} /> : <span className="text-fg-muted">none</span>) },
-  { header: 'Created', cell: (n) => <span className="text-fg-secondary">{new Date(n.created_at).toLocaleDateString()}</span> },
+  { header: 'Subscription', cell: (n) => (n.subscription_status ? <Badge value={n.subscription_status} /> : <span className="text-fg-muted">none</span>) },
+  { header: 'Created', cell: (n) => new Date(n.created_at).toLocaleDateString() },
 ];
 
 export default function Networks() {
@@ -56,7 +56,7 @@ function CreateNetwork({ open, onClose, onCreated }: { open: boolean; onClose: (
           <Field label="Name"><input className="input" required value={form.name} onChange={set('name')} /></Field>
           <Field label="Slug"><input className="input" required value={form.slug} onChange={set('slug')} placeholder="acme" /></Field>
         </div>
-        <p className="text-tiny text-fg-muted">Provision the first admin login (optional). A subdomain tracking host is created automatically.</p>
+        <p className="text-tiny text-fg-secondary">Provision the first admin login (optional). A subdomain tracking host is created automatically.</p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Owner email"><input className="input" type="email" value={form.ownerEmail} onChange={set('ownerEmail')} /></Field>
           <Field label="Owner password"><input className="input" type="password" value={form.ownerPassword} onChange={set('ownerPassword')} /></Field>

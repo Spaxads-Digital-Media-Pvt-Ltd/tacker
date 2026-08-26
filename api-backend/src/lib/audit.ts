@@ -48,6 +48,7 @@ export async function writeAudit(req: Request, entry: AuditEntry): Promise<void>
       before: entry.before === undefined ? null : JSON.stringify(entry.before),
       after: entry.after === undefined ? null : JSON.stringify(entry.after),
       ip: req.ip ?? null,
+      user_agent: req.get('user-agent') ?? null,
     });
   } catch (err) {
     // Auditing must never break the request it records; log and move on.

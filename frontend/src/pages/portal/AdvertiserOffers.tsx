@@ -1,5 +1,5 @@
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, StatusDot, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
 
 /** Advertiser portal offer DTO — revenue (their cost). Publisher payout is never exposed here. */
 interface AdvertiserOffer {
@@ -14,11 +14,11 @@ interface AdvertiserOffer {
 }
 
 const columns: Column<AdvertiserOffer>[] = [
-  { header: 'Offer', cell: (o) => <span className="font-medium text-fg">{o.name}</span> },
-  { header: 'Status', cell: (o) => <StatusDot value={o.status} /> },
-  { header: 'Model', cell: (o) => <span className="text-fg-secondary">{o.payoutModel}</span> },
-  { header: 'Revenue', cell: (o) => <span className="tabular-nums text-fg">{o.currency} {o.revenue}</span> },
-  { header: 'Destination', cell: (o) => <span className="font-mono tabular-nums text-tiny text-fg-muted">{o.destinationUrl.slice(0, 40)}…</span> },
+  { header: 'Offer', cell: (o) => <span className="font-medium">{o.name}</span> },
+  { header: 'Status', cell: (o) => <Badge value={o.status} /> },
+  { header: 'Model', cell: (o) => o.payoutModel },
+  { header: 'Revenue', cell: (o) => `${o.currency} ${o.revenue}` },
+  { header: 'Destination', cell: (o) => <span className="font-mono text-tiny text-fg-secondary">{o.destinationUrl.slice(0, 40)}…</span> },
 ];
 
 export default function AdvertiserOffers() {

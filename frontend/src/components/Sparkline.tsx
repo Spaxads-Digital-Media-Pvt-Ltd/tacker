@@ -1,5 +1,5 @@
 /** Tiny inline SVG sparkline (area + line) for the dashboard KPI cards. No chart dependency. */
-export function Sparkline({ data, color = '#0d9488', height = 40 }: { data: number[]; color?: string; height?: number }) {
+export function Sparkline({ data, color = '#3b82f6', height = 40 }: { data: number[]; color?: string; height?: number }) {
   const w = 100;
   const max = Math.max(1, ...data);
   const n = data.length;
@@ -10,7 +10,9 @@ export function Sparkline({ data, color = '#0d9488', height = 40 }: { data: numb
   });
   const line = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
   const area = `${line} L${w},${height} L0,${height} Z`;
-  const id = `sg-${color.replace('#', '')}`;
+  // Sanitize to a valid SVG id — `color` may be a hex string or a CSS value like
+  // "rgb(var(--accent))", and `url(#id)` breaks if the id contains parens/spaces.
+  const id = `sg-${color.replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="h-10 w-full" aria-hidden>
       <defs>

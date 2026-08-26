@@ -16,6 +16,18 @@ export interface GeoRuleConfig {
   destinationOverride: string | null;
 }
 
+export interface TrafficControlConfig {
+  controlType: 'blacklist' | 'whitelist';
+  action: 'block' | 'fail_traffic';
+  variables: string[];
+  comparisonMethod: string | null;
+  values: string[];
+  partnerScope: 'all' | 'specific';
+  partnerIds: string[];
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+}
+
 export interface OfferConfig {
   id: string;
   networkId: string;
@@ -40,6 +52,8 @@ export interface OfferConfig {
   securityCode: string | null;
   /** Network-wide postback secure_code (used when the offer has none). */
   networkSecurityCode: string | null;
+  /** Active Traffic Controls that apply to this offer (by scope — direct, via advertiser, or all). */
+  trafficControls: TrafficControlConfig[];
 }
 
 const TTL = 300;
@@ -101,6 +115,23 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
   );
   const r = rows[0];
   if (!r) return null;
+
+  // Separate query: Traffic Controls aren't FK'd to an offer (their scope is All / specific
+  // Offers / specific Advertisers), so this can't join cleanly onto the aggregate above.
+  const tcRes = await query<{
+    control_type: string; action: string; variables: string[]; comparison_method: string | null;
+    control_values: string[]; partner_scope: string; partner_ids: string[];
+    effective_from: string | null; effective_to: string | null;
+  }>(
+    `SELECT control_type, action, variables, comparison_method, control_values, partner_scope, partner_ids, effective_from, effective_to
+       FROM traffic_controls
+      WHERE network_id = $1 AND status = 'active'
+        AND (offer_scope = 'all'
+             OR (offer_scope = 'offers' AND offer_ids @> to_jsonb($2::text))
+             OR (offer_scope = 'advertisers' AND advertiser_ids @> to_jsonb($3::text)))`,
+    [networkId, offerId, r.advertiser_id],
+  );
+
   return {
     id: r.id, networkId: r.network_id, advertiserId: r.advertiser_id, status: r.status,
     destinationUrl: r.destination_url, fallbackUrl: r.fallback_url, payoutModel: r.payout_model,
@@ -112,5 +143,11 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     deniedPublishers: r.denied_publishers ?? [],
     securityCode: r.security_code ?? null,
     networkSecurityCode: r.network_security_code ?? null,
+    trafficControls: tcRes.rows.map((t) => ({
+      controlType: t.control_type as 'blacklist' | 'whitelist', action: t.action as 'block' | 'fail_traffic',
+      variables: t.variables, comparisonMethod: t.comparison_method, values: t.control_values,
+      partnerScope: t.partner_scope as 'all' | 'specific', partnerIds: t.partner_ids,
+      effectiveFrom: t.effective_from, effectiveTo: t.effective_to,
+    })),
   };
 }

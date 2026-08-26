@@ -68,6 +68,8 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   offer_creatives: { tenantColumn: 'network_id' },
   offer_coupons: { tenantColumn: 'network_id' },
   offer_deals: { tenantColumn: 'network_id' },
+  offer_forwarding_rules: { tenantColumn: 'network_id' },
+  offer_scheduled_actions: { tenantColumn: 'network_id' },
   tags: { tenantColumn: 'network_id' },
   taggings: { tenantColumn: 'network_id' },
 
@@ -78,6 +80,65 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   smart_links: { tenantColumn: 'network_id' },
   smart_link_items: { tenantColumn: 'network_id' },
   import_export_logs: { tenantColumn: 'network_id' },
+
+  // Offers-flyout parity: templates, groups, traffic controls, network-wide custom settings,
+  // SmartSwitch rules + auto-logged history.
+  offer_templates: { tenantColumn: 'network_id' },
+  offer_groups: { tenantColumn: 'network_id' },
+  traffic_controls: { tenantColumn: 'network_id' },
+  offer_custom_settings: { tenantColumn: 'network_id' },
+  smartswitch_rules: { tenantColumn: 'network_id' },
+  smartswitch_history: { tenantColumn: 'network_id' },
+
+  // Partner Tiers: payout margin + offer visibility groups.
+  partner_tiers: { tenantColumn: 'network_id' },
+  partner_tier_members: { tenantColumn: 'network_id' },
+  partner_tier_offers: { tenantColumn: 'network_id' },
+
+  // Offer Applications: approval workflow + reusable questionnaires.
+  questionnaires: { tenantColumn: 'network_id' },
+  questionnaire_fields: { tenantColumn: 'network_id' },
+
+  // Traffic Blocking: per Partner+Offer sub-placement filter rules.
+  traffic_blockings: { tenantColumn: 'network_id' },
+
+  // Traffic Sources: reusable tracking-link parameter presets.
+  traffic_sources: { tenantColumn: 'network_id' },
+
+  // Reporting Adjustments: per-day manual overrides on top of real reported numbers.
+  reporting_adjustments: { tenantColumn: 'network_id' },
+
+  // Partner Invoices: Accounts Payable invoices generated per Partner/billing period.
+  partner_invoices: { tenantColumn: 'network_id' },
+
+  // Advertiser Link Templates: default landing page URL templates per Advertiser.
+  advertiser_link_templates: { tenantColumn: 'network_id' },
+
+  // Advertiser Postback Controls: rules that auto-accept/reject/hold incoming conversions.
+  advertiser_postback_controls: { tenantColumn: 'network_id' },
+
+  // Advertiser Invoices: Accounts Receivable invoices generated per Advertiser/billing period.
+  advertiser_invoices: { tenantColumn: 'network_id' },
+
+  // Advertiser Tiered Commissions: volume-based payout/revenue adjustment rules.
+  advertiser_tiered_commissions: { tenantColumn: 'network_id' },
+
+  // Custom Reporting Metrics: user-defined derived metrics (formula over the real base metrics).
+  custom_metrics: { tenantColumn: 'network_id' },
+
+  // Marketplace › Your Profile(s): one editable "how this network presents itself" row per network.
+  marketplace_profiles: { tenantColumn: 'network_id' },
+
+  // Communication Hub: email messages/templates/audiences + Partner Banners.
+  email_templates: { tenantColumn: 'network_id' },
+  audiences: { tenantColumn: 'network_id' },
+  email_messages: { tenantColumn: 'network_id' },
+  banners: { tenantColumn: 'network_id' },
+
+  // Customer Value: Custom Data Points, Payout & Revenue Rules, and their real firing ledger.
+  customer_data_points: { tenantColumn: 'network_id' },
+  customer_value_rules: { tenantColumn: 'network_id' },
+  customer_value_rule_firings: { tenantColumn: 'network_id' },
 };
 
 export function getTableScope(table: string): TableScope {

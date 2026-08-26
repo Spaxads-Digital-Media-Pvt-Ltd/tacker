@@ -1,11 +1,11 @@
 /**
- * Invoices — advertiser billing owed + affiliate payable, derived from the append-only ledger
- * (/api/invoices). Formal PDF documents are a later addition; these are the live balances that would
- * seed them.
+ * Invoices (Advertisers › Invoices) — Accounts Receivable balances owed by each Advertiser, derived
+ * live from the append-only ledger (/api/invoices). Partner-side Accounts Payable now has its own
+ * first-class Manage Invoices page (Partners › Invoices, PartnerInvoicesManage.tsx) with generation,
+ * approval and payment tracking; this page keeps the read-only advertiser half.
  */
-import { useState } from 'react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../components/ui';
 
 interface Row { id: string; name: string; amount: string; currency: string; entries: number }
 interface Data { advertiserBilling: Row[]; affiliatePayable: Row[] }
@@ -14,23 +14,20 @@ const money = (v: string, c: string) => `${c} ${new Intl.NumberFormat('en-US', {
 
 export default function Invoices() {
   const { data, loading, error } = useQuery<Data>('/api/invoices');
-  const [tab, setTab] = useState('Advertiser Billing');
 
-  const cols = (who: string): Column<Row>[] => [
-    { header: who, cell: (r) => <span className="font-medium">{r.name}</span> },
+  const columns: Column<Row>[] = [
+    { header: 'Advertiser', cell: (r) => <span className="font-medium">{r.name}</span> },
     { header: 'Entries', className: 'text-right', cell: (r) => String(r.entries) },
     { header: 'Amount', className: 'text-right', cell: (r) => <span className="font-semibold">{money(r.amount, r.currency)}</span> },
   ];
-  const rows = tab === 'Advertiser Billing' ? data?.advertiserBilling : data?.affiliatePayable;
 
   return (
     <>
-      <PageHeader title="Invoices" subtitle="Advertiser billing owed and affiliate payable, from the ledger." />
-      <Tabs tabs={['Advertiser Billing', 'Affiliate Payable']} active={tab} onChange={setTab} />
+      <PageHeader title="Invoices" subtitle="Advertiser billing owed, from the ledger." />
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
-        : !rows || rows.length === 0 ? <StateBlock>No {tab.toLowerCase()} yet.</StateBlock>
-        : <Table columns={cols(tab === 'Advertiser Billing' ? 'Advertiser' : 'Affiliate')} rows={rows} rowKey={(r) => r.id} />}
+        : !data?.advertiserBilling.length ? <StateBlock>No advertiser billing yet.</StateBlock>
+        : <Table columns={columns} rows={data.advertiserBilling} rowKey={(r) => r.id} />}
     </>
   );
 }

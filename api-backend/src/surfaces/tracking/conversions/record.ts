@@ -15,6 +15,9 @@ import { getOfferConfig } from '../offer-cache.js';
 import { getStoredClick, type StoredClick } from '../click-store.js';
 import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
 import { getFraudConfig } from '../../../lib/fraud/rules.js';
+import { findMatchingControl } from '../../../lib/postback-controls/evaluate.js';
+import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.js';
+import { evaluateCustomerValueRules, recordCustomerValueFiring } from '../../../lib/customer-value/evaluate.js';
 import { enqueueOutboundPostback } from './enqueue-postback.js';
 
 export type ConversionOutcome =
@@ -143,15 +146,63 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
   // Goal-aware pricing: match the event to an offer goal (or the default goal). Goal pricing
   // overrides the frozen click default; an explicit postback payout/revenue param still wins.
   const goal = await resolveGoal(input.networkId, click.offer_id, input.event);
-  const payout = safeMoney(input.payoutParam) ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
-  const revenue = safeMoney(input.revenueParam) ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
+  let payout = safeMoney(input.payoutParam) ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
+  let revenue = safeMoney(input.revenueParam) ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
   const currency = click.currency ?? goal?.currency ?? offer?.currency ?? null;
   const goalId = goal?.id ?? null;
   const conversionId = randomUUID().replace(/-/g, '');
+  const advertiserId = offer?.advertiserId ?? null;
+
+  // Advertiser Postback Controls (real rule engine, not just CRUD — see lib/postback-controls).
+  // A hard attribution-window rejection is a tracking-integrity rule, not a business one; controls
+  // don't override it. Otherwise the first active, in-effect, matching control wins.
+  if (status !== 'rejected' || reason !== 'outside_attribution_window') {
+    const control = await findMatchingControl(input.networkId, {
+      offerId: click.offer_id, advertiserId, publisherId: click.publisher_id,
+      event: input.event, payout, revenue, source: input.source,
+      sub1: click.sub1, sub2: click.sub2, sub3: click.sub3, sub4: click.sub4, sub5: click.sub5,
+    });
+    if (control) {
+      status = control.controlType === 'accept' ? 'approved' : control.controlType === 'reject' ? 'rejected' : 'pending';
+      reason = `postback_control:${control.name}`;
+    }
+  }
+
+  // Advertiser Tiered Commissions (real rule engine — see lib/tiered-commissions). Only meaningful
+  // for conversions that will actually pay out; adjusts payout/revenue once a Partner crosses a
+  // volume threshold in the commission's rolling period.
+  if (status === 'approved' && (payout != null || revenue != null)) {
+    const adjusted = await applyTieredCommission(input.networkId, {
+      offerId: click.offer_id, advertiserId, publisherId: click.publisher_id,
+      payout: Number(payout ?? 0), revenue: Number(revenue ?? 0),
+    });
+    if (adjusted.appliedId) {
+      payout = payout != null ? adjusted.payout.toFixed(4) : payout;
+      revenue = revenue != null ? adjusted.revenue.toFixed(4) : revenue;
+    }
+  }
+
+  // Customer Value (real rule engine — see lib/customer-value/evaluate.ts). Requires a `user_id`
+  // in the caller's raw params to identify the customer; only meaningful for conversions that
+  // will actually pay out. Runs after Tiered Commissions so the more specific, customer-targeted
+  // rule can further override.
+  let cvAppliedId: string | null = null;
+  if (status === 'approved' && (payout != null || revenue != null)) {
+    const userIdParam = input.rawParams['user_id'];
+    const userId = typeof userIdParam === 'string' && userIdParam.length > 0 ? userIdParam : null;
+    const cvResult = await evaluateCustomerValueRules({
+      networkId: input.networkId, offerId: click.offer_id, advertiserId, publisherId: click.publisher_id,
+      userId, payout: Number(payout ?? 0), revenue: Number(revenue ?? 0), rawParams: input.rawParams,
+    });
+    if (cvResult.appliedId) {
+      if (cvResult.payoutOverridden) payout = cvResult.payout.toFixed(4);
+      if (cvResult.revenueOverridden) revenue = cvResult.revenue.toFixed(4);
+      cvAppliedId = cvResult.appliedId;
+    }
+  }
 
   // Insert the conversion AND (if approved) its dual ledger entries in ONE transaction (spec §8).
   // DB unique (offer_id, txn_id) is the authoritative idempotency guard.
-  const advertiserId = offer?.advertiserId ?? null;
   const client = await pool.connect();
   let insertedOk = false;
   try {
@@ -179,6 +230,13 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
         publisherId: click.publisher_id, advertiserId,
         payout, revenue, currency: currency ?? 'USD',
       });
+      if (cvAppliedId) {
+        const userIdParam = input.rawParams['user_id'];
+        await recordCustomerValueFiring(client, {
+          networkId: input.networkId, ruleId: cvAppliedId,
+          userId: String(userIdParam), conversionId,
+        });
+      }
     }
     await client.query('COMMIT');
   } catch (err) {

@@ -18,7 +18,7 @@ export function CustomFieldsManage({ entityType }: { entityType: 'publisher' | '
 
   const cols: Column<Def>[] = [
     { header: 'Label', cell: (d) => <span className="font-medium">{d.label}</span> },
-    { header: 'Key', cell: (d) => <span className="font-mono text-tiny text-fg-muted">{d.key}</span> },
+    { header: 'Key', cell: (d) => <span className="font-mono text-xs">{d.key}</span> },
     { header: 'Type', cell: (d) => d.fieldType },
     { header: 'Required', cell: (d) => (d.required ? <Badge value="active" /> : '—') },
     { header: '', className: 'text-right', cell: (d) => <button className="text-tiny font-medium text-danger-text hover:underline" onClick={async () => { if (confirm(`Delete "${d.label}"?`)) { await del.run(d.id); refetch(); } }}>Delete</button> },
@@ -54,7 +54,7 @@ function DefineModal({ entityType, onClose, onDone }: { entityType: string; onCl
         <Field label="Label"><input className="input" required value={form.label} onChange={(e) => set('label', e.target.value)} placeholder="Skype ID" /></Field>
         <Field label="Type"><select className="input" value={form.fieldType} onChange={(e) => set('fieldType', e.target.value)}>{['text', 'number', 'boolean', 'select'].map((t) => <option key={t}>{t}</option>)}</select></Field>
         {form.fieldType === 'select' && <Field label="Options (comma-separated)"><input className="input" value={form.options} onChange={(e) => set('options', e.target.value)} placeholder="tier1, tier2" /></Field>}
-        <label className="flex items-center gap-2 text-small text-fg"><input type="checkbox" className="chk" checked={form.required} onChange={(e) => set('required', e.target.checked)} /> Required</label>
+        <label className="flex items-center gap-2 text-small text-fg"><input type="checkbox" className="h-4 w-4 accent-accent" checked={form.required} onChange={(e) => set('required', e.target.checked)} /> Required</label>
         <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Define'}</button></div>
       </form>
     </Modal>

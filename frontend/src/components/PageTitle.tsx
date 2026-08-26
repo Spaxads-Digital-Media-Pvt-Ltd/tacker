@@ -5,7 +5,7 @@
  * pages always ends on the new page's title. The header falls back to a route-derived default for any
  * page that doesn't declare one.
  */
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 interface PageTitleValue {
   title?: string;
@@ -17,11 +17,12 @@ const PageTitleContext = createContext<PageTitleValue>({ set: () => {} });
 
 export function PageTitleProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<{ title?: string; subtitle?: string }>({});
-  return (
-    <PageTitleContext.Provider value={{ ...state, set: (title, subtitle) => setState({ title, subtitle }) }}>
-      {children}
-    </PageTitleContext.Provider>
-  );
+  // `set` and the context value must stay referentially stable across renders — usePageTitle's
+  // effect depends on `set`, and an unstable identity there re-fires the effect every render,
+  // which calls `set` again and re-renders the provider: an infinite loop.
+  const set = useCallback((title?: string, subtitle?: string) => setState({ title, subtitle }), []);
+  const value = useMemo(() => ({ ...state, set }), [state, set]);
+  return <PageTitleContext.Provider value={value}>{children}</PageTitleContext.Provider>;
 }
 
 /** Read the active page title/subtitle (used by the header). */

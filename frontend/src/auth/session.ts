@@ -13,8 +13,6 @@ export interface Session {
   email: string;
   networkId: string | null;
   ownerId: string | null;
-  /** Per-user UI accent theme id (Section 6). */
-  theme: string;
   /** Unix seconds when the access token expires (from Supabase). */
   expiresAt: number | null;
 }

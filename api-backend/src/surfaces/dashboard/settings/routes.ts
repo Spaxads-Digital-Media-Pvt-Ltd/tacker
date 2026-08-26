@@ -16,10 +16,10 @@ import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
 
-interface NetworkRow { name: string; default_currency: string; status: string; settings: Record<string, unknown> }
+interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
 async function loadNetwork(networkId: string): Promise<NetworkRow> {
-  const { rows } = await query<NetworkRow>('SELECT name, default_currency, status, settings FROM networks WHERE id = $1', [networkId]);
+  const { rows } = await query<NetworkRow>('SELECT ref, name, default_currency, status, settings FROM networks WHERE id = $1', [networkId]);
   const row = rows[0];
   if (!row) throw notFound('Network not found');
   return row;
@@ -60,7 +60,7 @@ export function settingsRoutes(): Router {
     const smtp = (s['smtp'] as Record<string, unknown> | undefined) ?? {};
     const { password, ...smtpSafe } = smtp as { password?: string };
     sendOk(res, {
-      general: { name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
+      general: { nid: Number(net.ref), name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
       smtp: { ...smtpSafe, passwordSet: Boolean(password) },
       integrations: (s['integrations'] as object) ?? {},
     });

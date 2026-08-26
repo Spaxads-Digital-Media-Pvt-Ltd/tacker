@@ -11,6 +11,18 @@ export interface PublisherAdminDTO {
   payoutTerms: string | null;
   defaultAttributionWindowS: number;
   defaultDedupWindowS: number;
+  country: string | null;
+  paymentMethod: string | null;
+  billingFrequency: string | null;
+  tier: string | null;
+  partnerManagerId: string | null;
+  accountExecutiveId: string | null;
+  referredById: string | null;
+  contactName: string | null;
+  taxId: string | null;
+  website: string | null;
+  notes: string | null;
+  hasPortalAccount: boolean;
   customFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -27,6 +39,18 @@ export function toAdminDTO(row: PublisherRow): PublisherAdminDTO {
     payoutTerms: row.payout_terms,
     defaultAttributionWindowS: row.default_attribution_window_s,
     defaultDedupWindowS: row.default_dedup_window_s,
+    country: row.country,
+    paymentMethod: row.payment_method,
+    billingFrequency: row.billing_frequency,
+    tier: row.tier,
+    partnerManagerId: row.partner_manager_id,
+    accountExecutiveId: row.account_executive_id,
+    referredById: row.referred_by_id,
+    contactName: row.contact_name,
+    taxId: row.tax_id,
+    website: row.website,
+    notes: row.notes,
+    hasPortalAccount: row.auth_user_id != null,
     customFields: (row.metadata?.['custom'] as Record<string, unknown> | undefined) ?? {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,

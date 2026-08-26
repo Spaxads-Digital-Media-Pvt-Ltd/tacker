@@ -14,6 +14,7 @@ import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
 import { lookupGeo, geoAvailable } from '../../lib/geo/geoip.js';
 import { parseUA } from '../../lib/ua.js';
 import { getOfferConfig } from './offer-cache.js';
+import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { evaluateGeoRules } from './geo-rules.js';
 import { isClickCapped } from './caps.js';
 import { markUnique } from './dedup.js';
@@ -54,6 +55,20 @@ function pickWeighted(items: { offer_id: string; weight: number }[]): string | n
 // error to an end user — spec §5).
 function divert(reply: FastifyReply, fallbackUrl: string | null): FastifyReply {
   if (fallbackUrl) return reply.code(302).header('location', fallbackUrl).send();
+  return reply.code(204).send();
+}
+
+/** Priority mechanism: lowest Position wins (unset positions sort last, in list order among themselves). */
+function pickByPriority(items: { offer_id: string; position: number | null }[]): string | null {
+  if (!items.length) return null;
+  const sorted = [...items].sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity));
+  return sorted[0]!.offer_id;
+}
+
+// A smart link with no eligible offer diverts to its Catch-All Offer (via /click, so the normal
+// caps/macros/attribution pipeline still applies) — or a neutral 204 if none is configured.
+function divertToCatchAll(reply: FastifyReply, catchAllOfferId: string | null): FastifyReply {
+  if (catchAllOfferId) return reply.code(302).header('location', `/click?offer_id=${catchAllOfferId}`).header('cache-control', 'no-store').send();
   return reply.code(204).send();
 }
 
@@ -135,6 +150,17 @@ export function buildTrackingApp(): FastifyInstance {
     const geoDecision = evaluateGeoRules(offer.geoRules, country, geoKnown);
     if (!geoDecision.allowed) return divert(reply, offer.fallbackUrl);
 
+    // 4b. Traffic Controls — real Blacklist/Whitelist rules on sub-values, geo, device, etc.
+    // (Offers › Traffic Controls). "Block" diverts like any other rule; "Fail Traffic" lets the
+    // click through but flags it, so it already shows up as invalid in existing fraud reporting.
+    const tcFields = {
+      sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
+      referrer: firstStr(req.headers['referer']) ?? null, ip, country,
+      device: ua.device, os: ua.os, browser: ua.browser, userAgent: (req.headers['user-agent'] as string) ?? null,
+    };
+    const tcMatch = evaluateTrafficControls(offer.trafficControls, tcFields, publisherId);
+    if (tcMatch?.action === 'block') return divert(reply, offer.fallbackUrl);
+
     // 5. Cap check (atomic).
     if (await isClickCapped(offer.id, offer.dailyClickCap)) return divert(reply, offer.fallbackUrl);
 
@@ -159,7 +185,8 @@ export function buildTrackingApp(): FastifyInstance {
       device: ua.device, os: ua.os, browser: ua.browser,
       referrer: firstStr(req.headers['referer']) ?? null, userAgent: req.headers['user-agent'] ?? null,
       sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
-      isUnique, fraudScore: fraud.score, fraudFlags: fraud.flags,
+      isUnique, fraudScore: fraud.score,
+      fraudFlags: tcMatch?.action === 'fail_traffic' ? [...fraud.flags, 'traffic_control'] : fraud.flags,
       resolvedPayout, resolvedRevenue, currency: offer.currency,
       smartLinkId,
     };
@@ -202,15 +229,15 @@ export function buildTrackingApp(): FastifyInstance {
     const slId = asUuid(firstStr(q['id']) ?? firstStr(q['sl']));
     if (!slId) return reply.code(400).send({ error: 'missing_smart_link_id' });
 
-    const linkRes = await query<{ id: string; status: string; fallback_url: string | null }>(
-      `SELECT id, status, fallback_url FROM smart_links WHERE id = $1 AND network_id = $2 LIMIT 1`,
+    const linkRes = await query<{ id: string; status: string; redirect_mechanism: string; catch_all_offer_id: string | null }>(
+      `SELECT id, status, redirect_mechanism, catch_all_offer_id FROM smart_links WHERE id = $1 AND network_id = $2 LIMIT 1`,
       [slId, tenant.networkId],
     );
     const link = linkRes.rows[0];
-    if (!link || link.status !== 'active') return divert(reply, link?.fallback_url ?? null);
+    if (!link || link.status !== 'active') return divertToCatchAll(reply, link?.catch_all_offer_id ?? null);
 
-    const itemsRes = await query<{ offer_id: string; weight: number; country: string | null }>(
-      `SELECT offer_id, weight, country FROM smart_link_items WHERE smart_link_id = $1 AND network_id = $2`,
+    const itemsRes = await query<{ offer_id: string; weight: number; position: number | null; country: string | null }>(
+      `SELECT offer_id, weight, position, country FROM smart_link_items WHERE smart_link_id = $1 AND network_id = $2`,
       [slId, tenant.networkId],
     );
     // Geo filter: keep items with no country target or one matching the visitor's country.
@@ -218,8 +245,13 @@ export function buildTrackingApp(): FastifyInstance {
     const country = geo?.country ?? null;
     const eligible = itemsRes.rows.filter((i) => !i.country || i.country === country);
     const pool = eligible.length ? eligible : itemsRes.rows;
-    const chosen = pickWeighted(pool);
-    if (!chosen) return divert(reply, link.fallback_url);
+    // Priority mechanism: lowest Position wins. Weight and KPI (no live performance signal on the
+    // hot path) both fall back to weighted-random, matching the reference's own steady-state
+    // behavior once a KPI-driven Smart Link has converged on its best-performing offer.
+    const chosen = link.redirect_mechanism === 'priority'
+      ? pickByPriority(pool)
+      : pickWeighted(pool);
+    if (!chosen) return divertToCatchAll(reply, link.catch_all_offer_id);
 
     // Forward to /click, preserving pub_id + subs and tagging the smart link.
     const params = new URLSearchParams({ offer_id: chosen, sl: slId });

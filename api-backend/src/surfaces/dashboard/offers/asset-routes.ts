@@ -21,6 +21,8 @@ import {
   createCreativeSchema, updateCreativeSchema,
   createCouponSchema, updateCouponSchema,
   createDealSchema, updateDealSchema,
+  createForwardingRuleSchema, updateForwardingRuleSchema,
+  createOfferPostbackSchema, updateOfferPostbackSchema,
 } from './asset-schemas.js';
 
 type Db = ReturnType<typeof dbForRequest>;
@@ -32,12 +34,14 @@ async function ensureOffer(db: Db, id: string | undefined): Promise<void> {
   if (!offer) throw notFound('Offer not found');
 }
 
-/** Map a validated (camelCase) body onto snake_case columns, keeping only defined keys. */
-function toColumns(body: Record<string, unknown>, colMap: Record<string, string>): Record<string, unknown> {
+/** Map a validated (camelCase) body onto snake_case columns, keeping only defined keys.
+ * `jsonCols` (snake_case) get JSON.stringify'd — `pg` doesn't auto-serialize arrays/objects for
+ * jsonb columns. */
+function toColumns(body: Record<string, unknown>, colMap: Record<string, string>, jsonCols: string[] = []): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [camel, snake] of Object.entries(colMap)) {
     const v = body[camel];
-    if (v !== undefined) out[snake] = v;
+    if (v !== undefined) out[snake] = jsonCols.includes(snake) ? JSON.stringify(v) : v;
   }
   return out;
 }
@@ -48,6 +52,7 @@ interface AssetSpec {
   createSchema: ZodTypeAny;
   updateSchema: ZodTypeAny;
   colMap: Record<string, string>;     // camelCase body key -> snake_case column
+  jsonCols?: string[];                // snake_case columns that are jsonb arrays/objects
   dto: (row: Row) => unknown;
   auditKind: string;                  // e.g. 'goal'
   invalidateCache?: boolean;          // goals affect payout resolution → bust the offer cache
@@ -69,7 +74,7 @@ function mountAsset(r: Router, spec: AssetSpec): void {
     await ensureOffer(db, req.params.id);
     const body = req.body as Record<string, unknown>;
     if (spec.beforeWrite) await spec.beforeWrite(db, req.params.id!, body);
-    const row = await db.insert<Row>(spec.table, { offer_id: req.params.id, ...toColumns(body, spec.colMap) });
+    const row = await db.insert<Row>(spec.table, { offer_id: req.params.id, ...toColumns(body, spec.colMap, spec.jsonCols) });
     await writeAudit(req, { action: `offer.${spec.auditKind}.create`, entityType: spec.table, entityId: row.id, after: row });
     if (spec.invalidateCache) await invalidateOfferConfig(db.scope.networkId, req.params.id!);
     res.status(201);
@@ -82,7 +87,7 @@ function mountAsset(r: Router, spec: AssetSpec): void {
     if (!before) throw notFound(`${spec.auditKind} not found`);
     const body = req.body as Record<string, unknown>;
     if (spec.beforeWrite) await spec.beforeWrite(db, req.params.id!, body);
-    const [row] = await db.update<Row>(spec.table, toColumns(body, spec.colMap), { id: req.params.assetId, offer_id: req.params.id });
+    const [row] = await db.update<Row>(spec.table, toColumns(body, spec.colMap, spec.jsonCols), { id: req.params.assetId, offer_id: req.params.id });
     await writeAudit(req, { action: `offer.${spec.auditKind}.update`, entityType: spec.table, entityId: req.params.assetId, before, after: row });
     if (spec.invalidateCache) await invalidateOfferConfig(db.scope.networkId, req.params.id!);
     sendOk(res, spec.dto(row ?? before));
@@ -106,8 +111,10 @@ const goalDTO = (r: Row) => ({
   isDefault: r.is_default, status: r.status, sortOrder: r.sort_order,
 });
 const creativeDTO = (r: Row) => ({
-  id: r.id, name: r.name, type: r.type, url: r.url, html: r.html,
+  id: r.id, ref: Number(r.ref), name: r.name, type: r.type, url: r.url, html: r.html,
   width: r.width, height: r.height, language: r.language, status: r.status,
+  visibleToPartners: r.visible_to_partners, emailFrom: r.email_from, emailSubject: r.email_subject,
+  offerId: r.offer_id, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 const couponDTO = (r: Row) => ({
   id: r.id, code: r.code, publisherId: r.publisher_id, description: r.description,
@@ -116,6 +123,15 @@ const couponDTO = (r: Row) => ({
 const dealDTO = (r: Row) => ({
   id: r.id, name: r.name, description: r.description, dealType: r.deal_type,
   value: r.value, status: r.status, startsAt: r.starts_at, endsAt: r.ends_at,
+});
+const forwardingRuleDTO = (r: Row) => ({
+  id: r.id, name: r.name, partnerIds: r.partner_ids, offerUrls: r.offer_urls,
+  destination: r.destination, countries: r.countries, status: r.status,
+  createdAt: r.created_at, updatedAt: r.updated_at,
+});
+const offerPostbackDTO = (r: Row) => ({
+  id: r.id, publisherId: r.publisher_id, url: r.url, method: r.method, event: r.event,
+  level: r.level, status: r.status, createdAt: r.created_at,
 });
 
 /** Register all offer asset collections onto the offers admin router. */
@@ -140,7 +156,10 @@ export function mountOfferAssets(r: Router): void {
   mountAsset(r, {
     collection: 'creatives', table: 'offer_creatives',
     createSchema: createCreativeSchema, updateSchema: updateCreativeSchema,
-    colMap: { name: 'name', type: 'type', url: 'url', html: 'html', width: 'width', height: 'height', language: 'language', status: 'status' },
+    colMap: {
+      name: 'name', type: 'type', url: 'url', html: 'html', width: 'width', height: 'height', language: 'language',
+      status: 'status', visibleToPartners: 'visible_to_partners', emailFrom: 'email_from', emailSubject: 'email_subject',
+    },
     dto: creativeDTO, auditKind: 'creative',
   });
 
@@ -164,5 +183,31 @@ export function mountOfferAssets(r: Router): void {
     createSchema: createDealSchema, updateSchema: updateDealSchema,
     colMap: { name: 'name', description: 'description', dealType: 'deal_type', value: 'value', status: 'status', startsAt: 'starts_at', endsAt: 'ends_at' },
     dto: dealDTO, auditKind: 'deal',
+  });
+
+  mountAsset(r, {
+    collection: 'forwarding-rules', table: 'offer_forwarding_rules',
+    createSchema: createForwardingRuleSchema, updateSchema: updateForwardingRuleSchema,
+    colMap: {
+      name: 'name', partnerIds: 'partner_ids', offerUrls: 'offer_urls',
+      destination: 'destination', countries: 'countries', status: 'status',
+    },
+    jsonCols: ['partner_ids', 'offer_urls', 'countries'],
+    dto: forwardingRuleDTO, auditKind: 'forwarding_rule',
+  });
+
+  mountAsset(r, {
+    collection: 'postbacks', table: 'publisher_postbacks',
+    createSchema: createOfferPostbackSchema, updateSchema: updateOfferPostbackSchema,
+    colMap: { publisherId: 'publisher_id', url: 'url', method: 'method', event: 'event', level: 'level', status: 'status' },
+    dto: offerPostbackDTO, auditKind: 'postback',
+    // The partner (publisher) a postback is scoped to must belong to this network.
+    beforeWrite: async (db, _offerId, body) => {
+      const pid = body['publisherId'];
+      if (typeof pid === 'string') {
+        const pub = await db.selectOne<PublisherRow>('publishers', { id: pid });
+        if (!pub) throw badRequest('publisherId does not belong to this network');
+      }
+    },
   });
 }

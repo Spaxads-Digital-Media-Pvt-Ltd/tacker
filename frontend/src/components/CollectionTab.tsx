@@ -14,7 +14,7 @@ import { Table, Modal, Field, Spinner, StateBlock, type Column } from './ui';
 export interface FieldDef {
   key: string;
   label: string;
-  type?: 'text' | 'number' | 'money' | 'select' | 'checkbox' | 'url' | 'textarea';
+  type?: 'text' | 'number' | 'money' | 'select' | 'checkbox' | 'url' | 'textarea' | 'tags' | 'hidden';
   options?: string[] | { value: string; label: string }[];
   required?: boolean;
   placeholder?: string;
@@ -33,22 +33,26 @@ function initialForm(fields: FieldDef[]): Record<string, string | boolean> {
   return f;
 }
 
-/** Seed a form from an existing row (edit mode). */
+/** Seed a form from an existing row (edit mode). Array-valued (`tags`) fields are joined for editing. */
 function formFromRow(fields: FieldDef[], row: Row): Record<string, string | boolean> {
   const f: Record<string, string | boolean> = {};
   for (const fd of fields) {
     const v = row[fd.key];
-    f[fd.key] = fd.type === 'checkbox' ? Boolean(v) : v == null ? '' : String(v);
+    if (fd.type === 'checkbox') { f[fd.key] = Boolean(v); continue; }
+    if (fd.type === 'tags') { f[fd.key] = Array.isArray(v) ? v.join(', ') : ''; continue; }
+    f[fd.key] = v == null ? '' : String(v);
   }
   return f;
 }
 
-/** Convert the form state into a request body: numbers coerced, blanks on optional fields dropped. */
+/** Convert the form state into a request body: numbers coerced, `tags` split into an array, blanks
+ * on optional fields dropped. */
 function toBody(fields: FieldDef[], form: Record<string, string | boolean>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const fd of fields) {
     const v = form[fd.key];
     if (fd.type === 'checkbox') { body[fd.key] = Boolean(v); continue; }
+    if (fd.type === 'tags') { body[fd.key] = String(v).split(',').map((s) => s.trim()).filter(Boolean); continue; }
     if (v === '' || v === undefined) { if (fd.required) body[fd.key] = v; continue; }
     body[fd.key] = fd.type === 'number' ? Number(v) : v;
   }
@@ -56,16 +60,19 @@ function toBody(fields: FieldDef[], form: Record<string, string | boolean>): Rec
 }
 
 export function CollectionTab({
-  basePath, fields, columns, addLabel, emptyText, editable = false,
+  basePath, listPath, fields, columns, addLabel, emptyText, editable = false,
 }: {
   basePath: string;
+  /** GET target, if it needs query params (e.g. a category filter) that mustn't leak into the
+   * `${basePath}/${id}` PATCH/DELETE URLs. Defaults to `basePath`. */
+  listPath?: string;
   fields: FieldDef[];
   columns: Column<Row>[];
   addLabel: string;
   emptyText: string;
   editable?: boolean;
 }) {
-  const { data, loading, error, refetch } = useQuery<Row[]>(basePath);
+  const { data, loading, error, refetch } = useQuery<Row[]>(listPath ?? basePath);
   const [open, setOpen] = useState(false);
   const [editRow, setEditRow] = useState<Row | null>(null);
 
@@ -76,8 +83,8 @@ export function CollectionTab({
       header: '', className: 'text-right',
       cell: (row) => (
         <span className="flex justify-end gap-3">
-          {editable && <button className="text-xs font-medium text-accent hover:underline" onClick={() => setEditRow(row)}>Edit</button>}
-          <button className="text-xs font-medium text-danger-text hover:underline"
+          {editable && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setEditRow(row)}>Edit</button>}
+          <button className="text-tiny font-medium text-danger-text hover:underline"
             onClick={async () => { if (confirm('Delete this item?')) { await del.run(row.id); refetch(); } }}>Delete</button>
         </span>
       ),
@@ -125,8 +132,8 @@ function FormModal({
   return (
     <Modal open onClose={onClose} title={title}>
       <form onSubmit={submit} className="space-y-3">
-        {error && <p className="text-sm text-danger-text">{error}</p>}
-        {fields.map((fd) => (
+        {error && <p className="text-small text-danger-text">{error}</p>}
+        {fields.filter((fd) => fd.type !== 'hidden').map((fd) => (
           <Field key={fd.key} label={fd.label}>{renderInput(fd, form[fd.key] ?? '', (v) => set(fd.key, v))}</Field>
         ))}
         <div className="flex justify-end gap-2 pt-2">
@@ -141,7 +148,7 @@ function FormModal({
 function renderInput(fd: FieldDef, value: string | boolean, onChange: (v: string | boolean) => void): ReactNode {
   if (fd.type === 'checkbox') {
     return (
-      <input type="checkbox" className="chk" checked={Boolean(value)}
+      <input type="checkbox" className="h-4 w-4 accent-accent" checked={Boolean(value)}
         onChange={(e) => onChange(e.target.checked)} />
     );
   }

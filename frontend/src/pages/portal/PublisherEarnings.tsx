@@ -1,5 +1,5 @@
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, StatCard, Table, StatusDot, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, StatCard, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
 
 interface StatementEntry {
   type: string; direction: string; amount: string; currency: string; status: string; createdAt: string;
@@ -7,10 +7,10 @@ interface StatementEntry {
 interface Earnings { balance: string; statement: StatementEntry[] }
 
 const columns: Column<StatementEntry>[] = [
-  { header: 'Type', cell: (e) => <span className="capitalize text-fg">{e.type}</span> },
-  { header: 'Direction', cell: (e) => <StatusDot value={e.direction === 'credit' ? 'active' : 'pending'} /> },
-  { header: 'Amount', cell: (e) => <span className={`tabular-nums ${e.direction === 'credit' ? 'font-semibold text-success-text' : 'text-fg-secondary'}`}>{e.direction === 'credit' ? '+' : '−'}{e.currency} {e.amount}</span> },
-  { header: 'Date', cell: (e) => <span className="text-fg-secondary">{new Date(e.createdAt).toLocaleString()}</span> },
+  { header: 'Type', cell: (e) => <span className="capitalize">{e.type}</span> },
+  { header: 'Direction', cell: (e) => <Badge value={e.direction === 'credit' ? 'active' : 'pending'} /> },
+  { header: 'Amount', cell: (e) => <span className={e.direction === 'credit' ? 'font-semibold text-success-text' : 'text-fg-secondary'}>{e.direction === 'credit' ? '+' : '−'}{e.currency} {e.amount}</span> },
+  { header: 'Date', cell: (e) => new Date(e.createdAt).toLocaleString() },
 ];
 
 export default function PublisherEarnings() {

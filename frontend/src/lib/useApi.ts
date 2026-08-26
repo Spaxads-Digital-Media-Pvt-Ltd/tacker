@@ -12,13 +12,15 @@ interface QueryState<T> {
   refetch: () => void;
 }
 
-export function useQuery<T>(path: string): QueryState<T> {
+/** Pass `null` for `path` to skip fetching (e.g. a dependent query waiting on an id). */
+export function useQuery<T>(path: string | null): QueryState<T> {
   const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(path !== null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
+    if (path === null) { setData(null); setLoading(false); setError(null); return; }
     let alive = true;
     setLoading(true);
     setError(null);

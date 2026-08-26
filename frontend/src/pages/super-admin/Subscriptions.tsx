@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, StatusDot, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
 import type { NetworkRow } from '../../types';
 
 interface Plan {
@@ -20,17 +20,17 @@ export default function Subscriptions() {
   const [assignTo, setAssignTo] = useState<NetworkRow | null>(null);
 
   const planCols: Column<Plan>[] = [
-    { header: 'Plan', cell: (p) => <span className="font-medium text-fg">{p.name}</span> },
-    { header: 'Code', cell: (p) => <span className="font-mono tabular-nums text-tiny text-fg-muted">{p.code}</span> },
-    { header: 'Price', cell: (p) => <span className="tabular-nums text-fg-secondary">{p.currency} {(p.price_cents / 100).toFixed(2)}/mo</span> },
-    { header: 'Limits', cell: (p) => <span className="text-tiny text-fg-muted">{Object.entries(p.limits).map(([k, v]) => `${k}: ${v}`).join(' · ') || '—'}</span> },
+    { header: 'Plan', cell: (p) => <span className="font-medium">{p.name}</span> },
+    { header: 'Code', cell: (p) => <span className="font-mono text-xs">{p.code}</span> },
+    { header: 'Price', cell: (p) => `${p.currency} ${(p.price_cents / 100).toFixed(2)}/mo` },
+    { header: 'Limits', cell: (p) => <span className="text-tiny text-fg-secondary">{Object.entries(p.limits).map(([k, v]) => `${k}: ${v}`).join(' · ') || '—'}</span> },
   ];
 
   const netCols: Column<NetworkRow>[] = [
-    { header: 'Network', cell: (n) => <span className="font-medium text-fg">{n.name}</span> },
+    { header: 'Network', cell: (n) => <span className="font-medium">{n.name}</span> },
     { header: 'Plan', cell: (n) => n.plan_code ?? <span className="text-fg-muted">none</span> },
-    { header: 'Status', cell: (n) => (n.subscription_status ? <StatusDot value={n.subscription_status} /> : <span className="text-fg-muted">—</span>) },
-    { header: '', className: 'text-right', cell: (n) => <button className="btn-ghost !py-1 !px-3 text-tiny" onClick={() => setAssignTo(n)}>Assign plan</button> },
+    { header: 'Status', cell: (n) => (n.subscription_status ? <Badge value={n.subscription_status} /> : <span className="text-fg-muted">—</span>) },
+    { header: '', className: 'text-right', cell: (n) => <button className="btn-ghost !py-1 !px-3 text-xs" onClick={() => setAssignTo(n)}>Assign plan</button> },
   ];
 
   return (
@@ -38,13 +38,13 @@ export default function Subscriptions() {
       <PageHeader title="Subscriptions & plans" subtitle="Define plans and assign them to tenant networks."
         action={<button className="btn-primary" onClick={() => setNewPlan(true)}>New plan</button>} />
 
-      <h2 className="eyebrow mb-3">Plans</h2>
+      <h2 className="mb-3 text-small font-semibold uppercase tracking-wide text-fg-secondary">Plans</h2>
       {plans.loading ? <StateBlock><Spinner /></StateBlock>
         : plans.error ? <StateBlock>{plans.error}</StateBlock>
         : !plans.data || plans.data.length === 0 ? <StateBlock>No plans yet.</StateBlock>
         : <Table columns={planCols} rows={plans.data} rowKey={(p) => p.id} />}
 
-      <h2 className="eyebrow mb-3 mt-8">Networks</h2>
+      <h2 className="mb-3 mt-8 text-small font-semibold uppercase tracking-wide text-fg-secondary">Networks</h2>
       {networks.loading ? <StateBlock><Spinner /></StateBlock>
         : networks.error ? <StateBlock>{networks.error}</StateBlock>
         : <Table columns={netCols} rows={networks.data ?? []} rowKey={(n) => n.id} />}

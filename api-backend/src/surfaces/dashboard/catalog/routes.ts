@@ -58,7 +58,7 @@ export function catalogRoutes(): Router {
       `SELECT pb.id, pb.url, pb.method, pb.event, pb.status, pb.created_at,
               p.id AS publisher_id, p.name AS publisher_name, o.name AS offer_name
          FROM publisher_postbacks pb
-         JOIN publishers p ON p.id = pb.publisher_id AND p.network_id = pb.network_id
+         LEFT JOIN publishers p ON p.id = pb.publisher_id AND p.network_id = pb.network_id
          LEFT JOIN offers o ON o.id = pb.offer_id AND o.network_id = pb.network_id
         WHERE pb.network_id = $1 ORDER BY pb.created_at DESC LIMIT 500`, [nid(req)]);
     sendOk(res, rows);

@@ -8,6 +8,17 @@ export const createPublisherSchema = z.object({
   payoutTerms: z.string().max(500).optional(),
   defaultAttributionWindowS: z.number().int().min(0).max(31_536_000).optional(),
   defaultDedupWindowS: z.number().int().min(0).max(31_536_000).optional(),
+  country: z.string().max(100).nullable().optional(),
+  paymentMethod: z.string().max(60).nullable().optional(),
+  billingFrequency: z.string().max(60).nullable().optional(),
+  tier: z.string().max(60).nullable().optional(),
+  partnerManagerId: z.string().uuid().nullable().optional(),
+  accountExecutiveId: z.string().uuid().nullable().optional(),
+  referredById: z.string().uuid().nullable().optional(),
+  contactName: z.string().max(200).nullable().optional(),
+  taxId: z.string().max(100).nullable().optional(),
+  website: z.string().max(300).nullable().optional(),
+  notes: z.string().max(4000).nullable().optional(),
   // Values for network-defined custom fields → merged into metadata.custom.
   customFields: z.record(z.string(), z.unknown()).optional(),
 });
@@ -22,6 +33,7 @@ export const createPostbackSchema = z.object({
   method: z.enum(['GET', 'POST']).default('GET'),
   offerId: z.string().uuid().nullable().optional(),
   event: z.string().max(100).nullable().optional(),
+  level: z.enum(['conversion', 'event', 'cpc']).default('conversion'),
 });
 export type CreatePostback = z.infer<typeof createPostbackSchema>;
 

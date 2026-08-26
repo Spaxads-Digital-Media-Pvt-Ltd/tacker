@@ -1,5 +1,8 @@
-/* Sora (display/headings) + Inter (UI body) + IBM Plex Mono (IDs/tokens/codes) — Section 0. */
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+/* Inter (UI) + JetBrains Mono (IDs/tokens/codes) — the only fonts used app-wide (Section 0).
+ * Inter over a rounded/geometric face: it's the standard for data-dense analytics/tracking
+ * dashboards (Linear, Vercel, Stripe, Segment, Amplitude) — built for legibility at small sizes
+ * in tables full of numbers, not for a friendly consumer-app feel. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,48 +12,44 @@
  * All color tokens are stored as "R G B" triples so Tailwind can apply alpha
  * via rgb(var(--token) / <alpha-value>). Never hardcode a hex/px anywhere else.
  *
- * Visual language: a warm, editorial "ledger" light theme (think a premium
- * fintech statement, not a SaaS-template gradient) — ink-on-paper neutrals,
- * a confident deep-teal accent, generous soft-shadowed cards, tabular-precise
- * mono for identifiers. Deliberately distinct from Everflow's navy/cobalt
- * chrome even though the feature surface takes cues from it.
+ * Accent is a single constant (navy blue) — no per-user theme switching. Deliberately dark
+ * (blue-700/900), not the lighter blue-500 used for semantic --info below, so the two never read
+ * as the same color.
  * ========================================================================= */
 :root {
-  /* --- Accent (theme-swappable; default Theme A · Ledger Teal) --- */
-  --accent: 13 148 136;          /* #0D9488 */
-  --accent-hover: 15 118 110;    /* #0F766E */
-  --accent-subtle: 240 253 250;  /* #F0FDFA */
-  --accent-text: 19 78 74;       /* #134E4A */
+  /* --- Accent (constant, navy blue) --- */
+  --accent: 29 78 216;           /* #1D4ED8 blue-700 */
+  --accent-hover: 30 64 175;     /* #1E40AF blue-800 */
+  --accent-subtle: 239 246 255;  /* #EFF6FF blue-50 */
+  --accent-text: 30 58 138;      /* #1E3A8A blue-900 */
 
   /* --- Semantic / status (CONSTANT across all themes) --- */
-  --success: 22 163 74;   --success-bg: 240 253 244;  --success-text: 21 128 61;   /* green = positive */
-  --danger: 220 38 38;    --danger-bg: 254 242 242;   --danger-text: 185 28 28;    /* red = negative */
-  --warning: 217 119 6;   --warning-bg: 255 251 235;  --warning-text: 146 64 14;   /* amber = pending */
-  --info: 2 132 199;      --info-bg: 240 249 255;     --info-text: 12 74 110;      /* sky = info */
+  --success: 34 197 94;   --success-bg: 220 252 231;  --success-text: 22 101 52;   /* green = positive */
+  --danger: 239 68 68;    --danger-bg: 254 226 226;   --danger-text: 153 27 27;    /* red = negative */
+  --warning: 245 158 11;  --warning-bg: 254 243 199;  --warning-text: 146 64 14;   /* amber = pending */
+  --info: 59 130 246;     --info-bg: 219 234 254;     --info-text: 30 64 175;      /* blue = info */
 
-  /* --- Neutral / surface (warm paper-toned light theme) --- */
-  --bg-page: 250 250 249;        /* #FAFAF9 warm off-white */
+  /* --- Neutral / surface (light theme; the whole app is light) --- */
+  --bg-page: 250 250 252;        /* #FAFAFC */
   --bg-surface: 255 255 255;     /* #FFFFFF */
   --bg-elevated: 255 255 255;    /* #FFFFFF (uses shadow, not tint) */
-  --bg-subtle: 245 245 244;      /* #F5F5F4 hover fills / code blocks */
-  --border: 231 229 228;         /* #E7E5E4 warm hairline */
-  --text-primary: 28 25 23;      /* #1C1917 warm ink */
-  --text-secondary: 87 83 78;    /* #57534E */
-  --text-muted: 168 162 158;     /* #A8A29E */
+  --border: 229 231 235;         /* #E5E7EB */
+  --text-primary: 17 24 39;      /* #111827 */
+  --text-secondary: 107 114 128; /* #6B7280 */
+  --text-muted: 156 163 175;     /* #9CA3AF */
 
   /* --- Typography --- */
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-display: 'Sora', var(--font-sans);
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
-  --fs-h1: 26px; --fs-h2: 20px; --fs-h3: 16px;
-  --fs-body: 14px; --fs-small: 13px; --fs-tiny: 11.5px;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --fs-h1: 28px; --fs-h2: 22px; --fs-h3: 18px;
+  --fs-body: 14px; --fs-small: 13px; --fs-tiny: 12px;
 
-  /* --- Radius (generous + soft — a signature trait of this theme) --- */
-  --radius: 9px;         /* controls / inputs */
-  --radius-card: 16px;   /* cards */
+  /* --- Radius --- */
+  --radius: 8px;        /* controls / inputs */
+  --radius-card: 12px;  /* cards */
 
   /* --- Legacy brand-* aliases → follow the accent so existing components
-   *     recolor with the theme automatically until they're migrated. --- */
+   *     stay in sync until they're migrated to the accent-* tokens directly. --- */
   --brand-50: var(--accent-subtle);
   --brand-100: var(--accent-subtle);
   --brand-300: var(--accent);
@@ -68,13 +67,11 @@
     line-height: 1.5;
     @apply bg-page text-fg antialiased;
   }
-  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; }
   /* Visible keyboard focus on every interactive element (quality floor). */
   :focus-visible {
     outline: 2px solid rgb(var(--accent));
     outline-offset: 2px;
   }
-  ::selection { background: rgb(var(--accent) / 0.18); }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
   }
@@ -83,26 +80,24 @@
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius)] px-4 py-2 text-body font-medium
-           transition-all focus:outline-none disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98];
+           transition-all duration-150 focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
   }
-  .btn-primary { @apply btn bg-accent text-white shadow-[0_1px_2px_rgb(0_0_0/0.08),0_1px_0_0_rgb(255_255_255/0.08)_inset] hover:bg-accent-hover; }
+  .btn-primary { @apply btn bg-accent text-white shadow-sm hover:bg-accent-hover hover:shadow; }
   .btn-ghost   { @apply btn border border-border bg-surface text-fg hover:border-accent/40 hover:bg-accent-subtle; }
-  .btn-subtle  { @apply btn bg-accent-subtle text-accent-text hover:brightness-95; }
-  .btn-danger  { @apply btn bg-danger text-white hover:brightness-95; }
-  /* Card: white surface, warm hairline border, generous 16px radius, soft layered shadow. */
+  /* Card: white surface, hairline border, 12px radius, ultra-subtle shadow. */
   .card {
-    @apply rounded-card border border-border bg-surface p-6 shadow-card;
+    @apply rounded-[var(--radius-card)] border border-border bg-surface p-6
+           shadow-[0_1px_2px_rgb(0_0_0/0.04),0_4px_12px_rgb(0_0_0/0.04)];
   }
   .input {
     @apply w-full rounded-[var(--radius)] border border-border bg-surface px-3.5 py-2.5 text-body text-fg
-           placeholder:text-fg-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20;
+           shadow-sm transition-colors duration-150 placeholder:text-fg-muted
+           hover:border-fg-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
   }
-  .label { @apply mb-1.5 block text-tiny font-semibold uppercase tracking-wide text-fg-muted; }
+  .label { @apply mb-1.5 block text-small font-medium text-fg-secondary; }
   /* Checkbox — accent-tinted on light theme. */
   .chk {
     @apply h-3.5 w-3.5 shrink-0 rounded border border-border bg-surface
            accent-accent focus:ring-2 focus:ring-accent/25;
   }
-  /* Small caption-style eyebrow used above section/page headings. */
-  .eyebrow { @apply text-tiny font-semibold uppercase tracking-wider text-fg-muted; }
 }

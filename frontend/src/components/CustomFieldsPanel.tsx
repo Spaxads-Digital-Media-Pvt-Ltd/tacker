@@ -60,11 +60,11 @@ export function CustomFieldsPanel({
         : empty ? <StateBlock>No custom fields defined for {entityType}s yet. Define one to start.</StateBlock>
         : (
           <form onSubmit={submit} className="space-y-3">
-            {save.error && <p className="text-sm text-danger-text">{save.error}</p>}
+            {save.error && <p className="text-small text-danger-text">{save.error}</p>}
             {(defs ?? []).map((d) => (
               <Field key={d.id} label={`${d.label}${d.required ? ' *' : ''}`}>
                 {d.fieldType === 'boolean' ? (
-                  <input type="checkbox" className="chk" checked={Boolean(form[d.key])} onChange={(e) => set(d.key, e.target.checked)} />
+                  <input type="checkbox" className="h-4 w-4 accent-accent" checked={Boolean(form[d.key])} onChange={(e) => set(d.key, e.target.checked)} />
                 ) : d.fieldType === 'select' ? (
                   <select className="input" value={String(form[d.key] ?? '')} onChange={(e) => set(d.key, e.target.value)}>
                     <option value="">—</option>
@@ -102,7 +102,7 @@ function DefineFieldModal({
   return (
     <Modal open={open} onClose={onClose} title={`Define ${entityType} custom field`}>
       <form onSubmit={submit} className="space-y-3">
-        {error && <p className="text-sm text-danger-text">{error}</p>}
+        {error && <p className="text-small text-danger-text">{error}</p>}
         <Field label="Key (letters, numbers, underscore)"><input className="input" required value={form.key} onChange={(e) => set('key', e.target.value)} placeholder="skype_id" /></Field>
         <Field label="Label"><input className="input" required value={form.label} onChange={(e) => set('label', e.target.value)} placeholder="Skype ID" /></Field>
         <Field label="Type">
@@ -114,7 +114,7 @@ function DefineFieldModal({
           <Field label="Options (comma-separated)"><input className="input" value={form.options} onChange={(e) => set('options', e.target.value)} placeholder="tier1, tier2, tier3" /></Field>
         )}
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" className="chk" checked={form.required} onChange={(e) => set('required', e.target.checked)} /> Required
+          <input type="checkbox" className="h-4 w-4 accent-accent" checked={form.required} onChange={(e) => set('required', e.target.checked)} /> Required
         </label>
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>

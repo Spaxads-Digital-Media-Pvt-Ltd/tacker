@@ -25,7 +25,6 @@ export default {
         page: rgb('--bg-page'),
         surface: rgb('--bg-surface'),
         elevated: rgb('--bg-elevated'),
-        subtle: rgb('--bg-subtle'),
         border: rgb('--border'),
         // Foreground text ramp.
         fg: {
@@ -41,7 +40,6 @@ export default {
       },
       fontFamily: {
         sans: ['var(--font-sans)'],
-        display: ['var(--font-display)'],
         mono: ['var(--font-mono)'],
       },
       fontSize: {
@@ -57,8 +55,8 @@ export default {
         card: 'var(--radius-card)',
       },
       boxShadow: {
-        card: '0 1px 2px rgb(28 25 23 / 0.04), 0 8px 24px -4px rgb(28 25 23 / 0.06)',
-        elevated: '0 12px 32px -6px rgb(28 25 23 / 0.16), 0 2px 6px rgb(28 25 23 / 0.06)',
+        card: '0 1px 2px rgb(0 0 0 / 0.04), 0 4px 12px rgb(0 0 0 / 0.04)',
+        elevated: '0 4px 16px rgb(0 0 0 / 0.10), 0 1px 3px rgb(0 0 0 / 0.06)',
       },
       keyframes: {
         'fade-in': { from: { opacity: '0', transform: 'translateY(4px)' }, to: { opacity: '1', transform: 'none' } },
