@@ -1,12 +1,6 @@
-/* Inter (UI) + JetBrains Mono (IDs/tokens/codes) — the only fonts used app-wide (Section 0).
- * Inter over a rounded/geometric face: it's the standard for data-dense analytics/tracking
- * dashboards (Linear, Vercel, Stripe, Segment, Amplitude) — compact, legible at small sizes in
- * tables full of numbers, a full 400–800 weight ramp, and true tabular figures for the
- * `tabular-nums` KPI cards. A Lato trial reached `main` via a merge and was reverted after an
- * A/B check: it ran ~5–8% wider (clipped a column sooner in dense report tables), its Google
- * build has no `tnum`, and it collapses the weight ramp to 400/700/900. The UI face is one
- * token (--font-sans) — swapping it is a single-line change. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Sora (UI) + Space Mono (IDs/tokens/codes) — loaded via index.html (Section 0).
+ * Sora: geometric sans with a premium SaaS feel for headings, nav, and body copy.
+ * Space Mono: monospace for tracking IDs, postbacks, codes, and metric-heavy table cells. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -47,8 +41,8 @@
   --text-muted: 100 116 139;     /* #64748B slate-500 */
 
   /* --- Typography --- */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --font-sans: 'Sora', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
   --fs-h1: 28px; --fs-h2: 22px; --fs-h3: 18px;
   --fs-body: 14px; --fs-small: 13px; --fs-tiny: 12px;
 
