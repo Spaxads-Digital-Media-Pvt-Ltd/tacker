@@ -86,7 +86,7 @@ export function MiniChart({ labels, revenue, clicks }: { labels: string[]; reven
       <path d={revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} fill="none" stroke="var(--color-accent-text, #6366f1)" strokeWidth={2} />
       <path d={clickLine} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 3" />
       {labels.map((l, i) => (i % step === 0 ? (
-        <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="var(--color-fg-secondary, #64748b)">{l.slice(5)}</text>
+        <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="rgb(var(--text-muted))">{l.slice(5)}</text>
       ) : null))}
     </svg>
   );

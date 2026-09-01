@@ -16,6 +16,13 @@ export default {
           subtle: rgb('--accent-subtle'),
           text: rgb('--accent-text'),
         },
+        chart: rgb('--chart'),
+        sidebar: {
+          DEFAULT: rgb('--sidebar-bg'),
+          text: rgb('--sidebar-text'),
+          muted: rgb('--text-muted'),
+          active: rgb('--sidebar-active'),
+        },
         // Semantic / status — CONSTANT across every theme (green=+, red=-, amber=pending, blue=info).
         success: { DEFAULT: rgb('--success'), bg: rgb('--success-bg'), text: rgb('--success-text') },
         danger: { DEFAULT: rgb('--danger'), bg: rgb('--danger-bg'), text: rgb('--danger-text') },
@@ -55,8 +62,8 @@ export default {
         card: 'var(--radius-card)',
       },
       boxShadow: {
-        card: '0 1px 2px rgb(0 0 0 / 0.04), 0 4px 12px rgb(0 0 0 / 0.04)',
-        elevated: '0 4px 16px rgb(0 0 0 / 0.10), 0 1px 3px rgb(0 0 0 / 0.06)',
+        card: '0 1px 2px rgb(26 22 20 / 0.06), 0 8px 24px rgb(26 22 20 / 0.05)',
+        elevated: '0 8px 28px rgb(26 22 20 / 0.12), 0 2px 6px rgb(26 22 20 / 0.08)',
       },
       keyframes: {
         'fade-in': { from: { opacity: '0', transform: 'translateY(4px)' }, to: { opacity: '1', transform: 'none' } },

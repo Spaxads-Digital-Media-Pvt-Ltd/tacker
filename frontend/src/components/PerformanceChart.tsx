@@ -59,22 +59,22 @@ export function PerformanceChart({
         <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full" aria-hidden>
           <defs>
             <linearGradient id="perf-rev" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.28" />
-              <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0" />
+              <stop offset="0%" stopColor="rgb(var(--chart))" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="rgb(var(--chart))" stopOpacity="0" />
             </linearGradient>
           </defs>
 
           {mode === 'area' ? (
             <>
               <path d={revArea} fill="url(#perf-rev)" />
-              <path d={revLine} fill="none" stroke="rgb(var(--accent))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <path d={revLine} fill="none" stroke="rgb(var(--chart))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
             </>
           ) : (
             revenue.map((v, i) => (
               <rect key={i} x={x(i) - barW / 2} y={yRev(v)} width={barW} height={padT + plotH - yRev(v)} rx="1.5" fill="rgb(var(--accent))" fillOpacity="0.55" />
             ))
           )}
-          <path d={clickLine} fill="none" stroke="#64748b" strokeWidth="1.5" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+          <path d={clickLine} fill="none" stroke="#C9BFB8" strokeWidth="1.5" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
 
           {HOURS.filter((h2) => h2 % 4 === 0).map((h2) => (
             <text key={h2} x={x(h2)} y={h - 6} fontSize="9" textAnchor="middle" fill="rgb(var(--text-muted))">

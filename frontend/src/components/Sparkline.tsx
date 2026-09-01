@@ -1,5 +1,5 @@
 /** Tiny inline SVG sparkline (area + line) for the dashboard KPI cards. No chart dependency. */
-export function Sparkline({ data, color = '#3b82f6', height = 40 }: { data: number[]; color?: string; height?: number }) {
+export function Sparkline({ data, color = 'rgb(var(--chart))', height = 40 }: { data: number[]; color?: string; height?: number }) {
   const w = 100;
   const max = Math.max(1, ...data);
   const n = data.length;

@@ -192,14 +192,14 @@ function LabeledChart({ label, labels, values }: { label: string; labels: string
       ) : (
         <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height: 140 }}>
           {[0, 0.5, 1].map((f) => (
-            <text key={f} x={padL - 6} y={padT + plotH * (1 - f) + 3} fontSize={9} textAnchor="end" fill="var(--color-fg-secondary, #64748b)">
+            <text key={f} x={padL - 6} y={padT + plotH * (1 - f) + 3} fontSize={9} textAnchor="end" fill="rgb(var(--text-muted))">
               {Math.round(max * f).toLocaleString()}
             </text>
           ))}
-          <path d={area} fill="var(--color-accent-text, #6366f1)" opacity={0.15} />
-          <path d={line} fill="none" stroke="var(--color-accent-text, #6366f1)" strokeWidth={1.5} />
+          <path d={area} fill="rgb(var(--chart))" opacity={0.12} />
+          <path d={line} fill="none" stroke="rgb(var(--chart))" strokeWidth={1.5} />
           {labels.map((l, i) => (i % step === 0 ? (
-            <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="var(--color-fg-secondary, #64748b)">{l}</text>
+            <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="rgb(var(--text-muted))">{l}</text>
           ) : null))}
         </svg>
       )}

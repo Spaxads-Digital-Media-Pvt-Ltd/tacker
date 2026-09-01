@@ -1,8 +1,4 @@
-/* Inter (UI) + JetBrains Mono (IDs/tokens/codes) — the only fonts used app-wide (Section 0).
- * Inter over a rounded/geometric face: it's the standard for data-dense analytics/tracking
- * dashboards (Linear, Vercel, Stripe, Segment, Amplitude) — built for legibility at small sizes
- * in tables full of numbers, not for a friendly consumer-app feel. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Slate & Teal enterprise theme. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -12,35 +8,37 @@
  * All color tokens are stored as "R G B" triples so Tailwind can apply alpha
  * via rgb(var(--token) / <alpha-value>). Never hardcode a hex/px anywhere else.
  *
- * Accent is a single constant (navy blue) — no per-user theme switching. Deliberately dark
- * (blue-700/900), not the lighter blue-500 used for semantic --info below, so the two never read
- * as the same color.
+ * Slate & Teal uses a serious navy navigation rail, teal accents, and light slate surfaces.
  * ========================================================================= */
 :root {
-  /* --- Accent (constant, navy blue) --- */
-  --accent: 29 78 216;           /* #1D4ED8 blue-700 */
-  --accent-hover: 30 64 175;     /* #1E40AF blue-800 */
-  --accent-subtle: 239 246 255;  /* #EFF6FF blue-50 */
-  --accent-text: 30 58 138;      /* #1E3A8A blue-900 */
+  /* --- Accent --- */
+  --accent: 13 148 136;          /* #0D9488 */
+  --accent-hover: 15 118 110;    /* #0F766E */
+  --accent-subtle: 204 251 241;  /* #CCFBF1 */
+  --accent-text: 15 118 110;     /* #0F766E */
+  --chart: 20 184 166;            /* #14B8A6 */
 
-  /* --- Semantic / status (CONSTANT across all themes) --- */
-  --success: 34 197 94;   --success-bg: 220 252 231;  --success-text: 22 101 52;   /* green = positive */
-  --danger: 239 68 68;    --danger-bg: 254 226 226;   --danger-text: 153 27 27;    /* red = negative */
+  /* --- Semantic / status --- */
+  --success: 5 150 105;   --success-bg: 204 251 241;  --success-text: 15 118 110;
+  --danger: 225 29 72;    --danger-bg: 255 228 230;   --danger-text: 190 18 60;
   --warning: 245 158 11;  --warning-bg: 254 243 199;  --warning-text: 146 64 14;   /* amber = pending */
-  --info: 59 130 246;     --info-bg: 219 234 254;     --info-text: 30 64 175;      /* blue = info */
+  --info: 20 184 166;     --info-bg: 204 251 241;      --info-text: 15 118 110;
 
-  /* --- Neutral / surface (light theme; the whole app is light) --- */
-  --bg-page: 250 250 252;        /* #FAFAFC */
+  /* --- Neutral / surface --- */
+  --bg-page: 241 245 249;        /* #F1F5F9 */
   --bg-surface: 255 255 255;     /* #FFFFFF */
-  --bg-elevated: 255 255 255;    /* #FFFFFF (uses shadow, not tint) */
-  --border: 229 231 235;         /* #E5E7EB */
-  --text-primary: 17 24 39;      /* #111827 */
-  --text-secondary: 107 114 128; /* #6B7280 */
-  --text-muted: 156 163 175;     /* #9CA3AF */
+  --bg-elevated: 255 255 255;    /* #FFFFFF */
+  --border: 226 232 240;         /* #E2E8F0 */
+  --text-primary: 15 23 42;      /* #0F172A */
+  --text-secondary: 71 85 105;   /* #475569 */
+  --text-muted: 100 116 139;     /* #64748B */
+  --sidebar-bg: 15 23 42;        /* #0F172A */
+  --sidebar-text: 148 163 184;   /* #94A3B8 */
+  --sidebar-active: 30 41 59;    /* #1E293B */
 
   /* --- Typography --- */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --font-sans: 'Sora', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
   --fs-h1: 28px; --fs-h2: 22px; --fs-h3: 18px;
   --fs-body: 14px; --fs-small: 13px; --fs-tiny: 12px;
 
@@ -57,6 +55,34 @@
   --brand-500: var(--accent);
   --brand-600: var(--accent);
   --brand-700: var(--accent-hover);
+}
+
+html.dark {
+  color-scheme: dark;
+  --accent: 13 148 136;
+  --accent-hover: 15 118 110;
+  --accent-subtle: 19 78 74;
+  --accent-text: 94 234 212;
+  --chart: 20 184 166;
+  --success: 52 211 153;
+  --success-bg: 6 78 59;
+  --success-text: 110 231 183;
+  --danger: 251 113 133;
+  --danger-bg: 76 5 25;
+  --danger-text: 253 164 175;
+  --info: 20 184 166;
+  --info-bg: 19 78 74;
+  --info-text: 94 234 212;
+  --bg-page: 15 23 42;
+  --bg-surface: 17 24 39;
+  --bg-elevated: 30 41 59;
+  --border: 51 65 85;
+  --text-primary: 248 250 252;
+  --text-secondary: 203 213 225;
+  --text-muted: 148 163 184;
+  --sidebar-bg: 15 23 42;
+  --sidebar-text: 148 163 184;
+  --sidebar-active: 30 41 59;
 }
 
 @layer base {
@@ -78,19 +104,50 @@
 }
 
 @layer components {
+  .sidebar-shell {
+    background-color: rgb(var(--sidebar-bg)) !important;
+    border-color: rgb(var(--sidebar-active)) !important;
+  }
+  @media (min-width: 768px) {
+    .sidebar-shell {
+      display: flex !important;
+      background-color: #0F172A !important;
+      border-color: #1E293B !important;
+    }
+  }
+  @media (max-width: 767px) {
+    .sidebar-shell {
+      display: none !important;
+    }
+  }
+  html.dark .sidebar-shell {
+    background-color: #0F172A !important;
+    border-color: #1E293B !important;
+  }
+  .sidebar-nav {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius)] px-4 py-2 text-body font-medium
            transition-all duration-150 focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary { @apply btn bg-accent text-white shadow-sm hover:bg-accent-hover hover:shadow; }
   .btn-ghost   { @apply btn border border-border bg-surface text-fg hover:border-accent/40 hover:bg-accent-subtle; }
-  /* Card: white surface, hairline border, 12px radius, ultra-subtle shadow. */
   .card {
     @apply rounded-[var(--radius-card)] border border-border bg-surface p-6
-           shadow-[0_1px_2px_rgb(0_0_0/0.04),0_4px_12px_rgb(0_0_0/0.04)];
+           shadow-[0_1px_2px_rgb(15_23_42/0.06),0_8px_24px_rgb(15_23_42/0.05)]
+           transition-[border-color,box-shadow,transform] duration-200 ease-in-out
+           hover:-translate-y-0.5 hover:border-[#CBD5E1];
+  }
+  html.dark .card:hover {
+    border-color: #475569;
   }
   .input {
-    @apply w-full rounded-[var(--radius)] border border-border bg-surface px-3.5 py-2.5 text-body text-fg
+    @apply w-full rounded-[var(--radius)] border border-border bg-elevated px-3.5 py-2.5 text-body text-fg
            shadow-sm transition-colors duration-150 placeholder:text-fg-muted
            hover:border-fg-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
   }

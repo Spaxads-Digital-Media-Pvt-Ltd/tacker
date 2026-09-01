@@ -44,13 +44,13 @@ function usePopover() {
 function RailIconButton({ expanded, label, children, onClick, badge }: { expanded: boolean; label: string; children: ReactNode; onClick: () => void; badge?: boolean }) {
   return expanded ? (
     <button type="button" onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-small font-medium text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
+      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-small font-medium text-[#94A3B8] dark:text-[#94A3B8] transition-colors hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white">
       <span className="relative shrink-0">{children}{badge && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />}</span>
       {label}
     </button>
   ) : (
     <button type="button" onClick={onClick} aria-label={label}
-      className="relative grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
+      className="relative grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#94A3B8] dark:text-[#94A3B8] transition-colors hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white">
       {children}
       {badge && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger" />}
     </button>

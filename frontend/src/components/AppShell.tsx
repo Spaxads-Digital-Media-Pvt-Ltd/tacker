@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, Search } from 'lucide-react';
+import { Menu, Moon, Search, Sun } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_HOME, type Role } from '../auth/roles';
 import { NAV, type NavEntry } from './nav';
@@ -37,8 +37,9 @@ function routeTitle(pathname: string, role: Role): string {
 }
 
 /** Slim top header (Section 1) — page title on the left (Section 2), profile menu on the right. */
-function TopHeader({ role, initials, displayName, email, onSignOut }: {
+function TopHeader({ role, initials, displayName, email, onSignOut, darkMode, onToggleTheme }: {
   role: Role; initials: string; displayName: string; email: string; onSignOut: () => void;
+  darkMode: boolean; onToggleTheme: () => void;
 }) {
   const loc = useLocation();
   const { title, subtitle } = usePageTitleValue();
@@ -52,7 +53,18 @@ function TopHeader({ role, initials, displayName, email, onSignOut }: {
           {subtitle && <p className="truncate text-tiny text-fg-secondary">{subtitle}</p>}
         </div>
       </div>
-      <ProfileMenu initials={initials} displayName={displayName} email={email} onSignOut={onSignOut} />
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          aria-label={darkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+          title={darkMode ? 'Light theme' : 'Dark theme'}
+          className="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-accent-text"
+        >
+          {darkMode ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+        <ProfileMenu initials={initials} displayName={displayName} email={email} onSignOut={onSignOut} />
+      </div>
     </header>
   );
 }
@@ -60,7 +72,7 @@ function TopHeader({ role, initials, displayName, email, onSignOut }: {
 /** Tooltip label that appears to the right of an icon on hover/focus (collapsed rail only). */
 function RailTip({ children }: { children: string }) {
   return (
-    <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-fg px-2 py-1 text-tiny font-medium text-white opacity-0 shadow-elevated transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+    <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-sidebar px-2 py-1 text-tiny font-medium text-white opacity-0 shadow-elevated transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
       {children}
     </span>
   );
@@ -92,11 +104,11 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onClose }: {
   const isOpen = openLabel === entry.label;
 
   const rowClass = expanded
-    ? `flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-small font-medium transition-colors ${
-        active || isOpen ? 'bg-accent-subtle text-accent-text' : 'text-fg hover:bg-accent-subtle hover:text-fg'
+    ? `flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-small font-medium transition-colors ${
+        active || isOpen ? 'border-l-[3px] border-[#0D9488] dark:border-[#14B8A6] bg-[#1E293B] dark:bg-[#1E293B] text-white' : 'border-l-2 border-transparent text-[#94A3B8] dark:text-[#94A3B8] hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white'
       }`
-    : `grid h-11 w-11 place-items-center rounded-[var(--radius)] transition-colors ${
-        active || isOpen ? 'bg-accent-subtle text-accent-text' : 'text-fg hover:bg-accent-subtle hover:text-fg'
+    : `grid h-11 w-11 place-items-center rounded-lg transition-colors ${
+        active || isOpen ? 'border-l-[3px] border-[#0D9488] dark:border-[#14B8A6] bg-[#1E293B] dark:bg-[#1E293B] text-white' : 'border-l-2 border-transparent text-[#94A3B8] dark:text-[#94A3B8] hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white'
       }`;
 
   const content = (
@@ -142,6 +154,11 @@ export function AppShell() {
   const [openFlyout, setOpenFlyout] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('tracker-theme') === 'dark');
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    localStorage.setItem('tracker-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
   if (!session) return null;
 
   const items = NAV[session.role];
@@ -162,19 +179,19 @@ export function AppShell() {
   return (
     <PageTitleProvider>
     <div className="flex h-full">
-      <aside className={`hidden flex-col border-r border-border bg-surface py-3 md:flex ${expanded ? 'w-60' : 'w-16 items-center'}`}>
+      <aside className={`sidebar-shell hidden flex-col border-r border-sidebar-active bg-sidebar py-4 md:flex ${expanded ? 'w-64' : 'w-[72px] items-center'}`}>
         <div className={`mb-1 flex items-center gap-2 ${expanded ? 'px-3' : ''}`}>
           <button
             type="button"
             onClick={() => setExpanded((e) => !e)}
             aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#94A3B8] dark:text-[#94A3B8] transition-colors hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white"
           >
             <Menu size={18} />
           </button>
           {expanded && (
             <Link to={ROLE_HOME[session.role]} className="flex-1">
-              <Brandmark />
+              <span className="text-white"><Brandmark /></span>
             </Link>
           )}
         </div>
@@ -182,7 +199,7 @@ export function AppShell() {
           <button
             type="button"
             onClick={() => setSearchOpen(true)}
-            className="mb-1 flex items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-small font-medium text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg mx-3"
+            className="mx-3 mb-2 flex items-center gap-3 rounded-lg bg-[#1E293B] dark:bg-[#1E293B] px-3 py-2.5 text-small font-medium text-[#94A3B8] dark:text-[#94A3B8] transition-colors hover:text-white"
           >
             <Search size={18} />Search
           </button>
@@ -191,7 +208,7 @@ export function AppShell() {
             type="button"
             onClick={() => setSearchOpen(true)}
             aria-label="Search"
-            className="group relative mb-1 grid h-9 w-9 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg"
+            className="group relative mb-2 grid h-9 w-9 place-items-center rounded-lg text-[#94A3B8] dark:text-[#94A3B8] transition-colors hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white"
           >
             <Search size={18} />
             <RailTip>Search</RailTip>
@@ -203,19 +220,19 @@ export function AppShell() {
           </Link>
         )}
         {expanded && (
-          <div className="my-2 flex items-center gap-2 px-3 text-tiny font-semibold uppercase tracking-wide text-fg-muted">
-            <span className="h-px flex-1 bg-border" />Core Platform<span className="h-px flex-1 bg-border" />
+          <div className="my-2 flex items-center gap-2 px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748B] dark:text-[#6B6560]">
+            <span className="h-px flex-1 bg-[#1E293B] dark:bg-[#1E293B]" />Core Platform<span className="h-px flex-1 bg-[#1E293B] dark:bg-[#1E293B]" />
           </div>
         )}
 
-        <nav className={`flex flex-1 flex-col overflow-y-auto ${expanded ? 'w-full gap-0.5' : 'items-center gap-1'}`}>
+        <nav className={`sidebar-nav flex flex-1 flex-col overflow-y-auto ${expanded ? 'w-full gap-0.5' : 'items-center gap-1'}`}>
           {items.map((item) => {
             const showHeader = expanded && item.group && item.group !== lastGroup;
             lastGroup = item.group;
             return (
               <div key={item.label} className={expanded ? 'w-full' : 'contents'}>
                 {showHeader && (
-                  <p className="mb-1 mt-3 px-5 text-tiny font-semibold uppercase tracking-wide text-fg-muted first:mt-0">{item.group}</p>
+                  <p className="mb-1 mt-6 px-5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748B] dark:text-[#64748B] first:mt-0">{item.group}</p>
                 )}
                 <RailItem entry={item} pathname={location.pathname} expanded={expanded} {...toggleProps} />
               </div>
@@ -223,7 +240,7 @@ export function AppShell() {
           })}
         </nav>
 
-        <div className={expanded ? 'w-full space-y-0.5 border-t border-border px-2 pt-2' : 'flex flex-col items-center gap-0.5 border-t border-border pt-2'}>
+        <div className={expanded ? 'w-full space-y-0.5 border-t border-[#1E293B] dark:border-[#1E293B] px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[#1E293B] dark:border-[#1E293B] pt-3'}>
           <NotificationsBell expanded={expanded} />
           <ProfileRailMenu expanded={expanded} initials={initials} displayName={session.displayName} email={session.email}
             onSignOut={async () => { await signOut(); navigate('/login'); }} />
@@ -234,7 +251,8 @@ export function AppShell() {
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col bg-page">
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
-          email={session.email} onSignOut={async () => { await signOut(); navigate('/login'); }} />
+          email={session.email} onSignOut={async () => { await signOut(); navigate('/login'); }}
+          darkMode={darkMode} onToggleTheme={() => setDarkMode((mode) => !mode)} />
         <main className="flex-1 overflow-auto p-4">
           <div className="w-full animate-fade-in">
             <SectionTabs role={session.role} />
