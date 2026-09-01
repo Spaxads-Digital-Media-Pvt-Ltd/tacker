@@ -48,8 +48,10 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
   const { title, subtitle } = usePageTitleValue();
   const heading = title ?? routeTitle(loc.pathname, role);
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2.5">
-      <div className="flex min-w-0 items-center gap-3">
+    <header className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
+      {/* Left zone — nav trigger + brand (both < md only) + page title. flex-1 so it balances
+          the right zone and keeps the centre search bar actually centred. */}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <button
           type="button"
           onClick={onMenu}
@@ -66,21 +68,27 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
           {subtitle && <p className="truncate text-tiny text-fg-secondary">{subtitle}</p>}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {/* compact icon on phones, a labelled pill from sm up */}
-        <button
-          type="button" onClick={onSearch} aria-label="Search"
-          className="grid h-9 w-9 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg sm:hidden"
-        >
-          <Search size={18} />
-        </button>
+
+      {/* Centre zone — the search pill, centred from md up (persistent rail, no hamburger).
+          Below md it drops out and the compact icon in the right zone takes over. */}
+      <div className="hidden flex-1 justify-center md:flex">
         <button
           type="button" onClick={onSearch}
-          className="hidden items-center gap-2 rounded-[var(--radius)] border border-border bg-page px-3 py-1.5 text-small text-fg-muted transition-colors hover:border-fg-muted hover:text-fg-secondary sm:flex lg:w-56"
+          className="flex w-full max-w-xs items-center gap-2 rounded-[var(--radius)] border border-border bg-page px-3 py-1.5 text-small text-fg-muted transition-colors hover:border-fg-muted hover:text-fg-secondary"
         >
           <Search size={15} className="shrink-0" />
           <span className="flex-1 text-left">Search…</span>
           <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-fg-muted">⌘K</kbd>
+        </button>
+      </div>
+
+      {/* Right zone — flex-1 + justify-end so it mirrors the left zone's width. */}
+      <div className="flex flex-1 items-center justify-end gap-1.5">
+        <button
+          type="button" onClick={onSearch} aria-label="Search"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg md:hidden"
+        >
+          <Search size={18} />
         </button>
         <ThemeToggle />
         <ProfileMenu initials={initials} displayName={displayName} email={email} onSignOut={onSignOut} />
