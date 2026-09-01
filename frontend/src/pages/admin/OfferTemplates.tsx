@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Modal, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Modal, Spinner, StateBlock, TableScroll } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { useFieldSpecs, valueLabel, fmtDateTime, type Template, type FieldSpec } from '../../data/offerTemplateFields';
@@ -70,7 +70,7 @@ function TableActionsMenu({ rows }: { rows: Template[] }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSubOpen(false); }} />
-          <div className="absolute right-0 z-20 mt-1 w-48 rounded-card border border-border bg-surface p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-48 rounded-card border border-border bg-elevated p-1 shadow-elevated">
             <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
             <div className="relative">
               <button type="button" onClick={() => setSubOpen((o) => !o)}
@@ -78,7 +78,7 @@ function TableActionsMenu({ rows }: { rows: Template[] }) {
                 Export <ChevronRight size={13} />
               </button>
               {subOpen && (
-                <div className="absolute left-full top-0 z-30 ml-1 w-36 rounded-card border border-border bg-surface p-1 shadow-lg">
+                <div className="absolute left-full top-0 z-30 ml-1 w-36 rounded-card border border-border bg-elevated p-1 shadow-elevated">
                   <button type="button" onClick={() => { downloadCsv('offer-templates.csv', exportRows()); setOpen(false); setSubOpen(false); }}
                     className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">CSV</button>
                   <button type="button" onClick={() => { downloadXlsx('offer-templates.xlsx', exportRows()); setOpen(false); setSubOpen(false); }}
@@ -113,7 +113,7 @@ function RowMenu({ onEdit, onSetDefault, onDelete, isDefault }: { onEdit: () => 
       {open && createPortal(
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-40 rounded-card border border-border bg-surface py-1 shadow-lg">
+          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             <button type="button" onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Edit</button>
             {!isDefault && <button type="button" onClick={() => { setOpen(false); onSetDefault(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Set as Default</button>}
             <button type="button" onClick={() => { setOpen(false); onDelete(); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-danger-bg">Delete</button>
@@ -152,12 +152,12 @@ export default function OfferTemplates() {
   return (
     <>
       <PageHeader title="Manage Templates" subtitle="Offers › Offer Templates › Manage" />
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <button className="btn-primary" onClick={() => nav('/app/offers-templates/add')}><Plus size={15} /> Offer Template</button>
-        <div className="flex items-center gap-2">
-          <div className="relative">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <button className="btn-primary max-sm:w-full" onClick={() => nav('/app/offers-templates/add')}><Plus size={15} /> Offer Template</button>
+        <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
+          <div className="relative max-sm:w-full">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search…" className="input !w-56 !pl-8" />
+            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search…" className="input !w-full sm:!w-56 !pl-8" />
           </div>
           <TableActionsMenu rows={rows} />
         </div>
@@ -168,9 +168,9 @@ export default function OfferTemplates() {
         : !data || data.length === 0 ? <StateBlock>No offer templates yet.</StateBlock>
         : (
           <>
-            <div className="overflow-x-auto rounded-card border border-border">
+            <TableScroll>
               <table className="w-full min-w-[900px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+                <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
                   <tr className="divide-x divide-border">
                     <th className="px-4 py-3 font-semibold">
                       <button type="button" onClick={() => setSortAsc((a) => !a)} className="flex items-center gap-1 hover:text-fg">
@@ -219,7 +219,7 @@ export default function OfferTemplates() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
             <div className="mt-3 flex justify-end">
               <Pagination total={rows.length} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
             </div>

@@ -13,7 +13,7 @@ import { createPortal } from 'react-dom';
 import { Plus, Search, MoreVertical, ChevronRight, ExternalLink, Filter, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, TableScroll } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
 import { DualListPicker } from '../../components/DualListPicker';
@@ -35,7 +35,7 @@ function AddMenu({ onPick }: { onPick: (key: MenuKey) => void }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 w-80 rounded-card border border-border bg-surface p-2 shadow-lg">
+          <div className="absolute left-0 z-20 mt-1 w-80 rounded-card border border-border bg-elevated p-2 shadow-elevated">
             {ADD_MENU.map((m) => (
               <button key={m.key} type="button" onClick={() => { setOpen(false); onPick(m.key); }}
                 className="block w-full rounded-[var(--radius)] px-2 py-2 text-left hover:bg-page">
@@ -67,7 +67,7 @@ function TableActionsMenu({ order, hidden, onApply }: { order: string[]; hidden:
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-48 rounded-card border border-border bg-surface p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-48 rounded-card border border-border bg-elevated p-1 shadow-elevated">
             <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
             <button type="button" onClick={() => { setOpen(false); setColumnsOpen(true); }} className="flex w-full items-center justify-between rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Columns Customization <ChevronRight size={13} /></button>
             <button type="button" onClick={() => { setOpen(false); setApiOpen(true); }} className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Show API Request</button>
@@ -95,7 +95,7 @@ function RowMenu({ onEdit, onSetStatus }: { onEdit: () => void; onSetStatus: (s:
       {open && createPortal(
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-44 rounded-card border border-border bg-surface py-1 shadow-lg">
+          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-44 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             <button type="button" onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Edit</button>
             <button type="button" onClick={() => { setOpen(false); onSetStatus('paused'); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Set as Paused</button>
             <button type="button" onClick={() => { setOpen(false); onSetStatus('deleted'); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-danger-bg">Set as Deleted</button>
@@ -155,7 +155,7 @@ function MacroMenu({ onPick }: { onPick: (token: string) => void }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-surface p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-elevated p-1 shadow-elevated">
             {MACROS.map((m) => (
               <button key={m.token} type="button" onClick={() => { onPick(m.token); setOpen(false); }} className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">{m.label}</button>
             ))}
@@ -216,7 +216,7 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-2xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[90vh] w-full max-w-2xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">{isEdit ? `Edit ${TYPE_LABEL[type]} Creative` : `Add ${menu.label} Creative`}</h2>
           <button onClick={onClose} className="text-fg-muted hover:text-fg"><X size={18} /></button>
@@ -300,12 +300,12 @@ export default function Creatives() {
   return (
     <>
       <PageHeader title="Manage Creatives" subtitle="Offers › Creatives › Manage" />
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <AddMenu onPick={setAddKey} />
-        <div className="flex items-center gap-2">
-          <div className="relative">
+        <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
+          <div className="relative max-sm:w-full">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search…" className="input !w-56 !pl-8" />
+            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search…" className="input !w-full sm:!w-56 !pl-8" />
           </div>
           <select value={status} onChange={(e) => { setStatus(e.target.value as typeof status); setPage(1); }} className="input !w-auto">
             <option value="all">All</option>
@@ -322,9 +322,9 @@ export default function Creatives() {
         : rows.length === 0 ? <StateBlock>No creatives match your filters.</StateBlock>
         : (
           <>
-            <div className="overflow-x-auto rounded-card border border-border">
+            <TableScroll>
               <table className="w-full min-w-[700px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+                <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
                   <tr className="divide-x divide-border">
                     <th className="px-4 py-3 font-semibold">ID</th>
                     {columnOrder.filter(showCol).map((c) => <th key={c} className="px-4 py-3 font-semibold">{c}</th>)}
@@ -357,7 +357,7 @@ export default function Creatives() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
             <div className="mt-3 flex justify-end">
               <Pagination total={rows.length} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
             </div>

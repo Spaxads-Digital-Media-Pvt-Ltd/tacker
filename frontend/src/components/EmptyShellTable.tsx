@@ -31,7 +31,7 @@ function StatusFilter({ initial }: { initial: string }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-surface py-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             {options.map((o) => (
               <button key={o} type="button" onClick={() => { setValue(o); setOpen(false); }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-page">
@@ -133,7 +133,7 @@ function TableActionsMenu({ columns, visibleColumns, onColumnsChange, resourceNa
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-surface p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-elevated p-1 shadow-elevated">
             <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
             <button type="button" onClick={() => { setPanel('columns'); setOpen(false); }}
               className="flex w-full items-center justify-between rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">

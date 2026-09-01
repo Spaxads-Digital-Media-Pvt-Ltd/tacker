@@ -36,3 +36,7 @@ data/geoip/*.mmdb
 
 # --- Docker volumes (if bind-mounted locally) ---
 .docker-data/
+
+# --- Local-only Compose overrides (per-machine port remaps etc.) ---
+docker-compose.override.yml
+docker-compose.override.yaml

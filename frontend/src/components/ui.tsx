@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { usePageTitle } from './PageTitle';
 
@@ -41,7 +41,10 @@ export function PhaseNotice({ phase, children }: { phase: string; children: Reac
 const SUCCESS = 'bg-success-bg text-success-text';
 const WARNING = 'bg-warning-bg text-warning-text';
 const DANGER = 'bg-danger-bg text-danger-text';
-const NEUTRAL = 'bg-page text-fg-secondary';
+// bg-elevated so the chip reads as *raised* in dark (bg-page there is darker than the card).
+// --bg-elevated is pure #FFF in light == the card, so add a hairline inset ring to keep the chip
+// visible there too; ring is box-shadow, so no size drift vs the coloured badge tones.
+const NEUTRAL = 'bg-elevated text-fg-secondary ring-1 ring-inset ring-border';
 const BADGE_TONES: Record<string, string> = {
   active: SUCCESS, approved: SUCCESS, verified: SUCCESS, issued: SUCCESS, completed: SUCCESS,
   pending: WARNING, trialing: WARNING, hold: WARNING,
@@ -62,21 +65,61 @@ export function StateBlock({ children }: { children: ReactNode }) {
   return <div className="grid place-items-center rounded-card border border-dashed border-border py-16 text-center text-small text-fg-secondary">{children}</div>;
 }
 
-/** Simple, accessible table. `columns` maps a header to a cell renderer. */
+/**
+ * Reusable scroll shell for wide data tables — the deliberate "scroll, don't reflow" pattern
+ * (see tailwind.config.js responsive strategy). Bounds height so `sticky` works, and shows a soft
+ * edge-fade only on the side that has more content, so the horizontal scroll is discoverable.
+ * Wrap a bare `<table>` in this on pages that don't use <Table> below.
+ */
+export function TableScroll({ children, className = '' }: { children: ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = useState({ left: false, right: false });
+  const update = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdge((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', update); ro.disconnect(); };
+  }, [update]);
+  useEffect(update);  // recompute after any render (row/column count may have changed)
+  return (
+    <div className="relative">
+      <div ref={ref} className={`max-h-[70vh] overflow-auto rounded-card border border-border ${className}`}>
+        {children}
+      </div>
+      {edge.left && <div aria-hidden className="pointer-events-none absolute inset-y-px left-px w-9 rounded-l-card bg-gradient-to-r from-black/[0.13] to-transparent" />}
+      {edge.right && <div aria-hidden className="pointer-events-none absolute inset-y-px right-px w-9 rounded-r-card bg-gradient-to-l from-black/[0.13] to-transparent" />}
+    </div>
+  );
+}
+
+/** Simple, accessible table. `columns` maps a header to a cell renderer. The header row stays
+ * pinned while scrolling vertically; `stickyCol` (default 0 — the row's primary identifier) stays
+ * pinned while scrolling horizontally. Pass `stickyCol={-1}` to pin nothing, or another index for
+ * tables whose first column is a checkbox/selector. */
 export interface Column<T> {
   header: string;
   cell: (row: T) => ReactNode;
   className?: string;
 }
 
-export function Table<T>({ columns, rows, rowKey }: { columns: Column<T>[]; rows: T[]; rowKey: (row: T) => string }) {
+export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Column<T>[]; rows: T[]; rowKey: (row: T) => string; stickyCol?: number }) {
   return (
-    <div className="overflow-x-auto rounded-card border border-border">
+    <TableScroll>
       <table className="w-full min-w-[560px] text-left text-body">
-        <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+        <thead className="sticky top-0 z-20 bg-page text-tiny uppercase tracking-wide text-fg-secondary [&_th]:border-b [&_th]:border-border">
           <tr className="divide-x divide-border">
             {columns.map((c, i) => (
-              <th key={i} className={`whitespace-nowrap px-4 py-3 font-semibold ${c.className ?? ''}`}>{c.header}</th>
+              <th key={i} className={`whitespace-nowrap px-4 py-3 font-semibold ${i === stickyCol ? 'sticky left-0 z-30 bg-page' : ''} ${c.className ?? ''}`}>{c.header}</th>
             ))}
           </tr>
         </thead>
@@ -84,13 +127,13 @@ export function Table<T>({ columns, rows, rowKey }: { columns: Column<T>[]; rows
           {rows.map((row) => (
             <tr key={rowKey(row)} className="divide-x divide-border bg-surface text-fg transition-colors hover:bg-accent-subtle/40">
               {columns.map((c, i) => (
-                <td key={i} className={`px-4 py-3 ${c.className ?? ''}`}>{c.cell(row)}</td>
+                <td key={i} className={`px-4 py-3 ${i === stickyCol ? 'sticky left-0 z-10 bg-inherit' : ''} ${c.className ?? ''}`}>{c.cell(row)}</td>
               ))}
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -107,7 +150,7 @@ export function Modal({ open, onClose, title, children, size = 'md' }: { open: b
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className={`w-full ${MODAL_SIZE[size]} animate-fade-in rounded-card border border-border bg-elevated p-6 shadow-card`} onClick={(e) => e.stopPropagation()}>
+      <div className={`w-full ${MODAL_SIZE[size]} animate-fade-in rounded-card border border-border bg-elevated p-6 shadow-elevated`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
           <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>

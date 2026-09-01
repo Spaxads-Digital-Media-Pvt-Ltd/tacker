@@ -134,7 +134,7 @@ function AdminDashboard({ name }: { name: string }) {
 
   return (
     <>
-      <div className="mb-2 flex items-start justify-between gap-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <PageHeader title="Dashboard" subtitle={`Welcome back, ${name}`} />
         <div className="flex items-center gap-2">
           <button className="btn-ghost" onClick={() => setLinkGenOpen(true)}><Link2 size={15} /> Tracking Link Generator</button>
@@ -150,7 +150,7 @@ function AdminDashboard({ name }: { name: string }) {
             {(visible.kpi || visible.performance) && (
               <div className={`grid grid-cols-1 gap-4 ${visible.kpi ? 'xl:grid-cols-[minmax(0,260px)_1fr_minmax(0,260px)]' : ''}`}>
                 {visible.kpi && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:flex xl:flex-col">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:flex xl:flex-col">
                     <Kpi label="Revenue" value={money(data.revenue.today)} series={data.series.revenue}
                       d={delta(Number(data.revenue.today), Number(data.revenue.yesterday))}
                       rows={[['Yesterday', money(data.revenue.yesterday)], ['This month', money(data.revenue.month)], ['Last month', money(data.revenue.lastMonth)]]} />
@@ -171,7 +171,7 @@ function AdminDashboard({ name }: { name: string }) {
                 )}
 
                 {visible.kpi && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:flex xl:flex-col">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:flex xl:flex-col">
                     <Kpi label="Payout" value={money(data.payout.today)} series={data.series.payout}
                       d={delta(Number(data.payout.today), Number(data.payout.yesterday))}
                       rows={[['Yesterday', money(data.payout.yesterday)], ['This month', money(data.payout.month)], ['Last month', money(data.payout.lastMonth)]]} />
@@ -202,6 +202,10 @@ function Kpi({ label, value, series, d, rows }: {
   label: string; value: string; series: number[];
   d: { pct: number; up: boolean } | null; rows: [string, string][];
 }) {
+  // Trend-direction color for the sparkline, using the existing --success / --danger tokens
+  // (no new colors). Neutral accent when there's no comparable prior period. Passed through
+  // Sparkline's existing `color` prop, so its API is unchanged and EntityPanel stays navy.
+  const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
   return (
     <div className="card !p-4">
       <div className="flex items-start justify-between">
@@ -212,8 +216,8 @@ function Kpi({ label, value, series, d, rows }: {
           </span>
         )}
       </div>
-      <p className="mt-1 text-h1 font-semibold tracking-tight text-fg">{value}</p>
-      <div className="mt-2"><Sparkline data={series} color="rgb(var(--accent))" /></div>
+      <p className="mt-1 text-[30px] font-bold leading-tight tracking-tight text-fg">{value}</p>
+      <div className="mt-2"><Sparkline data={series} color={trendColor} /></div>
       <dl className="mt-3 space-y-1 border-t border-border pt-2 text-tiny">
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between"><dt className="text-fg-muted">{k}</dt><dd className="font-medium tabular-nums text-fg-secondary">{v}</dd></div>

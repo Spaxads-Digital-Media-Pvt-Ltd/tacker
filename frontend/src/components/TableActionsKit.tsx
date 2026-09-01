@@ -42,10 +42,10 @@ export function ColumnsModal({
   return (
     <Modal open onClose={onClose} title="Table Columns">
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="relative">
             <SearchIcon size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-48 !pl-7" placeholder="Search columns…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="input !w-full sm:!w-48 !pl-7" placeholder="Search columns…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={reset}>Reset to default</button>
         </div>

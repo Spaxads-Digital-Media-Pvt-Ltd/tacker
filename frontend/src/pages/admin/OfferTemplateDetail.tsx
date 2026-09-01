@@ -27,7 +27,7 @@ function GeneralMenu({ isDefault, onSetDefault, onDelete }: { isDefault: boolean
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-surface py-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             {!isDefault && <button type="button" onClick={() => { setOpen(false); onSetDefault(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Set as Default</button>}
             <button type="button" onClick={() => { setOpen(false); onDelete(); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-danger-bg">Delete</button>
           </div>

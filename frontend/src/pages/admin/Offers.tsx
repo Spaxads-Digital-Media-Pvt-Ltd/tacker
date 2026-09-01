@@ -411,11 +411,11 @@ export default function Offers() {
         title="Manage Offers"
         subtitle="Create, manage and optimize your affiliate Offer."
         action={
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center max-sm:w-full">
             <SearchFieldSelect value={searchField} onChange={setSearchField} />
-            <div className="relative">
+            <div className="relative max-sm:w-full">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder={`Search by ${searchField}…`} value={nameQ} onChange={(e) => { setNameQ(e.target.value); setPage(1); }} />
+              <input className="input !w-full sm:!w-56 !pl-8" placeholder={`Search by ${searchField}…`} value={nameQ} onChange={(e) => { setNameQ(e.target.value); setPage(1); }} />
             </div>
             <StatusFilterSelect value={statuses[0] ?? ''} onChange={(v) => { setStatuses(v ? [v] : []); setPage(1); }} />
             <button type="button" className="btn-ghost relative" onClick={openDrawer}>
@@ -426,7 +426,7 @@ export default function Offers() {
                 </span>
               )}
             </button>
-            <Link to="/app/offers/new" className="btn-primary">+ Offer</Link>
+            <Link to="/app/offers/new" className="btn-primary max-sm:w-full">+ Offer</Link>
             <TableActionsMenu
               selectedIds={[...selected]}
               columnOrder={columnOrder}
@@ -452,7 +452,7 @@ export default function Offers() {
               <input type="checkbox" className="chk" checked={allOnPageSelected} onChange={toggleAllOnPage} />
               {selected.size > 0 ? `${selected.size} selected` : 'Select all on page'}
             </div>
-            <Table columns={displayedColumns} rows={paged} rowKey={(o) => o.id} />
+            <Table columns={displayedColumns} rows={paged} rowKey={(o) => o.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
             <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
               <span>{filtered.length} Total</span>
               <div className="flex items-center gap-1">

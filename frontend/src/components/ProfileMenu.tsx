@@ -5,11 +5,13 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { User, CreditCard, LogOut, type LucideIcon } from 'lucide-react';
+import { User, Bell, CreditCard, LogOut, type LucideIcon } from 'lucide-react';
 
 interface Item { label: string; to: string; icon: LucideIcon }
 const ITEMS: Item[] = [
   { label: 'Profile', to: '/app/profile', icon: User },
+  // Kept reachable here after the sidebar user-card + kebab was removed.
+  { label: 'Notification Preferences', to: '/app/profile/notifications', icon: Bell },
   { label: 'Billing', to: '/app/invoices', icon: CreditCard },
 ];
 

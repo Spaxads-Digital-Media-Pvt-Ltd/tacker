@@ -3,6 +3,32 @@
 // rgb(var(--token) / <alpha-value>) keeps Tailwind's opacity modifiers working (e.g. bg-accent/25).
 const rgb = (v) => `rgb(var(${v}) / <alpha-value>)`;
 
+/* =============================================================================
+ * RESPONSIVE / BREAKPOINT STRATEGY  (Section: Responsive — established Step 1)
+ * Screens are Tailwind defaults: sm 640 · md 768 · lg 1024 · xl 1280 · 2xl 1536.
+ * Device priority: laptop/desktop is the primary workspace; tablet is a real
+ * secondary surface; mobile is monitoring + light interaction, not full data entry.
+ *
+ *   Mobile      < md (768)     · sidebar = off-canvas drawer (hamburger in header)
+ *                              · single-column; forms stack fully
+ *                              · wide tables: horizontal scroll (never reflow to cards)
+ *   Tablet      md–lg (768–1024)· sidebar = persistent COLLAPSED icon rail (not a
+ *                                drawer); still expandable via the rail toggle
+ *                              · 2-col where content supports it (KPI row of 3, etc.)
+ *                              · tables still scroll, but more is visible
+ *   Laptop      lg–xl (1024–1280+) · the baseline design target — most screens are
+ *                                designed/tested here; rail collapsed by default
+ *   Large desktop xl+ (1280+)  · dashboard opens its 3-col KPI layout; content should
+ *                                USE the width (3-col grids) rather than stretch thin.
+ *                                Narrow single-purpose pages (forms) keep a sane
+ *                                max-width via `.card` + page container, not full-bleed.
+ *
+ * Wide-table rule: keep horizontal scroll on narrow viewports (matches Stripe /
+ * Segment / Airtable / Notion data grids). Polish the scroll — sticky header,
+ * sticky first (identifier) column, edge-fade affordance — in the shared <Table>
+ * (components/ui.tsx), not per page.
+ * ============================================================================= */
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   darkMode: 'class',
@@ -56,7 +82,8 @@ export default {
       },
       boxShadow: {
         card: '0 1px 2px rgb(0 0 0 / 0.04), 0 4px 12px rgb(0 0 0 / 0.04)',
-        elevated: '0 4px 16px rgb(0 0 0 / 0.10), 0 1px 3px rgb(0 0 0 / 0.06)',
+        // Themeable — resolves to --shadow-elevated (index.css), which the .dark block deepens.
+        elevated: 'var(--shadow-elevated)',
       },
       keyframes: {
         'fade-in': { from: { opacity: '0', transform: 'translateY(4px)' }, to: { opacity: '1', transform: 'none' } },

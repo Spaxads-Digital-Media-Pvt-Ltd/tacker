@@ -81,7 +81,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-start justify-items-center bg-black/60 p-4 pt-[8vh]" onClick={onClose}>
-      <div className="max-h-[75vh] w-full max-w-2xl animate-fade-in overflow-hidden rounded-card border border-border bg-elevated shadow-card" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[75vh] w-full max-w-2xl animate-fade-in overflow-hidden rounded-card border border-border bg-elevated shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-h2 font-semibold tracking-tight text-fg">Search</h2>
           <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={20} /></button>

@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, ExternalLink, Filter } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, TableScroll } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { fmtDateTime, fmtMoney, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
@@ -59,7 +59,7 @@ function TableActionsMenu({ rows, offerName }: { rows: SmartLink[]; offerName: (
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSubOpen(false); }} />
-          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-surface p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-elevated p-1 shadow-elevated">
             <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
             <div className="relative">
               <button type="button" onClick={() => setSubOpen((o) => !o)}
@@ -67,7 +67,7 @@ function TableActionsMenu({ rows, offerName }: { rows: SmartLink[]; offerName: (
                 Export <ChevronRight size={13} />
               </button>
               {subOpen && (
-                <div className="absolute left-full top-0 z-30 ml-1 w-36 rounded-card border border-border bg-surface p-1 shadow-lg">
+                <div className="absolute left-full top-0 z-30 ml-1 w-36 rounded-card border border-border bg-elevated p-1 shadow-elevated">
                   <button type="button" onClick={() => { downloadCsv('smart-links.csv', exportRows()); setOpen(false); setSubOpen(false); }}
                     className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">CSV</button>
                   <button type="button" onClick={() => { downloadXlsx('smart-links.xlsx', exportRows()); setOpen(false); setSubOpen(false); }}
@@ -101,7 +101,7 @@ function RowMenu({ onEdit, onCopy, onReport }: { onEdit: () => void; onCopy: () 
       {open && createPortal(
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-52 rounded-card border border-border bg-surface py-1 shadow-lg">
+          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-52 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             <button type="button" onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Edit</button>
             <button type="button" onClick={() => { setOpen(false); onCopy(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Copy</button>
             <button type="button" onClick={() => { setOpen(false); onReport(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">View Smart Link Report</button>
@@ -139,12 +139,12 @@ export default function SmartLinks() {
   return (
     <>
       <PageHeader title="Manage Smart Links" subtitle="Offers › Smart Links › Manage" />
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <button className="btn-primary" onClick={() => nav('/app/smart-links/add')}><Plus size={15} /> Smart Link</button>
-        <div className="flex items-center gap-2">
-          <div className="relative">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <button className="btn-primary max-sm:w-full" onClick={() => nav('/app/smart-links/add')}><Plus size={15} /> Smart Link</button>
+        <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
+          <div className="relative max-sm:w-full">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search…" className="input !w-56 !pl-8" />
+            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search…" className="input !w-full sm:!w-56 !pl-8" />
           </div>
           <select value={status} onChange={(e) => { setStatus(e.target.value as typeof status); setPage(1); }} className="input !w-auto">
             <option value="all">All</option>
@@ -161,9 +161,9 @@ export default function SmartLinks() {
         : rows.length === 0 ? <StateBlock>No smart links match your filters.</StateBlock>
         : (
           <>
-            <div className="overflow-x-auto rounded-card border border-border">
+            <TableScroll>
               <table className="w-full min-w-[1100px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+                <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
                   <tr className="divide-x divide-border">
                     <th className="px-4 py-3 font-semibold">ID</th>
                     <th className="px-4 py-3 font-semibold">Name</th>
@@ -221,7 +221,7 @@ export default function SmartLinks() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
             <div className="mt-3 flex justify-end">
               <Pagination total={rows.length} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
             </div>

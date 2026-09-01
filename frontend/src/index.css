@@ -1,8 +1,11 @@
-/* Inter (UI) + JetBrains Mono (IDs/tokens/codes) — the only fonts used app-wide (Section 0).
- * Inter over a rounded/geometric face: it's the standard for data-dense analytics/tracking
+/* UI font + JetBrains Mono (IDs/tokens/codes) — the only fonts used app-wide (Section 0).
+ * The UI face is set once via --font-sans below, so swapping it is a single-token change.
+ * Rationale for the original choice (Inter): it's the standard for data-dense analytics/tracking
  * dashboards (Linear, Vercel, Stripe, Segment, Amplitude) — built for legibility at small sizes
- * in tables full of numbers, not for a friendly consumer-app feel. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+ * in tables full of numbers, not for a friendly consumer-app feel.
+ * TRIAL (under review): Lato, to match an Everflow-style competitor. Revert = restore the Inter
+ * @import + --font-sans lines. */
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&family=JetBrains+Mono:wght@400;500&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -12,34 +15,38 @@
  * All color tokens are stored as "R G B" triples so Tailwind can apply alpha
  * via rgb(var(--token) / <alpha-value>). Never hardcode a hex/px anywhere else.
  *
- * Accent is a single constant (navy blue) — no per-user theme switching. Deliberately dark
- * (blue-700/900), not the lighter blue-500 used for semantic --info below, so the two never read
- * as the same color.
+ * Palette: "Slate & Teal (Clean Enterprise)" — slate neutrals, a teal accent
+ * (#0D9488), and a permanent dark-slate sidebar. --info stays blue so brand-teal
+ * and informational-blue never read as the same colour.
  * ========================================================================= */
 :root {
-  /* --- Accent (constant, navy blue) --- */
-  --accent: 29 78 216;           /* #1D4ED8 blue-700 */
-  --accent-hover: 30 64 175;     /* #1E40AF blue-800 */
-  --accent-subtle: 239 246 255;  /* #EFF6FF blue-50 */
-  --accent-text: 30 58 138;      /* #1E3A8A blue-900 */
+  /* --- Accent (teal). --hover = one step darker (teal-700). --subtle/--text are the
+   *     spec's positive-chip pair (teal-100 / teal-700): light tint bg + dark teal text
+   *     (#0F766E on #CCFBF1 ≈ 4.86:1 AA). --text also rides on white ≈ 5.47:1. --- */
+  --accent: 13 148 136;          /* #0D9488 teal-600 */
+  --accent-hover: 15 118 110;    /* #0F766E teal-700 — white text ≈ 5.47:1 */
+  --accent-subtle: 204 251 241;  /* #CCFBF1 teal-100 */
+  --accent-text: 15 118 110;     /* #0F766E teal-700 */
 
-  /* --- Semantic / status (CONSTANT across all themes) --- */
-  --success: 34 197 94;   --success-bg: 220 252 231;  --success-text: 22 101 52;   /* green = positive */
-  --danger: 239 68 68;    --danger-bg: 254 226 226;   --danger-text: 153 27 27;    /* red = negative */
-  --warning: 245 158 11;  --warning-bg: 254 243 199;  --warning-text: 146 64 14;   /* amber = pending */
-  --info: 59 130 246;     --info-bg: 219 234 254;     --info-text: 30 64 175;      /* blue = info */
+  /* --- Semantic / status. success stays GREEN (emerald), NOT the teal chip pair —
+   *     keeping "positive" visually distinct from the teal brand accent. danger maps to
+   *     the spec's negative-chip pair (rose-100 / rose-700). --- */
+  --success: 5 150 105;   --success-bg: 209 250 229;  --success-text: 6 95 70;     /* #059669 / #D1FAE5 / #065F46 — green = positive */
+  --danger: 225 29 72;    --danger-bg: 255 228 230;   --danger-text: 190 18 60;    /* #E11D48 / #FFE4E6 / #BE123C — red = negative */
+  --warning: 245 158 11;  --warning-bg: 254 243 199;  --warning-text: 146 64 14;   /* amber = pending (unchanged) */
+  --info: 59 130 246;     --info-bg: 219 234 254;     --info-text: 30 64 175;      /* blue = info (unchanged) */
 
-  /* --- Neutral / surface (light theme; the whole app is light) --- */
-  --bg-page: 250 250 252;        /* #FAFAFC */
+  /* --- Neutral / surface — slate ramp (slate-900 / 700 / 500 text on slate-100 page) --- */
+  --bg-page: 241 245 249;        /* #F1F5F9 slate-100 */
   --bg-surface: 255 255 255;     /* #FFFFFF */
   --bg-elevated: 255 255 255;    /* #FFFFFF (uses shadow, not tint) */
-  --border: 229 231 235;         /* #E5E7EB */
-  --text-primary: 17 24 39;      /* #111827 */
-  --text-secondary: 107 114 128; /* #6B7280 */
-  --text-muted: 156 163 175;     /* #9CA3AF */
+  --border: 226 232 240;         /* #E2E8F0 slate-200 */
+  --text-primary: 15 23 42;      /* #0F172A slate-900 */
+  --text-secondary: 51 65 85;    /* #334155 slate-700 — mid step of the ramp */
+  --text-muted: 100 116 139;     /* #64748B slate-500 */
 
   /* --- Typography --- */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: 'Lato', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
   --fs-h1: 28px; --fs-h2: 22px; --fs-h3: 18px;
   --fs-body: 14px; --fs-small: 13px; --fs-tiny: 12px;
@@ -47,6 +54,26 @@
   /* --- Radius --- */
   --radius: 8px;        /* controls / inputs */
   --radius-card: 12px;  /* cards */
+
+  /* --- Shadows (themeable — see .dark override) --- */
+  --shadow-elevated: 0 4px 16px rgb(0 0 0 / 0.10), 0 1px 3px rgb(0 0 0 / 0.06);
+
+  /* --- Sidebar — a permanent dark-slate island (both themes). Its own foreground ramp
+   *     because the global --text-* ramp is dark-on-light and can't ride a dark rail.
+   *     Contrast on --sidebar-bg #0F172A: fg 6.96:1, fg-muted 5.86:1 (both AA);
+   *     fg-strong on --sidebar-active-bg 14:1. --- */
+  --sidebar-bg: 15 23 42;          /* #0F172A slate-900 */
+  --sidebar-fg: 148 163 184;       /* #94A3B8 slate-400 — idle nav text + icons */
+  --sidebar-fg-strong: 248 250 252;/* #F8FAFC slate-50 — active / hover text, wordmark */
+  --sidebar-fg-muted: 134 149 170; /* #8695AA — section labels (spec #64748B nudged up for AA) */
+  --sidebar-active-bg: 30 41 59;   /* #1E293B slate-800 — active row fill */
+  --sidebar-hover-bg: 23 32 51;    /* #172033 — hover row fill (subtler than active) */
+  --sidebar-accent: 45 212 191;    /* #2DD4BF teal-400 — active left bar + active collapsed icon */
+  --sidebar-border: 30 41 59;      /* #1E293B — internal dividers + on-rail search border */
+
+  /* Nav-flyout backdrop scrim — alpha baked in (same as --shadow-elevated) so it can carry a
+   * theme-specific opacity. Kept low; `backdrop-blur` does the actual separating. */
+  --flyout-scrim: 0 0 0 / 0.20;
 
   /* --- Legacy brand-* aliases → follow the accent so existing components
    *     stay in sync until they're migrated to the accent-* tokens directly. --- */
@@ -57,6 +84,61 @@
   --brand-500: var(--accent);
   --brand-600: var(--accent);
   --brand-700: var(--accent-hover);
+
+  color-scheme: light;
+}
+
+/* =========================================================================
+ * DARK THEME (opt-in). Applied via a `dark` class on <html> (Tailwind
+ * darkMode: 'class'). Redefines the SAME token names as :root with dark
+ * values, so every component that already reads rgb(var(--token) / …) works
+ * in both themes with ZERO code changes. Semantic colors stay recognizable:
+ * green = positive, red = negative, amber = pending, blue = info.
+ * Legacy --brand-* aliases reference --accent* via var(), so they follow too.
+ * ========================================================================= */
+.dark {
+  color-scheme: dark;
+
+  /* Pure-black shadows read weak on a dark ground — deepen alpha + spread + offset so
+     modals and popovers still separate from the page. Light shadow is left untouched. */
+  --shadow-elevated: 0 10px 34px rgb(0 0 0 / 0.5), 0 3px 10px rgb(0 0 0 / 0.38);
+
+  /* A black wash barely darkens the near-black page — nudge it up; blur still carries the effect. */
+  --flyout-scrim: 0 0 0 / 0.35;
+
+  /* --- Accent (teal, tuned for dark). Kept at teal-700 so white text on a primary fill
+   *     stays ≈ 5.47:1 (AA) as the original navy dark accent did; --text is bright teal-300
+   *     for links (≈ 10:1 on cards). --- */
+  --accent: 15 118 110;        /* #0F766E teal-700 — fills; white text ≈ 5.47:1 */
+  --accent-hover: 17 94 89;    /* #115E59 teal-800 — darker on hover */
+  --accent-subtle: 19 78 74;   /* #134E4A — deep teal tint: hover fills / active nav / chips */
+  --accent-text: 94 234 212;   /* #5EEAD4 teal-300 — links / emphasis on dark surfaces */
+
+  /* --- Semantic / status — same hues, dark-tuned (solid vivid, -bg deep tint, -text light tint).
+   *     success back to green (emerald) so it stays distinct from the teal accent. --- */
+  --success: 52 211 153;  --success-bg: 6 78 59;    --success-text: 167 243 208;  /* #34D399 / #064E3B / #A7F3D0 */
+  --danger: 251 113 133;  --danger-bg: 76 19 40;    --danger-text: 253 164 175;   /* #FB7185 / #4C1328 / #FDA4AF */
+  --warning: 251 191 36;  --warning-bg: 56 40 8;    --warning-text: 253 224 71;
+  --info: 96 165 250;     --info-bg: 18 38 66;      --info-text: 147 197 253;
+
+  /* --- Neutral / surface — layered slate: page < surface (card) < elevated (popover) --- */
+  --bg-page: 15 23 42;           /* #0F172A slate-900 */
+  --bg-surface: 27 37 55;        /* #1B2537 */
+  --bg-elevated: 38 50 74;       /* #26324A */
+  --border: 43 58 84;            /* #2B3A54 */
+  --text-primary: 241 245 249;   /* #F1F5F9 slate-100 */
+  --text-secondary: 169 180 196; /* #A9B4C4 */
+  --text-muted: 124 138 160;     /* #7C8AA0 */
+
+  /* --- Sidebar — even darker than the dark page so the rail recedes; fg ramp reused from :root. --- */
+  --sidebar-bg: 10 15 28;          /* #0A0F1C */
+  --sidebar-fg: 148 163 184;       /* #94A3B8 */
+  --sidebar-fg-strong: 248 250 252;/* #F8FAFC */
+  --sidebar-fg-muted: 134 149 170; /* #8695AA */
+  --sidebar-active-bg: 28 39 64;   /* #1C2740 */
+  --sidebar-hover-bg: 20 29 48;    /* #141D30 */
+  --sidebar-accent: 45 212 191;    /* #2DD4BF teal-400 */
+  --sidebar-border: 30 41 59;      /* #1E293B */
 }
 
 @layer base {
@@ -95,6 +177,23 @@
            hover:border-fg-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
   }
   .label { @apply mb-1.5 block text-small font-medium text-fg-secondary; }
+  /* Thin, token-coloured scrollbar for the nav rail — a raw OS scrollbar (with arrow
+   * buttons, on Windows) in the middle of the nav icons reads as broken. Sidebar-scoped
+   * colours since the rail is a dark island in both themes. */
+  .scrollbar-slim { scrollbar-width: thin; scrollbar-color: rgb(var(--sidebar-border)) transparent; }
+  .scrollbar-slim::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-slim::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-slim::-webkit-scrollbar-thumb { background: rgb(var(--sidebar-border)); border-radius: 3px; }
+  .scrollbar-slim::-webkit-scrollbar-thumb:hover { background: rgb(var(--sidebar-fg-muted)); }
+  .scrollbar-slim::-webkit-scrollbar-button { display: none; }
+  /* Active nav row — "Clean Enterprise" treatment: flat --sidebar-active-bg fill, bright
+   * text, and a teal left bar (3px inset shadow; the bar's ends follow the row radius).
+   * Reads --sidebar-* so it's identical in light and dark. */
+  .sidebar-active {
+    color: rgb(var(--sidebar-fg-strong));
+    background-color: rgb(var(--sidebar-active-bg));
+    box-shadow: inset 3px 0 0 rgb(var(--sidebar-accent));
+  }
   /* Checkbox — accent-tinted on light theme. */
   .chk {
     @apply h-3.5 w-3.5 shrink-0 rounded border border-border bg-surface

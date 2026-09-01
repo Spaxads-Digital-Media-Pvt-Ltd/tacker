@@ -100,7 +100,7 @@ function NotifyScopeSelect() {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 w-72 rounded-card border border-border bg-surface py-1 shadow-lg">
+          <div className="absolute left-0 z-20 mt-1 w-72 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             {NOTIFY_SCOPES.map((o) => (
               <button key={o} type="button" onClick={() => { setValue(o); setOpen(false); }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-small text-fg hover:bg-page">

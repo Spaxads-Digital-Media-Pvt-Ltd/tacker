@@ -25,7 +25,7 @@ export function SmartLinkTrackingLinksModal({ smartLink, domains, onClose }: { s
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-2xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85vh] w-full max-w-2xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">Smart Link Tracking Links</h2>
           <button onClick={onClose} className="text-fg-muted hover:text-fg"><X size={18} /></button>

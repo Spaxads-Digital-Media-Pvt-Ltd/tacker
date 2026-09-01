@@ -368,12 +368,12 @@ export default function Publishers() {
         ))}
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <Link to="/app/publishers/new" className="btn-primary">+ Partner</Link>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <Link to="/app/publishers/new" className="btn-primary max-sm:w-full">+ Partner</Link>
+        <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
+          <div className="relative max-sm:w-full">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-56 !pl-8" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); setPage(1); }} />
+            <input className="input !w-full sm:!w-56 !pl-8" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); setPage(1); }} />
           </div>
           <StatusFilterSelect value={statuses[0] ?? ''} onChange={(v) => { setStatuses(v ? [v] : []); setPage(1); }} />
           <div className="relative">
@@ -415,7 +415,7 @@ export default function Publishers() {
                 {selected.size > 0 ? `${selected.size} selected` : 'Select all on page'}
               </div>
             )}
-            <Table columns={displayedColumns} rows={paged} rowKey={(p) => p.id} />
+            <Table columns={displayedColumns} rows={paged} rowKey={(p) => p.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
             <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
               <span>{filtered.length} Total</span>
               <div className="flex items-center gap-1">

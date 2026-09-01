@@ -141,8 +141,8 @@ export default function AdvertisersBulkEdit() {
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
               <input className="input !pl-8" placeholder="Search in both, available and selected" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
-            <div className="grid grid-cols-2 gap-3 rounded-card border border-border">
-              <div className="border-r border-border">
+            <div className="grid grid-cols-1 gap-3 rounded-card border border-border sm:grid-cols-2">
+              <div className="border-b border-border sm:border-b-0 sm:border-r">
                 <div className="flex items-center justify-between border-b border-border bg-page px-3 py-2">
                   <span className="text-small font-semibold text-fg">Available</span>
                   <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={selectAllAvailable}>Select All</button>

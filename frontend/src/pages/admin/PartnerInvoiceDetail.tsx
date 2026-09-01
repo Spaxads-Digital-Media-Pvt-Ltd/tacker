@@ -93,7 +93,7 @@ export default function PartnerInvoiceDetail() {
 
       {confirming && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={() => setConfirming(false)}>
-          <div className="w-full max-w-md rounded-card border border-border bg-elevated p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-2 text-h3 font-semibold text-fg">Approve &amp; Pay</h2>
             <p className="mb-4 text-small text-fg-secondary">Mark Invoice ID: {invoice.ref} as paid in full for {money(invoice.billedAmount, invoice.currency)}?</p>
             <div className="flex justify-end gap-2">

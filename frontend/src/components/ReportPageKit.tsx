@@ -80,13 +80,16 @@ export function MiniChart({ labels, revenue, clicks }: { labels: string[]; reven
   const clickLine = clicks.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yClick(v).toFixed(1)}`).join(' ');
   const step = Math.max(1, Math.ceil(n / 10));
 
+  // Colors use the real Section-0 tokens so the chart is theme-aware. (This previously referenced a
+  // `--color-*` var namespace that doesn't exist in this project, so it silently rendered the indigo
+  // hex fallback in both themes — an accent mismatch, not a deliberate color.)
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height: 240 }}>
-      <path d={revArea} fill="var(--color-accent-text, #6366f1)" opacity={0.15} />
-      <path d={revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} fill="none" stroke="var(--color-accent-text, #6366f1)" strokeWidth={2} />
-      <path d={clickLine} fill="none" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 3" />
+      <path d={revArea} fill="rgb(var(--accent-text))" opacity={0.15} />
+      <path d={revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} fill="none" stroke="rgb(var(--accent-text))" strokeWidth={2} />
+      <path d={clickLine} fill="none" stroke="rgb(var(--text-muted))" strokeWidth={1.5} strokeDasharray="4 3" />
       {labels.map((l, i) => (i % step === 0 ? (
-        <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="var(--color-fg-secondary, #64748b)">{l.slice(5)}</text>
+        <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="rgb(var(--text-secondary))">{l.slice(5)}</text>
       ) : null))}
     </svg>
   );

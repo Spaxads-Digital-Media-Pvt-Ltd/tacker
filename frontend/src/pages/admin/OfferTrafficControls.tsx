@@ -52,7 +52,7 @@ function TableActionsMenu({ order, hidden, onApply }: { order: string[]; hidden:
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-surface p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-elevated p-1 shadow-elevated">
             <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
             <button type="button" onClick={() => { setOpen(false); setColumnsOpen(true); }} className="flex w-full items-center justify-between rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Columns Customization <ChevronRight size={13} /></button>
             <button type="button" onClick={() => { setOpen(false); setApiOpen(true); }} className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Show API Request</button>
@@ -79,7 +79,7 @@ function HistoryModal({ id, onClose }: { id: string; onClose: () => void }) {
   ];
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-4xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[85vh] w-full max-w-4xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">History</h2>
           <button onClick={onClose} className="text-fg-muted hover:text-fg"><X size={18} /></button>
@@ -108,7 +108,7 @@ function RowMenu({ onEdit, onSetDeleted, onHistory }: { onEdit: () => void; onSe
       {open && createPortal(
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-40 rounded-card border border-border bg-surface py-1 shadow-lg">
+          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             <button type="button" onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Edit</button>
             <button type="button" onClick={() => { setOpen(false); onSetDeleted(); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-danger-bg">Set as Deleted</button>
             <button type="button" onClick={() => { setOpen(false); onHistory(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">History</button>

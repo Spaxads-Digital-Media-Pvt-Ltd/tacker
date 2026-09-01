@@ -90,7 +90,7 @@ export function EntitySearchSelect({
         {open && (
           <>
             <button type="button" className="fixed inset-0 z-10" aria-label="close" onClick={() => setOpen(false)} />
-            <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-surface py-1 shadow-lg">
+            <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-elevated py-1 shadow-elevated">
               {filtered.length === 0 ? (
                 <li className="px-3 py-2 text-tiny text-fg-muted">No matches</li>
               ) : filtered.map((o) => (

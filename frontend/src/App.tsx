@@ -9,6 +9,7 @@ import { CustomFieldsManage } from './pages/admin/CustomFieldsManage';
 
 // Route-level code-splitting per portal (spec §3B): each page is its own lazy chunk.
 const Login = lazy(() => import('./pages/Login'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const DashboardHome = lazy(() => import('./pages/DashboardHome'));
 const Advertisers = lazy(() => import('./pages/admin/Advertisers'));
 const AdvertisersBulkEdit = lazy(() => import('./pages/admin/AdvertisersBulkEdit'));
@@ -142,6 +143,7 @@ export default function App() {
     <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
 
         {/* Super Admin */}
         <Route element={<ProtectedRoute allow="super_admin"><AppShell /></ProtectedRoute>}>

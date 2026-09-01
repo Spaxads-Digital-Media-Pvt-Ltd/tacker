@@ -134,7 +134,7 @@ function AdjustVisibilityModal({ offer, publishers, onClose, onSaved }: { offer:
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-card border border-border bg-elevated p-6 shadow-card" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">Partner Visibility Settings</h2>
           <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close">✕</button>
