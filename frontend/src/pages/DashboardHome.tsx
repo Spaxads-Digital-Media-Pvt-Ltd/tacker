@@ -303,7 +303,7 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
             <div className="px-4 pb-1 pt-3">
               {series.loading
                 ? <div className="grid h-16 place-items-center"><Spinner /></div>
-                : <Sparkline data={points.length ? points : [0]} color="rgb(var(--chart))" height={64} />}
+                : <Sparkline data={points.length ? points : [0]} color="rgb(var(--accent))" height={64} />}
             </div>
 
             <ul className="divide-y divide-border border-t border-border">

@@ -138,8 +138,8 @@ export function PerformanceChart({
         <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full" aria-hidden>
           <defs>
             <linearGradient id="perf-rev" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgb(var(--chart))" stopOpacity="0.12" />
-              <stop offset="100%" stopColor="rgb(var(--chart))" stopOpacity="0" />
+              <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0" />
             </linearGradient>
           </defs>
 
@@ -153,7 +153,7 @@ export function PerformanceChart({
           {mode === 'area' ? (
             <>
               <path d={revArea} fill="url(#perf-rev)" />
-              <path d={revLine} fill="none" stroke="rgb(var(--chart))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <path d={revLine} fill="none" stroke="rgb(var(--accent))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
             </>
           ) : (
             revenue.map((v, i) => (
