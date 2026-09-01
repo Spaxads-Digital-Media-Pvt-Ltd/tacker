@@ -54,13 +54,21 @@ function RailIconButton({ expanded, label, children, onClick, badge }: { expande
   const cls = `transition-colors ${RAIL_IDLE}`;
   return expanded ? (
     <button type="button" onClick={onClick}
+<<<<<<< HEAD
       className={`flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-small font-medium ${cls}`}>
+=======
+      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-small font-medium text-[#94A3B8] dark:text-[#94A3B8] transition-colors hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white">
+>>>>>>> d0345fb7d8046c1797198cf5c82dd57cacd88c13
       <span className="relative shrink-0">{children}{badge && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />}</span>
       {label}
     </button>
   ) : (
     <button type="button" onClick={onClick} aria-label={label}
+<<<<<<< HEAD
       className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] ${cls}`}>
+=======
+      className="relative grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#94A3B8] dark:text-[#94A3B8] transition-colors hover:bg-[#1E293B] dark:hover:bg-[#1E293B] hover:text-white">
+>>>>>>> d0345fb7d8046c1797198cf5c82dd57cacd88c13
       {children}
       {badge && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger" />}
     </button>

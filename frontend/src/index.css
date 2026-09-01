@@ -141,6 +141,34 @@
   --sidebar-border: 30 41 59;      /* #1E293B */
 }
 
+html.dark {
+  color-scheme: dark;
+  --accent: 13 148 136;
+  --accent-hover: 15 118 110;
+  --accent-subtle: 19 78 74;
+  --accent-text: 94 234 212;
+  --chart: 20 184 166;
+  --success: 52 211 153;
+  --success-bg: 6 78 59;
+  --success-text: 110 231 183;
+  --danger: 251 113 133;
+  --danger-bg: 76 5 25;
+  --danger-text: 253 164 175;
+  --info: 20 184 166;
+  --info-bg: 19 78 74;
+  --info-text: 94 234 212;
+  --bg-page: 15 23 42;
+  --bg-surface: 17 24 39;
+  --bg-elevated: 30 41 59;
+  --border: 51 65 85;
+  --text-primary: 248 250 252;
+  --text-secondary: 203 213 225;
+  --text-muted: 148 163 184;
+  --sidebar-bg: 15 23 42;
+  --sidebar-text: 148 163 184;
+  --sidebar-active: 30 41 59;
+}
+
 @layer base {
   html { scroll-behavior: smooth; }
   body {
@@ -160,19 +188,50 @@
 }
 
 @layer components {
+  .sidebar-shell {
+    background-color: rgb(var(--sidebar-bg)) !important;
+    border-color: rgb(var(--sidebar-active)) !important;
+  }
+  @media (min-width: 768px) {
+    .sidebar-shell {
+      display: flex !important;
+      background-color: #0F172A !important;
+      border-color: #1E293B !important;
+    }
+  }
+  @media (max-width: 767px) {
+    .sidebar-shell {
+      display: none !important;
+    }
+  }
+  html.dark .sidebar-shell {
+    background-color: #0F172A !important;
+    border-color: #1E293B !important;
+  }
+  .sidebar-nav {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius)] px-4 py-2 text-body font-medium
            transition-all duration-150 focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary { @apply btn bg-accent text-white shadow-sm hover:bg-accent-hover hover:shadow; }
   .btn-ghost   { @apply btn border border-border bg-surface text-fg hover:border-accent/40 hover:bg-accent-subtle; }
-  /* Card: white surface, hairline border, 12px radius, ultra-subtle shadow. */
   .card {
     @apply rounded-[var(--radius-card)] border border-border bg-surface p-6
-           shadow-[0_1px_2px_rgb(0_0_0/0.04),0_4px_12px_rgb(0_0_0/0.04)];
+           shadow-[0_1px_2px_rgb(15_23_42/0.06),0_8px_24px_rgb(15_23_42/0.05)]
+           transition-[border-color,box-shadow,transform] duration-200 ease-in-out
+           hover:-translate-y-0.5 hover:border-[#CBD5E1];
+  }
+  html.dark .card:hover {
+    border-color: #475569;
   }
   .input {
-    @apply w-full rounded-[var(--radius)] border border-border bg-surface px-3.5 py-2.5 text-body text-fg
+    @apply w-full rounded-[var(--radius)] border border-border bg-elevated px-3.5 py-2.5 text-body text-fg
            shadow-sm transition-colors duration-150 placeholder:text-fg-muted
            hover:border-fg-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
   }

@@ -51,7 +51,7 @@ type RefMap = Map<string, string>;
 /** Dev-only: swap in sample data when a request errors, so the dashboard is previewable without
  * a live api-backend. No-op in production and a no-op once the real API responds. */
 function withMock<T>(q: { data: T | null; loading: boolean; error: string | null }, mock: T): { data: T | null; loading: boolean; error: string | null } {
-  if (import.meta.env.DEV && q.error) return { data: mock, loading: false, error: null };
+  if (DEMO_MODE || (import.meta.env.DEV && q.error)) return { data: mock, loading: false, error: null };
   return q;
 }
 
@@ -66,6 +66,7 @@ const SECTIONS = [
 type SectionId = (typeof SECTIONS)[number]['id'];
 const DEFAULT_VISIBLE: Record<SectionId, boolean> = { kpi: true, performance: true, offers: true, publishers: true, advertisers: true };
 const STORAGE_KEY = 'dashboard-visible-sections';
+const DEMO_MODE = import.meta.env.DEV && import.meta.env.VITE_DEMO_DATA === 'true';
 
 function loadVisible(): Record<SectionId, boolean> {
   try {
@@ -302,7 +303,7 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
             <div className="px-4 pb-1 pt-3">
               {series.loading
                 ? <div className="grid h-16 place-items-center"><Spinner /></div>
-                : <Sparkline data={points.length ? points : [0]} color="rgb(var(--accent))" height={64} />}
+                : <Sparkline data={points.length ? points : [0]} color="rgb(var(--chart))" height={64} />}
             </div>
 
             <ul className="divide-y divide-border border-t border-border">
