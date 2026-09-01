@@ -167,14 +167,13 @@
   }
   .btn-primary { @apply btn bg-accent text-white shadow-sm hover:bg-accent-hover hover:shadow; }
   .btn-ghost   { @apply btn border border-border bg-surface text-fg hover:border-accent/40 hover:bg-accent-subtle; }
+  /* Card: white surface, hairline border, 12px radius, ultra-subtle shadow.
+   * Hover-lift + border emphasis kept from the Slate & Teal branch; colours token-driven
+   * (shadow-card + border-fg-muted) so they track the theme instead of being pinned to hex. */
   .card {
-    @apply rounded-[var(--radius-card)] border border-border bg-surface p-6
-           shadow-[0_1px_2px_rgb(15_23_42/0.06),0_8px_24px_rgb(15_23_42/0.05)]
+    @apply rounded-[var(--radius-card)] border border-border bg-surface p-6 shadow-card
            transition-[border-color,box-shadow,transform] duration-200 ease-in-out
-           hover:-translate-y-0.5 hover:border-[#CBD5E1];
-  }
-  html.dark .card:hover {
-    border-color: #475569;
+           hover:-translate-y-0.5 hover:border-fg-muted;
   }
   .input {
     @apply w-full rounded-[var(--radius)] border border-border bg-elevated px-3.5 py-2.5 text-body text-fg
