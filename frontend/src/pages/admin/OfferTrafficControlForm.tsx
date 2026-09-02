@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PageHeader, Field } from '../../components/ui';
+import { PageHeader, Field, Segmented } from '../../components/ui';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { DualListPicker } from '../../components/DualListPicker';
@@ -98,6 +98,7 @@ export default function OfferTrafficControlForm() {
     <>
       <PageHeader title={isEdit ? `Edit Traffic Control${existing ? `: ${existing.name}` : ''}` : 'Add Traffic Control'} subtitle={`Offers › Traffic Controls › ${isEdit ? 'Edit' : 'Add'}`} />
 
+      <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center gap-6 border-b border-border pb-4">
         {(['General', 'Control'] as const).map((label, i) => {
           const n = (i + 1) as 1 | 2;
@@ -122,20 +123,15 @@ export default function OfferTrafficControlForm() {
               <div className="max-w-md space-y-4">
                 <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
                 <Field label="Status *">
-                  <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-                    {(['active', 'inactive'] as const).map((s) => (
-                      <button key={s} type="button" onClick={() => setStatus(s)}
-                        className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-small capitalize ${status === s ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>
-                        <span className={`h-2 w-2 rounded-full ${s === 'active' ? 'bg-success' : 'bg-warning'}`} />{s}
-                      </button>
-                    ))}
-                  </div>
+                  <Segmented options={['active', 'inactive']} value={status}
+                    onChange={(v) => setStatus(v as typeof status)}
+                    dots={{ active: 'bg-success', inactive: 'bg-warning' }} />
                 </Field>
                 <Field label="Effective Between *">
-                  <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-                    <button type="button" onClick={() => setHasPeriod(false)} className={`flex-1 py-2 text-small ${!hasPeriod ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>Always On</button>
-                    <button type="button" onClick={() => setHasPeriod(true)} className={`flex-1 py-2 text-small ${hasPeriod ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>Set Specific Period</button>
-                  </div>
+                  <Segmented
+                    options={[{ value: 'always', label: 'Always On' }, { value: 'period', label: 'Set Specific Period' }]}
+                    value={hasPeriod ? 'period' : 'always'}
+                    onChange={(v) => setHasPeriod(v === 'period')} />
                 </Field>
                 {hasPeriod && (
                   <div className="ml-3 flex gap-3 border-l-2 border-border pl-4">
@@ -156,11 +152,8 @@ export default function OfferTrafficControlForm() {
               </Field>
               {offerSelect && (
                 <div className="mt-4 max-w-2xl">
-                  <div className="mb-3 flex overflow-hidden rounded-[var(--radius)] border border-border">
-                    {(['offers', 'advertisers'] as const).map((s) => (
-                      <button key={s} type="button" onClick={() => setOfferScope(s)}
-                        className={`flex-1 py-2 text-small capitalize ${offerScope === s ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>{s}</button>
-                    ))}
+                  <div className="mb-3">
+                    <Segmented options={['offers', 'advertisers']} value={offerScope} onChange={(v) => setOfferScope(v as typeof offerScope)} />
                   </div>
                   {offerScope === 'offers'
                     ? <DualListPicker options={offerOptions} selected={offerIds} onChange={setOfferIds} />
@@ -183,18 +176,12 @@ export default function OfferTrafficControlForm() {
         ) : (
           <div className="max-w-md space-y-4">
             <Field label="Control Type *">
-              <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-                {(['whitelist', 'blacklist'] as const).map((t) => (
-                  <button key={t} type="button" onClick={() => setControlType(t)}
-                    className={`flex-1 py-2 text-small capitalize ${controlType === t ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>{t}</button>
-                ))}
-              </div>
+              <Segmented options={['whitelist', 'blacklist']} value={controlType} onChange={(v) => setControlType(v as typeof controlType)} />
             </Field>
             <Field label="Action *">
-              <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-                <button type="button" onClick={() => setAction('block')} className={`flex-1 py-2 text-small ${action === 'block' ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>Block</button>
-                <button type="button" onClick={() => setAction('fail_traffic')} className={`flex-1 py-2 text-small ${action === 'fail_traffic' ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>Fail Traffic</button>
-              </div>
+              <Segmented
+                options={[{ value: 'block', label: 'Block' }, { value: 'fail_traffic', label: 'Fail Traffic' }]}
+                value={action} onChange={(v) => setAction(v as typeof action)} />
             </Field>
             <Field label="Variables *">
               <select multiple className="input h-32" value={variables} onChange={(e) => setVariables(Array.from(e.target.selectedOptions, (o) => o.value))}>
@@ -215,20 +202,21 @@ export default function OfferTrafficControlForm() {
             )}
           </div>
         )}
-      </div>
 
-      <div className="mt-4 flex justify-end gap-2">
-        {step === 1 ? (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-traffic-controls')}>Cancel</button>
-            <button type="button" className="btn-primary" disabled={!step1Valid} onClick={() => setStep(2)}>Next</button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
-            <button type="button" className="btn-primary" disabled={busy || !step2Valid} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-          </>
-        )}
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          {step === 1 ? (
+            <>
+              <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-traffic-controls')}>Cancel</button>
+              <button type="button" className="btn-primary" disabled={!step1Valid} onClick={() => setStep(2)}>Next</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
+              <button type="button" className="btn-primary" disabled={busy || !step2Valid} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+            </>
+          )}
+        </div>
+      </div>
       </div>
     </>
   );

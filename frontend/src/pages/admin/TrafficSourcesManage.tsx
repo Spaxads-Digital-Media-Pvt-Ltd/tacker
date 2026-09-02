@@ -4,71 +4,75 @@
  * containing macros like {sub1}) a Partner picks when generating a link, plus an optional
  * postback URL. No status/Active filter here — the reference doesn't have one for this page.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical } from 'lucide-react';
+import { Search, MoreVertical, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column } from '../../components/ui';
 import { ColumnsModal } from '../../components/TableActionsKit';
+import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { TrafficSource } from '../../types';
 
 const ALL_COLUMNS = ['ID', 'Name', 'URL', 'Tracking Link Parameters', 'Created', 'Modified'] as const;
 
 function RowMenu({ source, onDeleted }: { source: TrafficSource; onDeleted: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/traffic-sources/${source.id}`));
-
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
   const doDelete = async () => {
-    setOpen(false);
     if (!confirm(`Delete traffic source "${source.name}"?`)) return;
     if (await del.run(undefined)) onDeleted();
   };
-
-  const item = (label: string, onClick: () => void) => (
-    <button role="menuitem" onClick={onClick} className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-      {label}
-    </button>
-  );
-
   return (
-    <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-36 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => { setOpen(false); nav(`/app/aff-traffic-sources/${source.id}/edit`); })}
-          {item('Delete', doDelete)}
-        </div>,
-        document.body,
+    <MenuPopover
+      ariaLabel="Traffic source actions" align="end" width="w-36"
+      triggerClassName="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+    >
+      {({ close }) => (
+        <>
+          <MenuItem onSelect={() => { close(); nav(`/app/aff-traffic-sources/${source.id}/edit`); }}>Edit</MenuItem>
+          <MenuItem tone="danger" onSelect={() => { close(); void doDelete(); }}>Delete</MenuItem>
+        </>
       )}
-    </>
+    </MenuPopover>
+  );
+}
+
+function SourcesTableActions({ rows, onColumns }: { rows: TrafficSource[]; onColumns: () => void }) {
+  const [subOpen, setSubOpen] = useState(false);
+  const exportRows = () => rows.map((r) => ({
+    ID: r.id.slice(0, 8), Name: r.name,
+    'Postback URL': r.enablePostback && r.postbackUrl ? r.postbackUrl : '',
+    'Tracking Link Parameters': r.trackingLinkParameters,
+    'Visible to Partners': r.visibleToPartners ? 'YES' : 'NO',
+    Created: r.createdAt, Modified: r.updatedAt,
+  }));
+  return (
+    <MenuPopover
+      ariaLabel="Table Actions" align="end" width="w-56"
+      triggerClassName="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+      onOpenChange={(o) => { if (!o) setSubOpen(false); }}
+    >
+      {({ close }) => (
+        <>
+          <div className="relative">
+            <button type="button" onClick={() => setSubOpen((o) => !o)}
+              className="flex w-full items-center justify-between whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-page">
+              Export <ChevronRight size={13} className="text-fg-muted" />
+            </button>
+            {subOpen && (
+              <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                <MenuItem onSelect={() => { downloadCsv('traffic-sources.csv', exportRows()); close(); }}>CSV</MenuItem>
+                <MenuItem onSelect={() => { void downloadXlsx('traffic-sources.xlsx', exportRows()); close(); }}>Excel</MenuItem>
+              </div>
+            )}
+          </div>
+          <MenuItem onSelect={() => { close(); onColumns(); }}>Columns Customization</MenuItem>
+        </>
+      )}
+    </MenuPopover>
   );
 }
 
@@ -78,14 +82,6 @@ export default function TrafficSourcesManage() {
   const [showColumns, setShowColumns] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [columnOrder, setColumnOrder] = useState<string[]>([...ALL_COLUMNS]);
-  const [tableActionsOpen, setTableActionsOpen] = useState(false);
-  const tableActionsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!tableActionsOpen) return;
-    const onDown = (e: MouseEvent) => { if (!tableActionsRef.current?.contains(e.target as Node)) setTableActionsOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [tableActionsOpen]);
 
   const filtered = useMemo(() => {
     const rows = data ?? [];
@@ -121,17 +117,7 @@ export default function TrafficSourcesManage() {
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <div ref={tableActionsRef} className="relative">
-            <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-              <MoreVertical size={15} />
-            </button>
-            {tableActionsOpen && (
-              <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
-              </div>
-            )}
-          </div>
+          <SourcesTableActions rows={filtered} onColumns={() => setShowColumns(true)} />
         </div>
       </div>
 
