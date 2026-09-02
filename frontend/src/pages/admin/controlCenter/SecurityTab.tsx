@@ -4,10 +4,11 @@
  */
 import { useState, type FormEvent } from 'react';
 import { api } from '../../../lib/api';
+import { cc } from '../../../lib/controlCenter';
 import { useQuery, useMutation } from '../../../lib/useApi';
 import { Tabs, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../../components/ui';
 import { EmptyShellTable } from '../../../components/EmptyShellTable';
-import { InfoCard, InfoGrid, InfoRow } from './shared';
+import { InfoCard, InfoGrid, InfoRow, YesNoToggle } from './shared';
 
 const SUB_TABS = ['API Keys', 'API Whitelist', 'Logins', 'Multi-Factor Authentication'] as const;
 
@@ -81,28 +82,117 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
 }
 
 function WhitelistSub() {
+  const { data, loading, refetch } = useQuery<Array<{ id: string; ipAddress: string; createdAt: string }>>('/api/control-center/api-whitelist');
+  const rows = (data ?? []).map((r) => ({
+    id: r.id,
+    cells: { 'IP Address': r.ipAddress },
+  }));
+
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-2 rounded-card border border-border bg-accent-subtle p-4 text-small text-fg-secondary">
         <span>If you <strong>do not have any entries</strong> in your API Whitelist, then API calls from <strong>all IPs are accepted</strong>. If you have <strong>one entry or more</strong>, only calls <strong>from the IPs in the list</strong> are accepted.</span>
       </div>
-      <InfoCard title="IPs whitelist"><EmptyShellTable columns={['IP Address']} /></InfoCard>
+      <InfoCard title="IPs whitelist">
+        <EmptyShellTable
+          columns={['IP Address']}
+          entityName="IP"
+          addLabel="IP"
+          rows={rows}
+          loading={loading}
+          onAddSubmit={async (v) => {
+            const ip = v['IP Address'];
+            if (!ip) return false;
+            await cc.apiWhitelist.add(ip);
+            refetch();
+            return true;
+          }}
+          onDelete={async (id) => { await cc.apiWhitelist.del(id); refetch(); }}
+        />
+      </InfoCard>
     </div>
   );
 }
 
+
 function LoginsSub() {
-  return <EmptyShellTable columns={['Employee', 'IP', 'Country', 'City', 'User Agent', 'Platform', 'Device Type', 'OS Version', 'Browser', 'Existing Device', 'Date/Time']} />;
+  const { data, loading } = useQuery<Array<{
+    id: string; employee: string; ip: string | null; country: string | null; city: string | null;
+    userAgent: string | null; platform: string | null; deviceType: string | null;
+    osVersion: string | null; browser: string | null; existingDevice: boolean; createdAt: string;
+  }>>('/api/control-center/login-events');
+
+  const rows = (data ?? []).map((e) => ({
+    id: e.id,
+    cells: {
+      Employee: e.employee,
+      IP: e.ip ?? '—',
+      Country: e.country ?? '—',
+      City: e.city ?? '—',
+      'User Agent': e.userAgent ?? '—',
+      Platform: e.platform ?? '—',
+      'Device Type': e.deviceType ?? '—',
+      'OS Version': e.osVersion ?? '—',
+      Browser: e.browser ?? '—',
+      'Existing Device': e.existingDevice ? 'Yes' : 'No',
+      'Date/Time': new Date(e.createdAt).toLocaleString(),
+    },
+  }));
+
+  return (
+    <EmptyShellTable
+      search
+      columns={['Employee', 'IP', 'Country', 'City', 'User Agent', 'Platform', 'Device Type', 'OS Version', 'Browser', 'Existing Device', 'Date/Time']}
+      rows={rows}
+      loading={loading}
+    />
+  );
 }
 
 function MfaSub() {
+  const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/security');
+  const mfa = (config?.mfa as Record<string, unknown> | undefined) ?? {};
+  const [editing, setEditing] = useState(false);
+  const [enableMfa, setEnableMfa] = useState(false);
+  const [methods, setMethods] = useState('');
+  const { run, busy, error } = useMutation((body: Record<string, unknown>) => cc.putConfig('security', body));
+
+  const startEdit = () => {
+    setEnableMfa(Boolean(mfa['enableNetworkMfa']));
+    setMethods(String(mfa['supportedMethods'] ?? ''));
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const ok = await run({ mfa: { enableNetworkMfa: enableMfa, supportedMethods: methods } });
+    if (ok) { setEditing(false); refetch(); }
+    return !!ok;
+  };
+
   return (
     <div className="space-y-4">
-      <InfoCard title="General">
-        <InfoGrid>
-          <InfoRow label="Enable Network MFA" />
-          <InfoRow label="Supported Network MFA Methods" />
-        </InfoGrid>
+      <InfoCard title="General" action={editing ? <span /> : <button className="text-tiny font-medium text-accent-text" onClick={startEdit}>Edit</button>}>
+        {editing ? (
+          <div className="space-y-4">
+            {error && <p className="text-small text-danger-text">{error}</p>}
+            <div>
+              <p className="mb-2 text-small font-semibold text-fg">Enable Network MFA</p>
+              <YesNoToggle value={enableMfa} onChange={setEnableMfa} />
+            </div>
+            <Field label="Supported Network MFA Methods">
+              <input className="input" value={methods} onChange={(e) => setMethods(e.target.value)} placeholder="e.g. Authenticator App, SMS" />
+            </Field>
+            <div className="flex justify-end gap-2 border-t border-border pt-4">
+              <button type="button" className="btn-ghost" onClick={() => setEditing(false)} disabled={busy}>Cancel</button>
+              <button type="button" className="btn-primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        ) : (
+          <InfoGrid>
+            <InfoRow label="Enable Network MFA" value={mfa['enableNetworkMfa'] ? 'YES' : 'NO'} />
+            <InfoRow label="Supported Network MFA Methods" value={String(mfa['supportedMethods'] ?? '')} />
+          </InfoGrid>
+        )}
       </InfoCard>
       <p className="text-small font-semibold text-fg">MFA Employee Settings</p>
       <EmptyShellTable status="All" columns={['Employee', 'Status', 'Method', 'User IP', 'Country', 'City', 'Platform', 'Device Type', 'OS Version', 'Completed']} />

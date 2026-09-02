@@ -1,34 +1,46 @@
 /**
- * Control Center › Segmentations. Categories and Channels are derived from real data already in
- * this app (Offer.category, Publisher.trafficSource) — the names are genuine, not fabricated, but
- * there's no dedicated categories/channels table, so columns like Status/Created/Offers that we
- * can't back honestly render as "—" rather than invented values. Labels reuses the real tags
- * backend (/api/tags, same as Offers/Partners/Advertisers "Tags"), same caveat for usage counts.
- * Business Unit has no backing concept anywhere, so it's a pure honest shell.
+ * Control Center › Segmentations — categories, channels, business units, and labels wired to
+ * /api/control-center/* CRUD and /api/tags.
  */
 import { useState, type ReactNode } from 'react';
-import { Search, MoreVertical, ChevronDown, Pencil } from 'lucide-react';
-import { useQuery } from '../../../lib/useApi';
+import { Search, MoreVertical, ChevronDown } from 'lucide-react';
+import { api } from '../../../lib/api';
+import { cc } from '../../../lib/controlCenter';
+import { useQuery, useMutation } from '../../../lib/useApi';
 import { StateBlock, Spinner, Tabs } from '../../../components/ui';
-import type { Offer, Publisher } from '../../../types';
 
 const SUB_TABS = ['Categories', 'Channels', 'Labels', 'Business Unit'] as const;
 
-function Toolbar({ addLabel, status, moreVertical }: { addLabel: string; status?: string; moreVertical?: boolean }) {
+interface SegRow {
+  id: string; ref?: number | null; name: string; status: string;
+  createdAt: string; updatedAt: string;
+}
+
+function statusParam(s: string) {
+  return s === 'All' ? 'all' : s.toLowerCase();
+}
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString();
+}
+
+function Toolbar({ addLabel, status, onAdd, onStatusChange, moreVertical }: {
+  addLabel: string; status?: string; onAdd?: () => void; onStatusChange?: (s: string) => void; moreVertical?: boolean;
+}) {
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <button title="Not available yet" className="btn-primary">+ {addLabel}</button>
+      <button className="btn-primary" onClick={onAdd}>+ {addLabel}</button>
       <div className="flex items-center gap-2">
         <div className="relative">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-          <input title="Not available yet" placeholder="Search…" className="input !w-56 !pl-8" />
+          <input placeholder="Search…" className="input !w-56 !pl-8" />
         </div>
-        {status && (
-          <button title="Not available yet" className="input flex !w-auto items-center gap-2 !py-1.5">
+        {status && onStatusChange && (
+          <button className="input flex !w-auto items-center gap-2 !py-1.5" onClick={() => onStatusChange(status === 'Active' ? 'Inactive' : 'Active')}>
             <span className="h-2 w-2 shrink-0 rounded-full bg-success" />{status}<ChevronDown size={14} className="text-fg-muted" />
           </button>
         )}
-        {moreVertical && <button title="Not available yet" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>}
+        {moreVertical && <button className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>}
       </div>
     </div>
   );
@@ -47,77 +59,103 @@ function SegTable({ columns, children }: { columns: string[]; children: ReactNod
   );
 }
 
-function CategoriesSub() {
-  const { data, loading } = useQuery<Offer[]>('/api/offers');
+function CrudSub({ resource, addLabel, columns, desc }: {
+  resource: string; addLabel: string; columns: string[]; desc: string;
+}) {
+  const [status, setStatus] = useState('Active');
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const path = `/api/control-center/${resource}?status=${statusParam(status)}`;
+  const { data, loading, refetch } = useQuery<SegRow[]>(path);
+  const createMut = useMutation((body: Record<string, unknown>) => cc.create(resource, body));
+  const rows = data ?? [];
+
+  const submit = async () => {
+    if (!name.trim()) return;
+    if (await createMut.run({ name: name.trim() })) {
+      setName('');
+      setAdding(false);
+      refetch();
+    }
+  };
+
   if (loading) return <StateBlock><Spinner /></StateBlock>;
-  const names = [...new Set((data ?? []).map((o) => o.category).filter((c): c is string => !!c))].sort();
+
   return (
     <div>
-      <p className="mb-3 text-small text-fg-secondary">Facilitate search and reporting of grouped Offers by assigning categories. This will be visible internally and externally by Partners.</p>
-      <Toolbar addLabel="Category" status="Active" />
-      {names.length === 0 ? (
-        <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">No categories found on any offer yet.</p>
+      <p className="mb-3 text-small text-fg-secondary">{desc}</p>
+      {adding && (
+        <div className="card mb-3 flex flex-wrap items-end gap-2">
+          <div className="flex-1">
+            <label className="label mb-1 block">Name *</label>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <button className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
+          <button className="btn-primary" onClick={submit} disabled={createMut.busy}>{createMut.busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      )}
+      <Toolbar addLabel={addLabel} status={status} onAdd={() => setAdding(true)} onStatusChange={setStatus} moreVertical={resource === 'channels'} />
+      {rows.length === 0 ? (
+        <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">No Record Found</p>
       ) : (
-        <SegTable columns={['ID', 'Name', 'Status', 'Created', 'Modified', '']}>
-          {names.map((name) => (
-            <tr key={name} className="bg-surface text-fg">
-              <td className="px-4 py-3 text-fg-secondary">—</td>
-              <td className="px-4 py-3 font-medium">{name}</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
+        <SegTable columns={[...columns, '']}>
+          {rows.map((r) => (
+            <tr key={r.id} className="bg-surface text-fg">
+              {columns.map((col) => {
+                if (col === 'ID') return <td key={col} className="px-4 py-3 text-fg-secondary">{r.ref ?? '—'}</td>;
+                if (col === 'Name') return <td key={col} className="px-4 py-3 font-medium">{resource === 'channels' && <span className="mr-2 inline-block h-2 w-2 rounded-full bg-success" />}{r.name}</td>;
+                if (col === 'Status') return <td key={col} className="px-4 py-3 capitalize">{r.status}</td>;
+                if (col === 'Created') return <td key={col} className="px-4 py-3">{fmtDate(r.createdAt)}</td>;
+                if (col === 'Modified') return <td key={col} className="px-4 py-3">{fmtDate(r.updatedAt)}</td>;
+                if (col === 'Offers') return <td key={col} className="px-4 py-3 text-fg-muted">—</td>;
+                return <td key={col} className="px-4 py-3">—</td>;
+              })}
               <td className="px-4 py-3 text-right">
-                <button title="Not available yet" className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Pencil size={14} /></button>
+                <button className="text-tiny text-danger-text hover:underline" onClick={async () => { await cc.del(resource, r.id); refetch(); }}>Delete</button>
               </td>
             </tr>
           ))}
         </SegTable>
       )}
-      <p className="mt-2 text-tiny text-fg-muted">Derived from each offer's own Category field — there's no separate categories table, so Status/Created/Modified aren't tracked.</p>
     </div>
   );
 }
-
-function ChannelsSub() {
-  const { data, loading } = useQuery<Publisher[]>('/api/publishers');
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  const names = [...new Set((data ?? []).map((p) => p.trafficSource).filter((c): c is string => !!c))].sort();
-  return (
-    <div>
-      <p className="mb-3 text-small text-fg-secondary">Assign tags to identify types of traffic sources at the Partner Level.</p>
-      <Toolbar addLabel="Channel" status="Active" moreVertical />
-      {names.length === 0 ? (
-        <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">No traffic sources found on any partner yet.</p>
-      ) : (
-        <SegTable columns={['Name', 'Offers', 'Created', 'Modified', '']}>
-          {names.map((name) => (
-            <tr key={name} className="bg-surface text-fg">
-              <td className="px-4 py-3 font-medium"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-success" />{name}</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-right">
-                <button title="Not available yet" className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-              </td>
-            </tr>
-          ))}
-        </SegTable>
-      )}
-      <p className="mt-2 text-tiny text-fg-muted">Derived from each partner's own Traffic Source field — there's no separate channels table, so Offers/Created/Modified aren't tracked.</p>
-    </div>
-  );
-}
-
-interface Tag { id: string; name: string; color: string | null }
 
 function LabelsSub() {
-  const { data, loading } = useQuery<Tag[]>('/api/tags');
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const { data, loading, refetch } = useQuery<Array<{
+    id: string; name: string; color: string | null;
+    advertisers: number; partners: number; offers: number; partnerTiers: number;
+  }>>('/api/control-center/tags-with-usage');
+  const createMut = useMutation((body: { name: string }) => api.post('/api/tags', body));
   const tags = data ?? [];
+
+  const submit = async () => {
+    if (!name.trim()) return;
+    if (await createMut.run({ name: name.trim() })) {
+      setName('');
+      setAdding(false);
+      refetch();
+    }
+  };
+
+  if (loading) return <StateBlock><Spinner /></StateBlock>;
+
   return (
     <div>
       <p className="mb-3 text-small text-fg-secondary">Set custom tags to link with a Partner, Advertiser, or Offer for internal reporting, searching, or filtering.</p>
-      <Toolbar addLabel="Label" moreVertical />
+      {adding && (
+        <div className="card mb-3 flex flex-wrap items-end gap-2">
+          <div className="flex-1">
+            <label className="label mb-1 block">Name *</label>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <button className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
+          <button className="btn-primary" onClick={submit} disabled={createMut.busy}>{createMut.busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      )}
+      <Toolbar addLabel="Label" onAdd={() => setAdding(true)} moreVertical />
       {tags.length === 0 ? (
         <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">No labels yet.</p>
       ) : (
@@ -125,38 +163,19 @@ function LabelsSub() {
           {tags.map((t) => (
             <tr key={t.id} className="bg-surface text-fg">
               <td className="px-4 py-3 font-medium text-accent-text"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full" style={{ background: t.color ?? '#94a3b8' }} />{t.name}</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
-              <td className="px-4 py-3 text-fg-muted">—</td>
+              <td className="px-4 py-3">{t.advertisers}</td>
+              <td className="px-4 py-3">{t.partners}</td>
+              <td className="px-4 py-3">0</td>
+              <td className="px-4 py-3">{t.offers}</td>
+              <td className="px-4 py-3">0</td>
+              <td className="px-4 py-3">{t.partnerTiers}</td>
               <td className="px-4 py-3 text-right">
-                <button title="Not available yet" className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
+                <button className="text-tiny text-danger-text hover:underline" onClick={async () => { await api.del(`/api/tags/${t.id}`); refetch(); }}>Delete</button>
               </td>
             </tr>
           ))}
         </SegTable>
       )}
-      <p className="mt-2 text-tiny text-fg-muted">Real tag dictionary (shared with Offers/Partners/Advertisers "Tags") — per-entity usage counts aren't tracked, shown as —.</p>
-    </div>
-  );
-}
-
-function BusinessUnitSub() {
-  return (
-    <div>
-      <p className="mb-3 text-small text-fg-secondary">Categorize the internal structure of your Networks. For example, Finance, Sales, European Department, etc.</p>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <button title="Not available yet" className="btn-primary">+ Add Business Unit</button>
-        <div className="relative">
-          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-          <input title="Not available yet" placeholder="Search…" className="input !w-56 !pl-8" />
-        </div>
-      </div>
-      <SegTable columns={['Name', '']}>
-        <tr><td colSpan={2} className="px-4 py-10 text-center text-small italic text-fg-muted">No Record Found</td></tr>
-      </SegTable>
     </div>
   );
 }
@@ -166,10 +185,19 @@ export default function SegmentationsTab() {
   return (
     <>
       <Tabs tabs={[...SUB_TABS]} active={sub} onChange={setSub} />
-      {sub === 'Categories' && <CategoriesSub />}
-      {sub === 'Channels' && <ChannelsSub />}
+      {sub === 'Categories' && (
+        <CrudSub resource="categories" addLabel="Category" columns={['ID', 'Name', 'Status', 'Created', 'Modified']}
+          desc="Facilitate search and reporting of grouped Offers by assigning categories. This will be visible internally and externally by Partners." />
+      )}
+      {sub === 'Channels' && (
+        <CrudSub resource="channels" addLabel="Channel" columns={['Name', 'Offers', 'Created', 'Modified']}
+          desc="Assign tags to identify types of traffic sources at the Partner Level." />
+      )}
       {sub === 'Labels' && <LabelsSub />}
-      {sub === 'Business Unit' && <BusinessUnitSub />}
+      {sub === 'Business Unit' && (
+        <CrudSub resource="business-units" addLabel="Business Unit" columns={['Name']}
+          desc="Categorize the internal structure of your Networks. For example, Finance, Sales, European Department, etc." />
+      )}
     </>
   );
 }

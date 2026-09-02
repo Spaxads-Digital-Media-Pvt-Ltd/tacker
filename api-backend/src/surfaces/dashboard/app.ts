@@ -45,6 +45,8 @@ import { marketplaceProfileRoutes } from './marketplace-profile/routes.js';
 import { communicationHubRoutes } from './communication-hub/routes.js';
 import { customerValueRoutes } from './customer-value/routes.js';
 import { trafficHealthRoutes } from './traffic-health/routes.js';
+import { investigatorRoutes } from './investigator/routes.js';
+import { automationRoutes } from './automation/routes.js';
 import { auditLogRoutes } from './audit-log/routes.js';
 import { trafficControlsRoutes } from './traffic-controls/routes.js';
 import { offerCustomSettingsRoutes } from './offer-custom-settings/routes.js';
@@ -63,6 +65,7 @@ import { linkTemplatesRoutes } from './link-templates/routes.js';
 import { postbackControlsRoutes } from './postback-controls/routes.js';
 import { advertiserInvoicesRoutes } from './advertiser-invoices/routes.js';
 import { tieredCommissionsRoutes } from './tiered-commissions/routes.js';
+import { controlCenterRoutes } from './control-center/routes.js';
 
 export function buildDashboardApp(): Express {
   const app = createBaseApp('dashboard');
@@ -155,6 +158,8 @@ export function buildDashboardApp(): Express {
   authed.use('/communication-hub', requireAdmin, communicationHubRoutes());
   authed.use('/customer-value', requireAdmin, customerValueRoutes());
   authed.use('/traffic-health', requireAdmin, trafficHealthRoutes());
+  authed.use('/investigator', requireAdmin, investigatorRoutes());
+  authed.use('/automation', requireAdmin, automationRoutes());
   authed.use('/audit-log', requireAdmin, auditLogRoutes());
   authed.use('/conversion-imports', requireAdmin, conversionImportsRoutes());
   authed.use('/traffic-controls', requireAdmin, trafficControlsRoutes());
@@ -174,6 +179,7 @@ export function buildDashboardApp(): Express {
   authed.use('/postback-controls', requireAdmin, postbackControlsRoutes());
   authed.use('/advertiser-invoices', requireAdmin, advertiserInvoicesRoutes());
   authed.use('/tiered-commissions', requireAdmin, tieredCommissionsRoutes());
+  authed.use('/control-center', requireAdmin, controlCenterRoutes());
 
   // API key management (spec §8A) — humans mint keys; their code uses them on the Public REST API.
   const adminUserId = (req: import('express').Request): string =>

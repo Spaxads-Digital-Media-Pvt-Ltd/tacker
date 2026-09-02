@@ -9,13 +9,14 @@
  * range, Service filter, search, Table Actions) and the green "NEW!" badge match the reference's
  * own real History Log, confirmed against a pasted screenshot.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Calendar, Search, Filter, MoreVertical, ChevronDown, ChevronRight } from 'lucide-react';
-import { Tabs, Badge, Spinner, StateBlock } from '../../../components/ui';
+import { Tabs, Badge, Spinner, StateBlock, Field } from '../../../components/ui';
 import { ColumnsModal } from '../../../components/TableActionsKit';
 import { Pagination, daysAgo, todayStr, toIso, DASH } from '../../../components/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../../lib/export';
-import { useQuery } from '../../../lib/useApi';
+import { cc } from '../../../lib/controlCenter';
+import { useQuery, useMutation } from '../../../lib/useApi';
 import type { DashboardUser } from '../../../types';
 
 const ACCOUNT_COLUMNS = [
@@ -30,15 +31,74 @@ interface HistoryRow {
   employee: string; method: string; portal: string; userIp: string | null; userAgent: string | null;
 }
 
+function yn(v?: boolean) { return v ? 'YES' : 'NO'; }
+
+function AddAccountForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('read_only');
+  const [businessUnit, setBusinessUnit] = useState('');
+  const [primaryPhone, setPrimaryPhone] = useState('');
+  const [title, setTitle] = useState('');
+  const [partnerManager, setPartnerManager] = useState(false);
+  const [advertiserManager, setAdvertiserManager] = useState(false);
+  const [superUser, setSuperUser] = useState(false);
+  const { run, busy, error } = useMutation((body: Record<string, unknown>) => cc.createUser(body));
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const ok = await run({
+      name, email, role,
+      businessUnit: businessUnit || undefined,
+      primaryPhone: primaryPhone || undefined,
+      title: title || undefined,
+      partnerManager, advertiserManager, superUser,
+    });
+    if (ok) onCreated();
+  };
+
+  return (
+    <form onSubmit={submit} className="card mb-3 space-y-4">
+      {error && <p className="text-small text-danger-text">{error}</p>}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required /></Field>
+        <Field label="Email *"><input type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
+        <Field label="Role *">
+          <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="admin">Admin</option>
+            <option value="manager">Manager</option>
+            <option value="finance">Finance</option>
+            <option value="read_only">Read Only</option>
+          </select>
+        </Field>
+        <Field label="Business Unit"><input className="input" value={businessUnit} onChange={(e) => setBusinessUnit(e.target.value)} /></Field>
+        <Field label="Primary Phone"><input className="input" value={primaryPhone} onChange={(e) => setPrimaryPhone(e.target.value)} /></Field>
+        <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
+      </div>
+      <div className="flex flex-wrap gap-4 text-small text-fg">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={partnerManager} onChange={(e) => setPartnerManager(e.target.checked)} className="h-4 w-4 rounded border-border" />Partner Manager</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={advertiserManager} onChange={(e) => setAdvertiserManager(e.target.checked)} className="h-4 w-4 rounded border-border" />Advertiser Manager</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={superUser} onChange={(e) => setSuperUser(e.target.checked)} className="h-4 w-4 rounded border-border" />Super User</label>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Creating…' : 'Add Account'}</button>
+      </div>
+    </form>
+  );
+}
+
 function AccountsList() {
-  const { data, loading, error } = useQuery<DashboardUser[]>('/api/users');
+  const [adding, setAdding] = useState(false);
+  const { data, loading, error, refetch } = useQuery<DashboardUser[]>('/api/users');
   const rows = data ?? [];
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   if (error) return <StateBlock>{error}</StateBlock>;
   return (
     <div>
+      {adding && <AddAccountForm onCancel={() => setAdding(false)} onCreated={() => { setAdding(false); refetch(); }} />}
       <div className="mb-3 flex items-center justify-between">
-        <button title="Not available yet" className="btn-primary">+ Add Account</button>
+        {!adding && <button className="btn-primary" onClick={() => setAdding(true)}>+ Add Account</button>}
       </div>
       {rows.length === 0 ? <StateBlock>No accounts found.</StateBlock> : (
         <div className="overflow-x-auto rounded-card border border-border">
@@ -50,14 +110,14 @@ function AccountsList() {
               {rows.map((u) => (
                 <tr key={u.id} className="bg-surface text-fg hover:bg-accent-subtle/40">
                   <td className="whitespace-nowrap px-4 py-3 font-medium text-accent-text">{u.name}</td>
-                  <td className="px-4 py-3 text-fg-muted">—</td>
+                  <td className="px-4 py-3 text-fg-secondary">{u.businessUnit ?? '—'}</td>
                   <td className="whitespace-nowrap px-4 py-3">{u.email}</td>
                   <td className="px-4 py-3"><Badge value={u.role} /></td>
-                  <td className="px-4 py-3 text-fg-muted">—</td>
-                  <td className="px-4 py-3 text-fg-muted">—</td>
-                  <td className="px-4 py-3 text-fg-muted">—</td>
-                  <td className="px-4 py-3 text-fg-muted">—</td>
-                  <td className="px-4 py-3 text-fg-muted">—</td>
+                  <td className="px-4 py-3 text-fg-secondary">{yn(u.partnerManager)}</td>
+                  <td className="px-4 py-3 text-fg-secondary">{yn(u.advertiserManager)}</td>
+                  <td className="px-4 py-3 text-fg-secondary">{u.primaryPhone ?? '—'}</td>
+                  <td className="px-4 py-3 text-fg-secondary">{u.title ?? '—'}</td>
+                  <td className="px-4 py-3 text-fg-secondary">{yn(u.superUser)}</td>
                   <td className="whitespace-nowrap px-4 py-3">{new Date(u.createdAt).toLocaleDateString()}</td>
                   <td className="whitespace-nowrap px-4 py-3">{new Date(u.updatedAt).toLocaleDateString()}</td>
                 </tr>

@@ -43,7 +43,12 @@ export interface Publisher {
   updatedAt?: string;
 }
 
-export interface DashboardUser { id: string; name: string; email: string; role: string; status: string; createdAt: string; updatedAt: string }
+export interface DashboardUser {
+  id: string; ref?: number; name: string; email: string; role: string; status: string;
+  businessUnit?: string | null; partnerManager?: boolean; advertiserManager?: boolean;
+  primaryPhone?: string | null; title?: string | null; superUser?: boolean;
+  createdAt: string; updatedAt: string;
+}
 
 export interface Offer {
   id: string;

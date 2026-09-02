@@ -143,15 +143,30 @@ export function NotificationRow({ n }: { n: NotifyDef }) {
  * (Save stays inert: no backing table for default notification preferences in this app), matching
  * every other Control Center edit flow. The Yes/No pills and scope dropdowns above are already
  * interactive in both states. */
-export function NotificationCard({ title, notifs }: { title: string; notifs: NotifyDef[] }) {
+export function NotificationCard({ title, notifs, onSave }: { title: string; notifs: NotifyDef[]; onSave?: () => Promise<boolean> }) {
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (onSave) {
+      setSaving(true);
+      try {
+        if (await onSave()) setEditing(false);
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      setEditing(false);
+    }
+  };
+
   return (
     <InfoCard title={title} action={editing ? <span /> : <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>}>
       <div>{notifs.map((n) => <NotificationRow key={n.name} n={n} />)}</div>
       {editing && (
         <div className="mt-2 flex justify-end gap-2 border-t border-border pt-4">
-          <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button>
-          <button type="button" className="btn-primary" onClick={() => setEditing(false)}>Save</button>
+          <button type="button" className="btn-ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+          <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       )}
     </InfoCard>
@@ -162,7 +177,22 @@ export interface EditField { label: string; type?: 'boolean' | 'text' }
 
 /** Real editable field grid — booleans render as checkboxes, everything else as a text input.
  * Reusable across any Control Center card built from an InfoGrid of InfoRows. */
-function InfoRowsEditForm({ fields, onCancel }: { fields: EditField[]; onCancel: () => void }) {
+function InfoRowsEditForm({ fields, onCancel, onSave }: { fields: EditField[]; onCancel: () => void; onSave?: () => Promise<boolean> }) {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (onSave) {
+      setSaving(true);
+      try {
+        if (await onSave()) onCancel();
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      onCancel();
+    }
+  };
+
   return (
     <div className="space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
@@ -177,8 +207,8 @@ function InfoRowsEditForm({ fields, onCancel }: { fields: EditField[]; onCancel:
         ))}
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn-primary" onClick={onCancel}>Save</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );
@@ -187,12 +217,12 @@ function InfoRowsEditForm({ fields, onCancel }: { fields: EditField[]; onCancel:
 /** A settings card built from an InfoGrid of read-only InfoRows — real "Edit" swaps it for a real,
  * interactive field grid (InfoRowsEditForm); Save stays honest (no backing table for any of these
  * network-config fields) but the toggle/edit interaction itself is real. */
-export function EditableInfoCard({ title, fields, action, children }: { title: string; fields: EditField[]; action?: ReactNode; children?: ReactNode }) {
+export function EditableInfoCard({ title, fields, action, children, onSave }: { title: string; fields: EditField[]; action?: ReactNode; children?: ReactNode; onSave?: () => Promise<boolean> }) {
   const [editing, setEditing] = useState(false);
   return (
     <InfoCard title={title} action={action ?? (editing ? <span /> : <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>)}>
       {editing ? (
-        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} />
+        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} onSave={onSave} />
       ) : (
         <InfoGrid>{fields.map((f) => <InfoRow key={f.label} label={f.label} />)}</InfoGrid>
       )}
