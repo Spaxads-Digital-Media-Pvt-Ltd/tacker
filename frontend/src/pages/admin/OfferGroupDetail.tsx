@@ -36,7 +36,7 @@ function StatsCard({ id }: { id: string }) {
           <thead className="text-tiny uppercase tracking-wide text-fg-secondary">
             <tr><th className="pb-2 pr-4 font-semibold">Revenue</th><th className="pb-2 pr-4 font-semibold">Payout</th><th className="pb-2 pr-4 font-semibold">Margin</th><th className="pb-2 pr-4 font-semibold">Clicks</th><th className="pb-2 pr-4 font-semibold">CV</th><th className="pb-2 font-semibold">CVR</th></tr>
           </thead>
-          <tbody>
+          <tbody className="tabular-nums">
             <tr>
               <td className="pr-4 pt-1">{fmtMoney(data?.revenue)}</td><td className="pr-4 pt-1">{fmtMoney(data?.payout)}</td><td className="pr-4 pt-1">{fmtMoney(data?.margin)}</td>
               <td className="pr-4 pt-1">{data?.clicks ?? 0}</td><td className="pr-4 pt-1">{data?.cv ?? 0}</td><td className="pt-1">{((data?.cvr ?? 0) * 100).toFixed(2)}%</td>
@@ -51,23 +51,34 @@ function StatsCard({ id }: { id: string }) {
 const CAP_TYPE_ROW_LABEL: Record<string, string> = { clicks: 'Clicks', conversions: 'Conversions', payout: 'Payout', revenue: 'Revenue' };
 
 function CapsCard({ data, id, nav }: { data: OfferGroup; id: string; nav: (p: string) => void }) {
+  const fmt = (v: number | null | undefined) => (v == null ? '-' : v.toLocaleString());
   return (
     <InfoCard title="Caps" action={<button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => nav(`/app/offers-groups/${id}/edit?tab=tracking`)}><Pencil size={12} />Edit</button>}>
-      <div className="overflow-x-auto rounded-card border border-border">
-        <table className="w-full min-w-[480px] text-left text-small">
-          <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
-            <tr><th className="px-4 py-2">Type</th>{TIME_INTERVALS.map((i) => <th key={i} className="px-4 py-2">{TIME_INTERVAL_LABEL[i]}</th>)}</tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {CAP_TYPES.map((t) => (
-              <tr key={t.key}>
-                <td className="px-4 py-2 font-medium text-fg">{CAP_TYPE_ROW_LABEL[t.key]}</td>
-                {TIME_INTERVALS.map((i) => <td key={i} className="px-4 py-2 text-fg-secondary">{data.caps[t.key]?.[i] ?? '-'}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {!data.capsEnabled ? (
+        <p className="text-small text-fg-muted">Caps are not enabled for this group.</p>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-card border border-border">
+            <table className="w-full min-w-[480px] text-left text-small">
+              <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
+                <tr><th className="px-4 py-2">Type</th>{TIME_INTERVALS.map((i) => <th key={i} className="px-4 py-2 text-right">{TIME_INTERVAL_LABEL[i]}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {CAP_TYPES.map((t) => (
+                  <tr key={t.key}>
+                    <td className="px-4 py-2 font-medium text-fg">{CAP_TYPE_ROW_LABEL[t.key]}</td>
+                    {TIME_INTERVALS.map((i) => <td key={i} className="px-4 py-2 text-right tabular-nums text-fg-secondary">{fmt(data.caps[t.key]?.[i])}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] text-fg-muted">
+            Stored for reference and reporting. Group-level shared caps aren't enforced at the click hot path yet — only each
+            member offer's own Daily Click Cap is.
+          </p>
+        </>
+      )}
     </InfoCard>
   );
 }
@@ -145,20 +156,22 @@ export default function OfferGroupDetail() {
       {tab === 'History' ? <HistoryTab id={id} />
         : tab === 'Offers' ? <OffersTab data={data} offers={offers ?? []} advertisers={advertisers ?? []} />
         : (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
             <InfoCard title="General" action={<button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => nav(`/app/offers-groups/${id}/edit`)}><Pencil size={12} />Edit</button>}>
               <InfoGrid>
-                <InfoRow label="ID" value={data.ref} />
+                <InfoRow label="ID" value={<span className="tabular-nums">{data.ref}</span>} />
                 <InfoRow label="Status" value={data.status === 'active' ? 'Active' : data.status === 'paused' ? 'Paused' : 'Deleted'} />
                 <InfoRow label="Name" value={data.name} />
                 <InfoRow label="Modified" value={<DateTimeValue iso={data.updatedAt} />} />
                 <InfoRow label="Advertiser" value={advertiser ? <Link to={`/app/advertisers/${advertiser.id}`} className="text-accent-text hover:underline">{advertiser.name}</Link> : undefined} />
                 <InfoRow label="Created" value={<DateTimeValue iso={data.createdAt} />} />
+                <InfoRow label="Currency" value={data.currency} />
                 <InfoRow label="Labels" value={data.labels} />
+                <InfoRow label="Notes" value={data.notes} />
               </InfoGrid>
             </InfoCard>
             <StatsCard id={id} />
-            <CapsCard data={data} id={id} nav={nav} />
+            <div className="xl:col-span-2"><CapsCard data={data} id={id} nav={nav} /></div>
           </div>
         )}
     </>

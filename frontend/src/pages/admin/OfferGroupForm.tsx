@@ -11,7 +11,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
+import { PageHeader, Field, Segmented } from '../../components/ui';
 import { DualListPicker } from '../../components/DualListPicker';
 import { CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL, CURRENCIES, type OfferGroup } from '../../data/offerGroups';
 import type { Advertiser, Offer } from '../../types';
@@ -102,6 +102,7 @@ export default function OfferGroupForm() {
     <>
       <PageHeader title={isEdit ? `Edit Offer Group${existing ? `: ${existing.name}` : ''}` : 'Add Offer Group'} subtitle={`Offers › Groups › ${isEdit ? 'Edit' : 'Add'}`} />
 
+      <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center gap-6 border-b border-border pb-4">
         {(['General', 'Tracking & Controls'] as const).map((label, i) => {
           const n = (i + 1) as 1 | 2;
@@ -123,14 +124,12 @@ export default function OfferGroupForm() {
           <div className="space-y-4">
             <div className="max-w-md"><Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
             <div className="max-w-md"><Field label="Status *">
-              <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-                {(['active', 'paused', 'deleted'] as const).map((s) => (
-                  <button key={s} type="button" onClick={() => setStatus(s)}
-                    className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-small capitalize ${status === s ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>
-                    <span className={`h-2 w-2 rounded-full ${s === 'active' ? 'bg-success' : s === 'paused' ? 'bg-warning' : 'bg-danger'}`} />{s}
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                options={['active', 'paused', 'deleted']}
+                value={status}
+                onChange={(v) => setStatus(v as typeof status)}
+                dots={{ active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' }}
+              />
             </Field></div>
 
             <div className="flex max-w-2xl items-end gap-2">
@@ -164,6 +163,10 @@ export default function OfferGroupForm() {
                 <span className="rounded-full bg-surface px-2 py-1 shadow-sm">{capsEnabled ? 'Yes' : 'No'}</span>
               </button>
             </Field>
+            <p className="text-[11px] text-fg-muted">
+              Stored on the group for reference and reporting. Group-level shared caps aren't enforced at the click hot path yet —
+              only each offer's own Daily Click Cap is (Offer → Tracking &amp; Controls).
+            </p>
 
             {capsEnabled && (
               <div className="rounded-card border border-border bg-page p-4">
@@ -197,20 +200,21 @@ export default function OfferGroupForm() {
             )}
           </div>
         )}
-      </div>
 
-      <div className="mt-4 flex justify-end gap-2">
-        {step === 1 ? (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-groups')}>Cancel</button>
-            <button type="button" className="btn-primary" disabled={!name || !advertiserId || offerIds.length === 0} onClick={() => setStep(2)}>Next</button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
-            <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-          </>
-        )}
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          {step === 1 ? (
+            <>
+              <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-groups')}>Cancel</button>
+              <button type="button" className="btn-primary" disabled={!name || !advertiserId || offerIds.length === 0} onClick={() => setStep(2)}>Next</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
+              <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+            </>
+          )}
+        </div>
+      </div>
       </div>
     </>
   );

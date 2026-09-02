@@ -210,7 +210,7 @@ export default function OfferCreate() {
               </div>
             </div>
             <div>
-              <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group so it shares that group's caps and reporting. You can also change this later from the group." /></label>
+              <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
               <div className="flex flex-wrap items-center gap-2">
                 <YesNoToggle on={assignGroup} onChange={setAssignGroup} />
                 {assignGroup && (

@@ -6,12 +6,11 @@
  * reference exactly — "+ Offer Group" and a group's Name navigate to real dedicated pages rather
  * than a modal.
  */
-import { useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, Filter } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, TableScroll } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { fmtMoney, type OfferGroup } from '../../data/offerGroups';
@@ -26,7 +25,6 @@ function capCell(v: number | null | undefined, money: boolean) {
 }
 
 function TableActionsMenu({ rows, advName }: { rows: OfferGroup[]; advName: (id: string | null) => string }) {
-  const [open, setOpen] = useState(false);
   const [subOpen, setSubOpen] = useState(false);
   const exportRows = () => rows.map((r) => ({
     ID: r.ref, Name: r.name, Advertiser: advName(r.advertiserId), Offers: r.offerIds.length,
@@ -35,56 +33,42 @@ function TableActionsMenu({ rows, advName }: { rows: OfferGroup[]; advName: (id:
     'Daily Click Cap': r.caps.clicks?.daily ?? 'N/A', 'Daily Conversion Cap': r.caps.conversions?.daily ?? 'N/A',
   }));
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && (
+    <MenuPopover
+      ariaLabel="Table Actions" align="end" width="w-48"
+      triggerClassName="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+      onOpenChange={(o) => { if (!o) setSubOpen(false); }}
+    >
+      {({ close }) => (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSubOpen(false); }} />
-          <div className="absolute right-0 z-20 mt-1 w-48 rounded-card border border-border bg-elevated p-1 shadow-elevated">
-            <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
-            <div className="relative">
-              <button type="button" onClick={() => setSubOpen((o) => !o)}
-                className="flex w-full items-center justify-between rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">
-                Export <ChevronRight size={13} />
-              </button>
-              {subOpen && (
-                <div className="absolute left-full top-0 z-30 ml-1 w-36 rounded-card border border-border bg-elevated p-1 shadow-elevated">
-                  <button type="button" onClick={() => { downloadCsv('offer-groups.csv', exportRows()); setOpen(false); setSubOpen(false); }}
-                    className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">CSV</button>
-                  <button type="button" onClick={() => { downloadXlsx('offer-groups.xlsx', exportRows()); setOpen(false); setSubOpen(false); }}
-                    className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Excel</button>
-                </div>
-              )}
-            </div>
+          <p className="px-3 py-1.5 text-small font-semibold text-fg">Table Actions</p>
+          <div className="relative">
+            <button type="button" onClick={() => setSubOpen((o) => !o)}
+              className="flex w-full items-center justify-between whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-page">
+              Export <ChevronRight size={13} className="text-fg-muted" />
+            </button>
+            {subOpen && (
+              <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                <MenuItem onSelect={() => { downloadCsv('offer-groups.csv', exportRows()); close(); }}>CSV</MenuItem>
+                <MenuItem onSelect={() => { downloadXlsx('offer-groups.xlsx', exportRows()); close(); }}>Excel</MenuItem>
+              </div>
+            )}
           </div>
         </>
       )}
-    </div>
+    </MenuPopover>
   );
 }
 
 function RowMenu({ onEdit }: { onEdit: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const openMenu = () => {
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    setOpen((o) => !o);
-  };
   return (
-    <div className="relative">
-      <button ref={btnRef} type="button" onClick={openMenu} className="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && createPortal(
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-            <button type="button" onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Edit</button>
-          </div>
-        </>,
-        document.body,
-      )}
-    </div>
+    <MenuPopover
+      ariaLabel="Offer group actions" align="end" width="w-40"
+      triggerClassName="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+    >
+      {({ close }) => <MenuItem onSelect={() => { close(); onEdit(); }}>Edit</MenuItem>}
+    </MenuPopover>
   );
 }
 
@@ -155,14 +139,14 @@ export default function OfferGroups() {
                       <td className="px-4 py-3 tabular-nums text-fg-secondary">{r.ref}</td>
                       <td className="px-4 py-3"><button className="font-medium text-accent-text hover:underline" onClick={() => nav(`/app/offers-groups/${r.id}`)}>{r.name}</button></td>
                       <td className="px-4 py-3 text-accent-text">{advName(r.advertiserId)}</td>
-                      <td className="px-4 py-3 text-fg-secondary">{r.offerIds.length}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small">{(r.today?.clicks ?? 0).toLocaleString()}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small">{fmtMoney(r.today?.payout)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small">{fmtMoney(r.today?.revenue)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small">{r.capsEnabled ? capCell(r.caps.payout?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small">{r.capsEnabled ? capCell(r.caps.revenue?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small">{r.capsEnabled ? capCell(r.caps.clicks?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small">{r.capsEnabled ? capCell(r.caps.conversions?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="px-4 py-3 tabular-nums text-fg-secondary">{r.offerIds.length}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{(r.today?.clicks ?? 0).toLocaleString()}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{fmtMoney(r.today?.payout)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{fmtMoney(r.today?.revenue)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.payout?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.revenue?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.clicks?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.conversions?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end">
                           <RowMenu onEdit={() => nav(`/app/offers-groups/${r.id}/edit`)} />

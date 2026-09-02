@@ -29,7 +29,7 @@ export const TIME_INTERVALS = ['daily', 'weekly', 'monthly', 'global'] as const;
 export const TIME_INTERVAL_LABEL: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', global: 'Global' };
 
 export function fmtMoney(v: string | number | undefined): string {
-  return `$${Number(v ?? 0).toFixed(2)}`;
+  return `$${Number(v ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function fmtDateTime(iso: string) {

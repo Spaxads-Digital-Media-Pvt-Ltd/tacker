@@ -248,17 +248,39 @@ async function main(): Promise<void> {
       }
     }
 
-    // ── 8. offer groups ─────────────────────────────────────────────────────────────────────
-    const GROUPS: [name: string, offerNames: string[]][] = [
-      ['US Nutrition Portfolio', ['Globex Daily Greens Trial - US', 'Globex Sleep Formula - US', 'Globex Keto Bundle — US', 'Northwind Meal-Prep Subscription — US']],
-      ['EU Finance Launch', ['Sterling Personal Loan — UK', 'Sterling Balance-Transfer Card — UK']],
-      ['Mobile Gaming Bundle', ['Pixel Forge: Dragon Realm — Global Install', 'Pixel Forge: Idle Tycoon — US/CA']],
+    // ── 8. offer groups — advertiser + currency + labels + a real caps matrix on two of them ──
+    //    NB: group-level caps are stored config only — nothing on the click hot path enforces a
+    //    *shared* group cap today (only per-offer daily_click_cap enforces). Seeded for UI coverage.
+    const GROUPS: { name: string; offerNames: string[]; labels: string; caps: string | null }[] = [
+      {
+        name: 'US Nutrition Portfolio',
+        offerNames: ['Globex Daily Greens Trial - US', 'Globex Sleep Formula - US', 'Globex Keto Bundle — US', 'Northwind Meal-Prep Subscription — US'],
+        labels: 'nutrition,us',
+        caps: '{"clicks":{"daily":50000,"monthly":1200000},"conversions":{"daily":2500},"payout":{"daily":8000}}',
+      },
+      {
+        name: 'EU Finance Launch',
+        offerNames: ['Sterling Personal Loan — UK', 'Sterling Balance-Transfer Card — UK'],
+        labels: 'finance,eu',
+        caps: '{"revenue":{"daily":15000,"weekly":90000},"clicks":{"daily":20000}}',
+      },
+      {
+        name: 'Mobile Gaming Bundle',
+        offerNames: ['Pixel Forge: Dragon Realm — Global Install', 'Pixel Forge: Idle Tycoon — US/CA'],
+        labels: 'gaming,mobile',
+        caps: null,
+      },
     ];
-    for (const [name, offerNames] of GROUPS) {
-      const ids = offerNames.map(offer);
+    for (const g of GROUPS) {
+      const ids = g.offerNames.map(offer);
+      const advId = (await db.query<{ advertiser_id: string | null }>(
+        `SELECT advertiser_id FROM offers WHERE id = $1`, [ids[0]])).rows[0]?.advertiser_id ?? null;
       await db.query(
-        `INSERT INTO offer_groups (network_id, name, offer_ids, status) VALUES ($1, $2, $3::jsonb, 'active')`,
-        [netId, name, JSON.stringify(ids)],
+        `INSERT INTO offer_groups (network_id, name, advertiser_id, offer_ids, currency, labels, notes, status, caps_enabled, caps)
+         VALUES ($1, $2, $3, $4::jsonb, 'USD', $5, $6, 'active', $7, $8::jsonb)`,
+        [netId, g.name, advId, JSON.stringify(ids), g.labels,
+          g.caps ? `Curated ${g.name.toLowerCase()} — review caps monthly.` : null,
+          g.caps != null, g.caps ?? '{}'],
       );
     }
 
