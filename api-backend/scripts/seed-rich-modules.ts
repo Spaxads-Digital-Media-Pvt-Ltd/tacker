@@ -78,7 +78,7 @@ async function main(): Promise<void> {
       'publisher_postbacks', 'traffic_blockings', 'traffic_sources', 'traffic_controls',
       'offer_coupons', 'partner_invoices', 'advertiser_invoices',
       'custom_field_defs', 'custom_metrics',
-      'offer_creatives', 'offer_templates', 'offer_goals', 'offer_deals',
+      'offer_creatives', 'offer_custom_settings', 'offer_templates', 'offer_goals', 'offer_deals',
       'smart_link_items', 'smart_links', 'smartswitch_rules',
       'customer_value_rule_firings', 'customer_value_rules', 'customer_data_points',
       'email_messages', 'email_templates', 'audiences', 'banners',
@@ -402,6 +402,33 @@ async function main(): Promise<void> {
         `INSERT INTO offer_creatives (network_id, offer_id, name, type, url, html, width, height, language, status, visible_to_partners, email_from, email_subject)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,NULL)`,
         [netId, o.id, `${o.name.slice(0, 24)} — ${ec.name}`, ec.type, ec.url, ec.html, ec.w, ec.h, ec.lang, ec.status, ec.vis]);
+    }
+
+    // ═══ 11b. Offer Custom Settings (Offers › Custom Settings) — a network-wide reference catalog
+    //     across five categories. NOT enforced anywhere (see offer-custom-settings/routes.ts);
+    //     seeded so the list + Offer-detail accordions have data to show and filter.
+    const OCS: { category: string; name: string; oi: number; event: string | null; value: string | null; description: string | null; publicDescription: string | null; pn: number; status: string }[] = [
+      { category: 'revenue_payout', name: 'Q1 VIP payout bump', oi: 0, event: 'lead', value: '18.00', description: 'Manually agreed with advertiser for Q1', publicDescription: 'Higher payout this quarter', pn: 2, status: 'active' },
+      { category: 'revenue_payout', name: 'EU revenue uplift', oi: 2, event: 'sale', value: '32.00', description: 'FX-adjusted', publicDescription: null, pn: 0, status: 'active' },
+      { category: 'revenue_payout', name: 'Legacy CPL rate', oi: 4, event: 'lead', value: '9.50', description: null, publicDescription: null, pn: 1, status: 'paused' },
+      { category: 'caps', name: 'Weekend click ceiling', oi: 0, event: 'Daily Click Cap', value: '25000', description: null, publicDescription: null, pn: 0, status: 'active' },
+      { category: 'caps', name: 'Trial conversion cap', oi: 2, event: 'Daily Conversion Cap', value: '400', description: 'Advertiser inventory limit', publicDescription: null, pn: 0, status: 'active' },
+      { category: 'caps', name: 'Lifetime cap — launch', oi: 3, event: 'Total Conversion Cap', value: '10000', description: null, publicDescription: null, pn: 1, status: 'paused' },
+      { category: 'throttle_rates', name: 'Slow ramp — new geo', oi: 1, event: null, value: '40', description: 'https://lp.demo.test/holding', publicDescription: null, pn: 0, status: 'active' },
+      { category: 'throttle_rates', name: 'Datacenter shave', oi: 5, event: null, value: '15', description: null, publicDescription: null, pn: 2, status: 'active' },
+      { category: 'landing_pages', name: 'Mobile-optimised LP', oi: 0, event: '60', value: 'https://lp.demo.test/m/offer', description: null, publicDescription: null, pn: 0, status: 'active' },
+      { category: 'landing_pages', name: 'A/B variant B', oi: 0, event: '40', value: 'https://lp.demo.test/b/offer', description: null, publicDescription: null, pn: 0, status: 'active' },
+      { category: 'landing_pages', name: 'German LP', oi: 2, event: '100', value: 'https://lp.demo.test/de/offer', description: null, publicDescription: null, pn: 1, status: 'paused' },
+      { category: 'creatives', name: 'Hero banner 970x250', oi: 1, event: '70', value: 'hero-970x250.jpg', description: null, publicDescription: null, pn: 0, status: 'active' },
+      { category: 'creatives', name: 'Story video 9:16', oi: 4, event: '30', value: 'story-vertical.mp4', description: null, publicDescription: null, pn: 0, status: 'active' },
+    ];
+    for (const s of OCS) {
+      const o = offers[s.oi % offers.length]!;
+      const partnerIds = publishers.slice(0, s.pn).map((p) => p.id);
+      await db.query(
+        `INSERT INTO offer_custom_settings (network_id, category, name, offer_id, partner_ids, description, public_description, event, value, status)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10)`,
+        [netId, s.category, s.name, o.id, JSON.stringify(partnerIds), s.description, s.publicDescription, s.event, s.value, s.status]);
     }
 
     // ═══ 12. Offer Templates (Offers › Templates) ═══════════════════════════════════════
@@ -769,6 +796,7 @@ async function main(): Promise<void> {
       custom_field_defs: await c('custom_field_defs'),
       custom_metrics: await c('custom_metrics'),
       offer_creatives: await c('offer_creatives'),
+      offer_custom_settings: await c('offer_custom_settings'),
       offer_templates: await c('offer_templates'),
       offer_goals: await c('offer_goals'),
       offer_deals: await c('offer_deals'),

@@ -2,6 +2,13 @@
  * Offer Custom Settings (Offers-flyout parity) — network-wide, category-grouped view (Revenue &
  * Payout / Caps / Throttle Rates / Landing Pages / Creatives), distinct from each Offer's own
  * per-country geo-rules. Tenant-scoped by network_id (spec §3A).
+ *
+ * NB: these rows are a reference catalog only. Nothing in surfaces/tracking, surfaces/workers or the
+ * ledger reads offer_custom_settings — cap enforcement uses the offer's own daily_click_cap /
+ * daily_conversion_cap (surfaces/tracking/caps.ts), and payout/revenue/destination overrides live on
+ * offer_geo_rules (per-country, applied at /click and frozen onto the click for the ledger). CRUD
+ * here + Copy Offer / Copy Settings (which duplicate the rows) are the only consumers. Wiring any of
+ * these categories into the click/ledger path is a separate, not-yet-built concern.
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -27,6 +34,10 @@ const dto = (r: Row) => ({
   status: r.status, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
+// `event` and `value` are generic text columns re-labelled per category (cap amount, throttle %,
+// weight, URL, creative name). The dashboard forms coerce number-typed inputs to JS numbers, so
+// accept a number here and normalise to string.
+const textOrNumber = z.union([z.string(), z.number().transform((n) => String(n))]).nullable().optional();
 const createSchema = z.object({
   category: z.enum(CATEGORIES),
   name: z.string().min(1).max(200),
@@ -34,8 +45,8 @@ const createSchema = z.object({
   partnerIds: z.array(z.string().uuid()).default([]),
   description: z.string().nullable().optional(),
   publicDescription: z.string().nullable().optional(),
-  event: z.string().nullable().optional(),
-  value: z.string().nullable().optional(),
+  event: textOrNumber,
+  value: textOrNumber,
   status: z.enum(['active', 'paused']).default('active'),
 });
 const updateSchema = createSchema.partial();

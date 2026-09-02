@@ -24,6 +24,16 @@ const ADD_LABEL: Record<Tab, string> = {
   'Landing Pages': 'Landing Page', Creatives: 'Creative',
 };
 
+/** These rows are a reference catalog — nothing here is applied at the click / ledger path yet
+ * (see api-backend offer-custom-settings/routes.ts). Each tab points at the mechanism that IS live. */
+const NOT_ENFORCED_NOTE: Record<Tab, string> = {
+  'Revenue & Payout': 'Reference list. Enforced payout/revenue overrides are per-country — set them on the offer (Offer → Custom Settings → Custom Payout Revenue Settings); those are applied at /click and frozen onto the click for the ledger.',
+  Caps: 'Reference list — not applied at the click path. The enforced caps are each offer’s own Daily Click / Conversion Cap (Offer → Tracking & Controls).',
+  'Throttle Rates': 'Reference list — traffic throttling is not applied at the click path yet.',
+  'Landing Pages': 'Reference list — the click path serves the offer’s Destination URL (or a per-country Destination override). Custom landing pages here are not served yet.',
+  Creatives: 'Reference list. Partner-facing creative assets live in Offers → Creatives.',
+};
+
 /** Offers › Custom Settings — network-wide counterpart to each Offer's own per-country geo-rules.
  * Groups by Partner/Event instead of country. `value`/`event` are the schema's shared generic
  * columns, re-labeled per category below (cap amount, throttle %, landing-page URL, creative name). */
@@ -44,7 +54,7 @@ export default function OfferCustomSettingsGlobal() {
       col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
       col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
       col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => count(r.partnerIds)),
+      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
       col('Description', (r) => (r.description ? String(r.description) : '—')),
       col('Public Description', (r) => (r.publicDescription ? String(r.publicDescription) : '—')),
       col('Event', (r) => (r.event ? String(r.event) : '—')),
@@ -53,33 +63,33 @@ export default function OfferCustomSettingsGlobal() {
       col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
       col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
       col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => count(r.partnerIds)),
+      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
       col('Cap Type', (r) => (r.event ? String(r.event) : '—')),
-      col('Cap Value', (r) => (r.value ? String(r.value) : '—')),
+      col('Cap Value', (r) => <span className="tabular-nums">{r.value ? Number(r.value).toLocaleString() : '—'}</span>),
     ],
     'Throttle Rates': [
       col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
       col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
       col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => count(r.partnerIds)),
-      col('Throttle Rate', (r) => (r.value ? `${r.value}%` : '—')),
+      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
+      col('Throttle Rate', (r) => <span className="tabular-nums">{r.value ? `${r.value}%` : '—'}</span>),
       col('Redirect', (r) => (r.description ? String(r.description) : '—')),
     ],
     'Landing Pages': [
       col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
       col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
       col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => count(r.partnerIds)),
+      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
       col('URL', (r) => (r.value ? String(r.value) : '—')),
-      col('Weight', (r) => (r.event ? String(r.event) : '—')),
+      col('Weight', (r) => <span className="tabular-nums">{r.event ? String(r.event) : '—'}</span>),
     ],
     Creatives: [
       col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
       col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
       col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => count(r.partnerIds)),
+      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
       col('Creative', (r) => (r.value ? String(r.value) : '—')),
-      col('Weight', (r) => (r.event ? String(r.event) : '—')),
+      col('Weight', (r) => <span className="tabular-nums">{r.event ? String(r.event) : '—'}</span>),
     ],
   };
 
@@ -119,6 +129,7 @@ export default function OfferCustomSettingsGlobal() {
     <>
       <PageHeader title="Manage Custom Settings" subtitle="Offers › Custom Settings › Manage" />
       <Tabs tabs={[...TABS]} active={tab} onChange={(t) => setTab(t as Tab)} />
+      <p className="mb-4 rounded-card border border-border bg-page px-3 py-2 text-[11px] text-fg-muted">{NOT_ENFORCED_NOTE[tab]}</p>
       {!offers ? (
         <StateBlock><Spinner /></StateBlock>
       ) : (
@@ -129,6 +140,8 @@ export default function OfferCustomSettingsGlobal() {
           addLabel={ADD_LABEL[tab]}
           emptyText="No custom settings yet."
           editable
+          searchKeys={['name', 'description', 'publicDescription', 'value', 'event']}
+          searchPlaceholder="Search by name…"
           fields={fields}
           columns={columns}
         />

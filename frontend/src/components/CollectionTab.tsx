@@ -7,6 +7,7 @@
  * CRUD targets `${basePath}` (POST) and `${basePath}/${row.id}` (PATCH/DELETE).
  */
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Search } from 'lucide-react';
 import { api } from '../lib/api';
 import { useQuery, useMutation } from '../lib/useApi';
 import { Table, Modal, Field, Spinner, StateBlock, type Column } from './ui';
@@ -60,7 +61,7 @@ function toBody(fields: FieldDef[], form: Record<string, string | boolean>): Rec
 }
 
 export function CollectionTab({
-  basePath, listPath, fields, columns, addLabel, emptyText, editable = false,
+  basePath, listPath, fields, columns, addLabel, emptyText, editable = false, searchKeys, searchPlaceholder = 'Search…',
 }: {
   basePath: string;
   /** GET target, if it needs query params (e.g. a category filter) that mustn't leak into the
@@ -71,10 +72,20 @@ export function CollectionTab({
   addLabel: string;
   emptyText: string;
   editable?: boolean;
+  /** When set, renders a search box that client-side filters the fetched rows by these row keys. */
+  searchKeys?: string[];
+  searchPlaceholder?: string;
 }) {
   const { data, loading, error, refetch } = useQuery<Row[]>(listPath ?? basePath);
   const [open, setOpen] = useState(false);
   const [editRow, setEditRow] = useState<Row | null>(null);
+  const [q, setQ] = useState('');
+
+  const shown = useMemo(() => {
+    if (!data || !searchKeys?.length || !q.trim()) return data;
+    const needle = q.trim().toLowerCase();
+    return data.filter((row) => searchKeys.some((k) => String(row[k] ?? '').toLowerCase().includes(needle)));
+  }, [data, searchKeys, q]);
 
   const del = useMutation((id: string) => api.del(`${basePath}/${id}`));
   const withActions = useMemo<Column<Row>[]>(() => [
@@ -93,13 +104,20 @@ export function CollectionTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {searchKeys?.length ? (
+          <div className="relative mr-auto">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={searchPlaceholder} className="input !w-full sm:!w-64 !pl-8" />
+          </div>
+        ) : null}
         <button className="btn-primary" onClick={() => setOpen(true)}>{addLabel}</button>
       </div>
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
         : !data || data.length === 0 ? <StateBlock>{emptyText}</StateBlock>
-        : <Table columns={withActions} rows={data} rowKey={(r) => r.id} />}
+        : !shown || shown.length === 0 ? <StateBlock>No rows match “{q}”.</StateBlock>
+        : <Table columns={withActions} rows={shown} rowKey={(r) => r.id} />}
 
       {open && <FormModal title={addLabel} fields={fields}
         onSubmit={(body) => api.post(basePath, body)}
