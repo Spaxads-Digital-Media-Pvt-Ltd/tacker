@@ -1,7 +1,17 @@
 /**
- * SmartSwitch (Offers-flyout parity) — automatic optimization/fraud-protection rules. Every
- * create/update/delete auto-appends a row to smartswitch_history, so the History sub-tab is a
- * genuine audit trail rather than a static shell. Tenant-scoped by network_id (spec §3A).
+ * SmartSwitch (Offers-flyout parity) — "automatic optimization / fraud-protection" rules.
+ *
+ * NB: smartswitch_rules is a reference catalog only. Nothing evaluates these rules — there is no
+ * repeatable worker / cron / tracking hook that reads smartswitch_rules, so no rule ever fires
+ * (action / action_delay / variable / actionable_variables are stored, never read). The live
+ * "auto fraud protection" in this codebase is the async fraud-scan worker (lib/fraud/scan.ts →
+ * Alerts), per-offer caps (tracking/caps.ts) and Traffic Controls / Blocking (/click enforcement).
+ * Wiring a real SmartSwitch evaluator (a repeatable job that scores each rule's variable over its
+ * window and applies the action) is a separate, not-yet-built concern.
+ *
+ * What IS real here: CRUD, and the History sub-tab — every create/update/delete auto-appends a row
+ * to smartswitch_history, so History is a genuine audit trail of rule *changes* (not rule firings).
+ * Tenant-scoped by network_id (spec §3A).
  */
 import { Router } from 'express';
 import { z } from 'zod';

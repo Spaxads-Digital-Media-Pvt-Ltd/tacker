@@ -6,9 +6,13 @@ import { CollectionTab, type FieldDef } from '../../components/CollectionTab';
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => ReactNode): Column<Row> => ({ header, cell });
 const fmt = (iso: unknown) => (iso ? new Date(String(iso)).toLocaleString() : '—');
-const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
+const count = (v: unknown) => <span className="tabular-nums">{Array.isArray(v) ? v.length : 0}</span>;
 
 const TABS = ['Rules', 'History'] as const;
+
+function Note({ children }: { children: ReactNode }) {
+  return <p className="mb-4 rounded-card border border-border bg-page px-3 py-2 text-[11px] text-fg-muted">{children}</p>;
+}
 
 const ruleColumns: Column<Row>[] = [
   col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
@@ -47,14 +51,21 @@ const historyColumns: Column<Row>[] = [
 
 function HistoryPanel() {
   const { data, loading, error } = useQuery<Row[]>('/api/smartswitch/history');
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  if (error) return <StateBlock>{error}</StateBlock>;
-  if (!data || data.length === 0) return <StateBlock>No changes recorded yet.</StateBlock>;
-  return <Table columns={historyColumns} rows={data} rowKey={(r) => r.id} />;
+  return (
+    <>
+      <Note>This is a real audit trail of rule <em>changes</em> (create / update / delete) — not of rule executions. SmartSwitch does not run rules yet.</Note>
+      {loading ? <StateBlock><Spinner /></StateBlock>
+        : error ? <StateBlock>{error}</StateBlock>
+        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
+        : <Table columns={historyColumns} rows={data} rowKey={(r) => r.id} />}
+    </>
+  );
 }
 
-/** Offers › SmartSwitch — automatic optimization/fraud-protection rules. Every rule mutation is
- * auto-logged server-side to smartswitch_history, so History is a genuine audit trail. */
+/** Offers › SmartSwitch — "automatic optimization / fraud-protection" rules. IMPORTANT: nothing
+ * evaluates these rules today (no worker / cron / tracking hook reads smartswitch_rules), so no
+ * rule fires. CRUD + the auto-logged History audit trail are the only real parts — see
+ * api-backend smartswitch/routes.ts. */
 export default function OfferSmartSwitch() {
   const [tab, setTab] = useState<(typeof TABS)[number]>('Rules');
   return (
@@ -62,14 +73,25 @@ export default function OfferSmartSwitch() {
       <PageHeader title="Manage Rules" subtitle="Offers › SmartSwitch › Manage" />
       <Tabs tabs={[...TABS]} active={tab} onChange={(t) => setTab(t as (typeof TABS)[number])} />
       {tab === 'Rules' ? (
-        <CollectionTab
-          basePath="/api/smartswitch/rules"
-          addLabel="New Rule"
-          emptyText="No SmartSwitch rules yet."
-          editable
-          fields={ruleFields}
-          columns={ruleColumns}
-        />
+        <>
+          <Note>
+            Rules are stored as a reference catalog — SmartSwitch does not auto-optimize, auto-pause or
+            send notifications yet, so no rule here fires. The live automatic protection in this build is
+            the async fraud scan (Reports → Fraud / Alerts), each offer’s own caps (Offer → Tracking &amp;
+            Controls) and Traffic Controls / Traffic Blocking (enforced at the click). The History tab is
+            a genuine audit trail of rule changes.
+          </Note>
+          <CollectionTab
+            basePath="/api/smartswitch/rules"
+            addLabel="New Rule"
+            emptyText="No SmartSwitch rules yet."
+            editable
+            searchKeys={['name', 'variable', 'actionableVariables', 'action', 'actionDelay']}
+            searchPlaceholder="Search by name…"
+            fields={ruleFields}
+            columns={ruleColumns}
+          />
+        </>
       ) : (
         <HistoryPanel />
       )}

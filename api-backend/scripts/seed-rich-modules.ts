@@ -79,7 +79,7 @@ async function main(): Promise<void> {
       'offer_coupons', 'partner_invoices', 'advertiser_invoices',
       'custom_field_defs', 'custom_metrics',
       'offer_creatives', 'offer_custom_settings', 'offer_templates', 'offer_goals', 'offer_deals',
-      'smart_link_items', 'smart_links', 'smartswitch_rules',
+      'smart_link_items', 'smart_links', 'smartswitch_history', 'smartswitch_rules',
       'customer_value_rule_firings', 'customer_value_rules', 'customer_data_points',
       'email_messages', 'email_templates', 'audiences', 'banners',
       'advertiser_link_templates', 'advertiser_postback_controls', 'advertiser_tiered_commissions',
@@ -526,16 +526,20 @@ async function main(): Promise<void> {
             pick([null, 'US', 'GB', 'DE'], it), null, it]);
       }
     }
-    const SWITCH_RULES = [
-      { name: 'Pause on low EPC', action: 'notify', variable: 'epc' },
-      { name: 'Block offers over cap', action: 'block', variable: 'daily_cap' },
+    // SmartSwitch rules — a reference catalog only (nothing evaluates them; see
+    // dashboard/smartswitch/routes.ts). Seeded with variety so the list + search have data.
+    const SWITCH_RULES: { name: string; action: string; delay: string; variable: string; actionable: string | null; nOffers: number; status: string }[] = [
+      { name: 'Pause on low EPC', action: 'notify', delay: '1h', variable: 'epc', actionable: 'epc,cvr', nOffers: 3, status: 'active' },
+      { name: 'Block offers over daily cap', action: 'block', delay: '15m', variable: 'daily_cap', actionable: null, nOffers: 3, status: 'active' },
+      { name: 'Notify on conversion-rate drop', action: 'notify', delay: '30m', variable: 'conversion_rate', actionable: 'cvr', nOffers: 5, status: 'active' },
+      { name: 'Block on datacenter spike', action: 'block', delay: '5m', variable: 'datacenter_pct', actionable: 'fraud_score', nOffers: 2, status: 'paused' },
     ];
     for (const r of SWITCH_RULES) {
       await db.query(
         `INSERT INTO smartswitch_rules (network_id, name, action, action_delay, variable, actionable_variables, offer_ids, advertiser_ids, partner_ids, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,'active')`,
-        [netId, r.name, r.action, '1h', r.variable, null,
-          JSON.stringify(offers.slice(0, 3).map((o) => o.id)), '[]', '[]']);
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10)`,
+        [netId, r.name, r.action, r.delay, r.variable, r.actionable,
+          JSON.stringify(offers.slice(0, r.nOffers).map((o) => o.id)), '[]', '[]', r.status]);
     }
 
     // ═══ 15. Customer Value (data points / rules / firings) ════════════════════════════
