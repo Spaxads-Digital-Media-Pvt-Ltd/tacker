@@ -60,8 +60,9 @@ function fromProfile(p: MarketplaceProfile): Draft {
   };
 }
 function toPreviewProfile(d: Draft): MarketplaceProfile {
+  const logoUrl = normalizeLogoUrl(d.logoUrl).url || null;
   return {
-    id: 'draft', name: d.name || 'Your Company', description: d.description || null, logoUrl: d.logoUrl || null,
+    id: 'draft', name: d.name || 'Your Company', description: d.description || null, logoUrl,
     categoriesMode: d.categoriesMode, categories: d.categories, conversionFunnelExpertise: d.conversionFunnelExpertise,
     promotionalMethods: d.promotionalMethods, payoutTypesAccepted: d.payoutTypesAccepted, deviceTypesCovered: d.deviceTypesCovered,
     geolocationsMode: d.geolocationsMode, geolocations: d.geolocations, websiteUrl: d.websiteUrl || null,
@@ -72,6 +73,58 @@ function toPreviewProfile(d: Draft): MarketplaceProfile {
     customLinkLabel: d.customLinkLabel || null, customLinkUrl: d.customLinkUrl || null, requireDefaultOffer: d.requireDefaultOffer,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
+}
+
+function normalizeLogoUrl(raw: string): { url: string; warning: string | null } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { url: '', warning: null };
+  try {
+    const u = new URL(trimmed);
+    if (u.hostname.includes('google.') && u.pathname.includes('/imgres') && u.searchParams.get('imgurl')) {
+      return {
+        url: decodeURIComponent(u.searchParams.get('imgurl')!),
+        warning: 'Google Images links do not work — we extracted the direct image URL below.',
+      };
+    }
+  } catch { /* not a valid URL yet */ }
+  if (/google\.com\/imgres/i.test(trimmed)) {
+    return { url: trimmed, warning: 'Paste the direct image URL (ending in .png, .jpg, .svg), not a Google Images page link.' };
+  }
+  return { url: trimmed, warning: null };
+}
+
+function LogoUrlField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [previewError, setPreviewError] = useState(false);
+  const normalized = normalizeLogoUrl(value);
+  const previewUrl = normalized.url;
+
+  return (
+    <div>
+      <label className="label mb-1 block">Logo URL</label>
+      <p className="mb-1 text-tiny text-fg-muted">
+        Paste a <strong>direct</strong> PNG/JPG/SVG link (must start with <code className="font-mono">https://</code> and end with an image extension).
+        Do not paste a Google Images page URL.
+      </p>
+      <input className="input" placeholder="https://example.com/logo.png" value={value} onChange={(e) => { setPreviewError(false); onChange(e.target.value); }} />
+      {normalized.warning && (
+        <p className="mt-2 rounded-[var(--radius)] border border-warning-bg bg-warning-bg px-3 py-2 text-tiny text-warning-text">{normalized.warning}</p>
+      )}
+      {previewUrl && !previewError && (
+        <img
+          src={previewUrl}
+          alt=""
+          className="mt-2 h-16 w-16 rounded-[var(--radius)] border border-border bg-white object-contain p-1"
+          onError={() => setPreviewError(true)}
+        />
+      )}
+      {previewUrl && previewError && (
+        <p className="mt-2 rounded-[var(--radius)] border border-danger-bg bg-danger-bg px-3 py-2 text-tiny text-danger-text">
+          Could not load this image. Use a direct link like{' '}
+          <span className="font-mono">https://png.pngtree.com/…/logo.jpg</span> — not a Google search page.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function MultiSelect({ label, options, selected, onChange, max, required }: {
@@ -129,8 +182,9 @@ export default function MarketplaceProfileEdit() {
     && d.contactFirstName.trim() && d.contactLastName.trim() && d.contactEmail.trim();
 
   const submit = async () => {
+    const logoUrl = normalizeLogoUrl(d.logoUrl).url;
     const body = {
-      name: d.name, description: d.description, logoUrl: d.logoUrl || undefined,
+      name: d.name, description: d.description, logoUrl: logoUrl || undefined,
       categoriesMode: d.categoriesMode, categories: d.categories,
       conversionFunnelExpertise: d.conversionFunnelExpertise, promotionalMethods: d.promotionalMethods,
       payoutTypesAccepted: d.payoutTypesAccepted, deviceTypesCovered: d.deviceTypesCovered,
@@ -179,12 +233,7 @@ export default function MarketplaceProfileEdit() {
               <label className="label mb-1 block">Name to use in the Marketplace <span className="text-danger-text">*</span></label>
               <input className="input" value={d.name} onChange={(e) => set('name', e.target.value)} />
             </div>
-            <div>
-              <label className="label mb-1 block">Logo URL</label>
-              <p className="mb-1 text-tiny text-fg-muted">Paste a PNG/JPG image URL. Transparent background recommended.</p>
-              <input className="input" placeholder="https://…/logo.png" value={d.logoUrl} onChange={(e) => set('logoUrl', e.target.value)} />
-              {d.logoUrl && <img src={d.logoUrl} alt="" className="mt-2 h-16 w-16 rounded-[var(--radius)] border border-border object-contain" />}
-            </div>
+            <LogoUrlField value={d.logoUrl} onChange={(v) => set('logoUrl', v)} />
             <div className="lg:col-span-2">
               <label className="label mb-1 block">Description <span className="text-danger-text">*</span></label>
               <textarea className="input min-h-24" value={d.description} onChange={(e) => set('description', e.target.value)} />

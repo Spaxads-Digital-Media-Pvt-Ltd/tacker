@@ -3,179 +3,228 @@
  * directly by the user: breadcrumb "Marketplace / Marketplace", title "Discover Advertisers", a
  * "Your Profile" button, a bordered "Featured Advertisers" panel, a toolbar with "Advertiser
  * Filters" / "Sort By Date" / search / grid-list toggle, and a card grid — logo, name, category
- * line, website link, "Learn More" + "Apply"). The reference lists real third-party brands (Roman
- * Health Ventures, BlueChew, Evite Inc., …) — reproducing those names/logos here would misrepresent
- * them as partners of this app, so this uses our own real Advertiser records instead, same
- * structure, honest data (matches the precedent already set for the sibling "Discover Partners"-
- * style substitution used elsewhere in this app).
- *
- * The reference's "Advertiser Filters" flyout has 9 categories (Categories, Conversion Funnel,
- * Promotional Methods Accepted, Payment Methods Available, Payout Types Available, Geo Markets
- * Targeted, Countries Targeted, Device Types Targeted, Connection Status — captured live in a
- * user-supplied screenshot, "Categories" submenu expanded showing a real vertical taxonomy: Adult &
- * Dating, Assistive Care, Beauty & Personal Care, Education & Career, Electronics, Entertainment &
- * Gaming, Fashion & Shopping, Financial Growth & Investments, …). Backed here via a new endpoint
- * (GET /api/advertisers/marketplace, api-backend/.../advertisers/routes.ts) that aggregates real
- * columns per advertiser: Categories (offers.category), Payout Types Available
- * (offers.payout_model), Conversion Funnel (an offer with >1 real goal — offer_goals, spec
- * feature-depth multi-goal offers), Connection Status (advertisers.status). Promotional Methods
- * Accepted / Payment Methods Available / Geo Markets Targeted / Countries Targeted / Device Types
- * Targeted have no equivalent stored field anywhere in this schema (offers carry no targeting
- * config — the only `countries` column in the whole schema belongs to `offer_forwarding_rules`,
- * which is never enforced, see RedirectReport.tsx) — those 5 categories are shown, real labels, but
- * inert ("Not available yet"), rather than fabricating values. Advertisers have no website/logo
- * field, so those reference elements are omitted rather than invented.
+ * line, website link, stats box (CVR / EPC), "Learn More" + "Apply"). The reference lists real
+ * third-party brands — this uses our own real Advertiser records instead, same structure, honest
+ * data.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, LayoutGrid, List, MessageSquare, Search } from 'lucide-react';
-import { useQuery } from '../../lib/useApi';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
+import {
+  ArrowDownUp, ChevronDown, Filter, LayoutGrid, List, Search,
+} from 'lucide-react';
+import { useMutation, useQuery } from '../../lib/useApi';
+import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { Icon } from '../../components/icons';
+import { CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
 import type { MarketplaceAdvertiser } from '../../types';
 
-const REAL_FILTER_CATEGORIES = [
-  { key: 'categories', label: 'Categories' },
-  { key: 'funnel', label: 'Conversion Funnel' },
-  { key: 'payoutModels', label: 'Payout Types Available' },
-  { key: 'connectionStatus', label: 'Connection Status' },
-] as const;
-type RealFilterKey = (typeof REAL_FILTER_CATEGORIES)[number]['key'];
+const STATUS_LABEL: Record<string, string> = { active: 'Connected', pending: 'Pending', inactive: 'Inactive' };
 const INERT_FILTER_LABELS = [
   'Promotional Methods Accepted', 'Payment Methods Available',
   'Geo Markets Targeted', 'Countries Targeted', 'Device Types Targeted',
 ] as const;
 
-const STATUS_LABEL: Record<string, string> = { active: 'Connected', pending: 'Pending', inactive: 'Inactive' };
-const FUNNEL_LABEL: Record<string, string> = { any: 'Any', funnel: 'Multi-Step Funnel', single: 'Single Step' };
-
 interface Filters { categories: string[]; payoutModels: string[]; connectionStatus: string[]; funnel: 'any' | 'funnel' | 'single' }
 const EMPTY_FILTERS: Filters = { categories: [], payoutModels: [], connectionStatus: [], funnel: 'any' };
 
-function AdvertiserFiltersFlyout({
-  allCategories, allPayoutModels, value, onApply, onClose,
-}: { allCategories: string[]; allPayoutModels: string[]; value: Filters; onApply: (v: Filters) => void; onClose: () => void }) {
-  const [path, setPath] = useState<RealFilterKey | null>(null);
-  const [draft, setDraft] = useState<Filters>(value);
-  const ref = useRef<HTMLDivElement>(null);
+function filtersToValues(f: Filters): FilterValues {
+  return {
+    categories: f.categories,
+    payoutModels: f.payoutModels,
+    connectionStatus: f.connectionStatus,
+    funnel: f.funnel === 'any' ? [] : [f.funnel],
+  };
+}
+function valuesToFilters(v: FilterValues): Filters {
+  const funnelVal = v.funnel?.[0];
+  return {
+    categories: v.categories ?? [],
+    payoutModels: v.payoutModels ?? [],
+    connectionStatus: v.connectionStatus ?? [],
+    funnel: funnelVal === 'funnel' || funnelVal === 'single' ? funnelVal : 'any',
+  };
+}
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [onClose]);
+interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
 
-  const toggle = (key: 'categories' | 'payoutModels' | 'connectionStatus', v: string) =>
-    setDraft((d) => ({ ...d, [key]: d[key].includes(v) ? d[key].filter((x) => x !== v) : [...d[key], v] }));
+function todayIso(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
 
-  const count = draft.categories.length + draft.payoutModels.length + draft.connectionStatus.length + (draft.funnel !== 'any' ? 1 : 0);
-  const apply = () => { onApply(draft); onClose(); };
+function initials(name: string): string {
+  return name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+}
 
+function logoHue(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return h;
+}
+
+function websiteLabel(email: string | null, name: string): string | null {
+  if (email?.includes('@')) {
+    const domain = email.split('@')[1];
+    if (domain && !domain.endsWith('.test')) return domain;
+  }
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24);
+  return slug ? `${slug}.com` : null;
+}
+
+function fmtPct(v: number | undefined): string {
+  if (v == null || Number.isNaN(v)) return '—';
+  return `${(v * 100).toFixed(2)}%`;
+}
+
+function fmtEpc(v: number | undefined): string {
+  if (v == null || Number.isNaN(v) || v === 0) return '—';
+  return `$${v.toFixed(2)}`;
+}
+
+function AdvertiserLogo({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
+  const dim = size === 'lg' ? 'h-20 w-20 text-xl' : size === 'sm' ? 'h-9 w-9 text-tiny' : 'h-16 w-16 text-base';
+  const hue = logoHue(name);
   return (
-    <div ref={ref} className="absolute left-0 top-full z-30 mt-1 rounded-card border border-border bg-elevated shadow-elevated">
-      {path === null ? (
-        <div className="w-72">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <h3 className="text-small font-semibold text-fg">Marketplace Advertiser Filters</h3>
-            <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraft(EMPTY_FILTERS)}>Clear</button>
-          </div>
-          <div className="py-1">
-            {REAL_FILTER_CATEGORIES.map((c) => {
-              const n = c.key === 'categories' ? draft.categories.length : c.key === 'payoutModels' ? draft.payoutModels.length
-                : c.key === 'connectionStatus' ? draft.connectionStatus.length : (draft.funnel !== 'any' ? 1 : 0);
-              return (
-                <button key={c.key} type="button" onClick={() => setPath(c.key)}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                  <span className="flex items-center gap-2">{c.label}{n > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">{n}</span>}</span>
-                  <ChevronRight size={13} className="text-fg-muted" />
-                </button>
-              );
-            })}
-            {INERT_FILTER_LABELS.map((label) => (
-              <div key={label} title="Not available yet" className="flex w-full cursor-not-allowed items-center justify-between px-3 py-1.5 text-left text-small text-fg-muted">
-                {label} <ChevronRight size={13} className="text-fg-muted" />
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-end gap-2 border-t border-border px-3 py-2.5">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply}>Apply{count > 0 ? ` (${count})` : ''}</button>
-          </div>
-        </div>
-      ) : path === 'categories' || path === 'payoutModels' ? (
-        <div className="w-72">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={() => setPath(null)} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronDown size={15} className="-rotate-90" /> {REAL_FILTER_CATEGORIES.find((c) => c.key === path)?.label}
-            </button>
-          </div>
-          <div className="max-h-64 overflow-y-auto py-1">
-            {(path === 'categories' ? allCategories : allPayoutModels).length === 0 && <p className="px-3 py-3 text-small text-fg-muted">No options.</p>}
-            {(path === 'categories' ? allCategories : allPayoutModels).map((v) => (
-              <label key={v} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small text-fg hover:bg-accent-subtle">
-                <input type="checkbox" className="chk" checked={draft[path].includes(v)} onChange={() => toggle(path, v)} />
-                {v}
-              </label>
-            ))}
-          </div>
-          <div className="flex justify-end gap-2 border-t border-border px-3 py-2.5">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply}>Apply{count > 0 ? ` (${count})` : ''}</button>
-          </div>
-        </div>
-      ) : path === 'connectionStatus' ? (
-        <div className="w-64">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={() => setPath(null)} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronDown size={15} className="-rotate-90" /> Connection Status
-            </button>
-          </div>
-          <div className="py-1">
-            {(['active', 'pending', 'inactive'] as const).map((s) => (
-              <label key={s} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small text-fg hover:bg-accent-subtle">
-                <input type="checkbox" className="chk" checked={draft.connectionStatus.includes(s)} onChange={() => toggle('connectionStatus', s)} />
-                {STATUS_LABEL[s]}
-              </label>
-            ))}
-          </div>
-          <div className="flex justify-end gap-2 border-t border-border px-3 py-2.5">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply}>Apply{count > 0 ? ` (${count})` : ''}</button>
-          </div>
-        </div>
-      ) : (
-        <div className="w-64">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={() => setPath(null)} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronDown size={15} className="-rotate-90" /> Conversion Funnel
-            </button>
-          </div>
-          <div className="py-1">
-            {(['any', 'funnel', 'single'] as const).map((f) => (
-              <button key={f} type="button" onClick={() => setDraft((d) => ({ ...d, funnel: f }))}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-small hover:bg-accent-subtle ${draft.funnel === f ? 'text-accent-text' : 'text-fg'}`}>
-                {draft.funnel === f && '✓'} {FUNNEL_LABEL[f]}
-              </button>
-            ))}
-          </div>
-          <div className="flex justify-end gap-2 border-t border-border px-3 py-2.5">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply}>Apply{count > 0 ? ` (${count})` : ''}</button>
-          </div>
-        </div>
-      )}
+    <div
+      className={`grid shrink-0 place-items-center rounded-full font-semibold text-white shadow-sm ${dim}`}
+      style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 42%), hsl(${(hue + 24) % 360} 60% 34%))` }}
+    >
+      {initials(name)}
     </div>
   );
 }
 
+type AdvertiserStats = { cvr7: number; epc7: number; cvr30: number; epc30: number };
+
+function AdvertiserCard({
+  a, stats, onApply, applying,
+}: {
+  a: MarketplaceAdvertiser;
+  stats?: AdvertiserStats;
+  onApply: (a: MarketplaceAdvertiser) => void;
+  applying: boolean;
+}) {
+  const site = websiteLabel(a.contactEmail, a.name);
+  const catLine = a.categories.length ? a.categories.join(', ') : 'Uncategorized';
+  const catLine2 = a.payoutModels.length ? a.payoutModels.join(', ') : null;
+
+  return (
+    <article className="flex flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card transition-shadow hover:shadow-elevated">
+      <div className="flex flex-col items-center px-6 pb-4 pt-8 text-center">
+        <AdvertiserLogo name={a.name} size="lg" />
+        <h3 className="mt-4 text-body font-semibold text-fg">{a.name}</h3>
+        <p className="mt-1 line-clamp-2 text-tiny leading-relaxed text-fg-secondary">{catLine}</p>
+        {catLine2 && <p className="mt-0.5 line-clamp-1 text-tiny text-fg-muted">{catLine2}</p>}
+        {site && (
+          <p className="mt-2 font-mono text-tiny text-accent-text">{site}/</p>
+        )}
+      </div>
+
+      <div className="mx-5 mb-4 rounded-[var(--radius)] border border-border bg-page px-4 py-3">
+        <div className="grid grid-cols-2 gap-4 text-center">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-fg-muted">CVR</p>
+            <p className="mt-1 font-mono text-h3 font-semibold tabular-nums text-fg">{fmtPct(stats?.cvr7)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-fg-muted">Earnings Per Click (EPC)</p>
+            <p className="mt-1 font-mono text-tiny tabular-nums text-fg">
+              {fmtEpc(stats?.epc7)}<span className="text-fg-muted"> / 7 days</span>
+              {' | '}
+              {fmtEpc(stats?.epc30)}<span className="text-fg-muted"> / 30 days</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {a.categories.length > 0 && (
+        <div className="border-t border-border px-5 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-fg-muted">Brand(s)</p>
+          <p className="mt-1 text-tiny text-fg-secondary">{a.categories.slice(0, 4).join(', ')}</p>
+        </div>
+      )}
+
+      <div className="mt-auto flex gap-2 border-t border-border p-4">
+        <Link
+          to={`/app/advertisers/${a.id}`}
+          className="btn-ghost flex-1 !py-2 text-small font-medium"
+        >
+          Learn More
+        </Link>
+        {a.status === 'active' ? (
+          <Link
+            to="/app/marketplace/connections"
+            className="btn-primary flex-1 !py-2 text-center text-small font-medium"
+          >
+            Connected
+          </Link>
+        ) : a.status === 'pending' ? (
+          <Link
+            to="/app/marketplace/connections"
+            className="flex flex-1 cursor-default items-center justify-center rounded-[var(--radius)] border border-warning-bg bg-warning-bg !py-2 text-small font-medium text-warning-text"
+          >
+            Pending
+          </Link>
+        ) : (
+          <button
+            type="button"
+            disabled={applying}
+            onClick={() => onApply(a)}
+            className="btn-primary flex-1 !py-2 text-small font-medium disabled:opacity-60"
+          >
+            {applying ? 'Applying…' : 'Apply'}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export default function Marketplace() {
-  const { data, loading, error } = useQuery<MarketplaceAdvertiser[]>('/api/advertisers/marketplace');
+  const navigate = useNavigate();
+  const { data, loading, error, refetch } = useQuery<MarketplaceAdvertiser[]>('/api/advertisers/marketplace');
+  const stats7 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&from=${encodeURIComponent(todayIso(7))}&to=${encodeURIComponent(new Date().toISOString())}&limit=200`);
+  const stats30 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&from=${encodeURIComponent(todayIso(30))}&to=${encodeURIComponent(new Date().toISOString())}&limit=200`);
+  const { run: patchAdvertiser, busy: applying } = useMutation((id: string) => api.patch(`/api/advertisers/${id}`, { status: 'pending' }));
+
   const [q, setQ] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const statsMap = useMemo(() => {
+    const map = new Map<string, AdvertiserStats>();
+    for (const row of stats7.data?.rows ?? []) {
+      const id = row.dimensions.advertiser;
+      if (!id) continue;
+      map.set(id, {
+        cvr7: Number(row.metrics.cr ?? 0),
+        epc7: Number(row.metrics.epc ?? 0),
+        cvr30: 0,
+        epc30: 0,
+      });
+    }
+    for (const row of stats30.data?.rows ?? []) {
+      const id = row.dimensions.advertiser;
+      if (!id) continue;
+      const prev = map.get(id) ?? { cvr7: 0, epc7: 0, cvr30: 0, epc30: 0 };
+      map.set(id, { ...prev, cvr30: Number(row.metrics.cr ?? 0), epc30: Number(row.metrics.epc ?? 0) });
+    }
+    return map;
+  }, [stats7.data, stats30.data]);
 
   const allCategories = useMemo(() => [...new Set((data ?? []).flatMap((a) => a.categories))].sort(), [data]);
   const allPayoutModels = useMemo(() => [...new Set((data ?? []).flatMap((a) => a.payoutModels))].sort(), [data]);
@@ -192,58 +241,122 @@ export default function Marketplace() {
   }, [data, q, appliedFilters, sortDir]);
 
   const featured = useMemo(() => [...(data ?? [])].filter((a) => a.status === 'active')
-    .sort((a, b) => b.offerCount - a.offerCount).slice(0, 4), [data]);
+    .sort((a, b) => b.offerCount - a.offerCount).slice(0, 5), [data]);
 
-  const filterCount = appliedFilters.categories.length + appliedFilters.payoutModels.length + appliedFilters.connectionStatus.length + (appliedFilters.funnel !== 'any' ? 1 : 0);
+  const filterCategories = useMemo((): FilterCategory[] => [
+    { key: 'categories', label: 'Categories', options: allCategories.map((c) => ({ value: c, label: c })) },
+    { key: 'funnel', label: 'Conversion Funnel', options: [
+      { value: 'any', label: 'Any' },
+      { value: 'funnel', label: 'Multi-Step Funnel' },
+      { value: 'single', label: 'Single Step' },
+    ] },
+    { key: 'payoutModels', label: 'Payout Types Available', options: allPayoutModels.map((p) => ({ value: p, label: p })) },
+    { key: 'connectionStatus', label: 'Connection Status', options: [
+      { value: 'active', label: 'Connected' },
+      { value: 'pending', label: 'Pending' },
+      { value: 'inactive', label: 'Inactive' },
+    ] },
+  ], [allCategories, allPayoutModels]);
+
+  const filterCount = appliedFilterCount(filtersToValues(appliedFilters), ['funnel']);
+
+  const handleApply = async (a: MarketplaceAdvertiser) => {
+    if (a.status !== 'inactive') return;
+    setApplyingId(a.id);
+    const ok = await patchAdvertiser(a.id);
+    setApplyingId(null);
+    if (ok !== null) {
+      setToast(`Connection request sent for ${a.name}. View it under Manage Connections.`);
+      refetch();
+    }
+  };
 
   return (
     <>
-      <PageHeader title="Discover Advertisers" subtitle="Marketplace › Discover Advertisers" action={
-        <button title="Not available yet" className="rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-small font-medium text-fg-muted">Your Profile</button>
-      } />
+      <PageHeader
+        title="Discover Advertisers"
+        subtitle="Marketplace › Discover Advertisers"
+        action={
+          <Link to="/app/marketplace/profile" className="rounded-[var(--radius)] border border-border bg-surface px-4 py-2 text-small font-medium text-fg transition-colors hover:border-accent/40 hover:bg-accent-subtle hover:text-accent-text">
+            Your Profile
+          </Link>
+        }
+      />
 
       {featured.length > 0 && (
-        <div className="mb-6 rounded-card border-2 border-fg p-6">
-          <h3 className="mb-4 text-h3 font-medium text-fg">Featured Advertisers</h3>
-          <div className="grid grid-cols-1 gap-6 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-            {featured.map((a) => (
-              <Link key={a.id} to={`/app/advertisers/${a.id}`} className="flex flex-col items-center gap-2 pt-4 text-center first:pt-0 sm:pt-0 sm:first:pl-0 sm:[&:not(:first-child)]:pl-6">
-                <div className="grid h-14 w-14 place-items-center rounded-full bg-accent-subtle text-accent-text"><Icon.building width={26} height={26} /></div>
-                <p className="font-semibold text-fg">{a.name}</p>
-                <p className="text-tiny text-fg-secondary">{a.categories.length ? a.categories.join(', ') : 'Uncategorized'}</p>
+        <section className="mb-8 overflow-hidden rounded-card border border-border bg-surface shadow-card">
+          <div className="border-b border-border px-6 py-4">
+            <h2 className="text-small font-medium text-fg-secondary">Featured Advertisers</h2>
+          </div>
+          <div className="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-5">
+            {featured.map((a, i) => (
+              <Link
+                key={a.id}
+                to={`/app/advertisers/${a.id}`}
+                className={`group flex flex-col items-center gap-2 px-6 py-8 text-center transition-colors hover:bg-page ${i > 0 ? 'sm:border-l sm:border-border' : ''}`}
+              >
+                <AdvertiserLogo name={a.name} />
+                <p className="font-semibold text-fg group-hover:text-accent-text">{a.name}</p>
+                <p className="line-clamp-2 text-tiny leading-relaxed text-fg-secondary">
+                  {a.categories.length ? a.categories.join(', ') : 'Uncategorized'}
+                </p>
+                {a.payoutModels.length > 0 && (
+                  <p className="line-clamp-1 text-tiny text-fg-muted">{a.payoutModels.join(', ')}</p>
+                )}
               </Link>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)} className="btn-ghost flex items-center gap-1.5">
-              {filterCount > 0 ? `Advertiser Filters (${filterCount})` : 'Advertiser Filters'} <ChevronDown size={13} className="text-fg-muted" />
+            <button type="button" onClick={() => setFilterOpen((o) => !o)} className="inline-flex items-center gap-2 rounded-[var(--radius)] border border-border bg-surface px-3.5 py-2 text-small font-medium text-fg transition-colors hover:bg-page">
+              <Filter size={14} className="text-fg-muted" />
+              {filterCount > 0 ? `Advertiser Filters (${filterCount})` : 'Advertiser Filters'}
+              <ChevronDown size={13} className="text-fg-muted" />
             </button>
             {filterOpen && (
-              <AdvertiserFiltersFlyout
-                allCategories={allCategories} allPayoutModels={allPayoutModels}
-                value={filters}
-                onApply={(v) => { setFilters(v); setAppliedFilters(v); }}
+              <CategorizedFiltersFlyout
+                title="Marketplace Advertiser Filters"
+                categories={filterCategories}
+                inertLabels={[...INERT_FILTER_LABELS]}
+                values={filtersToValues(filters)}
+                singleSelectKeys={['funnel']}
+                onApply={(v) => {
+                  const next = valuesToFilters(v);
+                  setFilters(next);
+                  setAppliedFilters(next);
+                }}
                 onClose={() => setFilterOpen(false)}
+                showPresets={false}
+                align="left"
               />
             )}
           </div>
-          <button type="button" onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))} className="btn-ghost">
+          <button
+            type="button"
+            onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+            className="inline-flex items-center gap-2 rounded-[var(--radius)] border border-border bg-surface px-3.5 py-2 text-small font-medium text-fg transition-colors hover:bg-page"
+          >
+            <ArrowDownUp size={14} className="text-fg-muted" />
             Sort By Date {sortDir === 'desc' ? '↓' : '↑'}
           </button>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-64 !pl-8" placeholder="Search Advertiser…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input
+              className="input !w-72 !rounded-full !pl-9"
+              placeholder="Search Advertiser"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
           </div>
           <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-            <button type="button" title="Grid view" onClick={() => setView('grid')} className={`grid h-9 w-9 place-items-center ${view === 'grid' ? 'bg-accent-subtle text-accent-text' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}><LayoutGrid size={15} /></button>
-            <button type="button" title="List view" onClick={() => setView('list')} className={`grid h-9 w-9 place-items-center ${view === 'list' ? 'bg-accent-subtle text-accent-text' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}><List size={15} /></button>
+            <button type="button" title="Grid view" onClick={() => setView('grid')} className={`grid h-9 w-9 place-items-center transition-colors ${view === 'grid' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-page'}`}><LayoutGrid size={15} /></button>
+            <button type="button" title="List view" onClick={() => setView('list')} className={`grid h-9 w-9 place-items-center border-l border-border transition-colors ${view === 'list' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-page'}`}><List size={15} /></button>
           </div>
         </div>
       </div>
@@ -252,50 +365,83 @@ export default function Marketplace() {
         : error ? <StateBlock>{error}</StateBlock>
         : rows.length === 0 ? <StateBlock>No advertisers match this search.</StateBlock>
         : view === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
             {rows.map((a) => (
-              <div key={a.id} className="card flex flex-col items-center gap-2 text-center">
-                <div className="grid h-14 w-14 place-items-center rounded-full bg-accent-subtle text-accent-text"><Icon.building width={26} height={26} /></div>
-                <p className="font-medium text-fg">{a.name}</p>
-                <p className="min-h-[1.2em] text-tiny text-fg-secondary">{a.categories.length ? a.categories.join(', ') : 'Uncategorized'}</p>
-                <div className="mt-2 flex w-full gap-2">
-                  <Link to={`/app/advertisers/${a.id}`} className="btn-ghost flex-1 !py-1.5 text-tiny">Learn More</Link>
-                  <button title="Not available yet" className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded-[var(--radius)] border border-border bg-surface !py-1.5 text-tiny text-fg-muted">
-                    <MessageSquare size={13} /> Apply
-                  </button>
-                </div>
-              </div>
+              <AdvertiserCard
+                key={a.id}
+                a={a}
+                stats={statsMap.get(a.id)}
+                onApply={handleApply}
+                applying={applying && applyingId === a.id}
+              />
             ))}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-card border border-border">
+          <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
             <table className="w-full text-left text-body">
               <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-                <tr><th className="px-4 py-3 font-semibold">Advertiser</th><th className="px-4 py-3 font-semibold">Categories</th><th className="px-4 py-3 font-semibold">Connection Status</th><th className="px-4 py-3" /></tr>
+                <tr>
+                  <th className="px-5 py-3 font-semibold">Advertiser</th>
+                  <th className="px-5 py-3 font-semibold">Categories</th>
+                  <th className="px-5 py-3 font-semibold">CVR</th>
+                  <th className="px-5 py-3 font-semibold">EPC (7d)</th>
+                  <th className="px-5 py-3 font-semibold">Status</th>
+                  <th className="px-5 py-3" />
+                </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((a) => (
-                  <tr key={a.id} className="hover:bg-accent-subtle/40">
-                    <td className="px-4 py-3">
-                      <span className="flex items-center gap-2">
-                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent-subtle text-accent-text"><Icon.building width={16} height={16} /></span>
-                        {a.name}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-fg-secondary">{a.categories.length ? a.categories.join(', ') : 'Uncategorized'}</td>
-                    <td className="px-4 py-3 text-fg-secondary">{STATUS_LABEL[a.status]}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex gap-2">
-                        <Link to={`/app/advertisers/${a.id}`} className="btn-ghost !py-1.5 text-tiny">Learn More</Link>
-                        <button title="Not available yet" className="cursor-not-allowed rounded-[var(--radius)] border border-border bg-surface px-3 py-1.5 text-tiny text-fg-muted">Apply</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((a) => {
+                  const stats = statsMap.get(a.id);
+                  const site = websiteLabel(a.contactEmail, a.name);
+                  return (
+                    <tr key={a.id} className="transition-colors hover:bg-page/60">
+                      <td className="px-5 py-4">
+                        <span className="flex items-center gap-3">
+                          <AdvertiserLogo name={a.name} size="sm" />
+                          <span>
+                            <span className="block font-medium text-fg">{a.name}</span>
+                            {site && <span className="font-mono text-tiny text-accent-text">{site}/</span>}
+                          </span>
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-fg-secondary">{a.categories.length ? a.categories.join(', ') : 'Uncategorized'}</td>
+                      <td className="px-5 py-4 font-mono tabular-nums text-fg">{fmtPct(stats?.cvr7)}</td>
+                      <td className="px-5 py-4 font-mono tabular-nums text-fg">{fmtEpc(stats?.epc7)}</td>
+                      <td className="px-5 py-4 text-fg-secondary">{STATUS_LABEL[a.status]}</td>
+                      <td className="px-5 py-4 text-right">
+                        <div className="inline-flex gap-2">
+                          <Link to={`/app/advertisers/${a.id}`} className="btn-ghost !py-1.5 text-tiny">Learn More</Link>
+                          {a.status === 'active' ? (
+                            <Link to="/app/marketplace/connections" className="btn-primary !py-1.5 text-tiny">Connected</Link>
+                          ) : a.status === 'pending' ? (
+                            <Link to="/app/marketplace/connections" className="rounded-[var(--radius)] border border-warning-bg bg-warning-bg px-3 py-1.5 text-tiny font-medium text-warning-text">Pending</Link>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={applying && applyingId === a.id}
+                              onClick={() => handleApply(a)}
+                              className="btn-primary !py-1.5 text-tiny disabled:opacity-60"
+                            >
+                              {applying && applyingId === a.id ? 'Applying…' : 'Apply'}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
+
+      {toast && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-border bg-elevated px-4 py-3 text-small text-fg shadow-elevated">
+          {toast}
+          <button type="button" className="ml-3 text-accent-text hover:underline" onClick={() => navigate('/app/marketplace/connections')}>View connections</button>
+        </div>,
+        document.body,
+      )}
     </>
   );
 }

@@ -15,6 +15,11 @@ import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
+import { syncPinApiKey, revokePinApiKey } from '../../../lib/integrations/pin-api.js';
+import { syncOfferFeed } from '../../../lib/integrations/offer-feed-sync.js';
+import { enqueueOfferFeedSync } from '../../../lib/integrations/enqueue.js';
+import { getIntegrationStatus } from '../../../lib/integrations/status.js';
+import { getCategoryCatalog, getAllCatalogs, categoryFromTab } from '../../../lib/integrations/catalog.js';
 
 interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
@@ -99,15 +104,63 @@ export function settingsRoutes(): Router {
     sendOk(res, { ok: true });
   }));
 
-  // Integrations — freeform key/value bag.
+  // Integrations — freeform key/value bag; Pin API mirrored into api_keys; feed changes enqueue sync.
   r.put('/integrations', requireRole('admin'), validateBody(integrationsSchema), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
     const b = req.body as z.infer<typeof integrationsSchema>;
     const net = await loadNetwork(networkId);
-    const integrations = { ...(net.settings?.['integrations'] as object ?? {}), ...b.values };
+    const prev = (net.settings?.['integrations'] as Record<string, unknown> | undefined) ?? {};
+    const integrations = { ...prev, ...b.values };
+    const now = new Date().toISOString();
+    if (b.values['offerFeedName'] && !prev['offerFeedCreatedAt']) integrations['offerFeedCreatedAt'] = now;
+    if (Object.keys(b.values).some((k) => k.startsWith('offerFeed'))) integrations['offerFeedModifiedAt'] = now;
     await saveSettings(networkId, { ...net.settings, integrations });
     await writeAudit(req, { action: 'settings.integrations.update', entityType: 'network', entityId: networkId });
+
+    const userId = req.identity && req.identity.surface === 'dashboard' ? req.identity.userId : '';
+    if (typeof b.values['pinApiKey'] === 'string' && b.values['pinApiKey']) {
+      await syncPinApiKey(networkId, userId, b.values['pinApiKey'] as string);
+    } else if (b.values['pinApiKey'] === '') {
+      await revokePinApiKey(networkId);
+    }
+
+    const feedConfigured = Boolean(integrations['offerFeedUrl'] && integrations['offerFeedAdvertiserId']);
+    const feedChanged = b.values['offerFeedUrl'] !== undefined || b.values['offerFeedAdvertiserId'] !== undefined
+      || b.values['offerFeedStatus'] !== undefined;
+    if (feedConfigured && feedChanged && integrations['offerFeedStatus'] !== 'paused') {
+      await enqueueOfferFeedSync({ networkId });
+    }
+
     sendOk(res, { ok: true });
+  }));
+
+  // Aggregated connection status for Integrations hub tabs.
+  r.get('/integrations/status', asyncHandler(async (req, res) => {
+    sendOk(res, await getIntegrationStatus(req.scope!.networkId));
+  }));
+
+  // Everflow-style catalog with Connected / Not connected card lists per category.
+  r.get('/integrations/catalog', asyncHandler(async (req, res) => {
+    const tab = req.query['category'] as string | undefined;
+    const networkId = req.scope!.networkId;
+    if (tab) {
+      const cat = categoryFromTab(tab);
+      if (!cat) {
+        sendOk(res, { connected: [], notConnected: [] });
+        return;
+      }
+      sendOk(res, await getCategoryCatalog(networkId, cat));
+      return;
+    }
+    sendOk(res, await getAllCatalogs(networkId));
+  }));
+
+  // Manual offer feed sync (Integrations › Feeds).
+  r.post('/integrations/offer-feed/sync', requireRole('admin'), asyncHandler(async (req, res) => {
+    const networkId = req.scope!.networkId;
+    const result = await syncOfferFeed(networkId);
+    await writeAudit(req, { action: 'settings.integrations.offer_feed.sync', entityType: 'network', entityId: networkId, after: result });
+    sendOk(res, result);
   }));
 
   // Global postback secure_code — the code the tracking /postback requires by default (offer code overrides).

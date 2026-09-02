@@ -16,6 +16,10 @@ export const QUEUE = {
   reconciliation: 'reconciliation',
   /** Scheduled data retention / pruning of raw clicks & logs (spec §7/§11, Phase 8). */
   retention: 'retention',
+  /** Facebook Conversions API — server-side events on approved conversions. */
+  facebookCapi: 'facebook-capi',
+  /** Offer feed pull — remote JSON feeds into offers table. */
+  offerFeedSync: 'offer-feed-sync',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

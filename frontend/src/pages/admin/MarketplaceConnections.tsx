@@ -27,14 +27,15 @@
  * own real column structure (an honest, permanently-empty shell — same convention as Redirect
  * Report/Partner Referrals) with a note explaining why it can never have rows.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ChevronDown, Search } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { Icon } from '../../components/icons';
 import { Pagination } from '../../components/ReportPageKit';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
 import type { MarketplaceAdvertiser } from '../../types';
 
 const DASH = '—';
@@ -46,83 +47,36 @@ function fmtDate(iso: string) {
 type Tab = 'connected' | 'awaiting' | 'pending';
 interface Filters { categories: string[]; payoutModels: string[] }
 const EMPTY_FILTERS: Filters = { categories: [], payoutModels: [] };
-const REAL_FILTER_KEYS = ['categories', 'payoutModels'] as const;
-type RealFilterKey = (typeof REAL_FILTER_KEYS)[number];
-const REAL_FILTER_LABELS: Record<RealFilterKey, string> = { categories: 'Categories', payoutModels: 'Payout Types' };
+
+function filtersToValues(f: Filters): FilterValues {
+  return { categories: f.categories, payoutModels: f.payoutModels };
+}
+function valuesToFilters(v: FilterValues): Filters {
+  return { categories: v.categories ?? [], payoutModels: v.payoutModels ?? [] };
+}
+
 const INERT_FILTER_LABELS = ['Promotional Methods', 'Regions'] as const;
 
-function TableFiltersFlyout({
-  allCategories, allPayoutModels, value, onApply, onClose,
-}: { allCategories: string[]; allPayoutModels: string[]; value: Filters; onApply: (v: Filters) => void; onClose: () => void }) {
-  const [path, setPath] = useState<RealFilterKey | null>(null);
-  const [draft, setDraft] = useState<Filters>(value);
-  const ref = useRef<HTMLDivElement>(null);
+const PAGE_SIZE = 25;
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [onClose]);
-
-  const toggle = (key: RealFilterKey, v: string) =>
-    setDraft((d) => ({ ...d, [key]: d[key].includes(v) ? d[key].filter((x) => x !== v) : [...d[key], v] }));
-  const count = draft.categories.length + draft.payoutModels.length;
-  const apply = () => { onApply(draft); onClose(); };
-
+function AdvertiserLogo({ name }: { name: string }) {
+  const initials = name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+  let hue = 0;
+  for (let i = 0; i < name.length; i++) hue = (hue * 31 + name.charCodeAt(i)) % 360;
   return (
-    <div ref={ref} className="absolute right-0 top-full z-30 mt-1 rounded-card border border-border bg-elevated shadow-elevated">
-      {path === null ? (
-        <div className="w-64">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <h3 className="text-small font-semibold text-fg">Table Filters</h3>
-            <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraft(EMPTY_FILTERS)}>Clear</button>
-          </div>
-          <div className="py-1">
-            {REAL_FILTER_KEYS.map((k) => (
-              <button key={k} type="button" onClick={() => setPath(k)}
-                className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                <span className="flex items-center gap-2">{REAL_FILTER_LABELS[k]}{draft[k].length > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">{draft[k].length}</span>}</span>
-                <ChevronRight size={13} className="text-fg-muted" />
-              </button>
-            ))}
-            {INERT_FILTER_LABELS.map((label) => (
-              <div key={label} title="Not available yet" className="flex w-full cursor-not-allowed items-center justify-between px-3 py-1.5 text-left text-small text-fg-muted">
-                {label} <ChevronRight size={13} className="text-fg-muted" />
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-end gap-2 border-t border-border px-3 py-2.5">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply}>Apply{count > 0 ? ` (${count})` : ''}</button>
-          </div>
-        </div>
-      ) : (
-        <div className="w-64">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={() => setPath(null)} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronDown size={15} className="-rotate-90" /> {REAL_FILTER_LABELS[path]}
-            </button>
-          </div>
-          <div className="max-h-64 overflow-y-auto py-1">
-            {(path === 'categories' ? allCategories : allPayoutModels).length === 0 && <p className="px-3 py-3 text-small text-fg-muted">No options.</p>}
-            {(path === 'categories' ? allCategories : allPayoutModels).map((v) => (
-              <label key={v} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small text-fg hover:bg-accent-subtle">
-                <input type="checkbox" className="chk" checked={draft[path].includes(v)} onChange={() => toggle(path, v)} />
-                {v}
-              </label>
-            ))}
-          </div>
-          <div className="flex justify-end gap-2 border-t border-border px-3 py-2.5">
-            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn-primary" onClick={apply}>Apply{count > 0 ? ` (${count})` : ''}</button>
-          </div>
-        </div>
-      )}
-    </div>
+    <span
+      className="grid h-8 w-8 place-items-center rounded-full text-tiny font-semibold text-white shadow-sm"
+      style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 42%), hsl(${(hue + 24) % 360} 60% 34%))` }}
+    >
+      {initials}
+    </span>
   );
 }
 
-const PAGE_SIZE = 25;
+function ContactCell({ email }: { email: string | null }) {
+  if (!email) return <span className="text-fg-muted">{DASH}</span>;
+  return <a href={`mailto:${email}`} className="text-accent-text hover:underline">{email}</a>;
+}
 
 export default function MarketplaceConnections() {
   const { data, loading, error, refetch } = useQuery<MarketplaceAdvertiser[]>('/api/advertisers/marketplace');
@@ -134,8 +88,15 @@ export default function MarketplaceConnections() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
+  const [toast, setToast] = useState<string | null>(null);
   const { run: patchStatus, busy } = useMutation((args: { id: string; status: 'active' | 'inactive' }) =>
     api.patch(`/api/advertisers/${args.id}`, { status: args.status }));
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const connected = useMemo(() => (data ?? []).filter((a) => a.status === 'active'), [data]);
   const awaiting = useMemo(() => (data ?? []).filter((a) => a.status === 'pending'), [data]);
@@ -158,9 +119,14 @@ export default function MarketplaceConnections() {
 
   const pagedRows = useMemo(() => rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [rows, page]);
 
-  const decide = async (id: string, status: 'active' | 'inactive') => {
+  const decide = async (id: string, status: 'active' | 'inactive', name: string) => {
     const r = await patchStatus({ id, status });
-    if (r) refetch();
+    if (r) {
+      setToast(status === 'active' ? `Approved ${name}. Moved to Connected Advertisers.` : `Rejected ${name}.`);
+      refetch();
+    } else {
+      setToast(`Could not update ${name}. Try again.`);
+    }
   };
 
   const TABS: { key: Tab; label: string }[] = [
@@ -168,7 +134,11 @@ export default function MarketplaceConnections() {
     { key: 'awaiting', label: 'Awaiting Your Approval' },
     { key: 'pending', label: 'Pending Approval' },
   ];
-  const filterCount = appliedFilters.categories.length + appliedFilters.payoutModels.length;
+  const filterCount = appliedFilterCount(filtersToValues(appliedFilters));
+  const filterCategories = useMemo((): FilterCategory[] => [
+    { key: 'categories', label: 'Categories', options: allCategories.map((c) => ({ value: c, label: c })) },
+    { key: 'payoutModels', label: 'Payout Types', options: allPayoutModels.map((p) => ({ value: p, label: p })) },
+  ], [allCategories, allPayoutModels]);
 
   return (
     <>
@@ -215,17 +185,16 @@ export default function MarketplaceConnections() {
           <input className="input !w-64 !pl-8" placeholder="Search…" value={q} onChange={(e) => changeQ(e.target.value)} />
         </div>
         <div className="relative">
-          <button type="button" title="Table Filters" onClick={() => setFilterOpen((o) => !o)}
-            className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <span className="relative">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" /></svg>
-              {filterCount > 0 && <span className="absolute -right-2 -top-2 grid h-3.5 w-3.5 place-items-center rounded-full bg-accent text-[9px] font-bold text-white">{filterCount}</span>}
-            </span>
-          </button>
+          <FilterButton count={filterCount} onClick={() => setFilterOpen((o) => !o)} title="Table Filters" />
           {filterOpen && (
-            <TableFiltersFlyout
-              allCategories={allCategories} allPayoutModels={allPayoutModels}
-              value={filters} onApply={applyFilters} onClose={() => setFilterOpen(false)}
+            <CategorizedFiltersFlyout
+              title="Table Filters"
+              categories={filterCategories}
+              inertLabels={[...INERT_FILTER_LABELS]}
+              values={filtersToValues(filters)}
+              onApply={(v) => applyFilters(valuesToFilters(v))}
+              onClose={() => setFilterOpen(false)}
+              showPresets={false}
             />
           )}
         </div>
@@ -257,7 +226,21 @@ export default function MarketplaceConnections() {
                 <tbody><tr><td colSpan={7} className="px-4 py-10 text-center text-small italic text-fg-muted">No Record Found</td></tr></tbody>
               </table>
             </div>
-          ) : <StateBlock>No Record Found</StateBlock>
+          ) : <StateBlock>
+            No Record Found
+            {tab === 'connected' && (
+              <p className="mt-2 text-tiny text-fg-muted">
+                Active advertisers appear here. Approve pending requests on the Awaiting tab, or browse{' '}
+                <Link to="/app/marketplace" className="text-accent-text hover:underline">Discover Advertisers</Link>.
+              </p>
+            )}
+            {tab === 'awaiting' && (
+              <p className="mt-2 text-tiny text-fg-muted">
+                When someone applies from{' '}
+                <Link to="/app/marketplace" className="text-accent-text hover:underline">Discover Advertisers</Link>, they appear here for approval.
+              </p>
+            )}
+          </StateBlock>
         ) : tab === 'connected' ? (
           <div className="overflow-x-auto rounded-card border border-border">
             <table className="w-full text-left text-body">
@@ -274,12 +257,12 @@ export default function MarketplaceConnections() {
               <tbody className="divide-y divide-border">
                 {pagedRows.map((a) => (
                   <tr key={a.id} className="hover:bg-accent-subtle/40">
-                    <td className="px-4 py-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-accent-subtle text-accent-text"><Icon.building width={16} height={16} /></span></td>
+                    <td className="px-4 py-3"><AdvertiserLogo name={a.name} /></td>
                     <td className="px-4 py-3"><Link to={`/app/advertisers/${a.id}`} className="text-accent-text hover:underline">{a.name}</Link></td>
                     <td className="px-4 py-3 text-fg-secondary">{a.categories.length ? a.categories.join(', ') : 'Uncategorized'}</td>
                     <td className="px-4 py-3 text-fg-secondary">{a.offerCount}</td>
                     <td className="px-4 py-3 text-fg-secondary">{fmtDate(a.createdAt)}</td>
-                    <td className="px-4 py-3 text-fg-secondary">{a.contactEmail ?? DASH}</td>
+                    <td className="px-4 py-3"><ContactCell email={a.contactEmail} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -310,18 +293,18 @@ export default function MarketplaceConnections() {
               <tbody className="divide-y divide-border">
                 {pagedRows.map((a) => (
                   <tr key={a.id} className="hover:bg-accent-subtle/40">
-                    <td className="px-4 py-3"><span className="grid h-8 w-8 place-items-center rounded-full bg-accent-subtle text-accent-text"><Icon.building width={16} height={16} /></span></td>
+                    <td className="px-4 py-3"><AdvertiserLogo name={a.name} /></td>
                     <td className="px-4 py-3 text-fg">{a.name}</td>
                     <td className="px-4 py-3"><Link to={`/app/advertisers/${a.id}`} className="text-accent-text hover:underline">View Profile</Link></td>
                     <td className="px-4 py-3 text-fg-secondary">{a.categories.length ? a.categories.join(', ') : 'Uncategorized'}</td>
-                    <td className="px-4 py-3 text-fg-secondary">{a.contactEmail ?? DASH}</td>
+                    <td className="px-4 py-3"><ContactCell email={a.contactEmail} /></td>
                     <td className="px-4 py-3 text-fg-muted">{DASH}</td>
                     <td className="px-4 py-3 text-fg-muted">{DASH}</td>
                     <td className="px-4 py-3 text-fg-secondary">{fmtDate(a.createdAt)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex gap-2">
-                        <button type="button" disabled={busy} onClick={() => decide(a.id, 'active')} className="btn-primary !py-1.5 text-tiny disabled:opacity-50">Approve</button>
-                        <button type="button" disabled={busy} onClick={() => decide(a.id, 'inactive')} className="rounded-[var(--radius)] border border-border bg-surface px-3 py-1.5 text-tiny font-medium text-fg hover:bg-accent-subtle disabled:opacity-50">Reject</button>
+                        <button type="button" disabled={busy} onClick={() => decide(a.id, 'active', a.name)} className="btn-primary !py-1.5 text-tiny disabled:opacity-50">Approve</button>
+                        <button type="button" disabled={busy} onClick={() => decide(a.id, 'inactive', a.name)} className="rounded-[var(--radius)] border border-border bg-surface px-3 py-1.5 text-tiny font-medium text-fg hover:bg-accent-subtle disabled:opacity-50">Reject</button>
                       </div>
                     </td>
                   </tr>
@@ -335,6 +318,13 @@ export default function MarketplaceConnections() {
         <div className="mt-3 flex justify-end">
           <Pagination total={tab === 'pending' ? 0 : rows.length} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
         </div>
+      )}
+
+      {toast && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-border bg-elevated px-4 py-3 text-small text-fg shadow-elevated">
+          {toast}
+        </div>,
+        document.body,
       )}
     </>
   );

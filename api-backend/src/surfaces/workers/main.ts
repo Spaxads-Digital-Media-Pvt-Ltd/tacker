@@ -16,6 +16,8 @@ import { startClickPersistWorker } from './processors/click-persist.js';
 import { startOutboundPostbackWorker } from './processors/outbound-postback.js';
 import { startFraudScanWorker, scheduleFraudScan } from './processors/fraud-scan.js';
 import { startRetentionWorker, scheduleRetention } from './processors/retention.js';
+import { startFacebookCapiWorker } from './processors/facebook-capi.js';
+import { startOfferFeedSyncWorker, scheduleOfferFeedScan } from './processors/offer-feed-sync.js';
 
 const log = surfaceLogger('workers');
 
@@ -27,9 +29,12 @@ const workers = [
   startOutboundPostbackWorker(),
   startFraudScanWorker(),
   startRetentionWorker(),
+  startFacebookCapiWorker(),
+  startOfferFeedSyncWorker(),
 ];
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
 void scheduleRetention().catch((err) => log.error({ err }, 'failed to schedule retention'));
+void scheduleOfferFeedScan().catch((err) => log.error({ err }, 'failed to schedule offer feed scan'));
 
 // Report only EXHAUSTED-retry failures to Sentry so transient retries don't spam it.
 for (const w of workers) {
