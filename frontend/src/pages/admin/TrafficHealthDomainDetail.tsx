@@ -17,7 +17,7 @@ import { Calendar, CheckCircle2, ShieldAlert, Lock } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Badge, Spinner, StateBlock } from '../../components/ui';
 import { EmptyShellTable } from '../../components/EmptyShellTable';
-import { daysAgo, todayStr } from '../../components/ReportPageKit';
+import { daysAgo, todayStr, toIso } from '../../components/ReportPageKit';
 import type { TrackingDomain } from '../../types';
 
 const TABS = ['All Activity', 'Uptime Incidents', 'Reputation Flags', 'Tasks', 'Usage', 'Assignments', 'Mismatches', 'Configuration'] as const;
@@ -40,50 +40,86 @@ function TabBar({ active, onChange }: { active: string; onChange: (t: string) =>
   );
 }
 
-function DateRangePicker() {
-  const [from, setFrom] = useState(daysAgo(90));
-  const [to, setTo] = useState(todayStr());
+function DateRangePicker({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
   return (
     <div className="mb-6 flex flex-wrap items-end gap-3">
       <div>
         <label className="label mb-1 flex items-center gap-1.5"><Calendar size={13} /> From</label>
-        <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+        <input type="date" className="input" value={from} max={to} onChange={(e) => onFrom(e.target.value)} />
       </div>
       <div>
         <label className="label mb-1 block">To</label>
-        <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
+        <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => onTo(e.target.value)} />
       </div>
     </div>
   );
 }
 
-function AllActivityTab() {
+interface ActivityEntry { id: string; action: string; createdAt: string; label: string; actorType: string }
+interface DomainSummary {
+  offersAssigned: number; partnersUsing: number; clicks: number; conversions: number;
+  revenue: number; payout: number; profit: number; margin: number | null; rpc: number | null;
+}
+
+function AllActivityTab({ domainId }: { domainId: string }) {
+  const [from, setFrom] = useState(daysAgo(90));
+  const [to, setTo] = useState(todayStr());
+  const qs = `from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`;
+  const { data, loading } = useQuery<ActivityEntry[]>(`/api/traffic-health/domains/${domainId}/activity?${qs}`);
   return (
     <div>
-      <DateRangePicker />
-      <div className="grid place-items-center rounded-card border border-border bg-surface px-6 py-16 text-center">
-        <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-success text-white"><CheckCircle2 size={28} /></div>
-        <p className="text-h3 font-semibold text-fg">Everything has been healthy!</p>
-        <p className="mt-2 text-small text-fg-secondary">No activity was recorded in this period.</p>
-      </div>
+      <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
+      {loading ? <StateBlock><Spinner /></StateBlock>
+        : !data?.length ? (
+          <div className="grid place-items-center rounded-card border border-border bg-surface px-6 py-16 text-center">
+            <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-success text-white"><CheckCircle2 size={28} /></div>
+            <p className="text-h3 font-semibold text-fg">No domain activity in this period</p>
+            <p className="mt-2 text-small text-fg-secondary">Create, update, or delete events for this domain will appear here.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-card border border-border">
+            <table className="w-full text-small">
+              <thead className="bg-page text-tiny text-fg-secondary">
+                <tr>
+                  <th className="px-3 py-2 text-left">When</th>
+                  <th className="px-3 py-2 text-left">Action</th>
+                  <th className="px-3 py-2 text-left">Actor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((e) => (
+                  <tr key={e.id} className="border-t border-border">
+                    <td className="px-3 py-2 text-fg-secondary">{new Date(e.createdAt).toLocaleString()}</td>
+                    <td className="px-3 py-2 capitalize text-fg">{e.label}</td>
+                    <td className="px-3 py-2 text-fg-secondary">{e.actorType}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
     </div>
   );
 }
 
 const INCIDENT_COLUMNS = ['Incident ID', 'Incident Status', 'Incident Type', 'Diagnosis Details', 'Is Action Required?', 'Detected', 'Last Observation', 'Resolution', 'Time to resolution'];
 function UptimeIncidentsTab() {
+  const [from, setFrom] = useState(daysAgo(90));
+  const [to, setTo] = useState(todayStr());
   return (
     <div>
-      <DateRangePicker />
+      <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
       <EmptyShellTable columns={INCIDENT_COLUMNS} status="Ongoing" />
     </div>
   );
 }
 
 function ReputationFlagsTab() {
+  const [from, setFrom] = useState(daysAgo(90));
+  const [to, setTo] = useState(todayStr());
   return (
     <div>
-      <DateRangePicker />
+      <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
       <div className="grid place-items-center rounded-card border border-border bg-surface px-6 py-16 text-center">
         <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-accent text-white"><ShieldAlert size={28} /></div>
         <p className="text-h3 font-semibold text-fg">Gain access to reputation monitoring</p>
@@ -98,9 +134,11 @@ function ReputationFlagsTab() {
 
 const TASK_COLUMNS = ['Task ID', 'Task Status', 'Related Incident', 'Instructions', 'Detected', 'Completed'];
 function TasksTab() {
+  const [from, setFrom] = useState(daysAgo(90));
+  const [to, setTo] = useState(todayStr());
   return (
     <div>
-      <DateRangePicker />
+      <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
       <EmptyShellTable columns={TASK_COLUMNS} status="All" />
     </div>
   );
@@ -111,8 +149,14 @@ const USAGE_COLUMNS = [
   'Dup. Clicks', 'Invalid clicks', 'Total CV', 'CV', 'VT CV', 'CTR', 'Throttle', 'CVR', 'CPC', 'CPA',
   'RPC', 'RPA', 'Revenue', 'Payout', 'Profit', 'Margin',
 ];
-function UsageTab() {
+function UsageTab({ domainId }: { domainId: string }) {
   const [view, setView] = useState<'summary' | 'partner' | 'offer'>('summary');
+  const [from, setFrom] = useState(daysAgo(90));
+  const [to, setTo] = useState(todayStr());
+  const qs = `from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`;
+  const { data: summary, loading } = useQuery<DomainSummary>(`/api/traffic-health/domains/${domainId}/summary?${qs}`);
+  const fmt = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString());
+  const money = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`);
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -124,10 +168,33 @@ function UsageTab() {
             </button>
           ))}
         </div>
-        <DateRangePicker />
+        <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
       </div>
-      <p className="mb-3 text-tiny text-fg-muted">Per-domain traffic attribution isn't tracked yet — clicks and conversions aren't tagged with which of this network's tracking domains served them.</p>
-      <EmptyShellTable columns={USAGE_COLUMNS} search={false} />
+      {loading ? <StateBlock><Spinner /></StateBlock>
+        : view !== 'summary' ? (
+          <>
+            <p className="mb-3 text-tiny text-fg-muted">Per-partner and per-offer breakdown requires hostname-level click tagging — not yet in schema. Summary stats below are live via offer assignment.</p>
+            <EmptyShellTable columns={USAGE_COLUMNS} search={false} />
+          </>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 rounded-card border border-border p-4 sm:grid-cols-4">
+            {[
+              ['Partners', fmt(summary?.partnersUsing)],
+              ['Offers assigned', fmt(summary?.offersAssigned)],
+              ['Clicks', fmt(summary?.clicks)],
+              ['Conversions', fmt(summary?.conversions)],
+              ['Revenue', money(summary?.revenue)],
+              ['Payout', money(summary?.payout)],
+              ['Profit', money(summary?.profit)],
+              ['RPC', summary?.rpc != null ? money(summary.rpc) : '—'],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <p className="text-tiny text-fg-muted">{label}</p>
+                <p className="text-h3 font-semibold text-fg">{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
     </div>
   );
 }
@@ -242,22 +309,21 @@ export default function TrafficHealthDomainDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const [tab, setTab] = useState<string>('All Activity');
-  const { data: domains, loading } = useQuery<TrackingDomain[]>('/api/tracking-domains');
-  const domain = domains?.find((d) => d.id === id);
+  const { data: domain, loading, error } = useQuery<TrackingDomain>(id ? `/api/tracking-domains/${id}` : null);
 
   if (loading) return <StateBlock><Spinner /></StateBlock>;
-  if (!domain) return <StateBlock>Domain not found.</StateBlock>;
+  if (error || !domain) return <StateBlock>{error ?? 'Domain not found.'}</StateBlock>;
 
   return (
     <>
       <button onClick={() => nav('/app/traffic-health')} className="btn-ghost !py-1.5 !px-3 text-tiny mb-3">← Back</button>
       <PageHeader title={`Domain Details: ${domain.host}`} subtitle={`Traffic Health › Domain Details: ${domain.host}`} />
       <TabBar active={tab} onChange={setTab} />
-      {tab === 'All Activity' && <AllActivityTab />}
+      {tab === 'All Activity' && <AllActivityTab domainId={domain.id} />}
       {tab === 'Uptime Incidents' && <UptimeIncidentsTab />}
       {tab === 'Reputation Flags' && <ReputationFlagsTab />}
       {tab === 'Tasks' && <TasksTab />}
-      {tab === 'Usage' && <UsageTab />}
+      {tab === 'Usage' && <UsageTab domainId={domain.id} />}
       {tab === 'Assignments' && <AssignmentsTab />}
       {tab === 'Mismatches' && <MismatchesTab />}
       {tab === 'Configuration' && <ConfigurationTab domain={domain} />}

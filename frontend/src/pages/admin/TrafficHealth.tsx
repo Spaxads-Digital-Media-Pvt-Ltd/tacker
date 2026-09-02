@@ -9,11 +9,9 @@
  * What IS real: our tracking-domain list (/api/tracking-domains) — search, Add Domain (reuses the
  * same real POST endpoint as Control Center's Tracking Domains page), the 90-day Uptime bar (built
  * from the domain's own real created_at + current status — we have no historical incident log, so
- * every bar reflects current status, same as the reference's own all-green state), and the
- * Configurations tab's real domain/SSL fields. Per-domain traffic (Usage) genuinely isn't
- * attributable in this schema — clicks/conversions aren't tagged with which of a network's several
- * tracking domains served them — so those numbers render as "—" rather than fabricated or
- * misattributed from network-wide totals.
+ * every bar reflects current status, same as the reference's own all-green state), Usage stats via
+ * /api/traffic-health (attributed via offer.tracking_domain_id), audit-log All Activity, and
+ * Configurations (including set-primary). Per-hostname click tagging and premium sections remain UI-only.
  */
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -23,10 +21,34 @@ import { api } from '../../lib/api';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
 import { Accordion } from '../../components/Accordion';
 import { EmptyShellTable } from '../../components/EmptyShellTable';
-import { daysAgo, todayStr } from '../../components/ReportPageKit';
+import { daysAgo, todayStr, toIso } from '../../components/ReportPageKit';
 import type { TrackingDomain } from '../../types';
 
 const TAB_LIST = ['Overview', 'Uptime Incidents', 'Reputation Flags', 'Tasks', 'Usage', 'Configurations'] as const;
+
+interface DomainSummary {
+  offersAssigned: number; smartLinksAssigned: number; partnersUsing: number;
+  clicks: number; conversions: number; payout: number; revenue: number; profit: number;
+  margin: number | null; rpc: number | null;
+}
+interface UsageRow {
+  domainId: string; host: string; ref: number;
+  partnersUsing: number; offersAssigned: number; clicks: number; conversions: number;
+  rpc: number | null; payout: number; revenue: number; profit: number; margin: number | null;
+}
+
+function fmtMoney(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '—';
+  return `$${n.toFixed(2)}`;
+}
+function fmtPct(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '—';
+  return `${n.toFixed(1)}%`;
+}
+function fmtNum(n: number | null | undefined): string {
+  if (n == null) return '—';
+  return n.toLocaleString();
+}
 
 function TabBar({ tabs, active, onChange, badges, right }: { tabs: readonly string[]; active: string; onChange: (t: string) => void; badges?: Record<string, number>; right?: ReactNode }) {
   return (
@@ -146,6 +168,23 @@ function UptimeBars({ domain }: { domain: TrackingDomain }) {
 
 function DomainDetailPanel({ domain, onOpenDetail }: { domain: TrackingDomain; onOpenDetail: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const from = daysAgo(90);
+  const to = todayStr();
+  const { data: summary } = useQuery<DomainSummary>(
+    `/api/traffic-health/domains/${domain.id}/summary?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`,
+  );
+  const s = summary;
+  const trafficMetrics: { label: string; value: string }[] = [
+    { label: 'Revenue', value: fmtMoney(s?.revenue) },
+    { label: 'Profit', value: fmtMoney(s?.profit) },
+    { label: 'Profit Margin', value: fmtPct(s?.margin) },
+    { label: 'Payout', value: fmtMoney(s?.payout) },
+    { label: 'Sale Amount', value: '—' },
+    { label: 'Conversions', value: fmtNum(s?.conversions) },
+    { label: 'Clicks', value: fmtNum(s?.clicks) },
+    { label: 'RPC', value: s?.rpc != null ? fmtMoney(s.rpc) : '—' },
+    { label: 'Impressions', value: '—' },
+  ];
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -175,14 +214,18 @@ function DomainDetailPanel({ domain, onOpenDetail }: { domain: TrackingDomain; o
 
       <div className="rounded-card border border-border p-4">
         <p className="mb-2 text-small font-semibold text-fg">Usage</p>
-        <p title="Per-domain traffic attribution isn't tracked yet" className="text-small text-fg-muted">— Partners Using the Domain for — Offers</p>
+        <p className="text-small text-fg-secondary">
+          {s
+            ? `${s.partnersUsing} Partner${s.partnersUsing === 1 ? '' : 's'} · ${s.offersAssigned} Offer${s.offersAssigned === 1 ? '' : 's'} assigned`
+            : 'Loading…'}
+        </p>
         <div className="mt-3 border-t border-border pt-3">
-          <p className="mb-2 text-small font-semibold text-fg">Total Traffic</p>
+          <p className="mb-2 text-small font-semibold text-fg">Total Traffic <span className="font-normal text-fg-muted">(via offers on this domain)</span></p>
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-            {['Revenue', 'Profit', 'Profit Margin', 'Payout', 'Sale Amount', 'Conversions', 'Clicks', 'RPC', 'Impressions'].map((label) => (
+            {trafficMetrics.map(({ label, value }) => (
               <div key={label}>
                 <p className="text-tiny text-fg-muted">{label}</p>
-                <p className="text-small font-medium text-fg-secondary">—</p>
+                <p className="text-small font-medium text-fg-secondary">{value}</p>
               </div>
             ))}
           </div>
@@ -331,18 +374,29 @@ function TasksTab() {
 }
 
 // ── Usage ────────────────────────────────────────────────────────────────
-const USAGE_COLUMNS = ['Domain', 'Partners Using Domain', 'Offers Ran', 'Impressions', 'Clicks', 'RPC', 'Conversions', 'Payout', 'Revenue', 'Profit', 'Margin', 'Sale Amount'];
 
-function UsageTab({ domains, loading }: { domains: TrackingDomain[]; loading: boolean }) {
+function UsageTab() {
   const [from, setFrom] = useState(daysAgo(90));
   const [to, setTo] = useState(todayStr());
+  const qs = `from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`;
+  const { data, loading } = useQuery<{ rows: UsageRow[] }>(`/api/traffic-health/usage?${qs}`);
+  const rows = data?.rows ?? [];
   if (loading) return <StateBlock><Spinner /></StateBlock>;
-  if (domains.length === 0) return <StateBlock>No tracking domains yet.</StateBlock>;
-  const columns: Column<TrackingDomain>[] = USAGE_COLUMNS.map((header) => (
-    header === 'Domain'
-      ? { header, cell: (d) => <span className="font-mono text-xs text-accent-text">{d.host}</span> }
-      : { header, cell: () => '—' }
-  ));
+  if (rows.length === 0) return <StateBlock>No tracking domains yet.</StateBlock>;
+  const columns: Column<UsageRow>[] = [
+    { header: 'Domain', cell: (r) => <span className="font-mono text-xs text-accent-text">{r.host}</span> },
+    { header: 'Partners Using Domain', cell: (r) => fmtNum(r.partnersUsing) },
+    { header: 'Offers Ran', cell: (r) => fmtNum(r.offersAssigned) },
+    { header: 'Impressions', cell: () => '—' },
+    { header: 'Clicks', cell: (r) => fmtNum(r.clicks) },
+    { header: 'RPC', cell: (r) => (r.rpc != null ? fmtMoney(r.rpc) : '—') },
+    { header: 'Conversions', cell: (r) => fmtNum(r.conversions) },
+    { header: 'Payout', cell: (r) => fmtMoney(r.payout) },
+    { header: 'Revenue', cell: (r) => fmtMoney(r.revenue) },
+    { header: 'Profit', cell: (r) => fmtMoney(r.profit) },
+    { header: 'Margin', cell: (r) => fmtPct(r.margin) },
+    { header: 'Sale Amount', cell: () => '—' },
+  ];
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
@@ -355,8 +409,8 @@ function UsageTab({ domains, loading }: { domains: TrackingDomain[]; loading: bo
           <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
-      <p className="text-tiny text-fg-muted">Per-domain traffic attribution isn't tracked yet — your domains are listed here for reference.</p>
-      <Table columns={columns} rows={domains} rowKey={(d) => d.id} />
+      <p className="text-tiny text-fg-muted">Traffic is attributed via offers assigned to each domain (clicks are not tagged with serving hostname).</p>
+      <Table columns={columns} rows={rows} rowKey={(r) => r.domainId} />
     </div>
   );
 }
@@ -364,8 +418,38 @@ function UsageTab({ domains, loading }: { domains: TrackingDomain[]; loading: bo
 // ── Configurations ───────────────────────────────────────────────────────
 const CERT_COLUMNS = ['ID', 'Common Name', 'Serial Number', 'Domain(s) Using the Certificate', 'Managed By', 'Issued By', 'Issued', 'Expiration', 'Expires in', 'Created', 'Modified'];
 
+function SetPrimaryModal({ open, onClose, domains, onSaved }: { open: boolean; onClose: () => void; domains: TrackingDomain[]; onSaved: () => void }) {
+  const [selected, setSelected] = useState('');
+  const { run, busy, error } = useMutation((id: string) => api.patch(`/api/traffic-health/domains/${id}/primary`, { isPrimary: true }));
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (selected && (await run(selected))) onSaved();
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Set default tracking domain">
+      <form onSubmit={submit} className="space-y-4">
+        {error && <p className="text-small text-danger-text">{error}</p>}
+        <Field label="Domain">
+          <select className="input" required value={selected} onChange={(e) => setSelected(e.target.value)}>
+            <option value="" disabled>Select domain…</option>
+            {domains.filter((d) => d.status === 'active').map((d) => (
+              <option key={d.id} value={d.id}>{d.host}{d.isPrimary ? ' (current primary)' : ''}</option>
+            ))}
+          </select>
+        </Field>
+        <p className="text-tiny text-fg-muted">Default conversion domain uses the same primary tracking domain in this app.</p>
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-primary" disabled={busy || !selected}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDomain[]; loading: boolean; refetch: () => void }) {
   const [adding, setAdding] = useState(false);
+  const [editPrimary, setEditPrimary] = useState(false);
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   const primary = domains.find((d) => d.isPrimary) ?? domains[0];
   const domainColumns: Column<TrackingDomain>[] = [
@@ -391,12 +475,12 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
         <div>
           <p className="text-small font-semibold text-fg">Default Tracking Domain</p>
           <p className="mt-1 text-small text-fg-secondary">{primary?.host ?? '—'}</p>
-          <button title="Not available yet" className="mt-1 text-tiny font-medium text-accent-text">Edit</button>
+          <button type="button" className="mt-1 text-tiny font-medium text-accent-text" onClick={() => setEditPrimary(true)} disabled={domains.length === 0}>Edit</button>
         </div>
         <div>
           <p className="text-small font-semibold text-fg">Default Conversion Domain</p>
           <p className="mt-1 text-small text-fg-secondary">{primary?.host ?? '—'}</p>
-          <button title="Not available yet" className="mt-1 text-tiny font-medium text-accent-text">Edit</button>
+          <button type="button" className="mt-1 text-tiny font-medium text-accent-text" onClick={() => setEditPrimary(true)} disabled={domains.length === 0}>Edit</button>
         </div>
         <div>
           <p className="text-small font-semibold text-fg">Domain Registration Contact</p>
@@ -424,6 +508,7 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
       </Accordion>
 
       <AddDomainModal open={adding} onClose={() => setAdding(false)} onCreated={() => { setAdding(false); refetch(); }} />
+      <SetPrimaryModal open={editPrimary} onClose={() => setEditPrimary(false)} domains={domains} onSaved={() => { setEditPrimary(false); refetch(); }} />
     </div>
   );
 }
@@ -431,7 +516,7 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function TrafficHealth() {
   const [tab, setTab] = useState<string>('Overview');
-  const { data, loading, refetch } = useQuery<TrackingDomain[]>('/api/tracking-domains');
+  const { data, loading, refetch } = useQuery<TrackingDomain[]>('/api/tracking-domains?limit=200');
   const domains = useMemo(() => data ?? [], [data]);
   const allUp = domains.length > 0 && domains.every((d) => d.status === 'active');
 
@@ -449,7 +534,7 @@ export default function TrafficHealth() {
       {tab === 'Uptime Incidents' && <UptimeIncidentsTab allUp={allUp} />}
       {tab === 'Reputation Flags' && <ReputationFlagsTab />}
       {tab === 'Tasks' && <TasksTab />}
-      {tab === 'Usage' && <UsageTab domains={domains} loading={loading} />}
+      {tab === 'Usage' && <UsageTab />}
       {tab === 'Configurations' && <ConfigurationsTab domains={domains} loading={loading} refetch={refetch} />}
     </>
   );

@@ -44,6 +44,7 @@ import { conversionImportsRoutes } from './conversion-imports/routes.js';
 import { marketplaceProfileRoutes } from './marketplace-profile/routes.js';
 import { communicationHubRoutes } from './communication-hub/routes.js';
 import { customerValueRoutes } from './customer-value/routes.js';
+import { trafficHealthRoutes } from './traffic-health/routes.js';
 import { auditLogRoutes } from './audit-log/routes.js';
 import { trafficControlsRoutes } from './traffic-controls/routes.js';
 import { offerCustomSettingsRoutes } from './offer-custom-settings/routes.js';
@@ -153,6 +154,7 @@ export function buildDashboardApp(): Express {
   authed.use('/marketplace-profile', requireAdmin, marketplaceProfileRoutes());
   authed.use('/communication-hub', requireAdmin, communicationHubRoutes());
   authed.use('/customer-value', requireAdmin, customerValueRoutes());
+  authed.use('/traffic-health', requireAdmin, trafficHealthRoutes());
   authed.use('/audit-log', requireAdmin, auditLogRoutes());
   authed.use('/conversion-imports', requireAdmin, conversionImportsRoutes());
   authed.use('/traffic-controls', requireAdmin, trafficControlsRoutes());
