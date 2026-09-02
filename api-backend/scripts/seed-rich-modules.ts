@@ -439,11 +439,19 @@ async function main(): Promise<void> {
     }
 
     // ═══ 14. Smart Links (+ SmartSwitch) ═══════════════════════════════════════════════
-    const SMART_LINKS = [
-      { name: 'US Nutrition Rotator', mech: 'weight', labels: 'nutrition,us' },
-      { name: 'EU Finance Priority', mech: 'priority', labels: 'finance,eu' },
-      { name: 'Global Gaming KPI', mech: 'kpi', labels: 'gaming' },
-      { name: 'Catch-All Fallback', mech: 'weight', labels: null },
+    // Deliberately varied so the Manage Smart Links filter drawer has something to bite on:
+    // every mechanism, both Show-to-Partners values, catch-all present + absent, two tracking
+    // domains, an active + a paused link.
+    const SMART_LINKS: {
+      name: string; mech: 'weight' | 'priority' | 'kpi'; labels: string | null;
+      status: 'active' | 'paused'; showToPartners: boolean; catchAll: boolean; host: string;
+    }[] = [
+      { name: 'US Nutrition Rotator', mech: 'weight', labels: 'nutrition,us', status: 'active', showToPartners: true, catchAll: true, host: 'demo.ourtracking.com' },
+      { name: 'EU Finance Priority', mech: 'priority', labels: 'finance,eu', status: 'active', showToPartners: false, catchAll: true, host: 'demo.ourtracking.com' },
+      { name: 'Global Gaming KPI', mech: 'kpi', labels: 'gaming', status: 'active', showToPartners: true, catchAll: true, host: 'demo.ourtracking.com' },
+      { name: 'Catch-All Fallback', mech: 'weight', labels: null, status: 'paused', showToPartners: false, catchAll: true, host: 'demo.ourtracking.com' },
+      { name: 'US Direct (no fallback)', mech: 'weight', labels: 'direct,us', status: 'active', showToPartners: true, catchAll: false, host: 'localhost' },
+      { name: 'APAC Priority Split', mech: 'priority', labels: 'apac', status: 'active', showToPartners: false, catchAll: true, host: 'localhost' },
     ];
     for (let s = 0; s < SMART_LINKS.length; s++) {
       const sl = SMART_LINKS[s]!;
@@ -453,8 +461,8 @@ async function main(): Promise<void> {
            kpi_run_frequency_hours, kpi_lookback_hours, kpi_metric, kpi_min_clicks)
          VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,$9,$10,$11,$12) RETURNING id`,
         [
-          netId, sl.name, s === 3 ? 'paused' : 'active', sl.mech,
-          items[items.length - 1]!.id, sl.labels, s % 2 === 0, dom('demo.ourtracking.com'),
+          netId, sl.name, sl.status, sl.mech,
+          sl.catchAll ? items[items.length - 1]!.id : null, sl.labels, sl.showToPartners, dom(sl.host),
           sl.mech === 'kpi' ? 24 : null, sl.mech === 'kpi' ? 168 : null, sl.mech === 'kpi' ? 'epc' : null, sl.mech === 'kpi' ? 100 : null,
         ])).rows[0]!;
       for (let it = 0; it < items.length; it++) {

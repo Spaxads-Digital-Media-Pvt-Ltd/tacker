@@ -5,15 +5,16 @@
  * per-row kebab (Edit / Copy / View Smart Link Report), and — matching the reference exactly —
  * "+ Smart Link" and a link's Name navigate to real dedicated pages rather than a modal.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, MoreVertical, ChevronRight, ExternalLink, Filter } from 'lucide-react';
+import { Plus, Search, MoreVertical, ChevronRight, ExternalLink, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
+import { SearchFilterDrawer, FieldBlock } from '../../components/SearchFilterDrawer';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { fmtDateTime, fmtMoney, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
+import { fmtDateTime, fmtMoney, REDIRECT_MECHANISMS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
 import type { Offer, TrackingDomain } from '../../types';
 
 const PAGE_SIZE = 25;
@@ -110,16 +111,66 @@ export default function SmartLinks() {
   const [page, setPage] = useState(1);
   const copy = useMutation((id: string) => api.post(`/api/smart-links/${id}/copy`, {}));
 
-  const offerLabel = (id: string) => { const o = offers?.find((x) => x.id === id); return o ? (o.ref != null ? `${o.name} (${o.ref})` : o.name) : id.slice(0, 8) + '…'; };
+  // ── Filter drawer (client-side, over the fetched list — same pattern as Manage Offers).
+  //    Status + Search stay as quick-filters in the toolbar; the drawer covers the rest. ──
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [fMech, setFMech] = useState('');         // redirectMechanism
+  const [fPartners, setFPartners] = useState(''); // '' | 'yes' | 'no'  (showToPartners)
+  const [fCatch, setFCatch] = useState('');       // catchAllOfferId | '__none__'
+  const [fRoutes, setFRoutes] = useState('');     // offerId that a link routes to
+  const [fDomain, setFDomain] = useState('');     // trackingDomainId
+  const [fLabel, setFLabel] = useState('');       // labels contains
+  const [dMech, setDMech] = useState('');
+  const [dPartners, setDPartners] = useState('');
+  const [dCatch, setDCatch] = useState('');
+  const [dRoutes, setDRoutes] = useState('');
+  const [dDomain, setDDomain] = useState('');
+  const [dLabel, setDLabel] = useState('');
+
+  const offerLabel = useCallback(
+    (id: string) => { const o = offers?.find((x) => x.id === id); return o ? (o.ref != null ? `${o.name} (${o.ref})` : o.name) : id.slice(0, 8) + '…'; },
+    [offers],
+  );
   const offerName = (id: string | null) => (id ? offerLabel(id) : '—');
   const base = trackBase(domains ?? null);
+
+  // Data-driven option lists so the drawer only offers values that actually exist in the list.
+  const catchAllOptions = useMemo(
+    () => Array.from(new Set((data ?? []).map((l) => l.catchAllOfferId).filter((x): x is string => Boolean(x))))
+      .map((id) => ({ id, label: offerLabel(id) })).sort((a, b) => a.label.localeCompare(b.label)),
+    [data, offerLabel],
+  );
+  const routedOfferOptions = useMemo(
+    () => Array.from(new Set(Object.values(itemsByLink).flat().map((it) => it.offerId)))
+      .map((id) => ({ id, label: offerLabel(id) })).sort((a, b) => a.label.localeCompare(b.label)),
+    [itemsByLink, offerLabel],
+  );
+
+  const openDrawer = () => {
+    setDMech(fMech); setDPartners(fPartners); setDCatch(fCatch); setDRoutes(fRoutes); setDDomain(fDomain); setDLabel(fLabel);
+    setDrawerOpen(true);
+  };
+  const applyDrawer = () => {
+    setFMech(dMech); setFPartners(dPartners); setFCatch(dCatch); setFRoutes(dRoutes); setFDomain(dDomain); setFLabel(dLabel);
+    setDrawerOpen(false); setPage(1);
+  };
+  const clearDraft = () => { setDMech(''); setDPartners(''); setDCatch(''); setDRoutes(''); setDDomain(''); setDLabel(''); };
+
+  const appliedFilterCount = [fMech, fPartners, fCatch, fRoutes, fDomain, fLabel.trim()].filter(Boolean).length;
+  const draftFilterCount = [dMech, dPartners, dCatch, dRoutes, dDomain, dLabel.trim()].filter(Boolean).length;
 
   const rows = useMemo(() => {
     let out = data ?? [];
     if (status !== 'all') out = out.filter((r) => r.status === status);
     if (q.trim()) out = out.filter((r) => r.name.toLowerCase().includes(q.trim().toLowerCase()));
+    if (fMech) out = out.filter((r) => r.redirectMechanism === fMech);
+    if (fPartners) out = out.filter((r) => r.showToPartners === (fPartners === 'yes'));
+    if (fCatch) out = out.filter((r) => (fCatch === '__none__' ? !r.catchAllOfferId : r.catchAllOfferId === fCatch));
+    if (fRoutes) out = out.filter((r) => (itemsByLink[r.id] ?? []).some((it) => it.offerId === fRoutes));
+    if (fDomain) out = out.filter((r) => r.trackingDomainId === fDomain);
+    if (fLabel.trim()) { const s = fLabel.trim().toLowerCase(); out = out.filter((r) => (r.labels ?? '').toLowerCase().includes(s)); }
     return out;
-  }, [data, status, q]);
+  }, [data, status, q, fMech, fPartners, fCatch, fRoutes, fDomain, fLabel, itemsByLink]);
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
@@ -136,7 +187,12 @@ export default function SmartLinks() {
             <option value="all">All</option>
             {STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s[0]!.toUpperCase() + s.slice(1)}</option>)}
           </select>
-          <button type="button" title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Filter size={15} /></button>
+          <button type="button" className="btn-ghost relative" onClick={openDrawer}>
+            <SlidersHorizontal size={15} /> Filters
+            {appliedFilterCount > 0 && (
+              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-white">{appliedFilterCount}</span>
+            )}
+          </button>
           <TableActionsMenu rows={rows} offerName={offerName} />
         </div>
       </div>
@@ -215,6 +271,58 @@ export default function SmartLinks() {
             </div>
           </>
         )}
+
+      {drawerOpen && (
+        <SearchFilterDrawer appliedCount={draftFilterCount} onClose={() => setDrawerOpen(false)} onApply={applyDrawer}>
+          <div className="mb-3 flex justify-end">
+            <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={clearDraft}>Clear</button>
+          </div>
+          <p className="mb-3 text-[11px] text-fg-muted">Status and Search stay in the toolbar as quick filters — this panel narrows the list further.</p>
+
+          <FieldBlock label="Redirect Mechanism">
+            <select className="input" value={dMech} onChange={(e) => setDMech(e.target.value)}>
+              <option value="">All Mechanisms</option>
+              {REDIRECT_MECHANISMS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Show to Partners">
+            <select className="input" value={dPartners} onChange={(e) => setDPartners(e.target.value)}>
+              <option value="">Any</option>
+              <option value="yes">Yes — exposed in the Partner Portal</option>
+              <option value="no">No</option>
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Routes to Offer">
+            <select className="input" value={dRoutes} onChange={(e) => setDRoutes(e.target.value)}>
+              <option value="">Any Offer</option>
+              {routedOfferOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-fg-muted">Smart Links with this offer in their rotation — useful when auditing where an offer gets traffic.</p>
+          </FieldBlock>
+
+          <FieldBlock label="Catch-All Offer">
+            <select className="input" value={dCatch} onChange={(e) => setDCatch(e.target.value)}>
+              <option value="">Any</option>
+              <option value="__none__">— No catch-all configured</option>
+              {catchAllOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Tracking Domain">
+            <select className="input" value={dDomain} onChange={(e) => setDDomain(e.target.value)}>
+              <option value="">All Tracking Domains</option>
+              {(domains ?? []).filter((d) => d.status === 'active').map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Label contains">
+            <input className="input" placeholder="e.g. nutrition" value={dLabel} onChange={(e) => setDLabel(e.target.value)} />
+            <p className="mt-1 text-[11px] text-fg-muted">Substring match against a Smart Link's free-text Labels.</p>
+          </FieldBlock>
+        </SearchFilterDrawer>
+      )}
     </>
   );
 }

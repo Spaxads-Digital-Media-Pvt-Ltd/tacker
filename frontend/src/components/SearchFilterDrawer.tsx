@@ -1,8 +1,14 @@
 /**
- * Trackog-style Search Filter drawer — right slide-over, light theme, checkbox-driven.
+ * Search Filter drawer — right slide-over, checkbox-driven, theme-aware (all tokens).
  * Tick a Group By / Report Option / column → it becomes a column (or metric) on Apply.
+ *
+ * Portaled to <body>: the app shell wraps every page in a `.animate-fade-in` div whose completed
+ * animation leaves an identity `transform` in effect (animation-fill-mode: both), which establishes
+ * a containing block for `position: fixed`. Rendered inline, this slide-over would be clipped to
+ * that wrapper's height instead of the viewport — obvious on a short list (e.g. Smart Links).
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { FilterDef } from '../lib/reportFilters';
 
 export interface EntityOpt { value: string; label: string }
@@ -22,7 +28,7 @@ export function SearchFilterDrawer({ appliedCount, onClose, onApply, children }:
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
       <button type="button" aria-label="Close filters" className="absolute inset-0 bg-black/60" onClick={onClose} />
       <aside className="relative flex h-full w-full max-w-[440px] flex-col border-l border-border bg-surface shadow-2xl animate-fade-in">
@@ -46,7 +52,8 @@ export function SearchFilterDrawer({ appliedCount, onClose, onApply, children }:
           <button type="button" className="btn-ghost border border-border px-5" onClick={onClose}>Cancel</button>
         </footer>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
