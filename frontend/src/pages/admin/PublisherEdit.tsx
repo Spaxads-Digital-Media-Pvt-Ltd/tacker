@@ -10,7 +10,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Tabs, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Tabs, Spinner, StateBlock, Segmented } from '../../components/ui';
 import type { Publisher, DashboardUser } from '../../types';
 
 const TABS = ['General', 'Address', 'Billing'] as const;
@@ -58,20 +58,6 @@ function LabelsEditor({ base }: { base: string }) {
         />
       </div>
     </Field>
-  );
-}
-
-function Segmented({ options, value, onChange, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium capitalize transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {o}
-        </button>
-      ))}
-    </div>
   );
 }
 

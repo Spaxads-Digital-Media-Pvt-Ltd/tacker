@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { usePageTitle } from './PageTitle';
+import { HelpHint } from './HelpHint';
 
 /**
  * Declares the page title/subtitle (rendered in the top header, Section 2 — NOT duplicated in the
@@ -161,11 +162,72 @@ export function Modal({ open, onClose, title, children, size = 'md' }: { open: b
   );
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <div>
-      <label className="label">{label}</label>
+      <label className="label">{label}{hint && <HelpHint text={hint} />}</label>
       {children}
+    </div>
+  );
+}
+
+/**
+ * A form field the reference has but this app can't back yet — the control is shown for layout
+ * parity but rendered non-interactive, with an honest one-line note. Same honesty convention as the
+ * inert filter rows on Manage Offers (honesty over fake functionality).
+ */
+export function UnavailableField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <label className="label mb-2 block text-fg-muted">{label}</label>
+      <div className="pointer-events-none select-none opacity-50">{children}</div>
+      <p className="mt-1 text-[11px] text-fg-muted">Not yet available in this app.</p>
+    </div>
+  );
+}
+
+/**
+ * Segmented control — a full-width recessed track (bg-page, hairline border, inset shadow) carrying
+ * a single "floating" thumb on the selected option (bg-elevated + drop shadow + hairline ring);
+ * unselected options are plain label text (+ optional status dot) sitting directly on the track.
+ * Options divide the width into equal segments (Everflow parity). Only the *selected* pill carries a
+ * raised edge — the others are bare text — so it never reads as a row of individually-boxed options.
+ * Used for Status / Visibility and every other either/or picker in the
+ * admin forms. `options` accepts bare strings or `{ value, label }`; `labels` remaps bare-string
+ * display text; `dots` maps a value → status-dot colour class. Pass `className` (e.g. `w-auto
+ * inline-flex`) to opt out of full-width where a control must hug its content.
+ */
+type SegmentedOption = string | { value: string; label: string };
+export function Segmented({
+  options, value, onChange, dots, labels, className,
+}: {
+  options: readonly SegmentedOption[];
+  value: string;
+  onChange: (v: string) => void;
+  dots?: Record<string, string>;
+  labels?: Record<string, string>;
+  className?: string;
+}) {
+  const items = options.map((o) => (typeof o === 'string' ? { value: o, label: labels?.[o] ?? o } : o));
+  return (
+    <div className={`flex w-full gap-1 rounded-[var(--radius)] border border-border bg-page p-1 shadow-[inset_0_1px_2px_rgb(2_6_23_/_0.06)] ${className ?? ''}`}>
+      {items.map((o) => {
+        const on = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(o.value)}
+            className={`flex flex-1 basis-0 min-w-0 items-center justify-center gap-1.5 rounded-[calc(var(--radius)-3px)] px-3 py-2 text-small font-medium capitalize transition-colors ${
+              on ? 'bg-elevated text-fg shadow-sm ring-1 ring-inset ring-border' : 'text-fg-secondary hover:text-fg'
+            }`}
+          >
+            {dots && <span className={`h-2 w-2 shrink-0 rounded-full ${dots[o.value] ?? 'bg-fg-muted'}`} />}
+            <span className="truncate">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

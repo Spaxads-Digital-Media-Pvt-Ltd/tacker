@@ -11,19 +11,27 @@
  * never a disabled/greyed-out fake. Creatives reuses the same real CollectionTab already on the
  * Offer Detail page.
  */
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Field, Tabs, Spinner, StateBlock, UnavailableField, type Column, Segmented } from '../../components/ui';
+import { HelpHint } from '../../components/HelpHint';
+import { LabelsEditor } from '../../components/LabelsEditor';
 import { CollectionTab, type FieldDef } from '../../components/CollectionTab';
 import type { Offer, Advertiser, TrackingDomain } from '../../types';
 
 const TABS = ['General', 'Tracking & Controls', 'Revenue & Payout (Events)', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'] as const;
-const STATUSES = ['draft', 'active', 'paused', 'archived'] as const;
+// Everflow-reference order (Active · Paused · Pending). Edit keeps "Deleted" (archived) as a 4th
+// segment — unlike the create form — so an already-archived offer still shows its current status.
+const STATUSES = ['active', 'paused', 'draft', 'archived'] as const;
 const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-success', paused: 'bg-warning', archived: 'bg-danger' };
+// Display labels for the real backend enum — matches the Offers list vocabulary; API value stays raw.
+const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
 const DEVICES = ['desktop', 'mobile', 'tablet'] as const;
+const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => import('react').ReactNode): Column<Row> => ({ header, cell });
 
@@ -34,20 +42,6 @@ interface FormState {
   payoutModel: string; defaultPayout: string; defaultRevenue: string;
   attributionWindowS: string; dedupWindowS: string; fallbackUrl: string; allowedTrafficTypes: string[];
   trackingDomainId: string;
-}
-
-function Segmented({ options, value, onChange, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium capitalize transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {o}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
@@ -85,8 +79,6 @@ function CategoryPicker({ categories, panel }: { categories: string[]; panel: (c
 // genuine local state (real clicks, real visual feedback) instead of dead onChange={() => {}}. ────
 
 function TrackingExtras({ domains, value, onChange }: { domains: TrackingDomain[]; value: string; onChange: (v: string) => void }) {
-  const [linkingType, setLinkingType] = useState('Redirect Linking');
-  const [convMethod, setConvMethod] = useState('Server To Server Postback');
   return (
     <>
       <p className="text-small font-semibold text-fg">Tracking Domain</p>
@@ -98,15 +90,14 @@ function TrackingExtras({ domains, value, onChange }: { domains: TrackingDomain[
       </Field>
 
       <p className="text-small font-semibold text-fg">Click Tracking</p>
-      <div>
-        <label className="label mb-2 block">Linking Type *</label>
-        <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value={linkingType} onChange={setLinkingType} />
-      </div>
+      <UnavailableField label="Linking Type">
+        <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value="Redirect Linking" onChange={() => {}} />
+      </UnavailableField>
 
       <p className="text-small font-semibold text-fg">Conversion Event Tracking</p>
       <div>
-        <label className="label mb-2 block">Conversion Tracking Method *</label>
-        <Segmented options={['Server To Server Postback', 'Javascript SDK', 'HTML Pixel']} value={convMethod} onChange={setConvMethod} />
+        <label className="label mb-1 block">Conversion Tracking</label>
+        <p className="text-small text-fg-secondary">Conversions are accepted via Server-to-Server postback, pixel, or iframe — the advertiser fires whichever they use. It isn't a per-offer setting.</p>
       </div>
 
       <div>
@@ -143,7 +134,6 @@ function RevenueExtras({ revenue, onRevenueChange }: { revenue: string; onRevenu
 }
 
 function AttributionExtras() {
-  const [method, setMethod] = useState('Last Touch');
   const [tracker24, setTracker24] = useState(false);
   const [ipQuality, setIpQuality] = useState(false);
   const [throttle, setThrottle] = useState(false);
@@ -153,10 +143,6 @@ function AttributionExtras() {
   const [serverSideClick, setServerSideClick] = useState(false);
   return (
     <>
-      <div>
-        <label className="label mb-2 block">Attribution Method</label>
-        <Segmented options={['Last Touch', 'First Touch']} value={method} onChange={setMethod} />
-      </div>
       <div>
         <label className="label mb-2 block">24metrics Tracker</label>
         <div className="flex items-center gap-2">
@@ -199,17 +185,12 @@ function AttributionExtras() {
 }
 
 function EmailTab() {
-  const [suppressionFile, setSuppressionFile] = useState(false);
   const [ezepo, setEzepo] = useState(false);
   const [optizmo, setOptizmo] = useState(false);
   const [instructions, setInstructions] = useState(false);
-  const [optOut, setOptOut] = useState(false);
   return (
     <div className="max-w-2xl space-y-4">
-      <div>
-        <label className="label mb-2 block">Enable Suppression File</label>
-        <YesNoToggle on={suppressionFile} onChange={setSuppressionFile} />
-      </div>
+      <UnavailableField label="Enable Suppression File"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
       <div>
         <label className="label mb-2 block">Ezepo Enabled</label>
         <input type="checkbox" checked={ezepo} onChange={(e) => setEzepo(e.target.checked)} className="h-4 w-4 rounded border-border" />
@@ -222,10 +203,7 @@ function EmailTab() {
         <label className="label mb-2 block">Enable Email Instructions</label>
         <YesNoToggle on={instructions} onChange={setInstructions} />
       </div>
-      <div>
-        <label className="label mb-2 block">Enable Email Opt-out</label>
-        <YesNoToggle on={optOut} onChange={setOptOut} />
-      </div>
+      <UnavailableField label="Enable Email Opt-out"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
     </div>
   );
 }
@@ -238,12 +216,18 @@ export default function OfferEdit() {
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: groups, refetch: refetchGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
+  const { data: allOffers } = useQuery<Offer[]>('/api/offers');
+  const categoryOptions = useMemo(
+    () => Array.from(new Set((allOffers ?? []).map((o) => o.category).filter((c): c is string => Boolean(c)))).sort(),
+    [allOffers],
+  );
   const [tab, setTab] = useState<string>('General');
   const [form, setForm] = useState<FormState | null>(null);
   const [capsEnabled, setCapsEnabled] = useState(false);
   const [failTrafficEnabled, setFailTrafficEnabled] = useState(false);
   const [assignGroup, setAssignGroup] = useState(false);
   const [groupId, setGroupId] = useState('');
+  const [catNew, setCatNew] = useState(false);
   const { run, busy, error: saveError } = useMutation((body: Record<string, unknown>) => api.patch(base, body));
 
   useEffect(() => {
@@ -321,50 +305,82 @@ export default function OfferEdit() {
       <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
       <form onSubmit={submit} className="card space-y-6">
         {saveError && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{saveError}</p>}
-        <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
+        <p className="flex items-center gap-1.5 text-tiny text-fg-secondary">
+          <Info size={13} className="shrink-0 text-fg-muted" /> Fields with an asterisk (*) are mandatory.
+        </p>
 
         {tab === 'General' && (
           <div className="max-w-2xl space-y-4">
-            <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
+            <Field label="Name *" hint="Shown to partners in the offer list and on their tracking links — not the internal ID.">
+              <input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} />
+            </Field>
             <div>
-              <label className="label mb-2 block">Status *</label>
-              <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
+              <label className="label mb-2 block">Status *<HelpHint text="Pending = setup in progress (not live). Active = running. Paused = temporarily stopped. Deleted = archived, hidden from partners." /></label>
+              <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} labels={STATUS_LABEL} />
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Advertiser *">
+            <div>
+              <label className="label mb-2 block">Visibility *<HelpHint text="Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval." /></label>
+              <Segmented options={VISIBILITIES} value={form.visibility} onChange={(v) => set('visibility', v)} />
+            </div>
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+              <Field label="Advertiser *" hint="The company that owns this offer. Payout & revenue roll up to them for reporting and invoicing, and their account / sales managers apply to it. Every offer belongs to exactly one.">
                 <select className="input" required value={form.advertiserId} onChange={(e) => set('advertiserId', e.target.value)}>
                   {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </Field>
-              <div>
-                <label className="label mb-2 block">Thumbnail</label>
-                <div className="grid h-[74px] place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Drag and drop or Browse</div>
-              </div>
+              <UnavailableField label="Thumbnail">
+                <div className="grid h-[42px] place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Drag and drop or Browse</div>
+              </UnavailableField>
             </div>
-            <Field label="Category"><input className="input" value={form.category} onChange={(e) => set('category', e.target.value)} placeholder="Fashion" /></Field>
-            <Field label="Currency *"><input className="input" maxLength={3} required value={form.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} /></Field>
+            <Field label="Category" hint="Grouping label used for list filtering and marketplace facets. Pick an existing one, or choose “＋ New category…” to add a new label.">
+              {catNew ? (
+                <div className="flex gap-2">
+                  <input className="input" autoFocus value={form.category} placeholder="New category name"
+                    onChange={(e) => set('category', e.target.value)} />
+                  <button type="button" className="btn-ghost shrink-0"
+                    onClick={() => { setCatNew(false); set('category', ''); }}>Cancel</button>
+                </div>
+              ) : (
+                <select className="input" value={form.category}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') { setCatNew(true); set('category', ''); }
+                    else set('category', e.target.value);
+                  }}>
+                  <option value="">No category</option>
+                  {form.category && !categoryOptions.includes(form.category) && <option value={form.category}>{form.category}</option>}
+                  {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                  <option value="__new__">＋ New category…</option>
+                </select>
+              )}
+            </Field>
+            <Field label="Currency *" hint="ISO 4217 3-letter code (e.g. USD). All payout, revenue and ledger amounts for this offer are recorded in it. Not validated server-side yet — enter a real code.">
+              <input className="input" list="offer-currency-options" maxLength={3} pattern="[A-Za-z]{3}" title="Three-letter ISO 4217 code, e.g. USD" required value={form.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} />
+              <datalist id="offer-currency-options">
+                {COMMON_CURRENCIES.map((c) => <option key={c} value={c} />)}
+              </datalist>
+            </Field>
             <div>
-              <label className="label mb-2 block">Visibility *</label>
-              <Segmented options={VISIBILITIES} value={form.visibility} onChange={(v) => set('visibility', v)} />
-            </div>
-            <div>
-              <label className="label mb-2 block">Assign To Offer Group</label>
-              <div className="flex items-center gap-2">
+              <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group so it shares that group's caps and reporting. You can also change this later from the group." /></label>
+              <div className="flex flex-wrap items-center gap-2">
                 <YesNoToggle on={assignGroup} onChange={setAssignGroup} />
                 {assignGroup && (
-                  <select className="input" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+                  <select className="input !w-auto" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
                     <option value="" disabled>Select Offer Group…</option>
                     {(groups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
                 )}
               </div>
             </div>
-            <Field label="Labels"><textarea className="input min-h-[60px]" placeholder="Add labels…" /></Field>
-            <Field label="App Identifier"><input className="input" /></Field>
-            <Field label="Preview URL"><input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} /></Field>
+            <LabelsEditor base={base} />
+            <UnavailableField label="App Identifier"><input className="input" disabled placeholder="e.g. com.acme.app" /></UnavailableField>
+            <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
+              <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
+            </Field>
             <Field label="Internal Notes"><textarea className="input min-h-[80px]" /></Field>
             <Field label="Product ID"><input className="input" /></Field>
-            <Field label="Description"><textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} /></Field>
+            <Field label="Description" hint="Notes about the offer for your team and partners. Plain text.">
+              <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} />
+            </Field>
           </div>
         )}
 

@@ -6,7 +6,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
 import type { Postback, Publisher, Offer } from '../../types';
 
 const STATUSES = ['active', 'disabled'] as const;
@@ -18,20 +18,6 @@ const LEVELS = ['global', 'specific', 'global_offer'] as const;
 const LEVEL_LABEL: Record<string, string> = { global: 'Global', specific: 'Specific', global_offer: 'Global (Offer)' };
 const DELIVERY_METHODS = ['postback', 'html', 'meta', 'tiktok', 'snapchat', 'rumble'] as const;
 const DELIVERY_LABEL: Record<string, string> = { postback: 'Postback', html: 'HTML', meta: 'Meta', tiktok: 'TikTok', snapchat: 'Snapchat', rumble: 'Rumble' };
-
-function Segmented({ options, value, onChange, labels, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; labels?: Record<string, string>; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {labels?.[o] ?? o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 interface FormState {
   status: string; description: string; postbackType: string; level: string;

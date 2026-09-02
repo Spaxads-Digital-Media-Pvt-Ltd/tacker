@@ -11,7 +11,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
+import { PageHeader, Field, Segmented } from '../../components/ui';
 import { Stepper } from '../../components/Stepper';
 import type { DashboardUser } from '../../types';
 
@@ -20,20 +20,6 @@ const BILLING_FREQUENCIES = ['Weekly', 'Bimonthly', 'Monthly'];
 const STEPS = ['General', 'Address', 'Billing', 'Additional Information', 'User'];
 const STATUSES = ['active', 'inactive'] as const;
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', inactive: 'bg-warning' };
-
-function Segmented({ options, value, onChange, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium capitalize transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -85,8 +71,8 @@ export default function AdvertiserCreate() {
   return (
     <>
       <PageHeader title="Add Advertiser" subtitle="Advertisers › Add" />
-      <div className="max-w-2xl mx-auto">
       <Stepper steps={STEPS} current={step} />
+      <div className="max-w-2xl mx-auto">
       <form onSubmit={next} className="card space-y-6">
         {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
         <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>

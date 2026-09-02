@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
 import { Stepper } from '../../components/Stepper';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
@@ -37,19 +37,6 @@ const NUMBER_OPERATORS = [
   { value: 'less_than_or_equal_to', label: 'Less Than or Equal To' },
   { value: 'equal_to', label: 'Equal To' },
 ];
-
-function Segmented({ options, value, onChange }: { options: readonly { value: string; label: string }[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o.value} type="button" onClick={() => onChange(o.value)}
-          className={`px-4 py-2 text-small font-medium transition-colors ${value === o.value ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function CheckboxList({ items, selected, onChange }: { items: { id: string; name: string }[]; selected: string[]; onChange: (ids: string[]) => void }) {
   const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -150,8 +137,8 @@ export default function CustomerValueRuleForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Rule' : 'Add Rule'} subtitle="Customer Value › Payout & Revenue Rules" />
+      <Stepper steps={STEPS} current={step} />
       <div className="max-w-2xl mx-auto">
-        <Stepper steps={STEPS} current={step} />
         <div className="card">
           <p className="mb-4 text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
           {error && <p className="mb-4 text-small text-danger-text">{error}</p>}

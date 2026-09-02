@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Info, Search, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { Tabs, Table, Badge, Field, Spinner, StateBlock, type Column } from '../../../components/ui';
+import { Tabs, Table, Badge, Field, Spinner, StateBlock, type Column, Segmented } from '../../../components/ui';
 import { EmptyShellTable } from '../../../components/EmptyShellTable';
 import { Pagination } from '../../../components/ReportPageKit';
 import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField } from './shared';
@@ -45,19 +45,6 @@ const GLOBAL_TOGGLE_DEFS: ToggleDef[] = [
   { label: 'Hide Partner Smart Links' },
 ];
 const GLOBAL_TOGGLES = GLOBAL_TOGGLE_DEFS.map((t) => t.label);
-
-function Segmented({ options, value, onChange }: { options: readonly string[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`px-4 py-2 text-small font-medium transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function Checkbox({ label, help, defaultChecked }: { label: string; help?: string; defaultChecked?: boolean }) {
   const [checked, setChecked] = useState(!!defaultChecked);

@@ -11,7 +11,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Tabs, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Tabs, Spinner, StateBlock, Segmented } from '../../components/ui';
+import { LabelsEditor } from '../../components/LabelsEditor';
 import type { Advertiser, DashboardUser } from '../../types';
 
 const TABS = ['General', 'Address', 'Billing', 'Additional Information'] as const;
@@ -19,61 +20,9 @@ const STATUSES = ['active', 'pending', 'inactive'] as const;
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', pending: 'bg-warning', inactive: 'bg-danger' };
 const BILLING_FREQUENCIES = ['Weekly', 'Bimonthly', 'Monthly'];
 
-interface Tag { id: string; name: string; color: string | null; createdAt: string }
-
-/** Real tags editor — chips + add-by-name, using the same /:id/tags assign/unassign endpoints
- * already wired for offers/partners. */
-function LabelsEditor({ base }: { base: string }) {
-  const { data: tags, refetch } = useQuery<Tag[]>(`${base}/tags`);
-  const [name, setName] = useState('');
-  const add = useMutation((n: string) => api.post(`${base}/tags`, { name: n }));
-  const remove = useMutation((tagId: string) => api.del(`${base}/tags/${tagId}`));
-
-  const submit = async () => {
-    const n = name.trim();
-    if (!n) return;
-    setName('');
-    await add.run(n);
-    refetch();
-  };
-
-  return (
-    <Field label="Labels">
-      <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border bg-surface p-2">
-        {(tags ?? []).map((t) => (
-          <span key={t.id} className="inline-flex items-center gap-1 rounded-full bg-accent-subtle px-2.5 py-1 text-tiny font-medium text-accent-text">
-            {t.name}
-            <button type="button" onClick={async () => { await remove.run(t.id); refetch(); }} className="text-accent-text/70 hover:text-accent-text">×</button>
-          </span>
-        ))}
-        <input
-          className="min-w-[120px] flex-1 border-0 bg-transparent px-1 py-1 text-small text-fg outline-none"
-          placeholder="Add label…" value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
-        />
-      </div>
-    </Field>
-  );
-}
-
 interface FormState {
   name: string; status: string; contactEmail: string; defaultCurrency: string; billingTerms: string;
   accountManagerId: string; salesManagerId: string; billingFrequency: string; verificationToken: string;
-}
-
-function Segmented({ options, value, onChange, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium capitalize transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {o}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {

@@ -123,10 +123,31 @@ const STATUS_LABEL: Record<string, string> = { active: 'Active', paused: 'Paused
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-fg-muted', draft: 'bg-warning', archived: 'bg-danger' };
 // Everflow-style model prefixes: R- on the revenue side, C- on the payout side, same suffix.
 const REV_PREFIX: Record<string, string> = { CPA: 'RPA', CPL: 'RPL', CPC: 'RPC', CPI: 'RPI', RevShare: 'RevShare' };
+const PAYOUT_TYPES = ['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'] as const;
+// Device Type filter — reference uses "PC/Tablet/Mobile"; this app stores allowed_traffic_types as
+// desktop/mobile/tablet (the only device values the Add/Edit Offer form writes).
+const DEVICE_TYPES: { value: string; label: string }[] = [
+  { value: 'desktop', label: 'PC (Desktop)' },
+  { value: 'tablet', label: 'Tablet' },
+  { value: 'mobile', label: 'Mobile' },
+];
+// Reference "Table Filters" panel lists these too, but this app's schema has no field to back them
+// (offers carry no channel / platform / business-unit classification, and "Marketplace Advertisers"
+// is a multi-tenant concept). Shown for 1:1 parity with the reference, rendered inert with a note
+// rather than fabricating options. (Country IS backed — see the geo-rules bulk fetch.)
+const UNBACKED_FILTERS: Record<string, string> = {
+  'Business Unit': 'No business-unit concept in this app.',
+  Channel: 'Offers carry no traffic-channel field.',
+  'Marketplace Advertisers': 'Single-tenant — same set as the Advertiser filter.',
+  Platform: 'Offers carry no OS/platform targeting field.',
+};
 
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
 const nfmt = new Intl.NumberFormat('en-US');
 const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
+// Bare 2-dp amount — the Revenue/Payout columns pair it with a separate currency label, and it keeps
+// them consistent with the money-formatted "Today's Revenue" column instead of dumping raw "10.0000".
+const amt = (v: string | number | undefined) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0));
 
 function todayStartIso(): string {
   const d = new Date();
@@ -138,6 +159,23 @@ const PAGE_SIZE = 12;
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
 interface TagAssignment { tagId: string; entityId: string }
+/** Per-offer effective allowed countries (bulk, from GET /api/offers/geo-rules). Offers with no
+ * geo rules are absent from the response — treated as "allows every country". */
+interface OfferCountries { offerId: string; mode: 'allow' | 'deny'; countries: string[] }
+
+/** Mirrors tracking/geo-rules.ts: no entry → allows all; allow-list → only those; deny-list → all but those. */
+function offerAllowsCountry(g: OfferCountries | undefined, cc: string): boolean {
+  if (!g) return true;
+  return g.mode === 'allow' ? g.countries.includes(cc) : !g.countries.includes(cc);
+}
+
+/** Short, readable countries summary for the list column. */
+function countriesLabel(g: OfferCountries | undefined): string {
+  if (!g || g.countries.length === 0) return g?.mode === 'allow' ? '—' : 'All';
+  const shown = g.countries.slice(0, 3).join(', ');
+  const more = g.countries.length > 3 ? ` +${g.countries.length - 3}` : '';
+  return g.mode === 'allow' ? `${shown}${more}` : `All except ${shown}${more}`;
+}
 
 const SEARCH_FIELDS = [
   { value: 'name', label: 'Name' },
@@ -159,6 +197,20 @@ function useDropdown() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
   return { open, setOpen, ref };
+}
+
+/** A "Table Filters" row the reference has but this app's schema can't back — rendered as a real,
+ * disabled control with a one-line reason, rather than fabricating options (same honesty convention
+ * used for the inert filter facets on the Marketplace/Advertisers pages). */
+function InertFilter({ label }: { label: string }) {
+  return (
+    <FieldBlock label={label}>
+      <select className="input cursor-not-allowed opacity-60" disabled>
+        <option>Not available in this app</option>
+      </select>
+      <p className="mt-1 text-[11px] text-fg-muted">{UNBACKED_FILTERS[label]}</p>
+    </FieldBlock>
+  );
 }
 
 function SearchFieldSelect({ value, onChange }: { value: SearchField; onChange: (v: SearchField) => void }) {
@@ -212,13 +264,21 @@ export default function Offers() {
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
+  const { data: users } = useQuery<{ id: string; name: string; email: string }[]>('/api/users');
   const { data: tags } = useQuery<Tag[]>('/api/tags');
   const { data: tagAssignments } = useQuery<TagAssignment[]>('/api/tags/assignments?entityType=offer');
+  const { data: offerCountries } = useQuery<OfferCountries[]>('/api/offers/geo-rules');
   const tagIdsByOffer = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const a of tagAssignments ?? []) m.set(a.entityId, [...(m.get(a.entityId) ?? []), a.tagId]);
     return m;
   }, [tagAssignments]);
+  const geoByOffer = useMemo(() => new Map((offerCountries ?? []).map((g) => [g.offerId, g])), [offerCountries]);
+  // Country options — every country named in any offer's allow-list or deny-list.
+  const countryOptions = useMemo(
+    () => Array.from(new Set((offerCountries ?? []).flatMap((g) => g.countries))).sort(),
+    [offerCountries],
+  );
   const categories = useMemo(() => Array.from(new Set((data ?? []).map((o) => o.category).filter((c): c is string => Boolean(c)))).sort(), [data]);
   const today = useQuery<AggResult>(`/api/reports?groupBy=offer&metrics=clicks,revenue&from=${encodeURIComponent(todayStartIso())}&to=${encodeURIComponent(new Date().toISOString())}`);
   const todayByOffer = useMemo(() => {
@@ -230,10 +290,22 @@ export default function Offers() {
     return m;
   }, [today.data]);
 
+  const advById = useMemo(() => new Map((advertisers ?? []).map((a) => [a.id, a])), [advertisers]);
+  const userName = (id: string | null | undefined) => (id ? users?.find((u) => u.id === id)?.name ?? id.slice(0, 8) + '…' : null);
   const advName = (id: string) => {
-    const a = advertisers?.find((x) => x.id === id);
+    const a = advById.get(id);
     return a ? (a.ref != null ? `(${a.ref}) ${a.name}` : a.name) : id.slice(0, 8) + '…';
   };
+  const mgrOf = (advertiserId: string, key: 'accountManagerId' | 'salesManagerId') => advById.get(advertiserId)?.[key] ?? null;
+  // Account / Sales manager live on the offer's advertiser (advertisers.account_manager_id /
+  // sales_manager_id → users). Options = managers actually assigned to at least one advertiser.
+  const [acctManagers, salesManagers] = useMemo(() => {
+    const build = (key: 'accountManagerId' | 'salesManagerId') =>
+      Array.from(new Set((advertisers ?? []).map((a) => a[key]).filter((x): x is string => Boolean(x))))
+        .map((id) => ({ id, name: (users ?? []).find((u) => u.id === id)?.name ?? `${id.slice(0, 8)}…` }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    return [build('accountManagerId'), build('salesManagerId')];
+  }, [advertisers, users]);
 
   // Applied filters (Trackog Manage Offer defaults: Active checked)
   const [statuses, setStatuses] = useState<string[]>(['active']);
@@ -246,7 +318,13 @@ export default function Offers() {
   const [tagId, setTagId] = useState('');
   const [category, setCategory] = useState('');
   const [payoutType, setPayoutType] = useState('');
+  const [revenueType, setRevenueType] = useState('');
   const [offerGroupId, setOfferGroupId] = useState('');
+  const [accountManagerId, setAccountManagerId] = useState('');
+  const [salesManagerId, setSalesManagerId] = useState('');
+  const [trackingDomainId, setTrackingDomainId] = useState('');
+  const [deviceType, setDeviceType] = useState('');
+  const [country, setCountry] = useState('');
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -263,21 +341,33 @@ export default function Offers() {
   const [dTag, setDTag] = useState(tagId);
   const [dCat, setDCat] = useState(category);
   const [dPayout, setDPayout] = useState(payoutType);
+  const [dRev, setDRev] = useState(revenueType);
   const [dGroup, setDGroup] = useState(offerGroupId);
+  const [dAcct, setDAcct] = useState(accountManagerId);
+  const [dSales, setDSales] = useState(salesManagerId);
+  const [dDomain, setDDomain] = useState(trackingDomainId);
+  const [dDevice, setDDevice] = useState(deviceType);
+  const [dCountry, setDCountry] = useState(country);
 
   const openDrawer = () => {
     setDStatuses(statuses); setDIds(offerIdsText); setDName(nameQ);
     setDAdv(advertiserId); setDObj(objective); setDVis(visibility); setDTag(tagId); setDCat(category);
-    setDPayout(payoutType); setDGroup(offerGroupId); setOpen(true);
+    setDPayout(payoutType); setDRev(revenueType); setDGroup(offerGroupId);
+    setDAcct(accountManagerId); setDSales(salesManagerId); setDDomain(trackingDomainId); setDDevice(deviceType);
+    setDCountry(country);
+    setOpen(true);
   };
   const applyDrawer = () => {
     setStatuses(dStatuses); setOfferIdsText(dIds); setNameQ(dName);
     setAdvertiserId(dAdv); setObjective(dObj); setVisibility(dVis); setTagId(dTag); setCategory(dCat);
-    setPayoutType(dPayout); setOfferGroupId(dGroup); setOpen(false); setPage(1);
+    setPayoutType(dPayout); setRevenueType(dRev); setOfferGroupId(dGroup);
+    setAccountManagerId(dAcct); setSalesManagerId(dSales); setTrackingDomainId(dDomain); setDeviceType(dDevice);
+    setCountry(dCountry);
+    setOpen(false); setPage(1);
   };
   const clearDraft = () => {
     setDStatuses([]); setDIds(''); setDName(''); setDAdv(''); setDObj(''); setDVis(''); setDTag(''); setDCat('');
-    setDPayout(''); setDGroup('');
+    setDPayout(''); setDRev(''); setDGroup(''); setDAcct(''); setDSales(''); setDDomain(''); setDDevice(''); setDCountry('');
   };
 
   const filtered = useMemo(() => {
@@ -299,22 +389,30 @@ export default function Offers() {
     if (tagId) rows = rows.filter((o) => (tagIdsByOffer.get(o.id) ?? []).includes(tagId));
     if (category) rows = rows.filter((o) => o.category === category);
     if (payoutType) rows = rows.filter((o) => o.payoutModel === payoutType);
+    if (revenueType) rows = rows.filter((o) => (REV_PREFIX[o.payoutModel] ?? o.payoutModel) === revenueType);
+    if (accountManagerId) rows = rows.filter((o) => mgrOf(o.advertiserId, 'accountManagerId') === accountManagerId);
+    if (salesManagerId) rows = rows.filter((o) => mgrOf(o.advertiserId, 'salesManagerId') === salesManagerId);
+    if (trackingDomainId) rows = rows.filter((o) => o.trackingDomainId === trackingDomainId);
+    if (deviceType) rows = rows.filter((o) => {
+      const t = o.allowedTrafficTypes ?? [];
+      return t.length === 0 || t.includes(deviceType); // no restriction = allows every device
+    });
+    if (country) rows = rows.filter((o) => offerAllowsCountry(geoByOffer.get(o.id), country));
     if (offerGroupId) {
       const group = (offerGroups ?? []).find((g) => g.id === offerGroupId);
       rows = rows.filter((o) => group?.offerIds.includes(o.id));
     }
     return rows;
-  }, [data, statuses, nameQ, searchField, offerIdsText, advertiserId, objective, visibility, tagId, category, payoutType, offerGroupId, offerGroups, tagIdsByOffer, advertisers]);
+  }, [data, statuses, nameQ, searchField, offerIdsText, advertiserId, objective, visibility, tagId, category, payoutType, revenueType, accountManagerId, salesManagerId, trackingDomainId, deviceType, country, geoByOffer, offerGroupId, offerGroups, tagIdsByOffer, advertisers, advById]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const appliedCount = statuses.length + (offerIdsText ? 1 : 0) + (nameQ ? 1 : 0)
-    + (advertiserId ? 1 : 0) + (objective ? 1 : 0) + (visibility ? 1 : 0) + (tagId ? 1 : 0) + (category ? 1 : 0)
-    + (payoutType ? 1 : 0) + (offerGroupId ? 1 : 0);
-  const draftCount = dStatuses.length + (dIds ? 1 : 0) + (dName ? 1 : 0)
-    + (dAdv ? 1 : 0) + (dObj ? 1 : 0) + (dVis ? 1 : 0) + (dTag ? 1 : 0) + (dCat ? 1 : 0)
-    + (dPayout ? 1 : 0) + (dGroup ? 1 : 0);
+  const boolCount = (...vals: unknown[]) => vals.reduce<number>((n, v) => n + (v ? 1 : 0), 0);
+  const appliedCount = statuses.length + boolCount(offerIdsText, nameQ, advertiserId, objective, visibility, tagId, category,
+    payoutType, revenueType, offerGroupId, accountManagerId, salesManagerId, trackingDomainId, deviceType, country);
+  const draftCount = dStatuses.length + boolCount(dIds, dName, dAdv, dObj, dVis, dTag, dCat,
+    dPayout, dRev, dGroup, dAcct, dSales, dDomain, dDevice, dCountry);
 
   const allOnPageSelected = paged.length > 0 && paged.every((o) => selected.has(o.id));
   const toggleAllOnPage = () => setSelected((s) => {
@@ -343,7 +441,10 @@ export default function Offers() {
     },
     { header: 'Visibility', cell: (o) => <span className="capitalize text-fg-secondary">{o.visibility ?? 'public'}</span> },
     { header: 'Advertiser', cell: (o) => <span className="text-accent-text">{advName(o.advertiserId)}</span> },
-    { header: 'Sales Manager', cell: () => <span className="text-fg-muted">—</span> },
+    { header: 'Sales Manager', cell: (o) => {
+      const n = userName(mgrOf(o.advertiserId, 'salesManagerId'));
+      return n ? <span className="text-fg-secondary">{n}</span> : <span className="text-fg-muted">—</span>;
+    } },
     { header: 'Category', cell: (o) => o.category ?? '—' },
     {
       header: 'Labels', cell: (o) => {
@@ -352,9 +453,12 @@ export default function Offers() {
         return names.length ? names.join(', ') : <span className="text-fg-muted">-</span>;
       },
     },
-    { header: 'Countries', cell: () => 'All' },
-    { header: 'Revenue', className: 'text-right', cell: (o) => <><span className="text-tiny text-fg-muted">{REV_PREFIX[o.payoutModel] ?? o.payoutModel}</span> {o.currency} {o.defaultRevenue}</> },
-    { header: 'Payout', className: 'text-right', cell: (o) => <><span className="text-tiny text-fg-muted">{o.payoutModel}</span> {o.currency} {o.defaultPayout}</> },
+    { header: 'Countries', cell: (o) => {
+      const g = geoByOffer.get(o.id);
+      return g ? <span className="text-fg-secondary">{countriesLabel(g)}</span> : 'All';
+    } },
+    { header: 'Revenue', className: 'text-right', cell: (o) => <><span className="text-tiny text-fg-muted">{REV_PREFIX[o.payoutModel] ?? o.payoutModel}</span> {o.currency} <span className="tabular-nums">{amt(o.defaultRevenue)}</span></> },
+    { header: 'Payout', className: 'text-right', cell: (o) => <><span className="text-tiny text-fg-muted">{o.payoutModel}</span> {o.currency} <span className="tabular-nums">{amt(o.defaultPayout)}</span></> },
     { header: "Today's Clicks", className: 'text-right', cell: (o) => nfmt.format(todayByOffer.get(o.id)?.clicks ?? 0) },
     { header: "Today's Revenue", className: 'text-right', cell: (o) => money(todayByOffer.get(o.id)?.revenue) },
     { header: 'Created', cell: (o) => new Date(o.createdAt).toLocaleDateString() },
@@ -382,13 +486,14 @@ export default function Offers() {
       id: o.ref ?? o.id, name: o.name, status: o.status, visibility: o.visibility ?? 'public',
       advertiser: advName(o.advertiserId), category: o.category ?? '', currency: o.currency,
       payoutModel: o.payoutModel, revenue: o.defaultRevenue, payout: o.defaultPayout,
+      countries: countriesLabel(geoByOffer.get(o.id)),
       createdAt: o.createdAt, modifiedAt: o.updatedAt ?? '',
     }));
     let blob: Blob;
     if (format === 'json') {
       blob = new Blob([JSON.stringify(mapped, null, 2)], { type: 'application/json;charset=utf-8;' });
     } else {
-      const headers = Object.keys(mapped[0] ?? { id: '', name: '', status: '', visibility: '', advertiser: '', category: '', currency: '', payoutModel: '', revenue: '', payout: '', createdAt: '', modifiedAt: '' });
+      const headers = Object.keys(mapped[0] ?? { id: '', name: '', status: '', visibility: '', advertiser: '', category: '', currency: '', payoutModel: '', revenue: '', payout: '', countries: '', createdAt: '', modifiedAt: '' });
       const lines = [headers.join(',')];
       for (const row of mapped) {
         lines.push(headers.map((h) => `"${String((row as Record<string, unknown>)[h] ?? '').replace(/"/g, '""')}"`).join(','));
@@ -436,7 +541,12 @@ export default function Offers() {
               appliedFilters={{
                 status: statuses[0] ?? undefined, search: nameQ || undefined, searchField,
                 advertiser: advertiserId ? advName(advertiserId) : undefined, category: category || undefined,
-                tag: tagId ? tags?.find((t) => t.id === tagId)?.name : undefined, payoutType: payoutType || undefined,
+                label: tagId ? tags?.find((t) => t.id === tagId)?.name : undefined, payoutType: payoutType || undefined,
+                revenueType: revenueType || undefined,
+                accountManager: accountManagerId ? userName(accountManagerId) ?? undefined : undefined,
+                salesManager: salesManagerId ? userName(salesManagerId) ?? undefined : undefined,
+                trackingDomain: trackingDomainId ? domains?.find((d) => d.id === trackingDomainId)?.host : undefined,
+                deviceType: deviceType || undefined,
                 offerGroup: offerGroupId ? offerGroups?.find((g) => g.id === offerGroupId)?.name : undefined,
               }}
             />
@@ -487,61 +597,123 @@ export default function Offers() {
               ))}
             </div>
           </div>
-          <FieldBlock label="Advertisers">
+
+          {/* Everflow's "Table Filters" panel, field-for-field. Alphabetical, like the reference.
+              Filters with a real backing column are live; the rest are shown inert (see below). */}
+          <p className="mb-2 mt-1 border-t border-border pt-3 text-tiny font-semibold uppercase tracking-wide text-fg-muted">Table Filters</p>
+
+          <FieldBlock label="Account Manager">
+            <select className="input" value={dAcct} onChange={(e) => setDAcct(e.target.value)}>
+              <option value="">All Account Managers</option>
+              {acctManagers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            {acctManagers.length === 0 && <p className="mt-1 text-[11px] text-fg-muted">No account managers assigned to any advertiser yet.</p>}
+          </FieldBlock>
+
+          <FieldBlock label="Advertiser">
             <select className="input" value={dAdv} onChange={(e) => setDAdv(e.target.value)}>
-              <option value="">Select Advertisers</option>
+              <option value="">All Advertisers</option>
               {(advertisers ?? []).map((a) => (
                 <option key={a.id} value={a.id}>{a.ref != null ? `(${a.ref}) ${a.name}` : a.name}</option>
               ))}
             </select>
           </FieldBlock>
-          <FieldBlock label="Tags">
-            <select className="input" value={dTag} onChange={(e) => setDTag(e.target.value)}>
-              <option value="">Select Tags</option>
-              {(tags ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </FieldBlock>
-          <FieldBlock label="Categories">
+
+          <InertFilter label="Business Unit" />
+
+          <FieldBlock label="Category">
             <select className="input" value={dCat} onChange={(e) => setDCat(e.target.value)}>
-              <option value="">Select Categories</option>
+              <option value="">All Categories</option>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </FieldBlock>
-          <div className="mb-3 grid grid-cols-2 gap-3">
-            <FieldBlock label="Objective">
-              <select className="input" value={dObj} onChange={(e) => setDObj(e.target.value)}>
-                <option value="">All Objectives</option>
-                <option value="conversions">Conversions</option>
-                <option value="sale">Sale</option>
-                <option value="app_installs">App Installs</option>
-                <option value="leads">Leads</option>
-                <option value="impressions">Impressions</option>
-                <option value="clicks">Clicks</option>
-              </select>
-            </FieldBlock>
-            <FieldBlock label="Visibility">
-              <select className="input" value={dVis} onChange={(e) => setDVis(e.target.value)}>
-                <option value="">All Visibility</option>
-                <option value="public">Public</option>
-                <option value="private">Private</option>
-                <option value="ask">Ask</option>
-              </select>
-            </FieldBlock>
-          </div>
+
+          <InertFilter label="Channel" />
+
+          <FieldBlock label="Country">
+            <select className="input" value={dCountry} onChange={(e) => setDCountry(e.target.value)}>
+              <option value="">All Countries</option>
+              {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-fg-muted">From each offer's geo rules — an offer with no rules matches every country.</p>
+          </FieldBlock>
+
+          <FieldBlock label="Device Type">
+            <select className="input" value={dDevice} onChange={(e) => setDDevice(e.target.value)}>
+              <option value="">All Device Types</option>
+              {DEVICE_TYPES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-fg-muted">Matches an offer's Allowed Traffic Types (no restriction = matches all).</p>
+          </FieldBlock>
+
+          <FieldBlock label="Label">
+            <select className="input" value={dTag} onChange={(e) => setDTag(e.target.value)}>
+              <option value="">All Labels</option>
+              {(tags ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </FieldBlock>
+
+          <InertFilter label="Marketplace Advertisers" />
+
+          <FieldBlock label="Offer Group">
+            <select className="input" value={dGroup} onChange={(e) => setDGroup(e.target.value)}>
+              <option value="">All Offer Groups</option>
+              {(offerGroups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </FieldBlock>
+
           <div className="mb-3 grid grid-cols-2 gap-3">
             <FieldBlock label="Payout Type">
               <select className="input" value={dPayout} onChange={(e) => setDPayout(e.target.value)}>
                 <option value="">All Payout Types</option>
-                {['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((p) => <option key={p} value={p}>{p}</option>)}
+                {PAYOUT_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </FieldBlock>
-            <FieldBlock label="Offer Group">
-              <select className="input" value={dGroup} onChange={(e) => setDGroup(e.target.value)}>
-                <option value="">Select Offer Group</option>
-                {(offerGroups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            <FieldBlock label="Revenue Type">
+              <select className="input" value={dRev} onChange={(e) => setDRev(e.target.value)}>
+                <option value="">All Revenue Types</option>
+                {PAYOUT_TYPES.map((p) => <option key={p} value={REV_PREFIX[p]}>{REV_PREFIX[p]}</option>)}
               </select>
             </FieldBlock>
           </div>
+
+          <InertFilter label="Platform" />
+
+          <FieldBlock label="Sales Manager">
+            <select className="input" value={dSales} onChange={(e) => setDSales(e.target.value)}>
+              <option value="">All Sales Managers</option>
+              {salesManagers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            {salesManagers.length === 0 && <p className="mt-1 text-[11px] text-fg-muted">No sales managers assigned to any advertiser yet.</p>}
+          </FieldBlock>
+
+          <FieldBlock label="Tracking Domain">
+            <select className="input" value={dDomain} onChange={(e) => setDDomain(e.target.value)}>
+              <option value="">All Tracking Domains</option>
+              {(domains ?? []).map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Visibility">
+            <select className="input" value={dVis} onChange={(e) => setDVis(e.target.value)}>
+              <option value="">All Visibility</option>
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+              <option value="ask">Ask</option>
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Objective">
+            <select className="input" value={dObj} onChange={(e) => setDObj(e.target.value)}>
+              <option value="">All Objectives</option>
+              <option value="conversions">Conversions</option>
+              <option value="sale">Sale</option>
+              <option value="app_installs">App Installs</option>
+              <option value="leads">Leads</option>
+              <option value="impressions">Impressions</option>
+              <option value="clicks">Clicks</option>
+            </select>
+          </FieldBlock>
         </SearchFilterDrawer>
       )}
     </>

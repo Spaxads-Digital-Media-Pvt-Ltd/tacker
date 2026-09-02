@@ -11,7 +11,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, Search, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
 import type { PostbackControl, PostbackControlRule, PostbackControlVariable, PostbackControlOperator, Offer, Publisher, Advertiser } from '../../types';
 
 const STEPS = ['General', 'Rules'] as const;
@@ -34,20 +34,6 @@ const OPERATOR_OPTIONS: { value: PostbackControlOperator; label: string; needsVa
   { value: 'greater_than', label: 'Greater Than', needsValue: true },
   { value: 'less_than', label: 'Less Than', needsValue: true },
 ];
-
-function Segmented({ options, value, onChange, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (

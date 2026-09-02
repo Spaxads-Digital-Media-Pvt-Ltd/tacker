@@ -11,7 +11,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, Search, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
 import type { TieredCommission, TieredGoal, TieredVariable, TieredAction, TimePeriod, Offer, Publisher, Advertiser } from '../../types';
 
 const STEPS = ['General', 'Settings'] as const;
@@ -28,20 +28,6 @@ const ACTION_OPTIONS: { value: TieredAction; label: string; unit: string }[] = [
   { value: 'increase_flat', label: 'Increase (Flat Amount)', unit: '$' },
   { value: 'increase_pct', label: 'Increase (Percentage)', unit: '%' },
 ];
-
-function Segmented({ options, value, onChange, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (

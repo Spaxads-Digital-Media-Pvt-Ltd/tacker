@@ -10,6 +10,9 @@ interface AggResult { rows: { dimensions: Record<string, string | null>; metrics
 
 const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
 const num = (v: string | number | undefined) => new Intl.NumberFormat('en-US').format(Number(v ?? 0));
+// Bare amount (no currency symbol — these tables carry a separate Currency column). Trims the raw
+// 4-dp numeric-column value (e.g. "10.0000") to the 2-dp money convention used elsewhere on the page.
+const amt = (v: string | number | undefined) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0));
 
 function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -26,7 +29,7 @@ function Card({ title, action, children }: { title: string; action?: ReactNode; 
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex gap-4 border-b border-border py-2 text-small last:border-0">
-      <dt className="w-36 shrink-0 text-fg-secondary">{label}</dt>
+      <dt className="w-44 shrink-0 text-fg-secondary">{label}</dt>
       <dd className="min-w-0 flex-1 break-all font-medium text-fg">{children}</dd>
     </div>
   );
@@ -140,9 +143,9 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
                   <td className="py-2 pr-4">{money(statsRow?.revenue)}</td>
                   <td className="py-2 pr-4">{money(statsRow?.payout)}</td>
                   <td className="py-2 pr-4">{money(statsRow?.margin)}</td>
-                  <td className="py-2 pr-4">{num(statsRow?.clicks)}</td>
-                  <td className="py-2 pr-4">{num(statsRow?.conversions)}</td>
-                  <td className="py-2">{statsRow?.cr ?? 0}%</td>
+                  <td className="py-2 pr-4 tabular-nums">{num(statsRow?.clicks)}</td>
+                  <td className="py-2 pr-4 tabular-nums">{num(statsRow?.conversions)}</td>
+                  <td className="py-2 tabular-nums">{(Number(statsRow?.cr ?? 0) * 100).toFixed(2)}%</td>
                 </tr></tbody>
               </table>
             </div>
@@ -154,9 +157,9 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
             <table className="w-full min-w-[420px] text-left text-small">
               <thead className="text-tiny uppercase text-fg-muted"><tr><th className="py-2">Name</th><th className="py-2 text-right">Revenue</th><th className="py-2 text-right">Payout</th><th className="py-2 pl-4">Currency</th></tr></thead>
               <tbody className="divide-y divide-border">
-                <tr><td className="py-2 font-medium">Base (Default)</td><td className="py-2 text-right">{offer.defaultRevenue}</td><td className="py-2 text-right">{offer.defaultPayout}</td><td className="py-2 pl-4">{offer.currency}</td></tr>
+                <tr><td className="py-2 font-medium">Base (Default)</td><td className="py-2 text-right tabular-nums">{amt(offer.defaultRevenue)}</td><td className="py-2 text-right tabular-nums">{amt(offer.defaultPayout)}</td><td className="py-2 pl-4">{offer.currency}</td></tr>
                 {(goals.data ?? []).map((g) => (
-                  <tr key={g.id}><td className="py-2 font-medium">{String(g.name)}</td><td className="py-2 text-right">{String(g.revenue)}</td><td className="py-2 text-right">{String(g.payout)}</td><td className="py-2 pl-4">{String(g.currency ?? offer.currency)}</td></tr>
+                  <tr key={g.id}><td className="py-2 font-medium">{String(g.name)}</td><td className="py-2 text-right tabular-nums">{amt(g.revenue as string | number)}</td><td className="py-2 text-right tabular-nums">{amt(g.payout as string | number)}</td><td className="py-2 pl-4">{String(g.currency ?? offer.currency)}</td></tr>
                 ))}
               </tbody>
             </table>

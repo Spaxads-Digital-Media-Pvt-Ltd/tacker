@@ -6,7 +6,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
 import type { Publisher, Offer, TrafficBlocking, TrafficBlockingFieldKey, TrafficBlockingMatchType } from '../../types';
 
 const STATUSES = ['active', 'inactive'] as const;
@@ -23,20 +23,6 @@ const MATCH_LABEL: Record<TrafficBlockingMatchType, string> = {
   begins_with: 'Begins With', contains: 'Contains', does_not_contain: 'Does not contain',
   does_not_match: 'Does not match', ends_with: 'Ends With', exact_match: 'Exact Match', is_empty: 'Is Empty',
 };
-
-function Segmented({ options, value, onChange, labels, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; labels?: Record<string, string>; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {labels?.[o] ?? o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 interface FieldState { enabled: boolean; matchType: TrafficBlockingMatchType | ''; value: string }
 const emptyFieldState = (): FieldState => ({ enabled: false, matchType: '', value: '' });

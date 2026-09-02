@@ -7,22 +7,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
 import type { CouponCode, Offer, Publisher } from '../../types';
-
-function Segmented({ options, value, onChange, labels, dots }: { options: readonly string[]; value: string; onChange: (v: string) => void; labels?: Record<string, string>; dots?: Record<string, string> }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-      {options.map((o) => (
-        <button key={o} type="button" onClick={() => onChange(o)}
-          className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium transition-colors ${value === o ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-          {dots && <span className={`h-2 w-2 rounded-full ${dots[o] ?? 'bg-fg-muted'}`} />}
-          {labels?.[o] ?? o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
