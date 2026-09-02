@@ -59,6 +59,7 @@ export default function OfferTemplateForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Template' : 'Add Template'} subtitle={`Offers › Offer Templates › ${isEdit ? 'Edit' : 'Add'}`} />
+      <div className="mx-auto max-w-2xl">
       <div className="card space-y-5">
         {error && <p className="text-small text-danger-text">{error}</p>}
         <div className="flex flex-wrap items-start justify-between gap-6">
@@ -80,8 +81,9 @@ export default function OfferTemplateForm() {
             return (
               <div key={row.id} className="ml-3 flex items-start gap-2 border-l-2 border-border pl-4">
                 <div className="w-full max-w-md rounded-card border border-border bg-page p-3">
-                  <button type="button" onClick={() => toggleOpen(row.id)} className="mb-2 flex items-center gap-1 text-fg-secondary hover:text-fg">
-                    {row.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  <button type="button" onClick={() => toggleOpen(row.id)} className="mb-2 flex w-full items-center gap-1.5 text-left text-small font-medium text-fg-secondary hover:text-fg">
+                    {row.open ? <ChevronDown size={14} className="shrink-0" /> : <ChevronRight size={14} className="shrink-0" />}
+                    {spec ? spec.label : <span className="text-fg-muted">New field</span>}
                   </button>
                   {row.open && (
                     <div className="space-y-3">
@@ -114,10 +116,12 @@ export default function OfferTemplateForm() {
             );
           })}
         </div>
+
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-templates')}>Cancel</button>
+          <button type="button" className="btn-primary" disabled={busy || !name} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+        </div>
       </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-templates')}>Cancel</button>
-        <button type="button" className="btn-primary" disabled={busy || !name} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
       </div>
     </>
   );

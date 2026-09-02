@@ -144,7 +144,9 @@ export default function OfferTemplates() {
   }, [data, q, sortAsc]);
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const useTemplate = (t: Template) => {
+  // NB: not a hook — named without the `use` prefix so react-hooks/rules-of-hooks doesn't flag the
+  // call site (it only writes sessionStorage + navigates; `nav` is captured at component level).
+  const applyTemplate = (t: Template) => {
     sessionStorage.setItem('offerTemplatePrefill', JSON.stringify(t.fieldValues));
     nav('/app/offers/new');
   };
@@ -194,22 +196,29 @@ export default function OfferTemplates() {
                         <button className="font-medium text-accent-text hover:underline" onClick={() => nav(`/app/offers-templates/${r.id}`)}>{r.name}</button>
                       </td>
                       <td className="px-4 py-3 text-small text-fg-secondary">
-                        {r.offerFields.length === 0 ? '—' : (
-                          <>
-                            {specs.filter((s) => r.offerFields.includes(s.key)).slice(0, 2).map((s) => (
-                              <p key={s.key}>- {s.label}: {valueLabel(s, r.fieldValues[s.key])}</p>
-                            ))}
-                            {r.offerFields.length > 2 && (
-                              <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setViewRow(r)}>View all ({r.offerFields.length})</button>
-                            )}
-                          </>
-                        )}
+                        {(() => {
+                          // Count/preview only fields that resolve to a known spec + have a value —
+                          // keeps this cell, "View all (N)" and the modal in agreement even if a row
+                          // carries a stray key (e.g. from an external API write).
+                          const resolved = specs.filter((s) => r.fieldValues[s.key]);
+                          if (resolved.length === 0) return '—';
+                          return (
+                            <>
+                              {resolved.slice(0, 2).map((s) => (
+                                <p key={s.key}>- {s.label}: {valueLabel(s, r.fieldValues[s.key])}</p>
+                              ))}
+                              {resolved.length > 2 && (
+                                <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setViewRow(r)}>View all ({resolved.length})</button>
+                              )}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.createdAt} /></td>
                       <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.updatedAt} /></td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
-                          <button className="btn-primary !py-1.5 !px-3 text-tiny" onClick={() => useTemplate(r)}>Use Template</button>
+                          <button className="btn-primary !py-1.5 !px-3 text-tiny" onClick={() => applyTemplate(r)}>Use Template</button>
                           <RowMenu isDefault={r.isDefault} onEdit={() => nav(`/app/offers-templates/${r.id}/edit`)}
                             onSetDefault={async () => { await setDefault.run(r.id); refetch(); }}
                             onDelete={async () => { if (confirm('Delete this template?')) { await del.run(r.id); refetch(); } }} />

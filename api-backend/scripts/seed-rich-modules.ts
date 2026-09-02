@@ -379,10 +379,32 @@ async function main(): Promise<void> {
     }
 
     // ═══ 12. Offer Templates (Offers › Templates) ═══════════════════════════════════════
+    // Keys MUST match the frontend field catalog (data/offerTemplateFields.ts → useFieldSpecs),
+    // which is also the OfferCreate form-state shape — that's what "Use Template" / "Add Offer from
+    // Template" merge into. Only these 8 keys are templatable.
     const TEMPLATES = [
-      { name: 'CPA Lead-Gen Default', def: true, values: { payout_model: 'CPA', objective: 'leads', currency: 'USD', visibility: 'public', default_payout: '12.00', default_revenue: '20.00' } },
-      { name: 'App Install (CPI)', def: false, values: { payout_model: 'CPI', objective: 'app_installs', currency: 'USD', visibility: 'public', default_payout: '2.50', default_revenue: '4.00' } },
-      { name: 'RevShare Subscription', def: false, values: { payout_model: 'RevShare', objective: 'sale', currency: 'USD', visibility: 'ask', default_payout: '30', default_revenue: '45' } },
+      {
+        name: 'CPA Lead-Gen Default', def: true,
+        values: {
+          advertiserId: advertisers[0]!.id, category: 'Finance', visibility: 'public',
+          destinationUrl: 'https://lp.demo-lead.test/start?cid={click_id}',
+          currency: 'USD', payoutModel: 'CPA', defaultPayout: '12.0000', defaultRevenue: '20.0000',
+        },
+      },
+      {
+        name: 'App Install (CPI)', def: false,
+        values: {
+          category: 'Gaming', visibility: 'public',
+          currency: 'USD', payoutModel: 'CPI', defaultPayout: '2.5000', defaultRevenue: '4.0000',
+        },
+      },
+      {
+        name: 'RevShare Subscription', def: false,
+        values: {
+          category: 'Streaming & Software', visibility: 'ask',
+          currency: 'USD', payoutModel: 'RevShare', defaultPayout: '30.0000', defaultRevenue: '45.0000',
+        },
+      },
     ];
     for (const t of TEMPLATES) {
       await db.query(

@@ -46,6 +46,11 @@ export function offerTemplatesRoutes(): Router {
 
   r.post('/', requireRole('admin', 'manager'), validateBody(createSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof createSchema>;
+    // Only one default template per network — same invariant the PATCH path enforces. There's no DB
+    // partial-unique index backing this, so the create path has to clear the old default too.
+    if (b.isDefault === true) {
+      await query('UPDATE offer_templates SET is_default = false WHERE network_id = $1', [req.scope!.networkId]);
+    }
     const row = await dbForRequest(req).insert<Row>(TABLE, {
       name: b.name, is_default: b.isDefault,
       offer_fields: JSON.stringify(Object.keys(b.fieldValues)),
