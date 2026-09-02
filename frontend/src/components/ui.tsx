@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { usePageTitle } from './PageTitle';
 
@@ -139,25 +140,43 @@ export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Co
 
 const MODAL_SIZE: Record<string, string> = { md: 'max-w-lg', xl: 'max-w-4xl' };
 
+/** Portaled to document.body — fixed overlays nested in the scrollable main column (and its
+ * animate-fade-in wrapper) get clipped to that box instead of covering the full viewport. */
 export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'xl' }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className={`w-full ${MODAL_SIZE[size]} animate-fade-in rounded-card border border-border bg-elevated p-6 shadow-elevated`} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] grid place-items-center bg-[rgb(var(--flyout-scrim))] p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+        className={`max-h-[calc(100vh-2rem)] w-full overflow-y-auto ${MODAL_SIZE[size]} animate-fade-in rounded-card border border-border bg-elevated p-6 shadow-elevated`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between">
-          <h2 className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
-          <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
+          <h2 id="modal-title" className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
+          <button type="button" onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
         </div>
         <div className="mt-4 overflow-x-auto">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
