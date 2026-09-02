@@ -60,6 +60,13 @@ npm install && npm run dev
 Health checks: every backend surface exposes `GET /health`. See `api-backend/README` details
 in `memory.md`.
 
+## Contributing / branch workflow
+
+`main` is protected in practice — **no direct pushes**. Work on a
+`<name>/<short-description>` branch and merge via Pull Request. AI agents:
+check `git branch --show-current` before committing. Full rules in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Project memory
 
 `memory.md` (gitignored, one at workspace root) records structure, decisions, conventions,
