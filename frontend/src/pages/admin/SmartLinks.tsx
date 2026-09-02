@@ -5,13 +5,12 @@
  * per-row kebab (Edit / Copy / View Smart Link Report), and — matching the reference exactly —
  * "+ Smart Link" and a link's Name navigate to real dedicated pages rather than a modal.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, ExternalLink, Filter } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, TableScroll } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { fmtDateTime, fmtMoney, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
@@ -47,69 +46,56 @@ function trackBase(domains: TrackingDomain[] | null): string {
 }
 
 function TableActionsMenu({ rows, offerName }: { rows: SmartLink[]; offerName: (id: string | null) => string }) {
-  const [open, setOpen] = useState(false);
   const [subOpen, setSubOpen] = useState(false);
   const exportRows = () => rows.map((r) => ({
     ID: r.ref, Name: r.name, 'Catch-All Offer': offerName(r.catchAllOfferId), 'Show to Partners': r.showToPartners ? 'YES' : 'NO',
     "Today's Revenue": fmtMoney(r.todayRevenue), Created: r.createdAt, Modified: r.updatedAt,
   }));
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && (
+    <MenuPopover
+      ariaLabel="Table Actions" align="end" width="w-52"
+      triggerClassName="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+      onOpenChange={(o) => { if (!o) setSubOpen(false); }}
+    >
+      {({ close }) => (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSubOpen(false); }} />
-          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-elevated p-1 shadow-elevated">
-            <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
-            <div className="relative">
-              <button type="button" onClick={() => setSubOpen((o) => !o)}
-                className="flex w-full items-center justify-between rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">
-                Export <ChevronRight size={13} />
-              </button>
-              {subOpen && (
-                <div className="absolute left-full top-0 z-30 ml-1 w-36 rounded-card border border-border bg-elevated p-1 shadow-elevated">
-                  <button type="button" onClick={() => { downloadCsv('smart-links.csv', exportRows()); setOpen(false); setSubOpen(false); }}
-                    className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">CSV</button>
-                  <button type="button" onClick={() => { downloadXlsx('smart-links.xlsx', exportRows()); setOpen(false); setSubOpen(false); }}
-                    className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Excel</button>
-                </div>
-              )}
-            </div>
-            <button type="button" title="Not available yet" onClick={() => setOpen(false)}
-              className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Columns Customization</button>
+          <p className="px-3 py-1.5 text-small font-semibold text-fg">Table Actions</p>
+          <div className="relative">
+            <button type="button" onClick={() => setSubOpen((o) => !o)}
+              className="flex w-full items-center justify-between whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-page">
+              Export <ChevronRight size={13} className="text-fg-muted" />
+            </button>
+            {subOpen && (
+              <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                <MenuItem onSelect={() => { downloadCsv('smart-links.csv', exportRows()); close(); }}>CSV</MenuItem>
+                <MenuItem onSelect={() => { downloadXlsx('smart-links.xlsx', exportRows()); close(); }}>Excel</MenuItem>
+              </div>
+            )}
           </div>
+          <button type="button" title="Not available yet" onClick={close}
+            className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg-muted hover:bg-page">Columns Customization</button>
         </>
       )}
-    </div>
+    </MenuPopover>
   );
 }
 
-/** Portaled to `document.body` — see OfferTemplates.tsx's RowMenu for why (a fixed popover nested
- * inside the table's scroll wrapper can otherwise get silently confined to an ancestor's box). */
 function RowMenu({ onEdit, onCopy, onReport }: { onEdit: () => void; onCopy: () => void; onReport: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const openMenu = () => {
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    setOpen((o) => !o);
-  };
   return (
-    <div className="relative">
-      <button ref={btnRef} type="button" onClick={openMenu} className="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && createPortal(
+    <MenuPopover
+      ariaLabel="Smart link actions" align="end" width="w-52"
+      triggerClassName="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+    >
+      {({ close }) => (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-52 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-            <button type="button" onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Edit</button>
-            <button type="button" onClick={() => { setOpen(false); onCopy(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Copy</button>
-            <button type="button" onClick={() => { setOpen(false); onReport(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">View Smart Link Report</button>
-          </div>
-        </>,
-        document.body,
+          <MenuItem onSelect={() => { close(); onEdit(); }}>Edit</MenuItem>
+          <MenuItem onSelect={() => { close(); onCopy(); }}>Copy</MenuItem>
+          <MenuItem onSelect={() => { close(); onReport(); }}>View Smart Link Report</MenuItem>
+        </>
       )}
-    </div>
+    </MenuPopover>
   );
 }
 
@@ -200,13 +186,15 @@ export default function SmartLinks() {
                                   {r.showToPartners && <a href={`${base}/sl?id=${r.id}`} target="_blank" rel="noreferrer" className="text-fg-muted hover:text-accent-text"><ExternalLink size={11} /></a>}
                                 </p>
                               ))}
-                              {items.length > 2 && <p className="text-tiny text-fg-secondary">View all ({items.length})</p>}
+                              {items.length > 2 && (
+                                <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => nav(`/app/smart-links/${r.id}`)}>View all ({items.length})</button>
+                              )}
                             </div>
                           )}
                         </td>
                         <td className="px-4 py-3 text-small text-fg-secondary">{offerName(r.catchAllOfferId)}</td>
                         <td className={`whitespace-nowrap px-4 py-3 text-small font-medium ${r.showToPartners ? 'text-success-text' : 'text-danger-text'}`}>{r.showToPartners ? 'YES' : 'NO'}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-small">{fmtMoney(r.todayRevenue)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{fmtMoney(r.todayRevenue)}</td>
                         <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.createdAt} /></td>
                         <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.updatedAt} /></td>
                         <td className="px-4 py-3">

@@ -11,7 +11,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
+import { PageHeader, Field, Segmented } from '../../components/ui';
 import { HelpIcon } from './controlCenter/shared';
 import { REDIRECT_MECHANISMS, KPI_METRICS, KPI_RUN_FREQUENCIES, KPI_LOOKBACK_WINDOWS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
 import type { Offer, TrackingDomain } from '../../types';
@@ -95,6 +95,7 @@ export default function SmartLinkForm() {
     <>
       <PageHeader title={isEdit ? 'Edit Smart Link' : 'Add Smart Link'} subtitle={`Offers › Smart Links › ${isEdit ? 'Edit' : 'Add'}`} />
 
+      <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center gap-6 border-b border-border pb-4">
         {(['General', 'Settings'] as const).map((label, i) => {
           const n = (i + 1) as 1 | 2;
@@ -116,14 +117,12 @@ export default function SmartLinkForm() {
           <div className="max-w-md space-y-4">
             <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
             <Field label="Status *">
-              <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-                {(['active', 'paused', 'deleted'] as const).map((s) => (
-                  <button key={s} type="button" onClick={() => setStatus(s)}
-                    className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-small capitalize ${status === s ? 'bg-page font-medium text-fg' : 'text-fg-secondary'}`}>
-                    <span className={`h-2 w-2 rounded-full ${s === 'active' ? 'bg-success' : s === 'paused' ? 'bg-warning' : 'bg-danger'}`} />{s}
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                options={['active', 'paused', 'deleted']}
+                value={status}
+                onChange={(v) => setStatus(v as typeof status)}
+                dots={{ active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' }}
+              />
             </Field>
             <Field label="Labels"><textarea className="input min-h-[70px]" value={labels} onChange={(e) => setLabels(e.target.value)} /></Field>
             <Field label="Tracking Domain *">
@@ -176,11 +175,14 @@ export default function SmartLinkForm() {
             )}
 
             <div className="space-y-3">
-              {rows.map((row) => (
+              {rows.map((row) => {
+                const rowOffer = (offers ?? []).find((o) => o.id === row.offerId);
+                return (
                 <div key={row.id} className="ml-3 flex items-start gap-2 border-l-2 border-border pl-4">
                   <div className="w-full rounded-card border border-border bg-page p-3">
-                    <button type="button" onClick={() => toggleOpen(row.id)} className="mb-2 flex items-center gap-1 text-fg-secondary hover:text-fg">
-                      {row.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <button type="button" onClick={() => toggleOpen(row.id)} className="mb-2 flex w-full items-center gap-1.5 text-left text-small font-medium text-fg-secondary hover:text-fg">
+                      {row.open ? <ChevronDown size={14} className="shrink-0" /> : <ChevronRight size={14} className="shrink-0" />}
+                      {rowOffer ? (rowOffer.ref != null ? `${rowOffer.name} (${rowOffer.ref})` : rowOffer.name) : <span className="text-fg-muted">New offer</span>}
                     </button>
                     {row.open && (
                       <div className="space-y-3">
@@ -198,7 +200,9 @@ export default function SmartLinkForm() {
                         </Field>
                         {row.offerId && (
                           <div className="ml-3 rounded-card border border-border bg-surface p-3">
-                            <Field label="Offer URL *"><input className="input" placeholder="Default" value={row.offerUrl} onChange={(e) => patchRow(row.id, { offerUrl: e.target.value })} /></Field>
+                            <Field label="Offer URL" hint="Optional per-offer URL override. Stored on the rotation item, but /sl currently redirects to the offer's own landing page — not applied at redirect time yet.">
+                              <input className="input" type="url" placeholder="Uses the offer's default landing page" value={row.offerUrl} onChange={(e) => patchRow(row.id, { offerUrl: e.target.value })} />
+                            </Field>
                           </div>
                         )}
                         <Field label="Country target (optional, ISO-2)"><input className="input !w-24" placeholder="US" value={row.country} onChange={(e) => patchRow(row.id, { country: e.target.value.toUpperCase() })} /></Field>
@@ -210,25 +214,27 @@ export default function SmartLinkForm() {
                     <Trash2 size={14} />
                   </button>
                 </div>
-              ))}
+                );
+              })}
               {rows.length === 0 && <p className="text-small text-fg-muted">No offers yet. Use the + button to add one.</p>}
             </div>
           </div>
         )}
-      </div>
 
-      <div className="mt-4 flex justify-end gap-2">
-        {step === 1 ? (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => nav('/app/smart-links')}>Cancel</button>
-            <button type="button" className="btn-primary" disabled={!name || !trackingDomainId} onClick={() => setStep(2)}>Next</button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
-            <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-          </>
-        )}
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          {step === 1 ? (
+            <>
+              <button type="button" className="btn-ghost" onClick={() => nav('/app/smart-links')}>Cancel</button>
+              <button type="button" className="btn-primary" disabled={!name || !trackingDomainId} onClick={() => setStep(2)}>Next</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
+              <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+            </>
+          )}
+        </div>
+      </div>
       </div>
     </>
   );

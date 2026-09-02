@@ -12,7 +12,7 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../components/ui';
 import { EmptyShellTable } from '../../components/EmptyShellTable';
-import { Pagination, METRICS_PARAM, deriveRow, money, pct, toIso, todayStr, type AggResult } from '../../components/ReportPageKit';
+import { METRICS_PARAM, deriveRow, money, pct, toIso, todayStr, type AggResult } from '../../components/ReportPageKit';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
 import { fmtDateTime, REDIRECT_MECHANISMS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
 import { SmartLinkTrackingLinksModal } from './SmartLinkTrackingLinksModal';
@@ -92,36 +92,36 @@ function OffersCard({ id, mechanism, items, offers, advertisers, nav }: { id: st
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="input !w-56" />
       </div>
       {rows.length === 0 ? <p className="text-small text-fg-muted">No offers configured.</p> : (
-        <>
-          <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full min-w-[720px] text-left text-small">
-              <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
-                <tr>
-                  <th className="px-4 py-2">ID</th><th className="px-4 py-2">Name</th><th className="px-4 py-2">URL</th>
-                  <th className="px-4 py-2">Advertiser</th><th className="px-4 py-2">Category</th><th className="px-4 py-2">Rules</th>
-                  {mechanism === 'priority' && <th className="px-4 py-2">Position</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {rows.map((it) => {
-                  const o = offers.find((x) => x.id === it.offerId);
-                  return (
-                    <tr key={it.id}>
-                      <td className="px-4 py-2 tabular-nums text-fg-secondary">{o?.ref ?? '—'}</td>
-                      <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${o?.status === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />{o?.name ?? it.offerId.slice(0, 8) + '…'}</span></td>
-                      <td className="px-4 py-2 text-fg-secondary">{it.offerUrl || 'Default'}</td>
-                      <td className="px-4 py-2 text-accent-text">{advertisers.find((a) => a.id === o?.advertiserId)?.name ?? '—'}</td>
-                      <td className="px-4 py-2 text-fg-secondary">{o?.category ?? '—'}</td>
-                      <td className="px-4 py-2 text-fg-secondary">{it.country ? `1` : 'None'}</td>
-                      {mechanism === 'priority' && <td className="px-4 py-2 tabular-nums text-fg-secondary">{it.position ?? '—'}</td>}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-3 flex justify-end"><Pagination total={rows.length} page={1} pageSize={25} onPageChange={() => {}} /></div>
-        </>
+        <div className="overflow-x-auto rounded-card border border-border">
+          <table className="w-full min-w-[720px] text-left text-small">
+            <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
+              <tr>
+                <th className="px-4 py-2">ID</th><th className="px-4 py-2">Name</th><th className="px-4 py-2">URL</th>
+                <th className="px-4 py-2">Advertiser</th><th className="px-4 py-2">Category</th>
+                {mechanism === 'weight' && <th className="px-4 py-2">Weight</th>}
+                {mechanism === 'priority' && <th className="px-4 py-2">Position</th>}
+                <th className="px-4 py-2">Geo</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((it) => {
+                const o = offers.find((x) => x.id === it.offerId);
+                return (
+                  <tr key={it.id}>
+                    <td className="px-4 py-2 tabular-nums text-fg-secondary">{o?.ref ?? '—'}</td>
+                    <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${o?.status === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />{o?.name ?? it.offerId.slice(0, 8) + '…'}</span></td>
+                    <td className="px-4 py-2 text-fg-secondary">{it.offerUrl || 'Default'}</td>
+                    <td className="px-4 py-2 text-accent-text">{advertisers.find((a) => a.id === o?.advertiserId)?.name ?? '—'}</td>
+                    <td className="px-4 py-2 text-fg-secondary">{o?.category ?? '—'}</td>
+                    {mechanism === 'weight' && <td className="px-4 py-2 tabular-nums text-fg-secondary">{it.weight}</td>}
+                    {mechanism === 'priority' && <td className="px-4 py-2 tabular-nums text-fg-secondary">{it.position ?? '—'}</td>}
+                    <td className="px-4 py-2 text-fg-secondary">{it.country || 'All'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </InfoCard>
   );
@@ -154,7 +154,7 @@ export default function SmartLinkDetail() {
         : tab === 'Run Record' ? <RunRecordTab />
         : (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
               <InfoCard title="General" action={
                 <div className="flex items-center gap-3">
                   <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => nav(`/app/smart-links/${id}/edit`)}><Pencil size={12} />Edit</button>
@@ -162,7 +162,7 @@ export default function SmartLinkDetail() {
                 </div>
               }>
                 <InfoGrid>
-                  <InfoRow label="ID" value={data.ref} />
+                  <InfoRow label="ID" value={<span className="tabular-nums">{data.ref}</span>} />
                   <InfoRow label="Status" value={data.status === 'active' ? 'Active' : data.status === 'paused' ? 'Paused' : 'Deleted'} />
                   <InfoRow label="Name" value={data.name} />
                   <InfoRow label="Modified" value={<DateTimeValue iso={data.updatedAt} />} />
