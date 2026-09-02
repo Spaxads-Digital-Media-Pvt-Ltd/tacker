@@ -4,12 +4,11 @@
  * (ID/Name/Default Template/Modified/Created + real Edit + a kebab) and an "Offer Fields" card
  * (a flat, real-paginated Field/Value table — not grouped, unlike the list page's "View all" modal).
  */
-import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Pencil, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, MenuPopover, MenuItem } from '../../components/ui';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
 import { useFieldSpecs, valueLabel, fmtDateTime, type Template } from '../../data/offerTemplateFields';
 
@@ -19,20 +18,19 @@ function DateTimeValue({ iso }: { iso: string }) {
 }
 
 function GeneralMenu({ isDefault, onSetDefault, onDelete }: { isDefault: boolean; onSetDefault: () => void; onDelete: () => void }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && (
+    <MenuPopover
+      ariaLabel="Template actions" align="end" width="w-40"
+      triggerClassName="grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+    >
+      {({ close }) => (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-            {!isDefault && <button type="button" onClick={() => { setOpen(false); onSetDefault(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Set as Default</button>}
-            <button type="button" onClick={() => { setOpen(false); onDelete(); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-danger-bg">Delete</button>
-          </div>
+          {!isDefault && <MenuItem onSelect={() => { close(); onSetDefault(); }}>Set as Default</MenuItem>}
+          <MenuItem tone="danger" onSelect={() => { close(); onDelete(); }}>Delete</MenuItem>
         </>
       )}
-    </div>
+    </MenuPopover>
   );
 }
 

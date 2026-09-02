@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { usePageTitle } from './PageTitle';
 import { HelpHint } from './HelpHint';
@@ -159,6 +160,113 @@ export function Modal({ open, onClose, title, children, size = 'md' }: { open: b
         <div className="mt-4 overflow-x-auto">{children}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Anchored dropdown menu — the standard row-kebab / "Table Actions" popover.
+ *
+ * Portaled to <body> and positioned from the trigger's rect, so an `overflow`-clipped or
+ * `transform`ed ancestor (the table scroll wrapper, an animation utility further up) can't trap or
+ * clip it; flips upward when it would overflow the viewport bottom. Dismisses on outside
+ * pointer-down, Escape, scroll, or resize.
+ *
+ * Deliberately has NO full-screen `fixed inset-0` click-catcher overlay. That overlay was the
+ * "row kebab opens the wrong menu" bug: with a menu open, its viewport-covering overlay ate the
+ * FIRST click on any *other* trigger (a different row's kebab, or the toolbar's Table Actions ⋮),
+ * so switching menus silently required two clicks and left the previously-open menu showing.
+ */
+export function MenuPopover({
+  button, ariaLabel, triggerClassName, align = 'end', width = 'w-44', onOpenChange, children,
+}: {
+  button: ReactNode;
+  ariaLabel: string;
+  triggerClassName?: string;
+  align?: 'start' | 'end';
+  width?: string;
+  onOpenChange?: (open: boolean) => void;
+  children: (api: { close: () => void }) => ReactNode;
+}) {
+  const [open, setOpenState] = useState(false);
+  const setOpen = useCallback((v: boolean | ((o: boolean) => boolean)) => {
+    setOpenState((o) => {
+      const next = typeof v === 'function' ? v(o) : v;
+      if (next !== o) onOpenChange?.(next);
+      return next;
+    });
+  }, [onOpenChange]);
+  const [style, setStyle] = useState<{ top?: number; bottom?: number; left?: number; right?: number }>({});
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const place = useCallback(() => {
+    const b = btnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    const gap = 4;
+    const menuH = menuRef.current?.offsetHeight ?? 0;
+    const flipUp = menuH > 0 && b.bottom + gap + menuH > window.innerHeight && b.top - gap - menuH > 0;
+    setStyle({
+      ...(flipUp ? { bottom: Math.round(window.innerHeight - b.top + gap) } : { top: Math.round(b.bottom + gap) }),
+      ...(align === 'end' ? { right: Math.round(window.innerWidth - b.right) } : { left: Math.round(b.left) }),
+    });
+  }, [align]);
+
+  useLayoutEffect(() => { if (open) place(); }, [open, place]);
+  useEffect(() => {
+    if (!open) return;
+    place(); // second pass now the panel has a real height (drives flip-up)
+    const onDown = (e: Event) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const dismiss = () => setOpen(false);
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+    };
+  }, [open, place, setOpen]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((o) => !o)}
+        className={triggerClassName}
+      >
+        {button}
+      </button>
+      {open && createPortal(
+        <div ref={menuRef} role="menu" style={style}
+          className={`fixed z-50 ${width} animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated`}>
+          {children({ close: () => setOpen(false) })}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+/** A row inside <MenuPopover>. `tone="danger"` for destructive actions. */
+export function MenuItem({ children, onSelect, tone = 'default' }: { children: ReactNode; onSelect: () => void; tone?: 'default' | 'danger' }) {
+  return (
+    <button type="button" role="menuitem" onClick={onSelect}
+      className={`flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-small ${
+        tone === 'danger' ? 'text-danger-text hover:bg-danger-bg' : 'text-fg hover:bg-page'
+      }`}>
+      {children}
+    </button>
   );
 }
 

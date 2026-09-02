@@ -7,13 +7,12 @@
  * "+ Offer Template" navigate to real dedicated pages (Template Details, Add/Edit Template) rather
  * than opening a modal in place.
  */
-import { useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Modal, Spinner, StateBlock, TableScroll } from '../../components/ui';
+import { PageHeader, Modal, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { useFieldSpecs, valueLabel, fmtDateTime, type Template, type FieldSpec } from '../../data/offerTemplateFields';
@@ -61,67 +60,51 @@ function PreFilledFieldsModal({ template, specs, onClose }: { template: Template
 }
 
 function TableActionsMenu({ rows }: { rows: Template[] }) {
-  const [open, setOpen] = useState(false);
   const [subOpen, setSubOpen] = useState(false);
   const exportRows = () => rows.map((r) => ({ ID: r.ref, Name: r.name, Default: r.isDefault ? 'YES' : 'NO', Created: r.createdAt, Modified: r.updatedAt }));
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && (
+    <MenuPopover
+      ariaLabel="Table Actions" align="end" width="w-48"
+      triggerClassName="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+      onOpenChange={(o) => { if (!o) setSubOpen(false); }}
+    >
+      {({ close }) => (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSubOpen(false); }} />
-          <div className="absolute right-0 z-20 mt-1 w-48 rounded-card border border-border bg-elevated p-1 shadow-elevated">
-            <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
-            <div className="relative">
-              <button type="button" onClick={() => setSubOpen((o) => !o)}
-                className="flex w-full items-center justify-between rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">
-                Export <ChevronRight size={13} />
-              </button>
-              {subOpen && (
-                <div className="absolute left-full top-0 z-30 ml-1 w-36 rounded-card border border-border bg-elevated p-1 shadow-elevated">
-                  <button type="button" onClick={() => { downloadCsv('offer-templates.csv', exportRows()); setOpen(false); setSubOpen(false); }}
-                    className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">CSV</button>
-                  <button type="button" onClick={() => { downloadXlsx('offer-templates.xlsx', exportRows()); setOpen(false); setSubOpen(false); }}
-                    className="block w-full rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">Excel</button>
-                </div>
-              )}
-            </div>
+          <p className="px-3 py-1.5 text-small font-semibold text-fg">Table Actions</p>
+          <div className="relative">
+            <button type="button" onClick={() => setSubOpen((o) => !o)}
+              className="flex w-full items-center justify-between whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-page">
+              Export <ChevronRight size={13} className="text-fg-muted" />
+            </button>
+            {subOpen && (
+              <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                <MenuItem onSelect={() => { downloadCsv('offer-templates.csv', exportRows()); close(); }}>CSV</MenuItem>
+                <MenuItem onSelect={() => { downloadXlsx('offer-templates.xlsx', exportRows()); close(); }}>Excel</MenuItem>
+              </div>
+            )}
           </div>
         </>
       )}
-    </div>
+    </MenuPopover>
   );
 }
 
-/** Portaled to `document.body` (not just `position: fixed` in place) — the row lives inside the
- * table's `overflow-x-auto` wrapper, and some ancestor between here and the viewport establishes a
- * containing block for fixed-position descendants (a transform/animation utility class further up
- * the tree), which silently confines a plain `fixed` popover to that ancestor's box instead of the
- * real viewport. Rendering through a portal sidesteps that entirely. */
 function RowMenu({ onEdit, onSetDefault, onDelete, isDefault }: { onEdit: () => void; onSetDefault: () => void; onDelete: () => void; isDefault: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const openMenu = () => {
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    setOpen((o) => !o);
-  };
   return (
-    <div className="relative">
-      <button ref={btnRef} type="button" onClick={openMenu} className="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && createPortal(
+    <MenuPopover
+      ariaLabel="Template actions" align="end" width="w-40"
+      triggerClassName="grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+      button={<MoreVertical size={15} />}
+    >
+      {({ close }) => (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div style={{ top: pos.top, right: pos.right }} className="fixed z-50 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-            <button type="button" onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Edit</button>
-            {!isDefault && <button type="button" onClick={() => { setOpen(false); onSetDefault(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-page">Set as Default</button>}
-            <button type="button" onClick={() => { setOpen(false); onDelete(); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-danger-bg">Delete</button>
-          </div>
-        </>,
-        document.body,
+          <MenuItem onSelect={() => { close(); onEdit(); }}>Edit</MenuItem>
+          {!isDefault && <MenuItem onSelect={() => { close(); onSetDefault(); }}>Set as Default</MenuItem>}
+          <MenuItem tone="danger" onSelect={() => { close(); onDelete(); }}>Delete</MenuItem>
+        </>
       )}
-    </div>
+    </MenuPopover>
   );
 }
 
