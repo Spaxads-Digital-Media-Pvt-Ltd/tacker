@@ -139,6 +139,40 @@ export function toGeoRuleDTO(row: OfferGeoRuleRow): GeoRuleDTO {
   };
 }
 
+/**
+ * Per-offer "effective allowed countries", collapsed from that offer's geo rules the same way
+ * tracking/geo-rules.ts evaluates them at click time (this is a read-only mirror — it never
+ * touches enforcement):
+ *   - a `*` deny, or explicit allow rules with no `*` allow → allow-list  ("only these")
+ *   - a `*` allow, or only deny rules                       → deny-list   ("all except these")
+ * Offers with NO geo rules are simply absent from the bulk response (caller treats "missing" as
+ * "allows every country").
+ */
+export interface OfferCountryDTO {
+  offerId: string;
+  mode: 'allow' | 'deny';
+  countries: string[]; // uppercase ISO-2; the allow-list (mode 'allow') or the deny-list (mode 'deny')
+}
+
+interface AggGeoRow {
+  offer_id: string;
+  allow_countries: string[];
+  deny_countries: string[];
+  wildcard_allow: boolean;
+  wildcard_deny: boolean;
+}
+
+export function toOfferCountryDTO(row: AggGeoRow): OfferCountryDTO {
+  const allow = [...new Set(row.allow_countries.map((c) => c.toUpperCase()))].sort();
+  const deny = [...new Set(row.deny_countries.map((c) => c.toUpperCase()))].sort();
+  // '*' deny, or an allow-list with no catch-all allow → the offer only permits the allow set.
+  if (row.wildcard_deny || (allow.length > 0 && !row.wildcard_allow)) {
+    return { offerId: row.offer_id, mode: 'allow', countries: allow };
+  }
+  // Otherwise ('*' allow, or deny-only rules) → everything is permitted except the deny set.
+  return { offerId: row.offer_id, mode: 'deny', countries: deny };
+}
+
 export interface PublisherAccessDTO {
   id: string;
   publisherId: string;

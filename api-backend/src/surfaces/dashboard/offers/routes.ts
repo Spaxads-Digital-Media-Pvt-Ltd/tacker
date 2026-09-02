@@ -40,6 +40,7 @@ import {
   toAdvertiserDTO,
   toPublisherDTO,
   toGeoRuleDTO,
+  toOfferCountryDTO,
   toAccessDTO,
 } from './dto.js';
 import { mountOfferAssets } from './asset-routes.js';
@@ -117,6 +118,29 @@ export function offersAdminRoutes(): Router {
       sendOk(res, rows.map(toAdminDTO), { limit, offset, total });
     }),
   );
+
+  // Bulk per-offer "effective allowed countries" for the Manage Offers list (Country filter +
+  // Countries column). Collapses each offer's geo rules to an allow-list / deny-list the same way
+  // tracking/geo-rules.ts evaluates them at click time — this is a read-only mirror, no enforcement.
+  // Offers with no geo rules are omitted (caller treats "absent" as "allows every country").
+  // Registered before /:id so "geo-rules" isn't captured as an offer id.
+  r.get('/geo-rules', asyncHandler(async (req, res) => {
+    const { rows } = await query<{
+      offer_id: string; allow_countries: string[]; deny_countries: string[];
+      wildcard_allow: boolean; wildcard_deny: boolean;
+    }>(
+      `SELECT offer_id,
+              COALESCE(array_agg(country) FILTER (WHERE action = 'allow' AND country <> '*'), '{}') AS allow_countries,
+              COALESCE(array_agg(country) FILTER (WHERE action = 'deny'  AND country <> '*'), '{}') AS deny_countries,
+              COALESCE(bool_or(country = '*' AND action = 'allow'), false) AS wildcard_allow,
+              COALESCE(bool_or(country = '*' AND action = 'deny'),  false) AS wildcard_deny
+         FROM offer_geo_rules
+        WHERE network_id = $1
+        GROUP BY offer_id`,
+      [req.scope!.networkId],
+    );
+    sendOk(res, rows.map(toOfferCountryDTO));
+  }));
 
   // Status counts for the list stat-card header (registered before /:id).
   r.get('/stats', asyncHandler(async (req, res) => {
