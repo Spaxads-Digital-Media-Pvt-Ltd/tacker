@@ -1,10 +1,12 @@
 /**
- * Manage Traffic Blockings (Partners › Traffic Blocking) — per Partner+Offer rules that flag a
- * click when a sub-placement (sub1..sub10) or source_id matches a filter. Filters are stored as a
+ * Manage Traffic Blockings (Partners › Traffic Blocking) — per Partner+Offer rules that reject a
+ * click when a sub-placement (sub1..sub10) or Source ID matches a filter. Filters are stored as a
  * single jsonb column (only enabled fields present) rather than 33 flat columns — see the
- * traffic-blocking migration. This page is admin-facing CRUD only; wiring the rules into the live
- * click-accept path is a separate, not-yet-built concern (matches how Postback "Test" fires a real
- * request but doesn't change click processing either). Tenant-scoped by network_id (§3A).
+ * traffic-blocking migration. These rules are genuinely enforced at /click by the tracking surface
+ * (surfaces/tracking/traffic-blocking-eval.ts): a matching rule diverts the click, the same outcome
+ * as a blacklist Traffic Control. Writes bust the cached OfferConfig for the affected offer so a
+ * change takes effect on the next click (sub1..sub5 / Source ID are matchable today; sub6..sub10
+ * await the click flow carrying those fields). Tenant-scoped by network_id (§3A).
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -16,6 +18,7 @@ import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
+import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 
 const TABLE = 'traffic_blockings';
 
@@ -99,6 +102,7 @@ export function trafficBlockingRoutes(): Router {
       publisher_id: b.publisherId, offer_id: b.offerId, status: b.status, filters: JSON.stringify(b.filters),
     });
     await writeAudit(req, { action: 'traffic_blocking.create', entityType: 'traffic_blocking', entityId: row.id, after: row });
+    if (row.status === 'active') await invalidateOfferConfig(req.scope!.networkId, row.offer_id);
     res.status(201);
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE t.id = $1 AND t.network_id = $2`, [row.id, req.scope!.networkId]);
     sendOk(res, dto(rows[0]!));
@@ -131,6 +135,8 @@ export function trafficBlockingRoutes(): Router {
     const [row] = Object.keys(patch).length > 0 ? await db.update<Row>(TABLE, patch, { id: req.params.id }) : [before];
     if (!row) throw notFound('Traffic blocking rule not found');
     await writeAudit(req, { action: 'traffic_blocking.update', entityType: 'traffic_blocking', entityId: req.params.id, before, after: row });
+    // Bust both the old and the new offer's cached config — offer_id or status may have changed.
+    await Promise.all([...new Set([before.offer_id, row.offer_id])].map((oid) => invalidateOfferConfig(req.scope!.networkId, oid)));
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE t.id = $1 AND t.network_id = $2`, [req.params.id, req.scope!.networkId]);
     sendOk(res, dto(rows[0]!));
   }));
@@ -141,6 +147,7 @@ export function trafficBlockingRoutes(): Router {
     if (!before) throw notFound('Traffic blocking rule not found');
     await db.delete(TABLE, { id: req.params.id });
     await writeAudit(req, { action: 'traffic_blocking.delete', entityType: 'traffic_blocking', entityId: req.params.id, before });
+    if (before.status === 'active') await invalidateOfferConfig(req.scope!.networkId, before.offer_id);
     sendOk(res, { deleted: true });
   }));
 

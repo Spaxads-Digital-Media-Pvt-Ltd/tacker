@@ -28,6 +28,13 @@ export interface TrafficControlConfig {
   effectiveTo: string | null;
 }
 
+/** One active Traffic Blocking rule (Partners › Traffic Blocking) — a per Partner+Offer reject
+ * rule. `filters` is keyed by click field (sub1..sub10 / sourceId); only enabled fields present. */
+export interface TrafficBlockingConfig {
+  publisherId: string;
+  filters: Record<string, { matchType: string; value: string | null }>;
+}
+
 export interface OfferConfig {
   id: string;
   networkId: string;
@@ -54,6 +61,8 @@ export interface OfferConfig {
   networkSecurityCode: string | null;
   /** Active Traffic Controls that apply to this offer (by scope — direct, via advertiser, or all). */
   trafficControls: TrafficControlConfig[];
+  /** Active Traffic Blocking rules for this offer (Partners › Traffic Blocking), matched per publisher. */
+  trafficBlockings: TrafficBlockingConfig[];
 }
 
 const TTL = 300;
@@ -132,6 +141,14 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     [networkId, offerId, r.advertiser_id],
   );
 
+  // Traffic Blocking rules are FK'd straight to (offer_id, publisher_id), so a plain filter — kept
+  // as its own query for the same reason as Traffic Controls (can't fold into the aggregate above).
+  const tbRes = await query<{ publisher_id: string; filters: Record<string, { matchType: string; value: string | null }> | null }>(
+    `SELECT publisher_id, filters FROM traffic_blockings
+      WHERE network_id = $1 AND offer_id = $2 AND status = 'active'`,
+    [networkId, offerId],
+  );
+
   return {
     id: r.id, networkId: r.network_id, advertiserId: r.advertiser_id, status: r.status,
     destinationUrl: r.destination_url, fallbackUrl: r.fallback_url, payoutModel: r.payout_model,
@@ -149,5 +166,6 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
       partnerScope: t.partner_scope as 'all' | 'specific', partnerIds: t.partner_ids,
       effectiveFrom: t.effective_from, effectiveTo: t.effective_to,
     })),
+    trafficBlockings: tbRes.rows.map((t) => ({ publisherId: t.publisher_id, filters: t.filters ?? {} })),
   };
 }

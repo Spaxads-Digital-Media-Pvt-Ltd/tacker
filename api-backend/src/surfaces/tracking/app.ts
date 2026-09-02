@@ -15,6 +15,7 @@ import { lookupGeo, geoAvailable } from '../../lib/geo/geoip.js';
 import { parseUA } from '../../lib/ua.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
+import { isTrafficBlocked } from './traffic-blocking-eval.js';
 import { evaluateGeoRules } from './geo-rules.js';
 import { isClickCapped } from './caps.js';
 import { markUnique } from './dedup.js';
@@ -125,6 +126,7 @@ export function buildTrackingApp(): FastifyInstance {
     const publisherId = asUuid(firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
     const smartLinkId = asUuid(firstStr(q['sl'])); // set when a smart link routed this click
     const subs = [1, 2, 3, 4, 5].map((i) => firstStr(q[`sub${i}`]));
+    const sourceId = firstStr(q['source_id']) ?? firstStr(q['source']) ?? firstStr(q['src']) ?? null;
 
     // 2. Offer config from Redis (load-through). No sync Postgres read on the hot path.
     const offer = await getOfferConfig(tenant.networkId, offerId);
@@ -160,6 +162,13 @@ export function buildTrackingApp(): FastifyInstance {
     };
     const tcMatch = evaluateTrafficControls(offer.trafficControls, tcFields, publisherId);
     if (tcMatch?.action === 'block') return divert(reply, offer.fallbackUrl);
+
+    // 4c. Traffic Blocking — per Partner+Offer rules on sub placements / Source ID (Partners ›
+    // Traffic Blocking). A matching rule rejects the click, same outcome as a blacklist control.
+    if (isTrafficBlocked(offer.trafficBlockings ?? [], publisherId, {
+      sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
+      sourceId,
+    })) return divert(reply, offer.fallbackUrl);
 
     // 5. Cap check (atomic).
     if (await isClickCapped(offer.id, offer.dailyClickCap)) return divert(reply, offer.fallbackUrl);

@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { Field } from '../../../components/ui';
 import { CopyBox } from '../../../components/CopyBox';
 import { useQuery } from '../../../lib/useApi';
-import type { Offer, Publisher, TrackingDomain } from '../../../types';
+import type { Offer, Publisher, TrackingDomain, TrafficSource } from '../../../types';
 
 const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'] as const;
 
@@ -13,11 +13,16 @@ interface Creative { id: string; name: string }
  * Parameters/Link layout (same pattern as the Dashboard's general Tracking Link Generator) — Offer is
  * fixed to the current one. Creative list is real (this offer's own creatives); "Generate All Links"
  * / "Generate Link to All QR codes" / "Advertiser Test Link" have no bulk-generation or QR backend,
- * so they're real, full-color buttons with a tooltip rather than fake-disabled. */
+ * so they're real, full-color buttons with a tooltip rather than fake-disabled.
+ *
+ * "Traffic Source" applies a real Partners › Traffic Sources preset — its Parameter/Value pairs
+ * (values often containing the partner's own macros like {campaign_id}) are appended verbatim to the
+ * generated link, so a preset like "Facebook Ads" one-click-fills the tracking params. */
 export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
   offer: Offer; publishers: Publisher[]; domains: TrackingDomain[]; onClose: () => void;
 }) {
   const { data: creatives } = useQuery<Creative[]>(`/api/offers/${offer.id}/creatives`);
+  const { data: trafficSources } = useQuery<TrafficSource[]>('/api/traffic-sources');
   const activeDomains = domains.filter((d) => d.status === 'active');
   const primary = activeDomains.find((d) => d.isPrimary) ?? activeDomains[0];
   const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
@@ -26,20 +31,26 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
   const [type, setType] = useState<'Click' | 'Impression'>('Click');
   const [creativeId, setCreativeId] = useState('');
   const [pubId, setPubId] = useState('');
+  const [sourceId, setSourceId] = useState('');
   const [showExtra, setShowExtra] = useState(false);
   const [extras, setExtras] = useState<Record<string, string>>({});
   const [encrypt, setEncrypt] = useState(false);
   const setExtra = (k: string, v: string) => setExtras((s) => ({ ...s, [k]: v }));
+
+  const source = (trafficSources ?? []).find((s) => s.id === sourceId);
 
   const link = useMemo(() => {
     if (!pubId) return '';
     const filled = Object.fromEntries(Object.entries(extras).filter(([, v]) => v.trim()));
     const base: Record<string, string> = { offer_id: offer.id, pub_id: pubId, type: type.toLowerCase() };
     if (creativeId) base.creative_id = creativeId;
-    if (!encrypt) return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}`;
+    // Traffic Source preset params are appended raw (not URLSearchParams-encoded) so partner macros
+    // like {campaign_id} survive; manual "Additional Parameters" come first so they win on collision.
+    const preset = source?.trackingLinkParameters ? `&${source.trackingLinkParameters}` : '';
+    if (!encrypt) return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}${preset}`;
     const packed = btoa(JSON.stringify(filled));
-    return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}`;
-  }, [pubId, type, creativeId, extras, encrypt, trackBase, offer.id]);
+    return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}${preset}`;
+  }, [pubId, type, creativeId, extras, encrypt, trackBase, offer.id, source]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -84,6 +95,19 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
                 <option value="">Select Partner…</option>
                 {publishers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
+            </div>
+            <div className="mt-3">
+              <Field label="Traffic Source (Optional)">
+                <select className="input" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+                  <option value="">No preset</option>
+                  {(trafficSources ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </Field>
+              {source && (
+                <p className="mt-1 break-all font-mono text-tiny text-fg-secondary">
+                  Appends: <span className="text-fg">{source.trackingLinkParameters}</span>
+                </p>
+              )}
             </div>
             {isLocal && <p className="mt-1 text-tiny text-warning">Local mode: link points at http://localhost:4002 so you can test clicks locally.</p>}
 

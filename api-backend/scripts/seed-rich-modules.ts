@@ -196,20 +196,24 @@ async function main(): Promise<void> {
         ]);
     }
 
-    // ═══ 4. Traffic Blocking (Partners › Traffic Blocking) ═══════════════════════════════════
-    for (let i = 0; i < 6; i++) {
+    // ═══ 4. Traffic Blocking (Partners › Traffic Blocking) — real per-field {matchType,value}
+    //    filters keyed by click field (sub1..sub5 / Source ID) — the exact shape the dashboard
+    //    writes and surfaces/tracking/traffic-blocking-eval.ts enforces at /click.
+    const TB_RULES: Record<string, { matchType: string; value: string | null }>[] = [
+      { sub1: { matchType: 'contains', value: 'spam_' } },
+      { sub2: { matchType: 'exact_match', value: 'incentivized' } },
+      { sub1: { matchType: 'begins_with', value: 'bot-' }, sub3: { matchType: 'contains', value: 'fraud' } },
+      { sourceId: { matchType: 'exact_match', value: '99999' } },
+      { sub4: { matchType: 'is_empty', value: null } },
+      { sub5: { matchType: 'ends_with', value: '_blocked' } },
+    ];
+    for (let i = 0; i < TB_RULES.length; i++) {
       await db.query(
         `INSERT INTO traffic_blockings (network_id, publisher_id, offer_id, status, filters)
          VALUES ($1,$2,$3,$4,$5::jsonb)`,
         [
           netId, publishers[i % publishers.length]!.id, offers[i % offers.length]!.id,
-          i % 4 === 3 ? 'inactive' : 'active',
-          JSON.stringify(pick([
-            { subIds: ['spam_01', 'spam_02'], reason: 'Known fraudulent sub IDs' },
-            { devices: ['tablet'], reason: 'No tablet inventory for this offer' },
-            { countries: ['NG', 'PK'], reason: 'Out of geo' },
-            { ipRanges: ['10.0.0.0/8'], reason: 'Datacenter traffic' },
-          ], i)),
+          i === 3 ? 'inactive' : 'active', JSON.stringify(TB_RULES[i]!),
         ]);
     }
 
