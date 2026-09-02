@@ -2,19 +2,21 @@
  * Offers › Groups — matches the reference's real "Manage Offer Groups" (verified live at
  * /offers/groups): ID/Name/Advertiser/Offers/Today's Clicks/Today's Payout/Today's Revenue/Daily
  * Payout Cap/Daily Revenue Cap/Daily Click Cap/Daily Conversion Cap columns, a real search + Active
- * status filter + Table Actions (Export) toolbar, a per-row kebab (Edit), and — matching the
- * reference exactly — "+ Offer Group" and a group's Name navigate to real dedicated pages rather
- * than a modal.
+ * status filter + a Filter drawer (Advertiser / Currency / Caps Enabled / Contains Offer / Label —
+ * client-side over the fetched list, same pattern as Manage Offers & Smart Links) + Table Actions
+ * (Export) toolbar, a per-row kebab (Edit), and — matching the reference exactly — "+ Offer Group"
+ * and a group's Name navigate to real dedicated pages rather than a modal.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, MoreVertical, ChevronRight, Filter } from 'lucide-react';
+import { Plus, Search, MoreVertical, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
+import { SearchFilterDrawer, FieldBlock } from '../../components/SearchFilterDrawer';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { fmtMoney, type OfferGroup } from '../../data/offerGroups';
-import type { Advertiser } from '../../types';
+import type { Advertiser, Offer } from '../../types';
 
 const PAGE_SIZE = 25;
 const STATUSES = ['active', 'paused', 'deleted'] as const;
@@ -75,19 +77,79 @@ function RowMenu({ onEdit }: { onEdit: () => void }) {
 export default function OfferGroups() {
   const { data, loading, error } = useQuery<OfferGroup[]>('/api/offer-groups');
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
+  const { data: offers } = useQuery<Offer[]>('/api/offers');
   const nav = useNavigate();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'all' | (typeof STATUSES)[number]>('active');
   const [page, setPage] = useState(1);
 
-  const advName = (id: string | null) => (id ? advertisers?.find((a) => a.id === id)?.name ?? id.slice(0, 8) + '…' : '—');
+  const advName = useCallback(
+    (id: string | null) => (id ? advertisers?.find((a) => a.id === id)?.name ?? id.slice(0, 8) + '…' : '—'),
+    [advertisers],
+  );
+  const offerLabel = useCallback(
+    (id: string) => { const o = offers?.find((x) => x.id === id); return o ? (o.ref != null ? `${o.name} (${o.ref})` : o.name) : id.slice(0, 8) + '…'; },
+    [offers],
+  );
+
+  // ── Filter drawer (client-side, over the fetched list — same pattern as Manage Offers /
+  //    Smart Links). Status + Search stay as quick-filters in the toolbar; the drawer covers
+  //    Advertiser / Currency / Caps Enabled / Contains Offer / Label. ──
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [fAdv, setFAdv] = useState('');       // advertiserId | '__none__'
+  const [fCur, setFCur] = useState('');       // currency code
+  const [fCaps, setFCaps] = useState('');     // '' | 'yes' | 'no'
+  const [fOffer, setFOffer] = useState('');   // offerId a group must contain
+  const [fLabel, setFLabel] = useState('');   // labels contains
+  const [dAdv, setDAdv] = useState('');
+  const [dCur, setDCur] = useState('');
+  const [dCaps, setDCaps] = useState('');
+  const [dOffer, setDOffer] = useState('');
+  const [dLabel, setDLabel] = useState('');
+
+  // Data-driven option lists so the drawer only offers values that exist in the current list.
+  const advOptions = useMemo(
+    () => Array.from(new Set((data ?? []).map((g) => g.advertiserId).filter((x): x is string => Boolean(x))))
+      .map((id) => ({ id, label: advName(id) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [data, advName],
+  );
+  const currencyOptions = useMemo(
+    () => Array.from(new Set((data ?? []).map((g) => g.currency).filter(Boolean))).sort(),
+    [data],
+  );
+  const memberOfferOptions = useMemo(
+    () => Array.from(new Set((data ?? []).flatMap((g) => g.offerIds)))
+      .map((id) => ({ id, label: offerLabel(id) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [data, offerLabel],
+  );
+  const hasNoAdv = useMemo(() => (data ?? []).some((g) => !g.advertiserId), [data]);
+
+  const openDrawer = () => {
+    setDAdv(fAdv); setDCur(fCur); setDCaps(fCaps); setDOffer(fOffer); setDLabel(fLabel);
+    setDrawerOpen(true);
+  };
+  const applyDrawer = () => {
+    setFAdv(dAdv); setFCur(dCur); setFCaps(dCaps); setFOffer(dOffer); setFLabel(dLabel);
+    setDrawerOpen(false); setPage(1);
+  };
+  const clearDraft = () => { setDAdv(''); setDCur(''); setDCaps(''); setDOffer(''); setDLabel(''); };
+
+  const appliedFilterCount = [fAdv, fCur, fCaps, fOffer, fLabel.trim()].filter(Boolean).length;
+  const draftFilterCount = [dAdv, dCur, dCaps, dOffer, dLabel.trim()].filter(Boolean).length;
 
   const rows = useMemo(() => {
     let out = data ?? [];
     if (status !== 'all') out = out.filter((r) => r.status === status);
     if (q.trim()) out = out.filter((r) => r.name.toLowerCase().includes(q.trim().toLowerCase()));
+    if (fAdv) out = out.filter((r) => (fAdv === '__none__' ? !r.advertiserId : r.advertiserId === fAdv));
+    if (fCur) out = out.filter((r) => r.currency === fCur);
+    if (fCaps) out = out.filter((r) => r.capsEnabled === (fCaps === 'yes'));
+    if (fOffer) out = out.filter((r) => r.offerIds.includes(fOffer));
+    if (fLabel.trim()) { const s = fLabel.trim().toLowerCase(); out = out.filter((r) => (r.labels ?? '').toLowerCase().includes(s)); }
     return out;
-  }, [data, status, q]);
+  }, [data, status, q, fAdv, fCur, fCaps, fOffer, fLabel]);
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
@@ -104,7 +166,12 @@ export default function OfferGroups() {
             <option value="all">All</option>
             {STATUSES.map((s) => <option key={s} value={s}>{s[0]!.toUpperCase() + s.slice(1)}</option>)}
           </select>
-          <button type="button" title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Filter size={15} /></button>
+          <button type="button" className="btn-ghost relative" onClick={openDrawer}>
+            <SlidersHorizontal size={15} /> Filters
+            {appliedFilterCount > 0 && (
+              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-white">{appliedFilterCount}</span>
+            )}
+          </button>
           <TableActionsMenu rows={rows} advName={advName} />
         </div>
       </div>
@@ -162,6 +229,51 @@ export default function OfferGroups() {
             </div>
           </>
         )}
+
+      {drawerOpen && (
+        <SearchFilterDrawer appliedCount={draftFilterCount} onClose={() => setDrawerOpen(false)} onApply={applyDrawer}>
+          <div className="mb-3 flex justify-end">
+            <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={clearDraft}>Clear</button>
+          </div>
+          <p className="mb-3 text-[11px] text-fg-muted">Status and Search stay in the toolbar as quick filters — this panel narrows the list further.</p>
+
+          <FieldBlock label="Advertiser">
+            <select className="input" value={dAdv} onChange={(e) => setDAdv(e.target.value)}>
+              <option value="">All Advertisers</option>
+              {hasNoAdv && <option value="__none__">— No advertiser set</option>}
+              {advOptions.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Currency">
+            <select className="input" value={dCur} onChange={(e) => setDCur(e.target.value)}>
+              <option value="">All Currencies</option>
+              {currencyOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Caps Enabled">
+            <select className="input" value={dCaps} onChange={(e) => setDCaps(e.target.value)}>
+              <option value="">Any</option>
+              <option value="yes">Yes — a caps matrix is configured</option>
+              <option value="no">No</option>
+            </select>
+          </FieldBlock>
+
+          <FieldBlock label="Contains Offer">
+            <select className="input" value={dOffer} onChange={(e) => setDOffer(e.target.value)}>
+              <option value="">Any Offer</option>
+              {memberOfferOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-fg-muted">Groups whose member list includes this offer — useful when auditing which group(s) an offer belongs to.</p>
+          </FieldBlock>
+
+          <FieldBlock label="Label contains">
+            <input className="input" placeholder="e.g. nutrition" value={dLabel} onChange={(e) => setDLabel(e.target.value)} />
+            <p className="mt-1 text-[11px] text-fg-muted">Substring match against a group's free-text Labels.</p>
+          </FieldBlock>
+        </SearchFilterDrawer>
+      )}
     </>
   );
 }

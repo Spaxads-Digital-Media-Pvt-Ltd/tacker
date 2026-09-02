@@ -248,26 +248,49 @@ async function main(): Promise<void> {
       }
     }
 
-    // ── 8. offer groups — advertiser + currency + labels + a real caps matrix on two of them ──
+    // ── 8. offer groups — spread across advertiser / currency / caps-enabled / status / labels so
+    //    the Manage Offer Groups list + its Filter drawer have real variety to exercise.
     //    NB: group-level caps are stored config only — nothing on the click hot path enforces a
     //    *shared* group cap today (only per-offer daily_click_cap enforces). Seeded for UI coverage.
-    const GROUPS: { name: string; offerNames: string[]; labels: string; caps: string | null }[] = [
+    //    A group's Advertiser is derived from its first member offer's advertiser.
+    const GROUPS: {
+      name: string; offerNames: string[]; labels: string;
+      currency: string; status: 'active' | 'paused'; caps: string | null;
+    }[] = [
       {
         name: 'US Nutrition Portfolio',
         offerNames: ['Globex Daily Greens Trial - US', 'Globex Sleep Formula - US', 'Globex Keto Bundle — US', 'Northwind Meal-Prep Subscription — US'],
-        labels: 'nutrition,us',
+        labels: 'nutrition,us', currency: 'USD', status: 'active',
         caps: '{"clicks":{"daily":50000,"monthly":1200000},"conversions":{"daily":2500},"payout":{"daily":8000}}',
       },
       {
         name: 'EU Finance Launch',
         offerNames: ['Sterling Personal Loan — UK', 'Sterling Balance-Transfer Card — UK'],
-        labels: 'finance,eu',
+        labels: 'finance,eu', currency: 'GBP', status: 'active',
         caps: '{"revenue":{"daily":15000,"weekly":90000},"clicks":{"daily":20000}}',
       },
       {
         name: 'Mobile Gaming Bundle',
         offerNames: ['Pixel Forge: Dragon Realm — Global Install', 'Pixel Forge: Idle Tycoon — US/CA'],
-        labels: 'gaming,mobile',
+        labels: 'gaming,mobile', currency: 'USD', status: 'active',
+        caps: null,
+      },
+      {
+        name: 'EU Outdoor Seasonal',
+        offerNames: ['Fjord Trekking Poles 2-Pack — EU', 'Fjord All-Season Tent — DE/AT'],
+        labels: 'outdoor,seasonal,eu', currency: 'EUR', status: 'active',
+        caps: null,
+      },
+      {
+        name: 'Skincare Premium Set',
+        offerNames: ['Lumen Vitamin C Serum — US', 'Lumen Retinol Night Cream — CA'],
+        labels: 'skincare,beauty,us', currency: 'USD', status: 'active',
+        caps: '{"clicks":{"daily":30000},"payout":{"daily":5000,"monthly":120000}}',
+      },
+      {
+        name: 'Acme Insurance & Streaming',
+        offerNames: ['BrightMile Auto Insurance Quote — US', 'StreamVault Annual Plan — US'],
+        labels: 'insurance,streaming,us', currency: 'USD', status: 'paused',
         caps: null,
       },
     ];
@@ -277,10 +300,10 @@ async function main(): Promise<void> {
         `SELECT advertiser_id FROM offers WHERE id = $1`, [ids[0]])).rows[0]?.advertiser_id ?? null;
       await db.query(
         `INSERT INTO offer_groups (network_id, name, advertiser_id, offer_ids, currency, labels, notes, status, caps_enabled, caps)
-         VALUES ($1, $2, $3, $4::jsonb, 'USD', $5, $6, 'active', $7, $8::jsonb)`,
-        [netId, g.name, advId, JSON.stringify(ids), g.labels,
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10::jsonb)`,
+        [netId, g.name, advId, JSON.stringify(ids), g.currency, g.labels,
           g.caps ? `Curated ${g.name.toLowerCase()} — review caps monthly.` : null,
-          g.caps != null, g.caps ?? '{}'],
+          g.status, g.caps != null, g.caps ?? '{}'],
       );
     }
 
