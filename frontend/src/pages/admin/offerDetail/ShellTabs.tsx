@@ -11,7 +11,7 @@ const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
 
 type PubOptions = { value: string; label: string }[];
 
-export function ForwardingRulesTab({ base }: { base: string }) {
+export function ForwardingRulesTab({ base, pubOptions = [] }: { base: string; pubOptions?: PubOptions }) {
   return (
     <CollectionTab
       basePath={`${base}/forwarding-rules`}
@@ -20,7 +20,7 @@ export function ForwardingRulesTab({ base }: { base: string }) {
       editable
       fields={[
         { key: 'name', label: 'Name', required: true },
-        { key: 'partnerIds', label: 'Partner IDs (comma separated)', type: 'tags' },
+        { key: 'partnerIds', label: 'Partners', type: 'multiselect', options: pubOptions, placeholder: 'Type to search partners…' },
         { key: 'offerUrls', label: 'Offer URLs (comma separated)', type: 'tags' },
         { key: 'destination', label: 'Destination', type: 'url' },
         { key: 'countries', label: 'Countries (comma separated ISO-2)', type: 'tags' },
@@ -39,7 +39,7 @@ export function ForwardingRulesTab({ base }: { base: string }) {
   );
 }
 
-export function ScheduledActionsTab({ base }: { base: string }) {
+export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; pubOptions?: PubOptions }) {
   return (
     <CollectionTab
       basePath={`${base}/scheduled-actions`}
@@ -48,7 +48,7 @@ export function ScheduledActionsTab({ base }: { base: string }) {
       editable
       fields={[
         { key: 'actionType', label: 'Type', type: 'select', options: ['activate', 'pause', 'archive', 'cap_change'], default: 'pause' },
-        { key: 'partnerIds', label: 'Partner IDs (comma separated)', type: 'tags' },
+        { key: 'partnerIds', label: 'Partners', type: 'multiselect', options: pubOptions, placeholder: 'Type to search partners…' },
         { key: 'event', label: 'Event' },
         { key: 'scheduledTime', label: 'Scheduled Time (ISO 8601)', placeholder: '2026-09-01T00:00:00Z' },
         { key: 'internalNotes', label: 'Internal Notes', type: 'textarea' },

@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Tabs, Badge, Spinner, StateBlock, Table, type Column } from '../../components/ui';
 import { CollectionTab, type FieldDef } from '../../components/CollectionTab';
+import type { Advertiser, Offer, Publisher } from '../../types';
 
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => ReactNode): Column<Row> => ({ header, cell });
@@ -29,17 +30,25 @@ const ruleColumns: Column<Row>[] = [
   col('Modified', (r) => fmt(r.updatedAt)),
 ];
 
-const ruleFields: FieldDef[] = [
-  { key: 'name', label: 'Name', required: true, placeholder: 'e.g. Auto-pause on high fraud rate' },
-  { key: 'action', label: 'Action', type: 'select', options: ['notify', 'block'], default: 'notify' },
-  { key: 'actionDelay', label: 'Action Delay', placeholder: 'e.g. 15 minutes' },
-  { key: 'variable', label: 'Variable', placeholder: 'e.g. conversion_rate' },
-  { key: 'actionableVariables', label: 'Actionable Variables', placeholder: 'e.g. epc, cvr' },
-  { key: 'offerIds', label: 'Offer IDs (comma separated)', type: 'tags' },
-  { key: 'advertiserIds', label: 'Advertiser IDs (comma separated)', type: 'tags' },
-  { key: 'partnerIds', label: 'Partner IDs (comma separated)', type: 'tags' },
-  { key: 'status', label: 'Status', type: 'select', options: ['active', 'paused'], default: 'active' },
-];
+const entOpts = <T extends { id: string; name: string; ref?: number }>(rows: T[] | null | undefined) =>
+  (rows ?? []).map((r) => ({ value: r.id, label: r.ref != null ? `${r.name} (${r.ref})` : r.name }));
+
+function useRuleFields(): FieldDef[] {
+  const { data: offers } = useQuery<Offer[]>('/api/offers');
+  const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
+  const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
+  return useMemo<FieldDef[]>(() => [
+    { key: 'name', label: 'Name', required: true, placeholder: 'e.g. Auto-pause on high fraud rate' },
+    { key: 'action', label: 'Action', type: 'select', options: ['notify', 'block'], default: 'notify' },
+    { key: 'actionDelay', label: 'Action Delay', type: 'duration' },
+    { key: 'variable', label: 'Variable', placeholder: 'e.g. conversion_rate' },
+    { key: 'actionableVariables', label: 'Actionable Variables', placeholder: 'e.g. epc, cvr' },
+    { key: 'offerIds', label: 'Offers', type: 'multiselect', options: entOpts(offers), placeholder: 'Type to search offers…' },
+    { key: 'advertiserIds', label: 'Advertisers', type: 'multiselect', options: entOpts(advertisers), placeholder: 'Type to search advertisers…' },
+    { key: 'partnerIds', label: 'Partners', type: 'multiselect', options: entOpts(publishers), placeholder: 'Type to search partners…' },
+    { key: 'status', label: 'Status', type: 'select', options: ['active', 'paused'], default: 'active' },
+  ], [offers, advertisers, publishers]);
+}
 
 const historyColumns: Column<Row>[] = [
   col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
@@ -68,6 +77,7 @@ function HistoryPanel() {
  * api-backend smartswitch/routes.ts. */
 export default function OfferSmartSwitch() {
   const [tab, setTab] = useState<(typeof TABS)[number]>('Rules');
+  const ruleFields = useRuleFields();
   return (
     <>
       <PageHeader title="Manage Rules" subtitle="Offers › SmartSwitch › Manage" />

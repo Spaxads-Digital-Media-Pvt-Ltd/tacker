@@ -11,7 +11,9 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { FilterDef } from '../lib/reportFilters';
 
-export interface EntityOpt { value: string; label: string }
+// EntitySearchSelect moved to ui.tsx (now shared by CollectionTab too); re-exported here so existing
+// `from '../../components/SearchFilterDrawer'` imports keep working.
+export { EntitySearchSelect, type EntityOpt } from './ui';
 
 interface SearchFilterDrawerProps {
   appliedCount: number;
@@ -62,71 +64,6 @@ function FunnelIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-accent-text" aria-hidden>
       <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
     </svg>
-  );
-}
-
-/** Searchable multi-select entity picker (Offers / Affiliates / Advertisers). */
-export function EntitySearchSelect({
-  label, placeholder, options, value, onChange,
-}: {
-  label: string; placeholder: string; options: EntityOpt[]; value: string[]; onChange: (v: string[]) => void;
-}) {
-  const [q, setQ] = useState('');
-  const [open, setOpen] = useState(false);
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    return options.filter((o) => !s || o.label.toLowerCase().includes(s) || o.value.toLowerCase().includes(s)).slice(0, 40);
-  }, [options, q]);
-  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
-  return (
-    <div className="mb-3">
-      <label className="label">{label}</label>
-      <div className="relative">
-        <input
-          className="input pr-8"
-          placeholder={placeholder}
-          value={q}
-          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-        />
-        {value.length > 0 && (
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white">
-            {value.length}
-          </span>
-        )}
-        {open && (
-          <>
-            <button type="button" className="fixed inset-0 z-10" aria-label="close" onClick={() => setOpen(false)} />
-            <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-elevated py-1 shadow-elevated">
-              {filtered.length === 0 ? (
-                <li className="px-3 py-2 text-tiny text-fg-muted">No matches</li>
-              ) : filtered.map((o) => (
-                <li key={o.value}>
-                  <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small hover:bg-page">
-                    <input type="checkbox" className="chk" checked={value.includes(o.value)} onChange={() => toggle(o.value)} />
-                    <span className="truncate">{o.label}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </div>
-      {value.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
-          {value.slice(0, 6).map((id) => {
-            const o = options.find((x) => x.value === id);
-            return (
-              <button key={id} type="button" onClick={() => toggle(id)}
-                className="rounded-md bg-accent-subtle px-2 py-0.5 text-[11px] text-accent-text hover:bg-accent-subtle/70">
-                {o?.label ?? id.slice(0, 8)} ×
-              </button>
-            );
-          })}
-          {value.length > 6 && <span className="text-[11px] text-fg-muted">+{value.length - 6} more</span>}
-        </div>
-      )}
-    </div>
   );
 }
 

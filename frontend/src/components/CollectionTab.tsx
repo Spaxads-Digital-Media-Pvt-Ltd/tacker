@@ -6,21 +6,27 @@
  *
  * CRUD targets `${basePath}` (POST) and `${basePath}/${row.id}` (PATCH/DELETE).
  */
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { api } from '../lib/api';
 import { useQuery, useMutation } from '../lib/useApi';
-import { Table, Modal, Field, Spinner, StateBlock, type Column } from './ui';
+import { Table, Modal, Field, Spinner, StateBlock, EntitySearchSelect, DurationField, type Column, type EntityOpt } from './ui';
 
 export interface FieldDef {
   key: string;
   label: string;
-  type?: 'text' | 'number' | 'money' | 'select' | 'checkbox' | 'url' | 'textarea' | 'tags' | 'hidden';
+  /** `multiselect` renders a searchable entity picker (pass real {value,label} `options`); `duration`
+   * renders a number + unit selector that stores a canonical "<n> <unit>" string. */
+  type?: 'text' | 'number' | 'money' | 'select' | 'checkbox' | 'url' | 'textarea' | 'tags' | 'multiselect' | 'duration' | 'hidden';
   options?: string[] | { value: string; label: string }[];
   required?: boolean;
   placeholder?: string;
   default?: string | boolean;
 }
+
+/** `multiselect` holds its value as a comma-joined string in form state (like `tags`) and converts
+ * at the request/response boundary, so form state stays string-only. */
+const isArrayField = (t: FieldDef['type']) => t === 'tags' || t === 'multiselect';
 
 interface Row { id: string; [k: string]: unknown; }
 
@@ -34,26 +40,27 @@ function initialForm(fields: FieldDef[]): Record<string, string | boolean> {
   return f;
 }
 
-/** Seed a form from an existing row (edit mode). Array-valued (`tags`) fields are joined for editing. */
+/** Seed a form from an existing row (edit mode). Array-valued (`tags`/`multiselect`) fields are
+ * joined for editing. */
 function formFromRow(fields: FieldDef[], row: Row): Record<string, string | boolean> {
   const f: Record<string, string | boolean> = {};
   for (const fd of fields) {
     const v = row[fd.key];
     if (fd.type === 'checkbox') { f[fd.key] = Boolean(v); continue; }
-    if (fd.type === 'tags') { f[fd.key] = Array.isArray(v) ? v.join(', ') : ''; continue; }
+    if (isArrayField(fd.type)) { f[fd.key] = Array.isArray(v) ? v.join(', ') : ''; continue; }
     f[fd.key] = v == null ? '' : String(v);
   }
   return f;
 }
 
-/** Convert the form state into a request body: numbers coerced, `tags` split into an array, blanks
- * on optional fields dropped. */
+/** Convert the form state into a request body: numbers coerced, `tags`/`multiselect` split into an
+ * array, blanks on optional fields dropped. */
 function toBody(fields: FieldDef[], form: Record<string, string | boolean>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const fd of fields) {
     const v = form[fd.key];
     if (fd.type === 'checkbox') { body[fd.key] = Boolean(v); continue; }
-    if (fd.type === 'tags') { body[fd.key] = String(v).split(',').map((s) => s.trim()).filter(Boolean); continue; }
+    if (isArrayField(fd.type)) { body[fd.key] = String(v).split(',').map((s) => s.trim()).filter(Boolean); continue; }
     if (v === '' || v === undefined) { if (fd.required) body[fd.key] = v; continue; }
     body[fd.key] = fd.type === 'number' ? Number(v) : v;
   }
@@ -137,6 +144,7 @@ function FormModal({
   onSubmit: (body: Record<string, unknown>) => Promise<unknown>;
   onClose: () => void; onDone: () => void;
 }) {
+  const formId = useId();
   const [form, setForm] = useState<Record<string, string | boolean>>(() => initial ? formFromRow(fields, initial) : initialForm(fields));
   const { run, busy, error } = useMutation((body: Record<string, unknown>) => onSubmit(body));
   const set = (k: string, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
@@ -148,16 +156,23 @@ function FormModal({
   };
 
   return (
-    <Modal open onClose={onClose} title={title}>
-      <form onSubmit={submit} className="space-y-3">
+    <Modal
+      open onClose={onClose} title={title}
+      footer={(
+        <>
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" form={formId} className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        </>
+      )}
+    >
+      <form id={formId} onSubmit={submit} className="space-y-3">
         {error && <p className="text-small text-danger-text">{error}</p>}
         {fields.filter((fd) => fd.type !== 'hidden').map((fd) => (
-          <Field key={fd.key} label={fd.label}>{renderInput(fd, form[fd.key] ?? '', (v) => set(fd.key, v))}</Field>
+          // `multiselect` renders its own label, so it isn't wrapped in <Field>.
+          fd.type === 'multiselect'
+            ? <div key={fd.key}>{renderInput(fd, form[fd.key] ?? '', (v) => set(fd.key, v))}</div>
+            : <Field key={fd.key} label={fd.label}>{renderInput(fd, form[fd.key] ?? '', (v) => set(fd.key, v))}</Field>
         ))}
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        </div>
       </form>
     </Modal>
   );
@@ -169,6 +184,21 @@ function renderInput(fd: FieldDef, value: string | boolean, onChange: (v: string
       <input type="checkbox" className="h-4 w-4 accent-accent" checked={Boolean(value)}
         onChange={(e) => onChange(e.target.checked)} />
     );
+  }
+  if (fd.type === 'multiselect') {
+    const selected = String(value).split(',').map((s) => s.trim()).filter(Boolean);
+    return (
+      <EntitySearchSelect
+        label={fd.label}
+        placeholder={fd.placeholder ?? 'Type to search…'}
+        options={optionList(fd.options) as EntityOpt[]}
+        value={selected}
+        onChange={(arr) => onChange(arr.join(','))}
+      />
+    );
+  }
+  if (fd.type === 'duration') {
+    return <DurationField value={String(value)} onChange={(v) => onChange(v)} />;
   }
   if (fd.type === 'select') {
     return (

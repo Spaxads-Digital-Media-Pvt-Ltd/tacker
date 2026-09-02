@@ -6,7 +6,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented, DurationField } from '../../components/ui';
 import type { Postback, Publisher, Offer } from '../../types';
 
 const STATUSES = ['active', 'disabled'] as const;
@@ -131,7 +131,7 @@ export default function PostbackForm() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <Field label="HTTP Method"><select className="input" value={form.method} onChange={(e) => set('method', e.target.value)}><option>GET</option><option>POST</option></select></Field>
                 <Field label="Event"><input className="input" value={form.event} onChange={(e) => set('event', e.target.value)} placeholder="e.g. purchase" /></Field>
-                <Field label="Delay"><input className="input" value={form.delay} onChange={(e) => set('delay', e.target.value)} placeholder="e.g. 15 minutes" /></Field>
+                <Field label="Delay"><DurationField value={form.delay} onChange={(v) => set('delay', v)} /></Field>
               </div>
             </>
           )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { usePageTitle } from './PageTitle';
@@ -141,7 +141,23 @@ export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Co
 
 const MODAL_SIZE: Record<string, string> = { md: 'max-w-lg', xl: 'max-w-4xl' };
 
-export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'xl' }) {
+/**
+ * Centered modal. The box is height-bounded to the viewport and its body scrolls, so a tall form
+ * never pushes its controls off-screen. Pass `footer` for a sticky action row (Save/Cancel) that
+ * stays visible while the body scrolls; without it the modal is a plain scroll container.
+ *
+ * Portaled to <body> — same reason as `SearchFilterDrawer`: the app shell wraps every page in a
+ * `.animate-fade-in` div whose completed animation leaves an identity `transform` in effect
+ * (animation-fill-mode: both), which establishes a containing block for `position: fixed`.
+ * Rendered inline, a modal taller than the page's own content area would be sized/centered
+ * against that wrapper's (shorter) box instead of the real viewport, clipping the footer —
+ * reproducible on any page whose content area is shorter than the modal.
+ */
+export function Modal({
+  open, onClose, title, children, footer, size = 'md',
+}: {
+  open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; size?: 'md' | 'xl';
+}) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -150,15 +166,118 @@ export function Modal({ open, onClose, title, children, size = 'md' }: { open: b
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className={`w-full ${MODAL_SIZE[size]} animate-fade-in rounded-card border border-border bg-elevated p-6 shadow-elevated`} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
+      <div className={`flex max-h-[calc(100vh-2rem)] w-full ${MODAL_SIZE[size]} animate-fade-in flex-col rounded-card border border-border bg-elevated shadow-elevated`} onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between p-6 pb-0">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
           <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
         </div>
-        <div className="mt-4 overflow-x-auto">{children}</div>
+        <div className="mt-4 flex-1 overflow-y-auto overflow-x-auto px-6 pb-6">{children}</div>
+        {footer != null && (
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-4">{footer}</div>
+        )}
       </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── Entity multi-select ──────────────────────────────────────────────────────
+export interface EntityOpt { value: string; label: string }
+
+/** Searchable multi-select entity picker (Offers / Affiliates / Advertisers). Type to search, tick
+ * to add, chips below show the selection. `label` is optional — omit it when the caller supplies
+ * its own <Field> wrapper. */
+export function EntitySearchSelect({
+  label, placeholder, options, value, onChange,
+}: {
+  label?: string; placeholder: string; options: EntityOpt[]; value: string[]; onChange: (v: string[]) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return options.filter((o) => !s || o.label.toLowerCase().includes(s) || o.value.toLowerCase().includes(s)).slice(0, 40);
+  }, [options, q]);
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <div className="mb-3">
+      {label ? <label className="label">{label}</label> : null}
+      <div className="relative">
+        <input
+          className="input pr-8"
+          placeholder={placeholder}
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+        />
+        {value.length > 0 && (
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white">
+            {value.length}
+          </span>
+        )}
+        {open && (
+          <>
+            <button type="button" className="fixed inset-0 z-10" aria-label="close" onClick={() => setOpen(false)} />
+            <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-elevated py-1 shadow-elevated">
+              {filtered.length === 0 ? (
+                <li className="px-3 py-2 text-tiny text-fg-muted">No matches</li>
+              ) : filtered.map((o) => (
+                <li key={o.value}>
+                  <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small hover:bg-page">
+                    <input type="checkbox" className="chk" checked={value.includes(o.value)} onChange={() => toggle(o.value)} />
+                    <span className="truncate">{o.label}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+      {value.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {value.slice(0, 6).map((id) => {
+            const o = options.find((x) => x.value === id);
+            return (
+              <button key={id} type="button" onClick={() => toggle(id)}
+                className="rounded-md bg-accent-subtle px-2 py-0.5 text-[11px] text-accent-text hover:bg-accent-subtle/70">
+                {o?.label ?? id.slice(0, 8)} ×
+              </button>
+            );
+          })}
+          {value.length > 6 && <span className="text-[11px] text-fg-muted">+{value.length - 6} more</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Duration field (number + unit) ───────────────────────────────────────────
+const DURATION_UNITS = ['minutes', 'hours', 'days'] as const;
+
+/** Parses a stored free-text delay ("15 minutes", "2h", "30m", "1 day") into {n, unit}. Unknown
+ * input falls back to an empty value so a bad legacy string doesn't silently become "0 minutes". */
+function parseDuration(s: string): { n: string; unit: (typeof DURATION_UNITS)[number] } {
+  const m = s.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)?$/);
+  if (!m) return { n: '', unit: 'minutes' };
+  const u = m[2] ?? 'minutes';
+  const unit = u.startsWith('h') ? 'hours' : u.startsWith('d') ? 'days' : 'minutes';
+  return { n: m[1]!, unit };
+}
+
+/** Number input + unit dropdown. Emits a canonical "<n> <unit>" string (or '' when the number is
+ * blank), so the stored value is unambiguous without changing the backend contract. */
+export function DurationField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { n, unit } = parseDuration(value || '');
+  const emit = (nextN: string, nextUnit: string) => onChange(nextN.trim() === '' ? '' : `${nextN.trim()} ${nextUnit}`);
+  return (
+    <div className="flex gap-2">
+      <input type="number" min={0} className="input" placeholder="e.g. 15" value={n}
+        onChange={(e) => emit(e.target.value, unit)} />
+      <select className="input !w-auto" value={unit} onChange={(e) => emit(n, e.target.value)}>
+        {DURATION_UNITS.map((u) => <option key={u} value={u} className="capitalize">{u[0]!.toUpperCase() + u.slice(1)}</option>)}
+      </select>
     </div>
   );
 }

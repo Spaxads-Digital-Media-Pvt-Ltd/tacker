@@ -90,8 +90,8 @@ export default function OfferDetail() {
       )}
 
       {tab === 'Custom Settings' && <CustomSettingsTab base={base} offerId={offer.id} />}
-      {tab === 'Forwarding Rules' && <ForwardingRulesTab base={base} />}
-      {tab === 'Scheduled Actions' && <ScheduledActionsTab base={base} />}
+      {tab === 'Forwarding Rules' && <ForwardingRulesTab base={base} pubOptions={pubOptions} />}
+      {tab === 'Scheduled Actions' && <ScheduledActionsTab base={base} pubOptions={pubOptions} />}
       {tab === 'Postbacks' && <PostbacksTab base={base} pubOptions={pubOptions} />}
       {tab === 'History' && <HistoryTab base={base} />}
 

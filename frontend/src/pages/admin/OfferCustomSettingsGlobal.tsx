@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Tabs, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
 import { CollectionTab, type FieldDef } from '../../components/CollectionTab';
-import type { Offer } from '../../types';
+import type { Offer, Publisher } from '../../types';
 
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => ReactNode): Column<Row> => ({ header, cell });
@@ -40,13 +40,15 @@ const NOT_ENFORCED_NOTE: Record<Tab, string> = {
 export default function OfferCustomSettingsGlobal() {
   const [tab, setTab] = useState<Tab>('Revenue & Payout');
   const { data: offers } = useQuery<Offer[]>('/api/offers');
+  const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const offerName = (id: unknown) => (offers ?? []).find((o) => o.id === id)?.name ?? '—';
 
   const offerOptions = (offers ?? []).map((o) => ({ value: o.id, label: o.name }));
+  const partnerOptions = (publishers ?? []).map((p) => ({ value: p.id, label: p.name }));
   const baseFields: FieldDef[] = [
     { key: 'name', label: 'Name', required: true },
     { key: 'offerId', label: 'Offer', type: 'select', options: offerOptions },
-    { key: 'partnerIds', label: 'Partner IDs (comma separated)', type: 'tags' },
+    { key: 'partnerIds', label: 'Partners', type: 'multiselect', options: partnerOptions, placeholder: 'Type to search partners…' },
   ];
 
   const columnsByTab: Record<Tab, Column<Row>[]> = {
