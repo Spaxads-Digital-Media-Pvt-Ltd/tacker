@@ -377,6 +377,28 @@ async function main(): Promise<void> {
           ]);
       }
     }
+    // …plus a fixed spread covering the remaining asset types + a Deleted status, so the Manage
+    // Creatives list's Filter drawer (Type / Language / Size / Partner visibility) has real variety.
+    const EXTRA_CREATIVES: { name: string; type: string; url: string | null; html: string | null; w: number | null; h: number | null; lang: string; status: string; vis: boolean }[] = [
+      { name: 'Q4 Promo Reel — 15s', type: 'video', url: 'https://cdn.demo.test/creatives/promo-15s.mp4', html: null, w: 1920, h: 1080, lang: 'en', status: 'active', vis: true },
+      { name: 'Launch Sizzle — 30s (DE)', type: 'video', url: 'https://cdn.demo.test/creatives/sizzle-de.mp4', html: null, w: 1280, h: 720, lang: 'de', status: 'paused', vis: true },
+      { name: 'Banner Pack — IAB set', type: 'archive', url: 'https://cdn.demo.test/creatives/iab-banner-pack.zip', html: null, w: null, h: null, lang: 'en', status: 'active', vis: true },
+      { name: 'Social Kit — FR', type: 'archive', url: 'https://cdn.demo.test/creatives/social-kit-fr.zip', html: null, w: null, h: null, lang: 'fr', status: 'active', vis: false },
+      { name: 'App Icon 512', type: 'thumbnail', url: 'https://cdn.demo.test/creatives/app-icon-512.png', html: null, w: 512, h: 512, lang: 'en', status: 'active', vis: true },
+      { name: 'Store Hero Thumb', type: 'thumbnail', url: 'https://cdn.demo.test/creatives/store-hero.png', html: null, w: 1200, h: 628, lang: 'en', status: 'active', vis: true },
+      { name: 'Email Body Copy — ES', type: 'text', url: 'https://cdn.demo.test/creatives/email-copy-es.txt', html: null, w: null, h: null, lang: 'es', status: 'active', vis: true },
+      { name: 'Native Headlines — EN', type: 'text', url: 'https://cdn.demo.test/creatives/native-headlines.txt', html: null, w: null, h: null, lang: 'en', status: 'paused', vis: true },
+      { name: 'Retired Leaderboard 728x90', type: 'image', url: 'https://cdn.demo.test/creatives/retired-728.jpg', html: null, w: 728, h: 90, lang: 'en', status: 'deleted', vis: false },
+      { name: 'Old Coupon Snippet', type: 'html', url: null, html: '<div class="promo">Use code SAVE20 — <a href="{tracking_link}">shop now</a></div>', w: 300, h: 250, lang: 'en', status: 'deleted', vis: true },
+    ];
+    for (let i = 0; i < EXTRA_CREATIVES.length; i++) {
+      const ec = EXTRA_CREATIVES[i]!;
+      const o = offers[i % Math.min(offers.length, 9)]!;
+      await db.query(
+        `INSERT INTO offer_creatives (network_id, offer_id, name, type, url, html, width, height, language, status, visible_to_partners, email_from, email_subject)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,NULL)`,
+        [netId, o.id, `${o.name.slice(0, 24)} — ${ec.name}`, ec.type, ec.url, ec.html, ec.w, ec.h, ec.lang, ec.status, ec.vis]);
+    }
 
     // ═══ 12. Offer Templates (Offers › Templates) ═══════════════════════════════════════
     // Keys MUST match the frontend field catalog (data/offerTemplateFields.ts → useFieldSpecs),
