@@ -140,6 +140,61 @@ export interface OfferApplication {
   latestUpdate: string;
 }
 
+
+export interface PublisherOffer {
+ id: string;
+ name: string;
+ status: 'draft' | 'active' | 'paused' | 'archived';
+ payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+ payout: string;
+ currency: string;
+ trackingUrl: string | null;
+ access: 'allow' | 'deny' | null;
+ approvalStatus: 'approved' | 'pending' | 'rejected' | null;
+ destinationUrl: string;
+ description: string | null;
+ previewUrl: string | null;
+ objective: 'conversions' | 'sale' | 'app_installs' | 'leads' | 'impressions' | 'clicks' | null;
+ visibility: 'public' | 'private' | 'ask';
+ category: string | null;
+ allowedTrafficTypes: string[];
+ fallbackUrl: string | null;
+ attributionWindowS: number;
+ dedupWindowS: number;
+ dailyClickCap: number | null;
+ dailyConversionCap: number | null;
+ totalConversionCap: number | null;
+ trackingDomainId: string | null;
+ createdAt: string;
+}
+
+export interface AdvertiserOffer {
+ id: string;
+ ref?: number;
+ name: string;
+ status: 'draft' | 'active' | 'paused' | 'archived';
+ payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+ revenue: string;
+ currency: string;
+ destinationUrl: string;
+ description: string | null;
+ previewUrl: string | null;
+ objective: 'conversions' | 'sale' | 'app_installs' | 'leads' | 'impressions' | 'clicks' | null;
+ visibility: 'public' | 'private' | 'ask';
+ category: string | null;
+ allowedTrafficTypes: string[];
+ fallbackUrl: string | null;
+ attributionWindowS: number;
+ dedupWindowS: number;
+ dailyClickCap: number | null;
+ dailyConversionCap: number | null;
+ totalConversionCap: number | null;
+ trackingDomainId: string | null;
+ trackingUrl: string | null;
+ createdAt: string;
+ updatedAt: string;
+}
+
 export type QuestionnaireDataField = 'checkbox' | 'date_input' | 'input' | 'numeric_input' | 'select' | 'textarea';
 
 export interface QuestionnaireField {

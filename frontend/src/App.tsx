@@ -58,6 +58,8 @@ const Subscriptions = lazy(() => import('./pages/super-admin/Subscriptions'));
 const Usage = lazy(() => import('./pages/super-admin/Usage'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
 const AdvertiserOffers = lazy(() => import('./pages/portal/AdvertiserOffers'));
+const PublisherOfferDetail = lazy(() => import('./pages/portal/PublisherOfferDetail'));
+const AdvertiserOfferDetail = lazy(() => import('./pages/portal/AdvertiserOfferDetail'));
 const PublisherEarnings = lazy(() => import('./pages/portal/PublisherEarnings'));
 const ApiKeys = lazy(() => import('./pages/portal/ApiKeys'));
 const ReportView = lazy(() => import('./pages/ReportView'));
@@ -295,6 +297,7 @@ export default function App() {
         <Route element={<ProtectedRoute allow="publisher"><AppShell /></ProtectedRoute>}>
           <Route path="/publisher" element={<DashboardHome />} />
           <Route path="/publisher/offers" element={<PublisherOffers />} />
+          <Route path="/publisher/offers/:id" element={<PublisherOfferDetail />} />
           <Route path="/publisher/stats" element={<ReportView title="Stats" subtitle="Your clicks, conversions, CR, payout, EPC — your data only." basePath="/api/portal/publisher/stats" groupByOptions={['offer', 'country', 'device', 'day']} />} />
           <Route path="/publisher/earnings" element={<PublisherEarnings />} />
           <Route path="/publisher/api-keys" element={<ApiKeys basePath="/api/portal/publisher/keys" />} />
@@ -304,6 +307,7 @@ export default function App() {
         <Route element={<ProtectedRoute allow="advertiser"><AppShell /></ProtectedRoute>}>
           <Route path="/advertiser" element={<DashboardHome />} />
           <Route path="/advertiser/offers" element={<AdvertiserOffers />} />
+          <Route path="/advertiser/offers/:id" element={<AdvertiserOfferDetail />} />
           <Route path="/advertiser/stats" element={<ReportView title="Stats" subtitle="Your offers’ clicks, conversions, CR, revenue — your data only." basePath="/api/portal/advertiser/stats" groupByOptions={['offer', 'country', 'device', 'day']} />} />
           <Route path="/advertiser/api-keys" element={<ApiKeys basePath="/api/portal/advertiser/keys" />} />
         </Route>
