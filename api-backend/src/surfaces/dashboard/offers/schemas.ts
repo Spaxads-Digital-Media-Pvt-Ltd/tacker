@@ -46,6 +46,13 @@ export const createAccessSchema = z.object({
   payoutOverride: moneySchema.nullable().optional(),
 });
 
+/** Publisher self-service request/withdraw. publisherId comes from the authenticated identity — not from the body. */
+export const requestAccessSchema = z.object({
+ access: z.enum(['allow', 'deny']).default('allow'),
+});
+
+export type RequestAccess = z.infer<typeof requestAccessSchema>;
+
 export type CreateOffer = z.infer<typeof createOfferSchema>;
 export type UpdateOffer = z.infer<typeof updateOfferSchema>;
 export type CreateGeoRule = z.infer<typeof createGeoRuleSchema>;

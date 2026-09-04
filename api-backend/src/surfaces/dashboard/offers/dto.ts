@@ -117,6 +117,122 @@ export function toPublisherDTO(row: OfferRow, effectivePayout: string): OfferPub
   };
 }
 
+/** Publisher portal detail: list fields + extended fields + access status + tracking link. */
+export interface PublisherOfferDetailDTO extends OfferPublisherDTO {
+ destinationUrl: string;
+ description: string | null;
+ previewUrl: string | null;
+ objective: OfferRow['objective'];
+ visibility: OfferRow['visibility'];
+ category: string | null;
+ allowedTrafficTypes: string[];
+ fallbackUrl: string | null;
+ attributionWindowS: number;
+ dedupWindowS: number;
+ dailyClickCap: number | null;
+ dailyConversionCap: number | null;
+ totalConversionCap: number | null;
+ trackingDomainId: string | null;
+ access: 'allow' | 'deny' | null;
+ approvalStatus: 'approved' | 'pending' | 'rejected' | null;
+ trackingUrl: string | null;
+ createdAt: string;
+}
+
+export function toPublisherDetailDTO(
+ row: OfferRow,
+ effectivePayout: string,
+ access: 'allow' | 'deny' | null,
+ approvalStatus: 'approved' | 'pending' | 'rejected' | null,
+ trackingUrl: string | null,
+): PublisherOfferDetailDTO {
+ const meta = row.metadata ?? {};
+ return {
+ id: row.id,
+ name: row.name,
+ status: row.status,
+ payoutModel: row.payout_model,
+ payout: effectivePayout,
+ currency: row.currency,
+ destinationUrl: row.destination_url,
+ description: (meta['description'] as string | undefined) ?? null,
+ previewUrl: row.preview_url,
+ objective: row.objective,
+ visibility: row.visibility,
+ category: row.category,
+ allowedTrafficTypes: row.allowed_traffic_types,
+ fallbackUrl: row.fallback_url,
+ attributionWindowS: row.attribution_window_s,
+ dedupWindowS: row.dedup_window_s,
+ dailyClickCap: row.daily_click_cap,
+ dailyConversionCap: row.daily_conversion_cap,
+ totalConversionCap: row.total_conversion_cap,
+ trackingDomainId: row.tracking_domain_id,
+ access,
+ approvalStatus,
+ trackingUrl,
+ createdAt: row.created_at,
+ };
+}
+
+/** Advertiser portal detail: list fields + extended fields (revenue shown; publisher payout never exposed). */
+export interface AdvertiserOfferDetailDTO {
+ id: string;
+ ref: number;
+ name: string;
+ status: OfferRow['status'];
+ destinationUrl: string;
+ payoutModel: OfferRow['payout_model'];
+ revenue: string;
+ currency: string;
+ description: string | null;
+ previewUrl: string | null;
+ objective: OfferRow['objective'];
+ visibility: OfferRow['visibility'];
+ category: string | null;
+ allowedTrafficTypes: string[];
+ fallbackUrl: string | null;
+ attributionWindowS: number;
+ dedupWindowS: number;
+ dailyClickCap: number | null;
+ dailyConversionCap: number | null;
+ totalConversionCap: number | null;
+ trackingDomainId: string | null;
+ trackingUrl: string | null;
+ createdAt: string;
+ updatedAt: string;
+}
+
+export function toAdvertiserDetailDTO(row: OfferRow, trackingUrl: string | null = null): AdvertiserOfferDetailDTO {
+ const meta = row.metadata ?? {};
+ return {
+ id: row.id,
+ ref: Number(row.ref),
+ name: row.name,
+ status: row.status,
+ destinationUrl: row.destination_url,
+ payoutModel: row.payout_model,
+ revenue: row.default_revenue,
+ currency: row.currency,
+ description: (meta['description'] as string | undefined) ?? null,
+ previewUrl: row.preview_url,
+ objective: row.objective,
+ visibility: row.visibility,
+ category: row.category,
+ allowedTrafficTypes: row.allowed_traffic_types,
+ fallbackUrl: row.fallback_url,
+ attributionWindowS: row.attribution_window_s,
+ dedupWindowS: row.dedup_window_s,
+ dailyClickCap: row.daily_click_cap,
+ dailyConversionCap: row.daily_conversion_cap,
+ totalConversionCap: row.total_conversion_cap,
+ trackingDomainId: row.tracking_domain_id,
+ trackingUrl,
+ createdAt: row.created_at,
+ updatedAt: row.updated_at,
+ };
+}
+
 export interface GeoRuleDTO {
   id: string;
   country: string;
