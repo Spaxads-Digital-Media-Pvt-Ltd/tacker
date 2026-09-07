@@ -1,10 +1,9 @@
 /**
- * Full profile page (Section 5A) — light, card-based, token-driven. Real values where the backend
- * provides them (name, email, role, network Long ID, tracking domain → postback/signup URLs, API
- * key); fields the backend doesn't model yet (phone, currency, language, security code) show a clear
- * placeholder rather than fabricated data. Every copyable value has a copy button with confirmation.
+ * Full profile page — General (own account + metadata) and Logins (own login_events).
+ * Profile fields persist via /api/me/account + /api/me/profile; security via password/email;
+ * compliance anonymize via /api/me/anonymize.
  */
-import { useState, type ReactNode, type FormEvent } from 'react';
+import { useEffect, useState, type ReactNode, type FormEvent, type ChangeEvent } from 'react';
 import { Copy, Check, Shield, Pencil, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { ROLE_LABELS } from '../../auth/roles';
@@ -12,16 +11,57 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { loadSession, saveSession } from '../../auth/session';
 import { PageHeader, Badge, Modal, Field, Tabs } from '../../components/ui';
-import { EmptyShellTable } from '../../components/EmptyShellTable';
+import { EmptyShellTable, type ShellRow } from '../../components/EmptyShellTable';
 
 const ACCOUNT_TABS = ['General', 'Logins'] as const;
 const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Portuguese'];
 
-interface MyAccount { ref: number; name: string; email: string; role: string; status: string; createdAt: string; updatedAt: string }
+interface MyAccount {
+  id: string;
+  ref: number;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  title: string | null;
+  businessUnit: string | null;
+  partnerManager: boolean;
+  advertiserManager: boolean;
+  language: string | null;
+  timezone: string | null;
+  photoUrl: string | null;
+  phone: string | null;
+  address: string | null;
+  apartment: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  postalCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface NetworkSettings { general: { defaultCurrency: string } }
+
+interface LoginRow {
+  id: string;
+  loginTime: string;
+  ip: string | null;
+  location: string | null;
+  deviceType: string | null;
+  browser: string | null;
+  platform: string | null;
+  osVersion: string | null;
+  userAgent: string | null;
+  existingDevice: boolean;
+}
 
 function fmtDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function dash(v: string | null | undefined): string {
+  return v?.trim() ? v : '—';
 }
 
 function Card({ title, icon, children, action }: { title: string; icon: ReactNode; children: ReactNode; action?: ReactNode }) {
@@ -50,11 +90,23 @@ export default function ProfilePage() {
   const domains = useQuery<{ id: string; host: string; isPrimary?: boolean; status?: string }[]>('/api/tracking-domains');
   const account = useQuery<MyAccount>('/api/me/account');
   const settings = useQuery<NetworkSettings>('/api/settings');
+  const logins = useQuery<LoginRow[]>('/api/me/logins');
   const [name, setName] = useState(session?.displayName ?? '');
   const [title, setTitle] = useState('');
   const [businessUnit, setBusinessUnit] = useState('');
   const [language, setLanguage] = useState('English');
   const [timezone, setTimezone] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [apartment, setApartment] = useState('');
+  const [city, setCity] = useState('');
+  const [region, setRegion] = useState('');
+  const [country, setCountry] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [email, setEmail] = useState(session?.email ?? '');
+  const [partnerManager, setPartnerManager] = useState(false);
+  const [advertiserManager, setAdvertiserManager] = useState(false);
   const [innerTab, setInnerTab] = useState<'Basis' | 'Contact'>('Basis');
   const [editOpen, setEditOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
@@ -62,13 +114,45 @@ export default function ProfilePage() {
   const [anonymizeOpen, setAnonymizeOpen] = useState(false);
   const [tab, setTab] = useState<string>('General');
 
+  useEffect(() => {
+    const a = account.data;
+    if (!a) return;
+    setName(a.name);
+    setTitle(a.title ?? '');
+    setBusinessUnit(a.businessUnit ?? '');
+    setLanguage(a.language ?? 'English');
+    setTimezone(a.timezone ?? '');
+    setPhone(a.phone ?? '');
+    setAddress(a.address ?? '');
+    setApartment(a.apartment ?? '');
+    setCity(a.city ?? '');
+    setRegion(a.region ?? '');
+    setCountry(a.country ?? '');
+    setPostalCode(a.postalCode ?? '');
+    setPhotoUrl(a.photoUrl);
+    setEmail(a.email);
+    setPartnerManager(a.partnerManager);
+    setAdvertiserManager(a.advertiserManager);
+  }, [account.data]);
+
   if (!session) return null;
-  const roleLabel = ROLE_LABELS[session.role];
+  const roleLabel = ROLE_LABELS[session.role] ?? account.data?.role ?? session.role;
 
   const active = (domains.data ?? []).filter((d) => d.status === 'active');
   const host = active.find((d) => d.isPrimary)?.host ?? active[0]?.host ?? 'your-tracking-domain.com';
   const affiliateSignup = `https://${host}/pub-signup`;
   const advertiserSignup = `https://${host}/adv-signup`;
+
+  const loginRows: ShellRow[] = (logins.data ?? []).map((e) => ({
+    id: e.id,
+    cells: {
+      'Login Time': fmtDateTime(e.loginTime),
+      IP: e.ip ?? '—',
+      Location: e.location ?? '—',
+      'Device Type': e.deviceType ?? '—',
+      Browser: e.browser ?? '—',
+    },
+  }));
 
   return (
     <>
@@ -91,19 +175,23 @@ export default function ProfilePage() {
                   <div className="space-y-4">
                     <Detail label="ID" value={account.data?.ref ?? '—'} />
                     <Detail label="Name" value={name} />
-                    <Detail label="Title" value={title || '—'} />
+                    <Detail label="Title" value={dash(title)} />
                     <Detail label="Role" value={roleLabel} />
-                    <Detail label="Partner Manager" value="—" />
-                    <Detail label="Advertiser Manager" value="—" />
-                    <Detail label="Business Unit" value={businessUnit || '—'} />
-                    <Detail label="Language" value={language} />
-                    <Detail label="Timezone" value={timezone || '—'} />
+                    <Detail label="Partner Manager" value={partnerManager ? 'Yes' : '—'} />
+                    <Detail label="Advertiser Manager" value={advertiserManager ? 'Yes' : '—'} />
+                    <Detail label="Business Unit" value={dash(businessUnit)} />
+                    <Detail label="Language" value={language || 'English'} />
+                    <Detail label="Timezone" value={dash(timezone)} />
                     <Detail label="Currency" value={settings.data?.general.defaultCurrency ?? '—'} />
                   </div>
                   <div className="space-y-4">
                     <div>
                       <p className="mb-2 text-tiny font-medium text-fg-secondary">Photo</p>
-                      <div className="grid h-20 w-20 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Not set</div>
+                      {photoUrl ? (
+                        <img src={photoUrl} alt="" className="h-20 w-20 rounded-card object-cover border border-border" />
+                      ) : (
+                        <div className="grid h-20 w-20 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Not set</div>
+                      )}
                     </div>
                     <Detail label="Status" value={<Badge value={account.data?.status ?? 'active'} />} />
                     <Detail label="Modified" value={account.data ? fmtDateTime(account.data.updatedAt) : '—'} />
@@ -112,14 +200,14 @@ export default function ProfilePage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                  <Detail label="Email" value={session.email} />
-                  <Detail label="Phone" value="—" />
-                  <Detail label="Address" value="—" />
-                  <Detail label="Apartment, Suite, etc." value="—" />
-                  <Detail label="City" value="—" />
-                  <Detail label="Region/State" value="—" />
-                  <Detail label="Country" value="—" />
-                  <Detail label="ZIP/Postal Code" value="—" />
+                  <Detail label="Email" value={email || session.email} />
+                  <Detail label="Phone" value={dash(phone)} />
+                  <Detail label="Address" value={dash(address)} />
+                  <Detail label="Apartment, Suite, etc." value={dash(apartment)} />
+                  <Detail label="City" value={dash(city)} />
+                  <Detail label="Region/State" value={dash(region)} />
+                  <Detail label="Country" value={dash(country)} />
+                  <Detail label="ZIP/Postal Code" value={dash(postalCode)} />
                 </div>
               )}
             </div>
@@ -148,25 +236,69 @@ export default function ProfilePage() {
 
       {tab === 'Logins' && (
         <div className="mt-4 card">
-          <EmptyShellTable columns={['Login Time', 'IP', 'Location', 'Device Type', 'Browser']} />
+          <EmptyShellTable
+            columns={['Login Time', 'IP', 'Location', 'Device Type', 'Browser']}
+            rows={loginRows}
+            loading={logins.loading}
+          />
         </div>
       )}
 
-      {editOpen && <EditProfileModal current={name} title={title} businessUnit={businessUnit} language={language} timezone={timezone}
-        onClose={() => setEditOpen(false)}
-        onSaved={(n, t, bu, lang, tz) => {
-          setName(n); setTitle(t); setBusinessUnit(bu); setLanguage(lang); setTimezone(tz);
-          const s = loadSession(); if (s) saveSession({ ...s, displayName: n }); setEditOpen(false);
-        }} />}
+      {editOpen && (
+        <EditProfileModal
+          initial={{
+            name, title, businessUnit, language, timezone, photoUrl,
+            phone, address, apartment, city, region, country, postalCode,
+          }}
+          onClose={() => setEditOpen(false)}
+          onSaved={(next) => {
+            setName(next.name);
+            setTitle(next.title);
+            setBusinessUnit(next.businessUnit);
+            setLanguage(next.language);
+            setTimezone(next.timezone);
+            setPhotoUrl(next.photoUrl);
+            setPhone(next.phone);
+            setAddress(next.address);
+            setApartment(next.apartment);
+            setCity(next.city);
+            setRegion(next.region);
+            setCountry(next.country);
+            setPostalCode(next.postalCode);
+            const s = loadSession();
+            if (s) saveSession({ ...s, displayName: next.name });
+            account.refetch();
+            setEditOpen(false);
+          }}
+        />
+      )}
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
-      {emailOpen && <ChangeEmailModal current={session.email} onClose={() => setEmailOpen(false)} />}
-      {anonymizeOpen && <AnonymizeModal onClose={() => setAnonymizeOpen(false)} />}
+      {emailOpen && (
+        <ChangeEmailModal
+          current={email}
+          onClose={() => setEmailOpen(false)}
+          onSaved={(next) => {
+            setEmail(next);
+            const s = loadSession();
+            if (s) saveSession({ ...s, email: next });
+            account.refetch();
+            setEmailOpen(false);
+          }}
+        />
+      )}
+      {anonymizeOpen && (
+        <AnonymizeModal
+          onClose={() => setAnonymizeOpen(false)}
+          onDone={() => {
+            account.refetch();
+            setAnonymizeOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }
 
-/** Matches the reference's Partner/Advertiser Sign Up Link cards — a light-tinted URL box with an
- * icon-only copy button, distinct from CopyField's bordered/mono style used elsewhere on this page. */
 function LinkCard({ title, url }: { title: string; url: string }) {
   return (
     <section className="card !p-0">
@@ -194,38 +326,101 @@ function CopyIconButton({ value }: { value: string }) {
   );
 }
 
-/** Name is real (persists via /api/me/profile, same as before); Title/Business Unit/Timezone/
- * Language have no backing column on `users` yet, so they're real, interactive fields that only
- * update local component state — matching every other honest-shell edit form in this app. */
-function EditProfileModal({ current, title, businessUnit, language, timezone, onClose, onSaved }: {
-  current: string; title: string; businessUnit: string; language: string; timezone: string;
-  onClose: () => void; onSaved: (name: string, title: string, businessUnit: string, language: string, timezone: string) => void;
+type ProfileForm = {
+  name: string; title: string; businessUnit: string; language: string; timezone: string;
+  photoUrl: string | null;
+  phone: string; address: string; apartment: string; city: string; region: string; country: string; postalCode: string;
+};
+
+function EditProfileModal({ initial, onClose, onSaved }: {
+  initial: ProfileForm;
+  onClose: () => void;
+  onSaved: (next: ProfileForm) => void;
 }) {
-  const [value, setValue] = useState(current);
-  const [titleV, setTitleV] = useState(title);
-  const [buV, setBuV] = useState(businessUnit);
-  const [langV, setLangV] = useState(language);
-  const [tzV, setTzV] = useState(timezone);
-  const { run, busy, error } = useMutation((name: string) => api.patch<{ name: string }>('/api/me/profile', { name }));
+  const [form, setForm] = useState(initial);
+  const { run, busy, error } = useMutation((body: Record<string, unknown>) =>
+    api.patch('/api/me/profile', body));
+
+  const set = (key: keyof ProfileForm, value: string | null) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  const onPhoto = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2_000_000) {
+      alert('Photo must be under 2 MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => set('photoUrl', typeof reader.result === 'string' ? reader.result : null);
+    reader.readAsDataURL(file);
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!value.trim()) return;
-    const r = await run(value.trim());
-    if (r) onSaved(r.name, titleV, buV, langV, tzV);
+    if (!form.name.trim()) return;
+    const r = await run({
+      name: form.name.trim(),
+      title: form.title.trim() || null,
+      businessUnit: form.businessUnit.trim() || null,
+      language: form.language || 'English',
+      timezone: form.timezone.trim() || null,
+      photoUrl: form.photoUrl,
+      phone: form.phone.trim() || null,
+      address: form.address.trim() || null,
+      apartment: form.apartment.trim() || null,
+      city: form.city.trim() || null,
+      region: form.region.trim() || null,
+      country: form.country.trim() || null,
+      postalCode: form.postalCode.trim() || null,
+    });
+    if (r) onSaved(form);
   };
+
   return (
     <Modal open onClose={onClose} title="Edit profile">
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
         {error && <p className="text-small text-danger-text">{error}</p>}
-        <Field label="Full name"><input className="input" value={value} onChange={(e) => setValue(e.target.value)} required /></Field>
-        <Field label="Title"><input className="input" value={titleV} onChange={(e) => setTitleV(e.target.value)} /></Field>
-        <Field label="Business Unit"><input className="input" value={buV} onChange={(e) => setBuV(e.target.value)} /></Field>
+        <Field label="Full name"><input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} required /></Field>
+        <Field label="Title"><input className="input" value={form.title} onChange={(e) => set('title', e.target.value)} /></Field>
+        <Field label="Business Unit"><input className="input" value={form.businessUnit} onChange={(e) => set('businessUnit', e.target.value)} /></Field>
         <Field label="Language">
-          <select className="input" value={langV} onChange={(e) => setLangV(e.target.value)}>
+          <select className="input" value={form.language} onChange={(e) => set('language', e.target.value)}>
             {LANGUAGES.map((l) => <option key={l}>{l}</option>)}
           </select>
         </Field>
-        <Field label="Timezone"><input className="input" value={tzV} onChange={(e) => setTzV(e.target.value)} placeholder="e.g. America/Los_Angeles" /></Field>
+        <Field label="Timezone"><input className="input" value={form.timezone} onChange={(e) => set('timezone', e.target.value)} placeholder="e.g. America/Los_Angeles" /></Field>
+        <Field label="Photo">
+          <div className="flex items-center gap-3">
+            {form.photoUrl ? (
+              <img src={form.photoUrl} alt="" className="h-14 w-14 rounded-card object-cover border border-border" />
+            ) : (
+              <div className="grid h-14 w-14 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">—</div>
+            )}
+            <div className="flex flex-col gap-1">
+              <input type="file" accept="image/*" onChange={onPhoto} className="text-tiny" />
+              {form.photoUrl && (
+                <button type="button" className="text-tiny text-accent-text hover:underline text-left" onClick={() => set('photoUrl', null)}>Remove photo</button>
+              )}
+            </div>
+          </div>
+        </Field>
+        <div className="border-t border-border pt-3">
+          <p className="mb-3 text-tiny font-medium text-fg-secondary">Contact</p>
+          <div className="space-y-3">
+            <Field label="Phone"><input className="input" value={form.phone} onChange={(e) => set('phone', e.target.value)} /></Field>
+            <Field label="Address"><input className="input" value={form.address} onChange={(e) => set('address', e.target.value)} /></Field>
+            <Field label="Apartment, Suite, etc."><input className="input" value={form.apartment} onChange={(e) => set('apartment', e.target.value)} /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="City"><input className="input" value={form.city} onChange={(e) => set('city', e.target.value)} /></Field>
+              <Field label="Region/State"><input className="input" value={form.region} onChange={(e) => set('region', e.target.value)} /></Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Country"><input className="input" value={form.country} onChange={(e) => set('country', e.target.value)} /></Field>
+              <Field label="ZIP/Postal Code"><input className="input" value={form.postalCode} onChange={(e) => set('postalCode', e.target.value)} /></Field>
+            </div>
+          </div>
+        </div>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
@@ -235,35 +430,59 @@ function EditProfileModal({ current, title, businessUnit, language, timezone, on
   );
 }
 
-/** No /api/me/email route: changing the login email for a demo account risks locking the user out
- * of their own known credentials, so this stays a real, interactive modal with an honestly inert
- * submit rather than a wired mutation. */
-function ChangeEmailModal({ current, onClose }: { current: string; onClose: () => void }) {
+function ChangeEmailModal({ current, onClose, onSaved }: {
+  current: string; onClose: () => void; onSaved: (email: string) => void;
+}) {
   const [value, setValue] = useState(current);
+  const { run, busy, error } = useMutation((email: string) =>
+    api.patch<{ ok: boolean; email: string }>('/api/me/email', { email }));
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const next = value.trim().toLowerCase();
+    if (!next || next === current.toLowerCase()) return;
+    const r = await run(next);
+    if (r?.ok) onSaved(r.email);
+  };
   return (
     <Modal open onClose={onClose} title="Change email">
-      <div className="space-y-4">
-        <Field label="New email address"><input type="email" className="input" value={value} onChange={(e) => setValue(e.target.value)} required /></Field>
+      <form onSubmit={submit} className="space-y-4">
+        {error && <p className="text-small text-danger-text">{error}</p>}
+        <Field label="New email address">
+          <input type="email" className="input" value={value} onChange={(e) => setValue(e.target.value)} required />
+        </Field>
+        <p className="text-tiny text-fg-secondary">You will need this email the next time you sign in.</p>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" title="Not available yet" className="btn-primary" onClick={onClose}>Save changes</button>
+          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
         </div>
-      </div>
+      </form>
     </Modal>
   );
 }
 
-/** GDPR-style anonymization has no backend in this app — real confirm dialog, honestly inert action. */
-function AnonymizeModal({ onClose }: { onClose: () => void }) {
+function AnonymizeModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const { run, busy, error } = useMutation(() => api.post<{ ok: boolean }>('/api/me/anonymize', {}));
+  const confirm = async () => {
+    const r = await run();
+    if (r?.ok) onDone();
+  };
   return (
     <Modal open onClose={onClose} title="Anonymize User Data">
       <div className="space-y-4">
+        {error && <p className="text-small text-danger-text">{error}</p>}
         <p className="text-small text-fg-secondary">
-          This will permanently replace this user's personal information (name, email) with anonymized placeholders. Business data (offers, reports, transactions) is not affected. This cannot be undone.
+          This will permanently replace this user's personal information (name, email, contact, photo) with anonymized placeholders. Business data (offers, reports, transactions) is not affected. This cannot be undone.
         </p>
         <div className="flex justify-end gap-2 pt-1">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" title="Not available yet" className="rounded-[var(--radius)] bg-danger px-4 py-2 text-small font-semibold text-white hover:opacity-90" onClick={onClose}>Anonymize</button>
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button
+            type="button"
+            className="rounded-[var(--radius)] bg-danger px-4 py-2 text-small font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            disabled={busy}
+            onClick={confirm}
+          >
+            {busy ? 'Anonymizing…' : 'Anonymize'}
+          </button>
         </div>
       </div>
     </Modal>
