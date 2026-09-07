@@ -58,9 +58,17 @@ function metricCells(shown: Set<string>, d: DerivedRow) {
 }
 
 interface OfferRow { offerId: string; offerName: string; derived: DerivedRow }
-function ExpandedOfferRows({ advertiserId, colSpanBefore, shown }: { advertiserId: string; colSpanBefore: number; shown: Set<string> }) {
+function ExpandedOfferRows({ advertiserId, colSpanBefore, shown, dimParams, from, to }: { advertiserId: string; colSpanBefore: number; shown: Set<string>; dimParams: Record<string, string | number | undefined>; from: string; to: string }) {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
-  const { data, loading } = useQuery<AggResult>(`/api/reports?groupBy=offer&metrics=${METRICS_PARAM}&advertiserId=${advertiserId}&limit=200`);
+  const qs = useMemo(() => {
+ const p = new URLSearchParams();
+ p.set('groupBy', 'offer'); p.set('metrics', METRICS_PARAM);
+ p.set('advertiserId', advertiserId);
+ p.set('from', toIso(from)); p.set('to', toIso(to, true)); p.set('limit', '200');
+ for (const [k, v] of Object.entries(dimParams)) if (v !== undefined && v !== '') p.set(k, String(v));
+ return p.toString();
+ }, [advertiserId, dimParams, from, to]);
+ const { data, loading } = useQuery<AggResult>(`/api/reports?${qs}`);
   const rows: OfferRow[] = useMemo(() => (data?.rows ?? [])
     .filter((r) => r.dimensions['offer'])
     .map((r) => ({
@@ -486,7 +494,7 @@ export default function AdvertiserReport() {
                           <RowActionMenu advertiser={{ id: r.advertiserId, name: r.advertiserName }} />
                         </td>
                       </tr>
-                      {expanded.has(r.advertiserId) && <ExpandedOfferRows advertiserId={r.advertiserId} colSpanBefore={1} shown={shown} />}
+                      {expanded.has(r.advertiserId) && <ExpandedOfferRows advertiserId={r.advertiserId} colSpanBefore={1} shown={shown} dimParams={dimParams} from={appliedFrom} to={appliedTo} />}
                     </Fragment>
                   ))}
                 </tbody>

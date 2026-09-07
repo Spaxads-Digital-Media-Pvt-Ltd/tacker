@@ -28,6 +28,7 @@
     "seed": "tsx scripts/seed.ts",
     "seed:rich": "tsx scripts/seed-rich.ts",
     "seed:rich-modules": "tsx scripts/seed-rich-modules.ts",
+ "seed:demo-data": "tsx scripts/seed-demo-data.ts",
     "bootstrap:admin": "tsx scripts/bootstrap-platform-admin.ts",
     "provision:demo-admin": "tsx scripts/provision-demo-admin.ts",
     "provision:demo-portals": "tsx scripts/provision-demo-portals.ts",

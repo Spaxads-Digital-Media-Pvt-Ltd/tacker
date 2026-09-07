@@ -22,13 +22,13 @@ const BILLING_FREQUENCIES = ['Weekly', 'Bi-Weekly', 'Monthly', 'Net 15', 'Net 30
 // Coarse, real (not fabricated) geographic bucketing over the free-text Country field — Everflow's
 // own "Region" filter category, built from the only geography this app actually stores.
 const COUNTRY_REGION: Record<string, string> = {
-  'United States': 'North America', Canada: 'North America', Mexico: 'North America',
-  'United Kingdom': 'Europe', Germany: 'Europe', France: 'Europe', Spain: 'Europe', Italy: 'Europe', Netherlands: 'Europe', Ireland: 'Europe',
-  India: 'Asia', China: 'Asia', Japan: 'Asia', Singapore: 'Asia', Philippines: 'Asia', 'South Korea': 'Asia',
-  Australia: 'Oceania', 'New Zealand': 'Oceania',
-  Brazil: 'South America', Argentina: 'South America',
-  'United Arab Emirates': 'Middle East', Israel: 'Middle East', 'Saudi Arabia': 'Middle East',
-  'South Africa': 'Africa', Nigeria: 'Africa', Egypt: 'Africa',
+  'US': 'North America', CA: 'North America', MX: 'North America',
+  'GB': 'Europe', DE: 'Europe', FR: 'Europe', ES: 'Europe', IT: 'Europe', NL: 'Europe', IE: 'Europe',
+  IN: 'Asia', CN: 'Asia', JP: 'Asia', SG: 'Asia', PH: 'Asia', 'KR': 'Asia',
+  AU: 'Oceania', 'NZ': 'Oceania',
+  BR: 'South America', AR: 'South America',
+  'AE': 'Middle East', IL: 'Middle East', 'SA': 'Middle East',
+  'ZA': 'Africa', NG: 'Africa', EG: 'Africa',
 };
 const regionOf = (country: string | null | undefined): string => (country ? (COUNTRY_REGION[country] ?? 'Other') : 'Unknown');
 
