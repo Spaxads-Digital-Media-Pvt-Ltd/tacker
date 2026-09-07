@@ -13,7 +13,7 @@ export default defineConfig({
     allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.io', '.ngrok.app'],
     proxy: {
       // Dashboard API (operators + portals) and the auth exchange.
-      '/api': { target: 'http://localhost:4001', changeOrigin: true },
+      '/api': { target: process.env.VITE_API_PROXY || 'http://localhost:4001', changeOrigin: true },
       // Platform-admin (Super Admin) surface.
       '/platform': { target: 'http://localhost:4004', changeOrigin: true },
     },

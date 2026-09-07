@@ -142,44 +142,72 @@ export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Co
 const MODAL_SIZE: Record<string, string> = { md: 'max-w-lg', xl: 'max-w-4xl' };
 
 /**
+ * Full-viewport dimmed layer portaled to document.body. Nested `fixed` overlays inside AppShell's
+ * scrollable `<main>` (or any overflow/transform ancestor) get clipped — use Overlay (or Modal)
+ * for every dimmed popup.
+ */
+export function Overlay({
+  children,
+  onClose,
+  className = 'grid place-items-center bg-[rgb(var(--flyout-scrim))] p-4 backdrop-blur-sm',
+}: {
+  children: ReactNode;
+  onClose?: () => void;
+  className?: string;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    if (onClose) window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      if (onClose) window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className={`fixed inset-0 z-[100] ${className}`} onClick={onClose} role="presentation">
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/**
  * Centered modal. The box is height-bounded to the viewport and its body scrolls, so a tall form
  * never pushes its controls off-screen. Pass `footer` for a sticky action row (Save/Cancel) that
  * stays visible while the body scrolls; without it the modal is a plain scroll container.
  *
- * Portaled to <body> — same reason as `SearchFilterDrawer`: the app shell wraps every page in a
- * `.animate-fade-in` div whose completed animation leaves an identity `transform` in effect
- * (animation-fill-mode: both), which establishes a containing block for `position: fixed`.
- * Rendered inline, a modal taller than the page's own content area would be sized/centered
- * against that wrapper's (shorter) box instead of the real viewport, clipping the footer —
- * reproducible on any page whose content area is shorter than the modal.
+ * Uses Overlay (portaled to document.body) so it is not clipped by AppShell / animate-fade-in.
  */
 export function Modal({
   open, onClose, title, children, footer, size = 'md',
 }: {
   open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; size?: 'md' | 'xl';
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   if (!open) return null;
-  return createPortal(
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className={`flex max-h-[calc(100vh-2rem)] w-full ${MODAL_SIZE[size]} animate-fade-in flex-col rounded-card border border-border bg-elevated shadow-elevated`} onClick={(e) => e.stopPropagation()}>
+  return (
+    <Overlay onClose={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+        className={`flex max-h-[calc(100vh-2rem)] w-full ${MODAL_SIZE[size]} animate-fade-in flex-col rounded-card border border-border bg-elevated shadow-elevated`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex shrink-0 items-center justify-between p-6 pb-0">
-          <h2 className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
-          <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
+          <h2 id="modal-title" className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
+          <button type="button" onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
         </div>
         <div className="mt-4 flex-1 overflow-y-auto overflow-x-auto px-6 pb-6">{children}</div>
         {footer != null && (
           <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-4">{footer}</div>
         )}
       </div>
-    </div>,
-    document.body,
+    </Overlay>
   );
 }
 
