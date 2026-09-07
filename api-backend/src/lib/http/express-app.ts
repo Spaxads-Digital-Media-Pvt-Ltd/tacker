@@ -16,7 +16,8 @@ export function createBaseApp(surface: string): Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(helmet());
-  app.use(express.json({ limit: '256kb' }));
+  // 6mb matches creatives / branding data-URL uploads (zod max 6_000_000 on creative url).
+  app.use(express.json({ limit: '6mb' }));
   app.use(pinoHttp({ logger: surfaceLogger(surface) }));
 
   // Per-request duration → Prometheus (spec §2/§3B). Uses the route pattern, not the raw path,

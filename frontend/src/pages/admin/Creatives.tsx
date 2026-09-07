@@ -13,7 +13,7 @@ import { createPortal } from 'react-dom';
 import { Plus, Search, MoreVertical, ChevronRight, ExternalLink, Filter, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, TableScroll } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, TableScroll, Overlay } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
 import { DualListPicker } from '../../components/DualListPicker';
@@ -215,7 +215,7 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
     (menuKey === 'link' ? linkValue.trim() : menuKey === 'emailOrHtml' ? (subKind === 'html' ? htmlValue.trim() : true) : !!fileDataUrl);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="max-h-[90vh] w-full max-w-2xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">{isEdit ? `Edit ${TYPE_LABEL[type]} Creative` : `Add ${menu.label} Creative`}</h2>
@@ -272,7 +272,7 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
           <button type="button" className="btn-primary" disabled={busy || !valid} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

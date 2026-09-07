@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, X, Info } from 'lucide-react';
-import { Field } from './ui';
+import { Field, Overlay } from './ui';
 import { Pagination } from './ReportPageKit';
 
 /**
@@ -63,7 +63,7 @@ function ColumnsCustomizationPanel({ columns, visible, onApply, onClose }: { col
   const filtered = columns.filter((c) => c.toLowerCase().includes(q.toLowerCase()));
   const toggle = (c: string) => setPending((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
   return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-black/30 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-card border border-border bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-h3 font-medium text-fg">Table Columns</h3>
@@ -92,7 +92,7 @@ function ColumnsCustomizationPanel({ columns, visible, onApply, onClose }: { col
           <button type="button" className="btn-primary" onClick={() => { onApply(pending); onClose(); }}>Apply</button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 
@@ -111,7 +111,7 @@ function ApiRequestModal({ title, onClose }: { title: string; onClose: () => voi
   const path = `/api/v1/network/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   const url = `${origin}${path}`;
   return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-black/30 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="w-full max-w-2xl rounded-card border border-border bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h3 className="text-h3 font-medium text-fg">Table Request</h3>
@@ -131,7 +131,7 @@ function ApiRequestModal({ title, onClose }: { title: string; onClose: () => voi
           <a href={`${origin}/api/v1/openapi.json`} target="_blank" rel="noreferrer" className="text-tiny font-medium text-accent-text">View API Docs →</a>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

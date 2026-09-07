@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, Filter, X } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, type Column, Table } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, Overlay, type Column, Table } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
 import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
 import { api } from '../../lib/api';
@@ -78,7 +78,7 @@ function HistoryModal({ id, onClose }: { id: string; onClose: () => void }) {
     { header: 'User IP', cell: (r) => r.userIp ?? '—' },
   ];
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="max-h-[85vh] w-full max-w-4xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">History</h2>
@@ -89,7 +89,7 @@ function HistoryModal({ id, onClose }: { id: string; onClose: () => void }) {
           : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
           : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
       </div>
-    </div>
+    </Overlay>
   );
 }
 

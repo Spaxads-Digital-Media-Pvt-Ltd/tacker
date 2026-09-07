@@ -13,8 +13,9 @@ import { useQuery, useMutation } from '../../../lib/useApi';
 import { Tabs, Table, Badge, Field, Spinner, StateBlock, type Column } from '../../../components/ui';
 import { EmptyShellTable } from '../../../components/EmptyShellTable';
 import { Pagination } from '../../../components/ReportPageKit';
-import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField } from './shared';
+import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField, type NotifySaved } from './shared';
 import type { TrackingDomain } from '../../../types';
+import { readFileAsDataUrl } from '../../../data/creatives';
 import {
   PARTNER_NOTIFS, OFFER_NOTIFS_PLATFORM, OFFER_GROUP_NOTIFS, ADVERTISER_NOTIFS,
   ACTION_NOTIFS, BILLING_NOTIFS, NETWORK_NOTIFS, SECURITY_NOTIFS, TRAFFIC_HEALTH_NOTIFS,
@@ -87,27 +88,100 @@ function YesNoPill({ label, value, onChange }: { label: string; value: boolean; 
   );
 }
 
-function UploadBox({ label }: { label: string }) {
+const IMAGE_ACCEPT = 'image/png,image/jpeg,image/jpg,image/jfif,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.ico,.jfif';
+
+function isImageFile(file: File): boolean {
+  if (file.type.startsWith('image/')) return true;
+  return /\.(png|jpe?g|jfif|gif|webp|svg|ico)$/i.test(file.name);
+}
+
+function UploadBox({ label, value, error, onFile, onClear }: {
+  label: string;
+  value: string | null;
+  error: string | null;
+  onFile: (f: File) => void;
+  onClear: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const takeFile = (file: File | undefined | null) => {
+    if (!file) return;
+    if (!isImageFile(file)) return;
+    onFile(file);
+  };
+
   return (
     <div>
       <label className="label mb-2 block">{label}</label>
-      <div className="grid h-[74px] place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Drag and drop or Browse</div>
+      <div
+        className={`rounded-card border border-dashed bg-page p-3 text-center transition-colors ${
+          dragging ? 'border-accent bg-accent-subtle' : 'border-border'
+        }`}
+        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragging(false);
+          takeFile(e.dataTransfer.files?.[0]);
+        }}
+      >
+        {value ? (
+          <div className="flex flex-col items-center gap-2">
+            <img src={value} alt={label} className="max-h-14 max-w-full object-contain" />
+            <div className="flex gap-2">
+              <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => inputRef.current?.click()}>Replace</button>
+              <button type="button" className="text-tiny font-medium text-danger-text hover:underline" onClick={onClear}>Remove</button>
+            </div>
+          </div>
+        ) : (
+          <p className="py-4 text-small text-fg-secondary">
+            {dragging ? 'Drop image here' : (
+              <>
+                Drag and drop or{' '}
+                <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => inputRef.current?.click()}>Browse</button>
+              </>
+            )}
+          </p>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept={IMAGE_ACCEPT}
+          className="hidden"
+          onChange={(e) => {
+            takeFile(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+      </div>
+      {error && <p className="mt-1 text-tiny text-danger-text">{error}</p>}
     </div>
   );
 }
 
 interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string } }
+interface PlatformBranding { logoUrl?: string | null; faviconUrl?: string | null }
 
-/** "Edit General" — matches platform_general_edit.png field-for-field. Network Displayed Name,
- * Support Email, Currency, and Timezone are real (PUT /api/settings/general, the same real network
- * settings Settings › General already writes) — the rest (Language, Show toggles, colors, logo)
- * have no backend concept in this app, so they stay real, interactive, non-persisting controls. */
+/** "Edit General" — Network Displayed Name, Support Email, Currency, and Timezone persist via
+ * PUT /api/settings/general. Logo / Favicon persist on control-center platform branding config. */
 function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => void }) {
   const { data: settings } = useQuery<NetworkSettings>('/api/settings');
+  const { data: platformConfig } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const branding = (platformConfig?.branding as PlatformBranding | undefined) ?? {};
   const [name, setName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [timezone, setTimezone] = useState('UTC');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const [faviconError, setFaviconError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => {
     if (!settings) return;
     setName(settings.general.name ?? '');
@@ -115,16 +189,48 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setCurrency(settings.general.defaultCurrency ?? 'USD');
     setTimezone(settings.general.timezone ?? 'UTC');
   }, [settings]);
-  const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.put('/api/settings/general', body));
+
+  useEffect(() => {
+    setLogoUrl(branding.logoUrl ?? null);
+    setFaviconUrl(branding.faviconUrl ?? null);
+  }, [platformConfig]);
+
+  const onLogo = async (f: File) => {
+    setLogoError(null);
+    try { setLogoUrl(await readFileAsDataUrl(f)); }
+    catch (e) { setLogoError(e instanceof Error ? e.message : 'Could not read file.'); }
+  };
+  const onFavicon = async (f: File) => {
+    setFaviconError(null);
+    try { setFaviconUrl(await readFileAsDataUrl(f)); }
+    catch (e) { setFaviconError(e instanceof Error ? e.message : 'Could not read file.'); }
+  };
 
   const save = async () => {
-    if (await run({ name, supportEmail: supportEmail || undefined, defaultCurrency: currency, timezone })) onSaved();
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await api.put('/api/settings/general', {
+        name,
+        supportEmail: supportEmail || undefined,
+        defaultCurrency: currency,
+        timezone,
+      });
+      await cc.putConfig('platform', {
+        branding: { logoUrl: logoUrl || null, faviconUrl: faviconUrl || null },
+      });
+      onSaved();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="max-w-2xl mx-auto card space-y-4">
       <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       <Field label="Network Displayed Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Checkbox label="Show Name" defaultChecked />
       <Field label="Support Email *"><input className="input" value={supportEmail} onChange={(e) => setSupportEmail(e.target.value)} /></Field>
@@ -151,11 +257,11 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
         </div>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <UploadBox label="Logo" />
-        <UploadBox label="Favicon" />
+        <UploadBox label="Logo" value={logoUrl} error={logoError} onFile={onLogo} onClear={() => setLogoUrl(null)} />
+        <UploadBox label="Favicon" value={faviconUrl} error={faviconError} onFile={onFavicon} onClear={() => setFaviconUrl(null)} />
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
         <button className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
@@ -298,11 +404,17 @@ function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?:
   );
 }
 
-function ImagePreviewBox({ label, help }: { label: string; help: string }) {
+function ImagePreviewBox({ label, help, src }: { label: string; help: string; src?: string | null }) {
   return (
     <div>
       <p className="mb-2 flex items-center gap-1.5 text-small font-semibold text-fg">{label} <HelpIcon text={help} /></p>
-      <div className="grid h-20 w-32 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Not set</div>
+      {src ? (
+        <div className="flex h-20 w-32 items-center justify-center overflow-hidden rounded-card border border-border bg-page p-2">
+          <img src={src} alt={label} className="max-h-full max-w-full object-contain" />
+        </div>
+      ) : (
+        <div className="grid h-20 w-32 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Not set</div>
+      )}
     </div>
   );
 }
@@ -381,6 +493,7 @@ function GeneralSub() {
   const [editing, setEditing] = useState<'general' | 'global' | null>(null);
   const { data: settings, refetch } = useQuery<NetworkSettings>('/api/settings');
   const { data: platformConfig, refetch: refetchPlatform } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const branding = (platformConfig?.branding as PlatformBranding | undefined) ?? {};
   const globalCfg = (platformConfig?.global as Record<string, unknown> | undefined) ?? {};
   const toggles = (globalCfg['toggles'] as Record<string, boolean> | undefined) ?? {};
   const toggleHelp = new Map(GLOBAL_TOGGLE_DEFS.map((t) => [t.label, t.help]));
@@ -394,7 +507,14 @@ function GeneralSub() {
     return v === undefined ? undefined : v ? 'YES' : 'NO';
   };
 
-  if (editing === 'general') return <EditGeneralForm onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); refetch(); }} />;
+  if (editing === 'general') {
+    return (
+      <EditGeneralForm
+        onCancel={() => setEditing(null)}
+        onSaved={() => { setEditing(null); refetch(); refetchPlatform(); }}
+      />
+    );
+  }
   if (editing === 'global') return <EditGlobalForm onCancel={() => setEditing(null)} onSaved={refetchPlatform} />;
 
   return (
@@ -403,9 +523,9 @@ function GeneralSub() {
         <InfoCard title="General" action={<button className="text-tiny font-medium text-accent-text" onClick={() => setEditing('general')}>Edit</button>}>
           <InfoGrid>
             <InfoRow label="Network Identifier" value={settings?.general.name} />
-            <ImagePreviewBox label="Logo" help="Shown in the top-left corner of the dashboard and Partner/Advertiser portals." />
+            <ImagePreviewBox label="Logo" help="Shown in the top-left corner of the dashboard and Partner/Advertiser portals." src={branding.logoUrl} />
             <InfoRow label="NID" value={settings?.general.nid} />
-            <ImagePreviewBox label="Favicon" help="Shown as the browser-tab icon across every portal." />
+            <ImagePreviewBox label="Favicon" help="Shown as the browser-tab icon across every portal." src={branding.faviconUrl} />
             <InfoRow label="Support Email" value={settings?.general.supportEmail} />
             <ColorSwatchRow label="Primary Color" color={null} />
             <InfoRow label="Language" value="English" />
@@ -622,27 +742,27 @@ function IPsSub() {
 }
 
 function NotificationsSub() {
-  const { data: config } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
-  const saved = (config?.notifications as Record<string, unknown> | undefined) ?? {};
-  const saveKey = useMutation(async (key: string) => {
-    const res = await cc.putConfig('platform', { notifications: { ...saved, [key]: saved[key] ?? {} } });
-    return !!res;
-  });
+  const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const saved = (config?.notifications as Record<string, NotifySaved> | undefined) ?? {};
 
-  const mkSave = (key: string) => async () => !!(await saveKey.run(key));
+  const mkSave = (key: string) => async (values: NotifySaved) => {
+    const res = await cc.putConfig('platform', { notifications: { ...saved, [key]: values } });
+    if (res) refetch();
+    return !!res;
+  };
 
   return (
     <div className="space-y-4">
       <HeadsUpBanner>Note that editing the default notifications will not modify any existing notification setting. It will only affect new accounts.</HeadsUpBanner>
-      <NotificationCard title="Partners" notifs={PARTNER_NOTIFS} onSave={mkSave('partners')} />
-      <NotificationCard title="Offers" notifs={OFFER_NOTIFS_PLATFORM} onSave={mkSave('offers')} />
-      <NotificationCard title="Offer Groups" notifs={OFFER_GROUP_NOTIFS} onSave={mkSave('offerGroups')} />
-      <NotificationCard title="Advertisers" notifs={ADVERTISER_NOTIFS} onSave={mkSave('advertisers')} />
-      <NotificationCard title="Actions" notifs={ACTION_NOTIFS} onSave={mkSave('actions')} />
-      <NotificationCard title="Billing" notifs={BILLING_NOTIFS} onSave={mkSave('billing')} />
-      <NotificationCard title="Network" notifs={NETWORK_NOTIFS} onSave={mkSave('network')} />
-      <NotificationCard title="Security" notifs={SECURITY_NOTIFS} onSave={mkSave('security')} />
-      <NotificationCard title="Traffic Health" notifs={TRAFFIC_HEALTH_NOTIFS} onSave={mkSave('trafficHealth')} />
+      <NotificationCard title="Partners" notifs={PARTNER_NOTIFS} saved={saved['partners']} onSave={mkSave('partners')} />
+      <NotificationCard title="Offers" notifs={OFFER_NOTIFS_PLATFORM} saved={saved['offers']} onSave={mkSave('offers')} />
+      <NotificationCard title="Offer Groups" notifs={OFFER_GROUP_NOTIFS} saved={saved['offerGroups']} onSave={mkSave('offerGroups')} />
+      <NotificationCard title="Advertisers" notifs={ADVERTISER_NOTIFS} saved={saved['advertisers']} onSave={mkSave('advertisers')} />
+      <NotificationCard title="Actions" notifs={ACTION_NOTIFS} saved={saved['actions']} onSave={mkSave('actions')} />
+      <NotificationCard title="Billing" notifs={BILLING_NOTIFS} saved={saved['billing']} onSave={mkSave('billing')} />
+      <NotificationCard title="Network" notifs={NETWORK_NOTIFS} saved={saved['network']} onSave={mkSave('network')} />
+      <NotificationCard title="Security" notifs={SECURITY_NOTIFS} saved={saved['security']} onSave={mkSave('security')} />
+      <NotificationCard title="Traffic Health" notifs={TRAFFIC_HEALTH_NOTIFS} saved={saved['trafficHealth']} onSave={mkSave('trafficHealth')} />
     </div>
   );
 }

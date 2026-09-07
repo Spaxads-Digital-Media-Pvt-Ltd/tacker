@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { CopyBox } from './CopyBox';
 import { useQuery } from '../lib/useApi';
+import { Overlay } from './ui';
 import type { Offer, Publisher, TrackingDomain } from '../types';
 
 const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5', 'sub6', 'sub7', 'sub8', 'sub9'] as const;
@@ -41,14 +42,8 @@ export function TrackingLinkGeneratorModal({ onClose }: { onClose: () => void })
 
   const setExtra = (k: string, v: string) => setExtras((s) => ({ ...s, [k]: v }));
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="max-h-[85vh] w-full max-w-3xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">Tracking Link Generator</h2>
@@ -103,6 +98,6 @@ export function TrackingLinkGeneratorModal({ onClose }: { onClose: () => void })
         </div>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

@@ -2,8 +2,9 @@
  * Trackog-style Search Filter drawer — right slide-over, light theme, checkbox-driven.
  * Tick a Group By / Report Option / column → it becomes a column (or metric) on Apply.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { FilterDef } from '../lib/reportFilters';
+import { Overlay } from './ui';
 
 export interface EntityOpt { value: string; label: string }
 
@@ -16,16 +17,12 @@ interface SearchFilterDrawerProps {
 
 /** Right slide-over shell (Trackog Search Filter). Light theme. */
 export function SearchFilterDrawer({ appliedCount, onClose, onApply, children }: SearchFilterDrawerProps) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button type="button" aria-label="Close filters" className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <aside className="relative flex h-full w-full max-w-[440px] flex-col border-l border-border bg-surface shadow-2xl animate-fade-in">
+    <Overlay onClose={onClose} className="flex justify-end bg-[rgb(var(--flyout-scrim))] backdrop-blur-sm">
+      <aside
+        className="relative flex h-full w-full max-w-[440px] flex-col border-l border-border bg-surface shadow-2xl animate-fade-in"
+        onClick={(e) => e.stopPropagation()}
+      >
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div>
             <h2 className="flex items-center gap-2 text-body font-semibold text-fg">
@@ -46,7 +43,7 @@ export function SearchFilterDrawer({ appliedCount, onClose, onApply, children }:
           <button type="button" className="btn-ghost border border-border px-5" onClick={onClose}>Cancel</button>
         </footer>
       </aside>
-    </div>
+    </Overlay>
   );
 }
 

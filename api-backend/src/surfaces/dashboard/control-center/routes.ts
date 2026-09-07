@@ -315,15 +315,24 @@ export function controlCenterRoutes(): Router {
 
   // --- Partner referral overrides ---
   r.get('/partner-referrals', validateQuery(statusListQuery), asyncHandler(async (req, res) => {
-    const db = dbForRequest(req);
+    const networkId = req.scope!.networkId;
     const status = (req.query.status as string | undefined) ?? 'all';
-    const where = status === 'all' ? {} : { status };
-    const rows = await db.selectMany<Record<string, unknown>>('partner_referral_overrides', { where, orderBy: 'created_at', limit: 500 });
+    const params: unknown[] = [networkId];
+    let sql = `SELECT o.*, p.name AS partner_name
+      FROM partner_referral_overrides o
+      LEFT JOIN publishers p ON p.id = o.publisher_id
+      WHERE o.network_id = $1`;
+    if (status !== 'all') {
+      params.push(status);
+      sql += ` AND o.status = $2`;
+    }
+    sql += ' ORDER BY o.created_at DESC LIMIT 500';
+    const { rows } = await query<Record<string, unknown>>(sql, params);
     sendOk(res, rows.map(referralDto));
   }));
 
   r.post('/partner-referrals', requireRole('admin', 'manager'), validateBody(z.object({
-    publisherId: z.string().uuid().optional(),
+    publisherId: z.string().uuid().optional().nullable(),
     enabled: z.boolean().default(true),
     commissionStructure: z.string().default(''),
     fixedAmountRate: z.string().default(''),
@@ -354,12 +363,21 @@ export function controlCenterRoutes(): Router {
 
   // --- Terms acceptances ---
   r.get('/terms-acceptances', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<Record<string, unknown>>('terms_acceptances', { where: {}, orderBy: 'created_at', orderDir: 'desc', limit: 500 });
+    const networkId = req.scope!.networkId;
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT t.*, p.name AS partner_name
+       FROM terms_acceptances t
+       LEFT JOIN publishers p ON p.id = t.publisher_id
+       WHERE t.network_id = $1
+       ORDER BY t.created_at DESC
+       LIMIT 500`,
+      [networkId],
+    );
     sendOk(res, rows.map(termsDto));
   }));
 
   r.post('/terms-acceptances', requireRole('admin', 'manager'), validateBody(z.object({
-    publisherId: z.string().uuid().optional(),
+    publisherId: z.string().uuid().optional().nullable(),
     partnerUser: z.string().default(''),
     userAgent: z.string().optional(),
     ipAddress: z.string().optional(),
@@ -427,6 +445,7 @@ function referralDto(row: Record<string, unknown>) {
     id: row['id'],
     ref: row['ref'] != null ? Number(row['ref']) : null,
     publisherId: row['publisher_id'],
+    partner: row['partner_name'] ?? null,
     enabled: row['enabled'],
     commissionStructure: row['commission_structure'],
     fixedAmountRate: row['fixed_amount_rate'],
@@ -442,6 +461,7 @@ function termsDto(row: Record<string, unknown>) {
   return {
     id: row['id'],
     publisherId: row['publisher_id'],
+    partner: row['partner_name'] ?? null,
     partnerUser: row['partner_user'],
     userAgent: row['user_agent'],
     ipAddress: row['ip_address'],

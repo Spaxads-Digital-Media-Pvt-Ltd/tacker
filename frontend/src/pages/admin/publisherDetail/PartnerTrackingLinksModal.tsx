@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { CopyBox } from '../../../components/CopyBox';
+import { Overlay } from '../../../components/ui';
 import { useQuery } from '../../../lib/useApi';
 import type { Publisher, Offer, TrackingDomain } from '../../../types';
 
@@ -34,14 +35,8 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
     return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}`;
   }, [offerId, type, extras, encrypt, trackBase, publisher.id]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="max-h-[85vh] w-full max-w-3xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">Partner Tracking Links</h2>
@@ -101,6 +96,6 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
           </div>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

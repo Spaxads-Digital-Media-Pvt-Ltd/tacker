@@ -130,6 +130,51 @@ export function buildDashboardApp(): Express {
     sendOk(res, { ok: true });
   }));
 
+  // My Notification Preferences — per-user overrides stored on users.metadata.notifications.
+  authed.get('/me/notifications', asyncHandler(async (req, res) => {
+    const userId = (req.identity as { userId?: string }).userId;
+    if (!userId) return sendOk(res, { preferences: {} });
+    const { rows } = await query<{ metadata: Record<string, unknown> | string }>(
+      'SELECT metadata FROM users WHERE auth_user_id = $1 AND network_id = $2',
+      [userId, req.scope!.networkId],
+    );
+    const raw = rows[0]?.metadata;
+    const meta = typeof raw === 'string' ? (() => { try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; } })() : (raw ?? {});
+    const preferences = (meta['notifications'] as Record<string, unknown> | undefined) ?? {};
+    sendOk(res, { preferences });
+  }));
+
+  authed.put(
+    '/me/notifications',
+    validateBody(z.object({
+      preferences: z.record(z.string(), z.record(z.string(), z.object({
+        inApp: z.boolean().optional(),
+        email: z.boolean().optional(),
+        scope: z.string().optional(),
+      }).passthrough())),
+    })),
+    asyncHandler(async (req, res) => {
+      const userId = (req.identity as { userId?: string }).userId;
+      if (!userId) return sendOk(res, { preferences: {} });
+      const patch = (req.body as { preferences: Record<string, unknown> }).preferences;
+      const { rows } = await query<{ metadata: Record<string, unknown> | string }>(
+        'SELECT metadata FROM users WHERE auth_user_id = $1 AND network_id = $2',
+        [userId, req.scope!.networkId],
+      );
+      if (!rows[0]) return sendOk(res, { preferences: {} });
+      const raw = rows[0].metadata;
+      const meta = typeof raw === 'string' ? (() => { try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; } })() : { ...(raw ?? {}) };
+      const prev = (meta['notifications'] as Record<string, unknown> | undefined) ?? {};
+      const next = { ...prev, ...patch };
+      meta['notifications'] = next;
+      await query(
+        'UPDATE users SET metadata = $3 WHERE auth_user_id = $1 AND network_id = $2',
+        [userId, req.scope!.networkId, JSON.stringify(meta)],
+      );
+      sendOk(res, { preferences: next });
+    }),
+  );
+
   authed.use('/subscription', subscriptionRoutes());
 
   // Admin-only, network-scoped CRUD.

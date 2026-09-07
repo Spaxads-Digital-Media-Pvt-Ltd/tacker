@@ -137,6 +137,143 @@ async function main(): Promise<void> {
     assert(r.status === 200 && Array.isArray(r.json?.data), 'array');
   });
 
+  await check('PUT /control-center/config/partners (portal + signup + dashboard + referral + terms)', async () => {
+    const r = await req(`${CC}/config/partners`, {
+      method: 'PUT', token,
+      body: {
+        portal: { hideTotalClick: true, showAccountManagerDetails: true, htmlCustomHeader: '<p>H</p>' },
+        signup: { autoApprovePartners: true, language: 'English', customSignUpHeader: 'Welcome' },
+        dashboard: { cards: { Clicks: true, Conversions: false } },
+        referral: { enabled: true, method: 'Tracking link', commissionType: 'Percentage', duration: 'Lifetime', fixedAmountRate: '10%', minimumThreshold: '0' },
+        terms: { enforce: true, content: 'Smoke terms' },
+        notifications: { offers: { 'Offer Status Changed': { inApp: true, email: false } } },
+      },
+    });
+    assert(r.status === 200, JSON.stringify(r.json));
+  });
+
+  await check('GET /control-center/config/partners round-trip', async () => {
+    const r = await req(`${CC}/config/partners`, { token });
+    assert(r.status === 200, `status ${r.status}`);
+    const d = r.json?.data ?? {};
+    assert(d.portal?.hideTotalClick === true, 'portal not saved');
+    assert(d.signup?.autoApprovePartners === true, 'signup not saved');
+    assert(d.dashboard?.cards?.Clicks === true, 'dashboard not saved');
+    assert(d.referral?.enabled === true, 'referral not saved');
+    assert(d.terms?.enforce === true, 'terms not saved');
+    assert(d.notifications?.offers?.['Offer Status Changed']?.email === false, 'notifications not saved');
+  });
+
+  let refId = '';
+  await check('POST /control-center/partner-referrals', async () => {
+    const r = await req(`${CC}/partner-referrals`, {
+      method: 'POST', token,
+      body: { enabled: true, commissionStructure: 'Percentage', fixedAmountRate: '5%', duration: '30d' },
+    });
+    assert(r.status === 201, JSON.stringify(r.json));
+    refId = r.json?.data?.id;
+  });
+
+  await check('GET /control-center/partner-referrals', async () => {
+    const r = await req(`${CC}/partner-referrals?status=all`, { token });
+    assert(r.status === 200 && Array.isArray(r.json?.data), 'array');
+    assert(r.json.data.some((x: { id: string }) => x.id === refId), 'created override missing');
+  });
+
+  await check('DELETE /control-center/partner-referrals/:id', async () => {
+    const r = await req(`${CC}/partner-referrals/${refId}`, { method: 'DELETE', token });
+    assert(r.status === 200, `status ${r.status}`);
+  });
+
+  await check('POST + GET /control-center/terms-acceptances', async () => {
+    const r = await req(`${CC}/terms-acceptances`, {
+      method: 'POST', token,
+      body: { partnerUser: 'smoke@test.com', userAgent: 'smoke', ipAddress: '127.0.0.1' },
+    });
+    assert(r.status === 201, JSON.stringify(r.json));
+    const list = await req(`${CC}/terms-acceptances`, { token });
+    assert(list.status === 200 && Array.isArray(list.json?.data), 'array');
+    assert(list.json.data.some((x: { partnerUser: string }) => x.partnerUser === 'smoke@test.com'), 'acceptance missing');
+  });
+
+  await check('PUT /control-center/config/advertisers', async () => {
+    const r = await req(`${CC}/config/advertisers`, {
+      method: 'PUT', token,
+      body: {
+        general: { htmlCustomHeader: '<p>Adv H</p>', htmlCustomFooter: '<p>Adv F</p>', hideTotalClick: true },
+        signup: {
+          customSignUpHeader: 'Adv welcome', customSignUpConfirmation: 'Thanks',
+          autoApproveAdvertisers: true, language: 'English', useExternalSignUpUrl: false,
+        },
+        notifications: { network: { 'Communication Hub Email (from network)': { email: false } } },
+      },
+    });
+    assert(r.status === 200, JSON.stringify(r.json));
+  });
+
+  await check('GET /control-center/config/advertisers round-trip', async () => {
+    const r = await req(`${CC}/config/advertisers`, { token });
+    assert(r.status === 200, `status ${r.status}`);
+    const d = r.json?.data ?? {};
+    assert(d.general?.hideTotalClick === true, 'general not saved');
+    assert(d.signup?.autoApproveAdvertisers === true, 'signup not saved');
+    assert(d.notifications?.network?.['Communication Hub Email (from network)']?.email === false, 'notifications not saved');
+  });
+
+  await check('GET /custom-fields?entity=advertiser', async () => {
+    const r = await req(`${DASH}/api/custom-fields?entity=advertiser`, { token });
+    assert(r.status === 200 && Array.isArray(r.json?.data), 'array');
+    return `${r.json.data.length} field(s)`;
+  });
+
+  await check('GET /custom-fields?entity=publisher', async () => {
+    const r = await req(`${DASH}/api/custom-fields?entity=publisher`, { token });
+    assert(r.status === 200 && Array.isArray(r.json?.data), 'array');
+    return `${r.json.data.length} field(s)`;
+  });
+
+  await check('GET /api/keys/scopes', async () => {
+    const r = await req(`${DASH}/api/keys/scopes`, { token });
+    assert(r.status === 200 && Array.isArray(r.json?.data?.available), 'scopes');
+    return `${r.json.data.available.length} scope(s)`;
+  });
+
+  let keyId = '';
+  await check('POST /api/keys', async () => {
+    const r = await req(`${DASH}/api/keys`, {
+      method: 'POST', token,
+      body: { name: 'cc-security-smoke', scopes: ['offers:read', 'reports:read'] },
+    });
+    assert(r.status === 201 && r.json?.data?.key, JSON.stringify(r.json));
+    keyId = r.json.data.id;
+    assert(r.json.data.scopes.includes('offers:read'), 'scope missing');
+  });
+
+  await check('GET /api/keys', async () => {
+    const r = await req(`${DASH}/api/keys`, { token });
+    assert(r.status === 200 && Array.isArray(r.json?.data), 'array');
+    assert(r.json.data.some((k: { id: string }) => k.id === keyId), 'created key missing');
+  });
+
+  await check('DELETE /api/keys/:id (revoke)', async () => {
+    const r = await req(`${DASH}/api/keys/${keyId}`, { method: 'DELETE', token });
+    assert(r.status === 200 && r.json?.data?.revoked === true, JSON.stringify(r.json));
+  });
+
+  await check('PUT /control-center/config/security (MFA)', async () => {
+    const r = await req(`${CC}/config/security`, {
+      method: 'PUT', token,
+      body: { mfa: { enableNetworkMfa: true, supportedMethods: 'Authenticator App', employees: {} } },
+    });
+    assert(r.status === 200, JSON.stringify(r.json));
+  });
+
+  await check('GET /control-center/config/security round-trip', async () => {
+    const r = await req(`${CC}/config/security`, { token });
+    assert(r.status === 200, `status ${r.status}`);
+    assert(r.json?.data?.mfa?.enableNetworkMfa === true, 'mfa not saved');
+  });
+
   await check('GET /users (extended DTO)', async () => {
     const r = await req(`${DASH}/api/users`, { token });
     assert(r.status === 200 && r.json?.data?.[0]?.ref != null, 'missing ref');

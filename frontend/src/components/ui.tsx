@@ -49,7 +49,7 @@ const NEUTRAL = 'bg-elevated text-fg-secondary ring-1 ring-inset ring-border';
 const BADGE_TONES: Record<string, string> = {
   active: SUCCESS, approved: SUCCESS, verified: SUCCESS, issued: SUCCESS, completed: SUCCESS,
   pending: WARNING, trialing: WARNING, hold: WARNING,
-  suspended: DANGER, rejected: DANGER, blocked: DANGER, failed: DANGER,
+  suspended: DANGER, rejected: DANGER, blocked: DANGER, failed: DANGER, revoked: DANGER,
   draft: NEUTRAL, paused: NEUTRAL, inactive: NEUTRAL, disabled: NEUTRAL, archived: NEUTRAL,
 };
 
@@ -140,28 +140,48 @@ export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Co
 
 const MODAL_SIZE: Record<string, string> = { md: 'max-w-lg', xl: 'max-w-4xl' };
 
-/** Portaled to document.body — fixed overlays nested in the scrollable main column (and its
- * animate-fade-in wrapper) get clipped to that box instead of covering the full viewport. */
-export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'xl' }) {
+/**
+ * Full-viewport dimmed scrim, always portaled to document.body. Nested `position: fixed`
+ * overlays inside AppShell's scrollable `<main>` (or any overflow/transform ancestor) get
+ * clipped to that box — this is why popups showed a half-white backdrop. Use Overlay (or
+ * Modal, which uses it) for every dimmed popup.
+ */
+export function Overlay({
+  children,
+  onClose,
+  className = 'grid place-items-center bg-[rgb(var(--flyout-scrim))] p-4 backdrop-blur-sm',
+}: {
+  children: ReactNode;
+  onClose?: () => void;
+  className?: string;
+}) {
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    if (onClose) window.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      window.removeEventListener('keydown', onKey);
+      if (onClose) window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [open, onClose]);
+  }, [onClose]);
 
-  if (!open) return null;
   return createPortal(
-    <div
-      className="fixed inset-0 z-[100] grid place-items-center bg-[rgb(var(--flyout-scrim))] p-4 backdrop-blur-sm"
-      onClick={onClose}
-      role="presentation"
-    >
+    <div className={`fixed inset-0 z-[100] ${className}`} onClick={onClose} role="presentation">
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/** Portaled to document.body — fixed overlays nested in the scrollable main column (and its
+ * animate-fade-in wrapper) get clipped to that box instead of covering the full viewport. */
+export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'xl' }) {
+  if (!open) return null;
+  return (
+    <Overlay onClose={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -175,8 +195,7 @@ export function Modal({ open, onClose, title, children, size = 'md' }: { open: b
         </div>
         <div className="mt-4 overflow-x-auto">{children}</div>
       </div>
-    </div>,
-    document.body,
+    </Overlay>
   );
 }
 
