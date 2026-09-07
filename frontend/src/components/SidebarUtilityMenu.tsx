@@ -152,11 +152,15 @@ function Popover({ anchorRef, panelRef, children }: {
 
 export function NotificationsBell({ expanded }: { expanded: boolean }) {
   const { open, setOpen, ref, panelRef } = usePopover();
-  const { data } = useQuery<HistoryRow[]>(open ? '/api/audit-log' : null);
-  const rows = (data ?? []).slice(0, 6);
+  const { data } = useQuery<HistoryRow[]>('/api/audit-log');
+  const rows = (data ?? []).slice(0, 8);
+  const hasNew = (data ?? []).some((r) => r.isNew);
+
   return (
     <div className="relative" ref={ref}>
-      <RailIconButton expanded={expanded} label="Notifications" onClick={() => setOpen((o) => !o)}><Bell size={18} /></RailIconButton>
+      <RailIconButton expanded={expanded} label="Notifications" onClick={() => setOpen((o) => !o)} badge={hasNew}>
+        <Bell size={18} />
+      </RailIconButton>
       {open && (
         <Popover anchorRef={ref} panelRef={panelRef}>
           <div className="flex items-center justify-between border-b border-border px-3.5 py-3">
@@ -168,10 +172,23 @@ export function NotificationsBell({ expanded }: { expanded: boolean }) {
               <p className="px-3.5 py-6 text-center text-small text-fg-muted">No recent activity.</p>
             ) : rows.map((r) => (
               <div key={r.id} className="border-b border-border px-3.5 py-2.5 last:border-0">
-                <p className="text-small text-fg">{r.isNew ? 'New' : ''} {r.service} {r.isNew ? 'created' : 'updated'}</p>
+                <p className="text-small text-fg">
+                  {r.isNew && <span className="mr-1.5 rounded bg-success-bg px-1.5 py-0.5 text-[10px] font-semibold uppercase text-success-text">New</span>}
+                  {r.service} {r.isNew ? 'created' : 'updated'}
+                </p>
                 <p className="mt-0.5 text-tiny text-fg-secondary">{r.employee} · {timeAgo(r.operationTime)}</p>
+                {r.changes && <p className="mt-0.5 line-clamp-1 text-tiny text-fg-muted">{r.changes}</p>}
               </div>
             ))}
+          </div>
+          <div className="border-t border-border p-2">
+            <Link
+              to="/app/profile/notifications"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center justify-center rounded-[var(--radius)] px-2.5 py-2 text-tiny font-medium text-accent-text hover:bg-accent-subtle"
+            >
+              Notification Preferences
+            </Link>
           </div>
         </Popover>
       )}

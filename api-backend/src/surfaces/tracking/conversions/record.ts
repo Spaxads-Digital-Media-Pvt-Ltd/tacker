@@ -19,6 +19,8 @@ import { findMatchingControl } from '../../../lib/postback-controls/evaluate.js'
 import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.js';
 import { evaluateCustomerValueRules, recordCustomerValueFiring } from '../../../lib/customer-value/evaluate.js';
 import { enqueueOutboundPostback } from './enqueue-postback.js';
+import { enqueueFacebookCapi } from '../../../lib/integrations/enqueue.js';
+import { loadIntegrations } from '../../../lib/integrations/settings.js';
 
 export type ConversionOutcome =
   | 'approved' | 'pending' | 'rejected' | 'duplicate' | 'click_not_found' | 'security_failed';
@@ -261,6 +263,19 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
       txnId: input.txnId,
       subs: [click.sub1, click.sub2, click.sub3, click.sub4, click.sub5],
     });
+
+    // Facebook CAPI — server-side conversion event when Media Buying integration is configured.
+    const integrations = await loadIntegrations(input.networkId);
+    if (integrations.fbPixelId && integrations.fbAccessToken) {
+      await enqueueFacebookCapi({
+        networkId: input.networkId,
+        conversionId,
+        eventName: input.event,
+        payout,
+        currency,
+        clickId: input.clickId,
+      });
+    }
   }
 
   return { outcome: status, conversionId };

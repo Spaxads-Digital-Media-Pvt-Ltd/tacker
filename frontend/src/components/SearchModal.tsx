@@ -4,6 +4,7 @@ import { Search, X, History, Clock } from 'lucide-react';
 import { useQuery } from '../lib/useApi';
 import { getRecentViews, getQueryHistory, recordQuery, type RecentKind } from '../lib/recentlyViewed';
 import { Icon } from './icons';
+import { Overlay } from './ui';
 import type { Offer, Publisher, Advertiser } from '../types';
 
 interface Result { kind: RecentKind; id: string; ref: number | null; name: string; status: string }
@@ -30,11 +31,6 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
 
   useEffect(() => { inputRef.current?.focus(); }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const results = useMemo<Result[]>(() => {
     const query = q.trim().toLowerCase();
@@ -80,7 +76,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-start justify-items-center bg-black/60 p-4 pt-[8vh]" onClick={onClose}>
+    <Overlay onClose={onClose} className="grid place-items-start justify-items-center bg-[rgb(var(--flyout-scrim))] p-4 pt-[8vh] backdrop-blur-sm">
       <div className="max-h-[75vh] w-full max-w-2xl animate-fade-in overflow-hidden rounded-card border border-border bg-elevated shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-h2 font-semibold tracking-tight text-fg">Search</h2>
@@ -122,7 +118,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
               <p className="px-3 pb-1 text-h3 font-medium text-fg">Search History</p>
               {queryHistory.length ? queryHistory.map((term) => (
                 <button key={term} type="button" onClick={() => setQ(term)}
-                  className="flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2.5 text-left text-small text-fg transition-colors hover:bg-accent-subtle">
+                  className="flex w-full items-center gap-2 rounded-[var(--radius)] px-3 py-2.5 text-left text-small text-fg transition-colors hover:bg-accent-subtle">
                   <Clock size={15} className="shrink-0 text-fg-muted" />{term}
                 </button>
               )) : <p className="px-3 py-6 text-center text-small text-fg-muted">No past searches yet.</p>}
@@ -142,6 +138,6 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
           </button>
         )}
       </div>
-    </div>
+    </Overlay>
   );
 }

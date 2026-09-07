@@ -120,3 +120,22 @@ export interface TrackingDomainRow {
   created_at: string;
   updated_at: string;
 }
+
+export interface InvestigationRow {
+  id: string;
+  ref: string;
+  network_id: string;
+  start_date: string;
+  end_date: string;
+  target_type: 'sub_id' | 'transaction_id' | 'click_id' | 'partner';
+  target_value: string | null;
+  sub_field: string | null;
+  publisher_id: string | null;
+  entry_count: number;
+  suspect_count: number;
+  offer_count: number;
+  partner_count: number;
+  file_name: string | null;
+  created_at: string;
+  updated_at: string;
+}

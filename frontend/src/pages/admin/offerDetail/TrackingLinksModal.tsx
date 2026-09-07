@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
-import { Field } from '../../../components/ui';
+import { Field, Overlay } from '../../../components/ui';
 import { CopyBox } from '../../../components/CopyBox';
 import { useQuery } from '../../../lib/useApi';
 import type { Offer, Publisher, TrackingDomain, TrafficSource } from '../../../types';
@@ -52,14 +52,8 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
     return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}${preset}`;
   }, [pubId, type, creativeId, extras, encrypt, trackBase, offer.id, source]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="max-h-[85vh] w-full max-w-3xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">Offer Tracking Links</h2>
@@ -161,6 +155,6 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
           </div>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

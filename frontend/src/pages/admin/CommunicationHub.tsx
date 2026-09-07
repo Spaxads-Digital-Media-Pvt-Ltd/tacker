@@ -8,7 +8,7 @@
  * Layout intentionally diverges from the reference's own multi-step wizard / WYSIWYG editor — a
  * single-page compose form covers the same real capability without reproducing a rich-text builder.
  */
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Plus, Pencil, Trash2, Send } from 'lucide-react';
 import { PageHeader, Tabs, Field, Modal, Spinner, StateBlock } from '../../components/ui';
 import { Pagination } from '../../components/ReportPageKit';
@@ -214,15 +214,36 @@ function EmailComposeForm({ audiences, templates, initial, onSaved, onCancel }: 
   audiences: AudienceRow[]; templates: TemplateRow[]; initial?: EmailMsg;
   onSaved: () => void; onCancel: () => void;
 }) {
-  const [subject, setSubject] = useState(initial?.subject ?? '');
-  const [body, setBody] = useState(initial?.body ?? '');
-  const [messageType, setMessageType] = useState(initial?.messageType ?? 'general');
-  const [audienceId, setAudienceId] = useState(initial?.audienceId ?? '');
-  const { run, busy, error } = useMutation((args: { action: 'draft' | 'send' }) =>
-    initial
-      ? api.put<{ id: string }>(`/api/communication-hub/emails/${initial.id}`, { subject, body, messageType, audienceId: audienceId || undefined })
-      : api.post<{ id: string; sendError: string | null }>('/api/communication-hub/emails', { subject, body, messageType, audienceId: audienceId || undefined, action: args.action }),
+  const editId = initial?.id;
+  const { data: loaded, loading: loadingEmail } = useQuery<EmailMsg>(
+    editId ? `/api/communication-hub/emails/${editId}` : null,
   );
+  const source = editId && loaded ? loaded : initial;
+
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [messageType, setMessageType] = useState('general');
+  const [audienceId, setAudienceId] = useState('');
+  const { run, busy, error } = useMutation(async (args: { action: 'draft' | 'send' }) => {
+    const payload = { subject, body, messageType, audienceId: audienceId || undefined };
+    if (editId) {
+      await api.put<{ id: string }>(`/api/communication-hub/emails/${editId}`, payload);
+      if (args.action === 'send') {
+        return api.post<{ id: string; sendError: string | null }>(`/api/communication-hub/emails/${editId}/send`);
+      }
+      return { id: editId, sendError: null };
+    }
+    return api.post<{ id: string; sendError: string | null }>('/api/communication-hub/emails', { ...payload, action: args.action });
+  });
+
+  useEffect(() => {
+    if (source) {
+      setSubject(source.subject);
+      setBody(source.body ?? '');
+      setMessageType(source.messageType);
+      setAudienceId(source.audienceId ?? '');
+    }
+  }, [source?.id, source?.updatedAt]);
 
   const applyTemplate = (id: string) => {
     const t = templates.find((tt) => tt.id === id);
@@ -234,6 +255,10 @@ function EmailComposeForm({ audiences, templates, initial, onSaved, onCancel }: 
     const res = await run({ action });
     if (res) onSaved();
   };
+
+  if (editId && loadingEmail && !loaded) {
+    return <StateBlock><Spinner /></StateBlock>;
+  }
 
   return (
     <form onSubmit={(e) => submit(e, 'draft')} className="space-y-4">
@@ -279,6 +304,9 @@ function EmailsTab() {
   const [page, setPage] = useState(1);
   const [composing, setComposing] = useState<EmailMsg | null | 'new'>(null);
   const [viewing, setViewing] = useState<EmailMsg | null>(null);
+  const { data: viewedEmail, loading: viewLoading } = useQuery<EmailMsg>(
+    viewing ? `/api/communication-hub/emails/${viewing.id}` : null,
+  );
   const status = sub === 'Sent' ? 'sent' : sub === 'Scheduled' ? 'scheduled' : 'draft';
   const { data, loading, refetch } = useQuery<EmailMsg[]>(`/api/communication-hub/emails?status=${status}`);
   const { data: audiencesData } = useQuery<AudienceRow[]>('/api/communication-hub/audiences');
@@ -346,15 +374,17 @@ function EmailsTab() {
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title={viewing?.subject ?? ''} size="xl">
         {viewing && (
-          <div className="space-y-3">
-            <div className="flex gap-4 text-small text-fg-secondary">
-              <span>Type: <span className="capitalize text-fg">{viewing.messageType.replace('_', ' ')}</span></span>
-              <span>Status: <StatusPill status={viewing.status} /></span>
-              <span>Recipients: <span className="text-fg">{viewing.recipientCount}</span></span>
+          viewLoading && !viewedEmail ? <StateBlock><Spinner /></StateBlock> : (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-small text-fg-secondary">
+                <span>Type: <span className="capitalize text-fg">{(viewedEmail ?? viewing).messageType.replace('_', ' ')}</span></span>
+                <span>Status: <StatusPill status={(viewedEmail ?? viewing).status} /></span>
+                <span>Recipients: <span className="text-fg">{(viewedEmail ?? viewing).recipientCount}</span></span>
+              </div>
+              {(viewedEmail ?? viewing).sendError && <p className="text-small text-danger-text">{(viewedEmail ?? viewing).sendError}</p>}
+              <div className="whitespace-pre-wrap rounded-card border border-border bg-page p-3 text-small text-fg">{(viewedEmail ?? viewing).body}</div>
             </div>
-            {viewing.sendError && <p className="text-small text-danger-text">{viewing.sendError}</p>}
-            <div className="whitespace-pre-wrap rounded-card border border-border bg-page p-3 text-small text-fg">{viewing.body}</div>
-          </div>
+          )
         )}
       </Modal>
     </>

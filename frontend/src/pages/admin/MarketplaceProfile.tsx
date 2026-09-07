@@ -1,18 +1,5 @@
 /**
- * Marketplace › Your Profile(s) — verified against the live reference (clicked through from the
- * Marketplace flyout's real `href="/everxchange/profiles"`, and its Edit form at
- * `/everxchange/profiles/partner/edit`, plus real filled-in screenshots supplied by the user). Real,
- * editable: name, description, logo, categories (targeted up to 5, or "All"), payout types accepted,
- * promotional methods, device types covered, geolocations (global or specific), website URL, and a
- * contact section (visibility toggle, name/phone/email, social links, one custom link) — backed by a
- * new `marketplace_profiles` table, one row per network (api-backend/.../marketplace-profile/routes.ts).
- *
- * Everflow's own version is how ONE network presents itself to every OTHER network on its
- * cross-tenant EverXchange directory; this app is single-tenant, so there's no other network to be
- * discovered by. But the profile fields themselves are genuinely real and editable — this network's
- * own "how would we present ourselves" data, matching the honest-substitution precedent already used
- * for Discover Advertisers (real Advertiser records standing in for the reference's fabricated
- * third-party companies).
+ * Marketplace › Your Profile(s) — preview how this network presents itself in the marketplace directory.
  */
 import { Link } from 'react-router-dom';
 import { MoreVertical } from 'lucide-react';

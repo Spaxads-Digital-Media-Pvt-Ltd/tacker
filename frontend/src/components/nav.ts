@@ -123,9 +123,9 @@ export const NAV: Record<Role, NavEntry[]> = {
     { group: 'More', to: '/app/investigator', label: 'Investigator', icon: 'investigator' },
     {
       group: 'More', label: 'Automation', icon: 'automation', flyout: [
-        { label: 'Scheduled Actions', description: 'Schedule status, caps & payout', to: '/app/automation' },
-        { label: 'Alerts', description: 'Notify on KPI thresholds', to: '/app/alerts' },
-        { label: 'Webhooks', description: 'Send data to 3rd parties' },
+        { label: 'Scheduled Actions', description: 'Schedule status, caps & payout', to: '/app/automation?tab=scheduled-actions' },
+        { label: 'Alerts', description: 'Notify on KPI thresholds', to: '/app/automation?tab=alerts' },
+        { label: 'Webhooks', description: 'Send data to 3rd parties', to: '/app/automation?tab=webhooks' },
       ],
     },
     {

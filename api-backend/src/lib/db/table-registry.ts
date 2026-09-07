@@ -139,6 +139,26 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   customer_data_points: { tenantColumn: 'network_id' },
   customer_value_rules: { tenantColumn: 'network_id' },
   customer_value_rule_firings: { tenantColumn: 'network_id' },
+
+  // Investigator: saved click/conversion lookups for fraud review.
+  investigations: { tenantColumn: 'network_id' },
+
+  // Automation › Alerts — user-defined alert rules (notify prefs stored; firing is future work).
+  automation_alert_rules: { tenantColumn: 'network_id' },
+  // Automation › Webhooks — outbound webhook endpoints (delivery is future work).
+  automation_webhooks: { tenantColumn: 'network_id' },
+
+  // Control Center
+  network_documents: { tenantColumn: 'network_id' },
+  segmentation_categories: { tenantColumn: 'network_id' },
+  segmentation_channels: { tenantColumn: 'network_id' },
+  business_units: { tenantColumn: 'network_id' },
+  network_api_whitelist: { tenantColumn: 'network_id' },
+  network_ip_blacklist: { tenantColumn: 'network_id' },
+  network_domain_managers: { tenantColumn: 'network_id' },
+  login_events: { tenantColumn: 'network_id' },
+  partner_referral_overrides: { tenantColumn: 'network_id' },
+  terms_acceptances: { tenantColumn: 'network_id' },
 };
 
 export function getTableScope(table: string): TableScope {

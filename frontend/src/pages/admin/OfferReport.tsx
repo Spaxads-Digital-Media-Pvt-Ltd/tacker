@@ -20,7 +20,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Search, MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, Overlay } from '../../components/ui';
 import { FilterButton, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
@@ -133,7 +133,7 @@ function AdjustVisibilityModal({ offer, publishers, onClose, onSaved }: { offer:
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="w-full max-w-2xl rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">Partner Visibility Settings</h2>
@@ -181,7 +181,7 @@ function AdjustVisibilityModal({ offer, publishers, onClose, onSaved }: { offer:
           <button type="button" className="btn-primary" disabled={saving || loading} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 

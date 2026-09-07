@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Spinner, StateBlock, Overlay, type Column } from '../../components/ui';
 import type { AdvertiserInvoice, AdvertiserInvoiceLedgerEntry } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', deleted: 'bg-danger-text' };
@@ -78,7 +78,7 @@ export default function AdvertiserInvoiceDetail() {
       </div>
 
       {confirming && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={() => setConfirming(false)}>
+        <Overlay onClose={() => setConfirming(false)}>
           <div className="w-full max-w-md rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-2 text-h3 font-semibold text-fg">Pay Invoice</h2>
             <p className="mb-4 text-small text-fg-secondary">Mark Invoice ID: {invoice.ref} as paid in full for {money(invoice.billedAmount, invoice.currency)}?</p>
@@ -87,7 +87,7 @@ export default function AdvertiserInvoiceDetail() {
               <button type="button" className="btn-primary" disabled={pay.busy} onClick={doPay}>{pay.busy ? 'Processing…' : 'Pay'}</button>
             </div>
           </div>
-        </div>
+        </Overlay>
       )}
     </>
   );

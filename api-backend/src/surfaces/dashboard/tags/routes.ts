@@ -69,6 +69,19 @@ export function tagsRoutes(): Router {
     sendOk(res, rows.map((r) => ({ tagId: r.tag_id, entityId: r.entity_id })));
   }));
 
+  r.patch('/:id', requireRole('admin', 'manager'), validateBody(createTagSchema.partial()), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const before = await db.selectOne<TagRow>('tags', { id: req.params.id });
+    if (!before) throw notFound('Tag not found');
+    const b = req.body as Partial<z.infer<typeof createTagSchema>>;
+    const patch: Record<string, unknown> = {};
+    if (b.name !== undefined) patch['name'] = b.name;
+    if (b.color !== undefined) patch['color'] = b.color;
+    const [updated] = await db.update<TagRow>('tags', patch, { id: req.params.id });
+    await writeAudit(req, { action: 'tag.update', entityType: 'tag', entityId: req.params.id!, before, after: updated });
+    sendOk(res, tagDTO(updated ?? before));
+  }));
+
   r.delete('/:id', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const n = await db.delete('tags', { id: req.params.id }); // taggings cascade via FK

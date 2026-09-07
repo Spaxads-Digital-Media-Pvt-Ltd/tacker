@@ -8,12 +8,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Copy, Info, Search, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../../lib/api';
+import { cc } from '../../../lib/controlCenter';
 import { useQuery, useMutation } from '../../../lib/useApi';
 import { Tabs, Table, Badge, Field, Spinner, StateBlock, type Column, Segmented } from '../../../components/ui';
 import { EmptyShellTable } from '../../../components/EmptyShellTable';
 import { Pagination } from '../../../components/ReportPageKit';
-import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField } from './shared';
+import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField, type NotifySaved } from './shared';
 import type { TrackingDomain } from '../../../types';
+import { readFileAsDataUrl } from '../../../data/creatives';
 import {
   PARTNER_NOTIFS, OFFER_NOTIFS_PLATFORM, OFFER_GROUP_NOTIFS, ADVERTISER_NOTIFS,
   ACTION_NOTIFS, BILLING_NOTIFS, NETWORK_NOTIFS, SECURITY_NOTIFS, TRAFFIC_HEALTH_NOTIFS,
@@ -73,27 +75,100 @@ function YesNoPill({ label, value, onChange }: { label: string; value: boolean; 
   );
 }
 
-function UploadBox({ label }: { label: string }) {
+const IMAGE_ACCEPT = 'image/png,image/jpeg,image/jpg,image/jfif,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.ico,.jfif';
+
+function isImageFile(file: File): boolean {
+  if (file.type.startsWith('image/')) return true;
+  return /\.(png|jpe?g|jfif|gif|webp|svg|ico)$/i.test(file.name);
+}
+
+function UploadBox({ label, value, error, onFile, onClear }: {
+  label: string;
+  value: string | null;
+  error: string | null;
+  onFile: (f: File) => void;
+  onClear: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const takeFile = (file: File | undefined | null) => {
+    if (!file) return;
+    if (!isImageFile(file)) return;
+    onFile(file);
+  };
+
   return (
     <div>
       <label className="label mb-2 block">{label}</label>
-      <div className="grid h-[74px] place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Drag and drop or Browse</div>
+      <div
+        className={`rounded-card border border-dashed bg-page p-3 text-center transition-colors ${
+          dragging ? 'border-accent bg-accent-subtle' : 'border-border'
+        }`}
+        onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragging(false);
+          takeFile(e.dataTransfer.files?.[0]);
+        }}
+      >
+        {value ? (
+          <div className="flex flex-col items-center gap-2">
+            <img src={value} alt={label} className="max-h-14 max-w-full object-contain" />
+            <div className="flex gap-2">
+              <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => inputRef.current?.click()}>Replace</button>
+              <button type="button" className="text-tiny font-medium text-danger-text hover:underline" onClick={onClear}>Remove</button>
+            </div>
+          </div>
+        ) : (
+          <p className="py-4 text-small text-fg-secondary">
+            {dragging ? 'Drop image here' : (
+              <>
+                Drag and drop or{' '}
+                <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => inputRef.current?.click()}>Browse</button>
+              </>
+            )}
+          </p>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept={IMAGE_ACCEPT}
+          className="hidden"
+          onChange={(e) => {
+            takeFile(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+      </div>
+      {error && <p className="mt-1 text-tiny text-danger-text">{error}</p>}
     </div>
   );
 }
 
 interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string } }
+interface PlatformBranding { logoUrl?: string | null; faviconUrl?: string | null }
 
-/** "Edit General" — matches platform_general_edit.png field-for-field. Network Displayed Name,
- * Support Email, Currency, and Timezone are real (PUT /api/settings/general, the same real network
- * settings Settings › General already writes) — the rest (Language, Show toggles, colors, logo)
- * have no backend concept in this app, so they stay real, interactive, non-persisting controls. */
+/** "Edit General" — Network Displayed Name, Support Email, Currency, and Timezone persist via
+ * PUT /api/settings/general. Logo / Favicon persist on control-center platform branding config. */
 function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => void }) {
   const { data: settings } = useQuery<NetworkSettings>('/api/settings');
+  const { data: platformConfig } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const branding = (platformConfig?.branding as PlatformBranding | undefined) ?? {};
   const [name, setName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [timezone, setTimezone] = useState('UTC');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const [faviconError, setFaviconError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => {
     if (!settings) return;
     setName(settings.general.name ?? '');
@@ -101,16 +176,48 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setCurrency(settings.general.defaultCurrency ?? 'USD');
     setTimezone(settings.general.timezone ?? 'UTC');
   }, [settings]);
-  const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.put('/api/settings/general', body));
+
+  useEffect(() => {
+    setLogoUrl(branding.logoUrl ?? null);
+    setFaviconUrl(branding.faviconUrl ?? null);
+  }, [platformConfig]);
+
+  const onLogo = async (f: File) => {
+    setLogoError(null);
+    try { setLogoUrl(await readFileAsDataUrl(f)); }
+    catch (e) { setLogoError(e instanceof Error ? e.message : 'Could not read file.'); }
+  };
+  const onFavicon = async (f: File) => {
+    setFaviconError(null);
+    try { setFaviconUrl(await readFileAsDataUrl(f)); }
+    catch (e) { setFaviconError(e instanceof Error ? e.message : 'Could not read file.'); }
+  };
 
   const save = async () => {
-    if (await run({ name, supportEmail: supportEmail || undefined, defaultCurrency: currency, timezone })) onSaved();
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await api.put('/api/settings/general', {
+        name,
+        supportEmail: supportEmail || undefined,
+        defaultCurrency: currency,
+        timezone,
+      });
+      await cc.putConfig('platform', {
+        branding: { logoUrl: logoUrl || null, faviconUrl: faviconUrl || null },
+      });
+      onSaved();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="max-w-2xl mx-auto card space-y-4">
       <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       <Field label="Network Displayed Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Checkbox label="Show Name" defaultChecked />
       <Field label="Support Email *"><input className="input" value={supportEmail} onChange={(e) => setSupportEmail(e.target.value)} /></Field>
@@ -137,11 +244,11 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
         </div>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <UploadBox label="Logo" />
-        <UploadBox label="Favicon" />
+        <UploadBox label="Logo" value={logoUrl} error={logoError} onFile={onLogo} onClear={() => setLogoUrl(null)} />
+        <UploadBox label="Favicon" value={faviconUrl} error={faviconError} onFile={onFavicon} onClear={() => setFaviconUrl(null)} />
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
         <button className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
@@ -154,23 +261,51 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
  * Over, the three Hide Partner * Links checkboxes, the three partner-facing checkboxes, and finally
  * the 3-way On Hold Partner Visibility segment. No backing table for any of this (Global Settings
  * has no network-config schema in this app) so Save stays inert like every other honest-shell form. */
-function EditGlobalForm({ onCancel }: { onCancel: () => void }) {
+function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?: () => void }) {
+  const { data: config } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const saved = (config?.global as Record<string, unknown> | undefined) ?? {};
   const help = new Map(GLOBAL_TOGGLE_DEFS.map((t) => [t.label, t.help]));
-  const [threshold, setThreshold] = useState('90');
-  const [cpcBasis, setCpcBasis] = useState('Unique Clicks');
-  const [macroVisibility, setMacroVisibility] = useState('Visible');
-  const [adv110Visible, setAdv110Visible] = useState(true);
-  const [saleAmountVisible, setSaleAmountVisible] = useState(true);
-  const [onHoldVisibility, setOnHoldVisibility] = useState('Visible');
-  const checkedByDefault = new Set([
-    'Enable Fail Traffic and Forwarding Rules when Offer is paused',
-    'Enable Partners to select timezones in their UI',
-    'Enable Offer Caps in Partner UI',
-    'Enable Partners to update billing details inside their Partner UI',
-    'Allow partners to manage Postbacks',
-    'Enable Partner Email Verification',
-    'Enable Advertiser Email Verification',
-  ]);
+  const [threshold, setThreshold] = useState(String(saved['offerCapThreshold'] ?? '90'));
+  const [cpcBasis, setCpcBasis] = useState(String(saved['cpcBasis'] ?? 'Unique Clicks'));
+  const [macroVisibility, setMacroVisibility] = useState(String(saved['macroVisibility'] ?? 'Visible'));
+  const [adv110Visible, setAdv110Visible] = useState(saved['adv110Visible'] !== false);
+  const [saleAmountVisible, setSaleAmountVisible] = useState(saved['saleAmountVisible'] !== false);
+  const [onHoldVisibility, setOnHoldVisibility] = useState(String(saved['onHoldVisibility'] ?? 'Visible'));
+  const [toggles, setToggles] = useState<Record<string, boolean>>(() => {
+    const t = (saved['toggles'] as Record<string, boolean> | undefined) ?? {};
+    const defaults = new Set([
+      'Enable Fail Traffic and Forwarding Rules when Offer is paused',
+      'Enable Partners to select timezones in their UI',
+      'Enable Offer Caps in Partner UI',
+      'Enable Partners to update billing details inside their Partner UI',
+      'Allow partners to manage Postbacks',
+      'Enable Partner Email Verification',
+      'Enable Advertiser Email Verification',
+    ]);
+    const out: Record<string, boolean> = {};
+    for (const g of GLOBAL_TOGGLES) out[g] = t[g] ?? defaults.has(g);
+    return out;
+  });
+  const { run, busy, error } = useMutation((body: Record<string, unknown>) => cc.putConfig('platform', body));
+
+  useEffect(() => {
+    const g = (config?.global as Record<string, unknown> | undefined) ?? {};
+    setThreshold(String(g['offerCapThreshold'] ?? '90'));
+    setCpcBasis(String(g['cpcBasis'] ?? 'Unique Clicks'));
+    setMacroVisibility(String(g['macroVisibility'] ?? 'Visible'));
+    setAdv110Visible(g['adv110Visible'] !== false);
+    setSaleAmountVisible(g['saleAmountVisible'] !== false);
+    setOnHoldVisibility(String(g['onHoldVisibility'] ?? 'Visible'));
+    const t = (g['toggles'] as Record<string, boolean> | undefined) ?? {};
+    setToggles((prev) => {
+      const out = { ...prev };
+      for (const label of GLOBAL_TOGGLES) {
+        if (t[label] !== undefined) out[label] = t[label];
+      }
+      return out;
+    });
+  }, [config]);
+
   const leading = [
     "Enable Partners/Advertisers managers as 'Reply-To' address",
     'Enable Global CPC/CPM Dynamic Payouts in Tracking Links',
@@ -189,16 +324,41 @@ function EditGlobalForm({ onCancel }: { onCancel: () => void }) {
     'Enable Partner Email Verification',
     'Enable Advertiser Email Verification',
   ];
+
+  const save = async () => {
+    const ok = await run({
+      global: {
+        offerCapThreshold: threshold,
+        cpcBasis,
+        macroVisibility,
+        adv110Visible,
+        saleAmountVisible,
+        onHoldVisibility,
+        toggles,
+      },
+    });
+    if (ok) { onSaved?.(); onCancel(); }
+  };
+
   return (
     <div className="max-w-2xl mx-auto card space-y-4">
       <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
-      {leading.map((g) => <Checkbox key={g} label={g} help={help.get(g)} defaultChecked={checkedByDefault.has(g)} />)}
+      {error && <p className="text-small text-danger-text">{error}</p>}
+      {leading.map((g) => (
+        <label key={g} className="flex items-center gap-2 text-small text-fg">
+          <input type="checkbox" checked={!!toggles[g]} onChange={(e) => setToggles((t) => ({ ...t, [g]: e.target.checked }))} className="h-4 w-4 rounded border-border" />
+          {g}{help.get(g) && <HelpIcon text={help.get(g)!} />}
+        </label>
+      ))}
       <Field label="Set Offer cap Threshold Percentage *"><input className="input" value={threshold} onChange={(e) => setThreshold(e.target.value)} /></Field>
       <div>
         <label className="label mb-2 block">Set CPC Calculation Based On *</label>
         <Segmented options={['Unique Clicks', 'Gross Clicks']} value={cpcBasis} onChange={setCpcBasis} />
       </div>
-      <Checkbox label="Enable Global Fail Traffic" help={help.get('Enable Global Fail Traffic')} />
+      <label className="flex items-center gap-2 text-small text-fg">
+        <input type="checkbox" checked={!!toggles['Enable Global Fail Traffic']} onChange={(e) => setToggles((t) => ({ ...t, 'Enable Global Fail Traffic': e.target.checked }))} className="h-4 w-4 rounded border-border" />
+        Enable Global Fail Traffic
+      </label>
       <div>
         <label className="mb-2 flex items-center gap-1.5 text-small font-semibold text-fg">
           Set Macro Parameter Visibility for Partners <HelpIcon text={help.get('Set Macro Parameter Visibility for Partners') ?? ''} />
@@ -211,7 +371,12 @@ function EditGlobalForm({ onCancel }: { onCancel: () => void }) {
           </div>
         )}
       </div>
-      {tail.map((g) => <Checkbox key={g} label={g} help={help.get(g)} defaultChecked={checkedByDefault.has(g)} />)}
+      {tail.map((g) => (
+        <label key={g} className="flex items-center gap-2 text-small text-fg">
+          <input type="checkbox" checked={!!toggles[g]} onChange={(e) => setToggles((t) => ({ ...t, [g]: e.target.checked }))} className="h-4 w-4 rounded border-border" />
+          {g}{help.get(g) && <HelpIcon text={help.get(g)!} />}
+        </label>
+      ))}
       <div>
         <label className="mb-2 flex items-center gap-1.5 text-small font-semibold text-fg">
           Set On Hold Partner Visibility <HelpIcon text={help.get('Set On Hold Partner Visibility') ?? ''} />
@@ -219,18 +384,24 @@ function EditGlobalForm({ onCancel }: { onCancel: () => void }) {
         <Segmented options={['Invisible', 'Visible', 'Restricted']} value={onHoldVisibility} onChange={setOnHoldVisibility} />
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn-primary" onClick={onCancel}>Save</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="btn-primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );
 }
 
-function ImagePreviewBox({ label, help }: { label: string; help: string }) {
+function ImagePreviewBox({ label, help, src }: { label: string; help: string; src?: string | null }) {
   return (
     <div>
       <p className="mb-2 flex items-center gap-1.5 text-small font-semibold text-fg">{label} <HelpIcon text={help} /></p>
-      <div className="grid h-20 w-32 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Not set</div>
+      {src ? (
+        <div className="flex h-20 w-32 items-center justify-center overflow-hidden rounded-card border border-border bg-page p-2">
+          <img src={src} alt={label} className="max-h-full max-w-full object-contain" />
+        </div>
+      ) : (
+        <div className="grid h-20 w-32 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Not set</div>
+      )}
     </div>
   );
 }
@@ -288,12 +459,17 @@ function GlobalPostbackCard() {
 }
 
 function AddressCard() {
+  const { data: config } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const addr = (config?.address as Record<string, string> | undefined) ?? {};
   return (
     <InfoCard title="Address" action={<span />}>
       <InfoGrid>
-        <InfoRow label="Address" /><InfoRow label="Apartment, suite, etc." />
-        <InfoRow label="Country" /><InfoRow label="Region/State" />
-        <InfoRow label="City" /><InfoRow label="ZIP/Postal Code" />
+        <InfoRow label="Address" value={addr['address']} />
+        <InfoRow label="Apartment, suite, etc." value={addr['apartment']} />
+        <InfoRow label="Country" value={addr['country']} />
+        <InfoRow label="Region/State" value={addr['region']} />
+        <InfoRow label="City" value={addr['city']} />
+        <InfoRow label="ZIP/Postal Code" value={addr['zip']} />
       </InfoGrid>
     </InfoCard>
   );
@@ -303,10 +479,30 @@ function GeneralSub() {
   const origin = window.location.origin;
   const [editing, setEditing] = useState<'general' | 'global' | null>(null);
   const { data: settings, refetch } = useQuery<NetworkSettings>('/api/settings');
+  const { data: platformConfig, refetch: refetchPlatform } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const branding = (platformConfig?.branding as PlatformBranding | undefined) ?? {};
+  const globalCfg = (platformConfig?.global as Record<string, unknown> | undefined) ?? {};
+  const toggles = (globalCfg['toggles'] as Record<string, boolean> | undefined) ?? {};
   const toggleHelp = new Map(GLOBAL_TOGGLE_DEFS.map((t) => [t.label, t.help]));
 
-  if (editing === 'general') return <EditGeneralForm onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); refetch(); }} />;
-  if (editing === 'global') return <EditGlobalForm onCancel={() => setEditing(null)} />;
+  const globalValue = (label: string) => {
+    if (label === 'Set Offer cap Threshold Percentage') return globalCfg['offerCapThreshold'] as string | undefined;
+    if (label === 'Set CPC Calculation Based On') return globalCfg['cpcBasis'] as string | undefined;
+    if (label === 'Set Macro Parameter Visibility for Partners') return globalCfg['macroVisibility'] as string | undefined;
+    if (label === 'Set On Hold Partner Visibility') return globalCfg['onHoldVisibility'] as string | undefined;
+    const v = toggles[label];
+    return v === undefined ? undefined : v ? 'YES' : 'NO';
+  };
+
+  if (editing === 'general') {
+    return (
+      <EditGeneralForm
+        onCancel={() => setEditing(null)}
+        onSaved={() => { setEditing(null); refetch(); refetchPlatform(); }}
+      />
+    );
+  }
+  if (editing === 'global') return <EditGlobalForm onCancel={() => setEditing(null)} onSaved={refetchPlatform} />;
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -314,9 +510,9 @@ function GeneralSub() {
         <InfoCard title="General" action={<button className="text-tiny font-medium text-accent-text" onClick={() => setEditing('general')}>Edit</button>}>
           <InfoGrid>
             <InfoRow label="Network Identifier" value={settings?.general.name} />
-            <ImagePreviewBox label="Logo" help="Shown in the top-left corner of the dashboard and Partner/Advertiser portals." />
+            <ImagePreviewBox label="Logo" help="Shown in the top-left corner of the dashboard and Partner/Advertiser portals." src={branding.logoUrl} />
             <InfoRow label="NID" value={settings?.general.nid} />
-            <ImagePreviewBox label="Favicon" help="Shown as the browser-tab icon across every portal." />
+            <ImagePreviewBox label="Favicon" help="Shown as the browser-tab icon across every portal." src={branding.faviconUrl} />
             <InfoRow label="Support Email" value={settings?.general.supportEmail} />
             <ColorSwatchRow label="Primary Color" color={null} />
             <InfoRow label="Language" value="English" />
@@ -344,7 +540,7 @@ function GeneralSub() {
         </InfoCard>
         <InfoCard title="Global Settings" action={<button className="text-tiny font-medium text-accent-text" onClick={() => setEditing('global')}>Edit</button>}>
           <InfoGrid>
-            {GLOBAL_TOGGLES.map((g) => <InfoRow key={g} label={g} help={toggleHelp.get(g)} />)}
+            {GLOBAL_TOGGLES.map((g) => <InfoRow key={g} label={g} value={globalValue(g)} help={toggleHelp.get(g)} />)}
           </InfoGrid>
         </InfoCard>
       </div>
@@ -378,6 +574,13 @@ function DomainSearchTable({ rows, cols }: { rows: TrackingDomain[]; cols: Colum
 
 function DomainsSub() {
   const { data, loading } = useQuery<TrackingDomain[]>('/api/tracking-domains');
+  const { data: platformConfig } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const reg = (platformConfig?.domainRegistration as Record<string, string> | undefined) ?? {};
+  const [dmStatus, setDmStatus] = useState('Active');
+  const { data: managers, loading: dmLoading, refetch: refetchDm } = useQuery<Array<{
+    id: string; firstName: string; lastName: string; email: string; status: string; createdAt: string; updatedAt: string;
+  }>>(`/api/control-center/domain-managers?status=${dmStatus === 'All' ? 'all' : dmStatus.toLowerCase()}`);
+
   const domains = data ?? [];
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   const cols: Column<TrackingDomain>[] = [
@@ -387,6 +590,19 @@ function DomainsSub() {
     { header: 'Is Default', cell: (d) => (d.isPrimary ? 'Default' : '—') },
   ];
   const primary = domains.find((d) => d.isPrimary) ?? domains[0];
+
+  const dmRows = (managers ?? []).map((m) => ({
+    id: m.id,
+    cells: {
+      'First Name': m.firstName,
+      'Last Name': m.lastName || '—',
+      Email: m.email,
+      Status: m.status,
+      Created: new Date(m.createdAt).toLocaleDateString(),
+      Modified: new Date(m.updatedAt).toLocaleDateString(),
+    },
+  }));
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <InfoCard title="Tracking Domains" action={<span />}>
@@ -398,16 +614,40 @@ function DomainsSub() {
       </InfoCard>
       <InfoCard title="Domain Managers" action={<span />}>
         <InfoBanner>This information is required if you have provided at least one tracking or login domain for platform usage. Please provide any relevant contact details to facilitate communication regarding the domain(s).</InfoBanner>
-        <EmptyShellTable addLabel="Add" entityName="Domain Manager" status="Active" columns={['First Name', 'Last Name', 'Email', 'Status', 'Created', 'Modified']} />
+        <EmptyShellTable
+          addLabel="Add"
+          entityName="Domain Manager"
+          status="Active"
+          statusFilter={dmStatus}
+          onStatusFilterChange={setDmStatus}
+          columns={['First Name', 'Last Name', 'Email', 'Status', 'Created', 'Modified']}
+          rows={dmRows}
+          loading={dmLoading}
+          onAddSubmit={async (v) => {
+            await cc.create('domain-managers', {
+              firstName: v['First Name'],
+              lastName: v['Last Name'] ?? '',
+              email: v['Email'],
+            });
+            refetchDm();
+            return true;
+          }}
+          onDelete={async (id) => { await cc.del('domain-managers', id); refetchDm(); }}
+        />
       </InfoCard>
       <InfoCard title="Domain Registration Information" action={<span />}>
         <InfoBanner>This information is being collected in relation to Administered Domain Services under this platform's terms. This information is required by ICANN and will only be used for registration issues. Inaccurate information can lead to the suspension or cancellation of the Administered Domains.</InfoBanner>
         <InfoGrid>
-          <InfoRow label="Name" /><InfoRow label="Organization" />
-          <InfoRow label="Email" /><InfoRow label="Phone" />
-          <InfoRow label="Address 1" /><InfoRow label="Apartment, Suite, etc." />
-          <InfoRow label="City" /><InfoRow label="Region" />
-          <InfoRow label="Country" /><InfoRow label="ZIP/Postal Code" />
+          <InfoRow label="Name" value={reg['name']} />
+          <InfoRow label="Organization" value={reg['organization']} />
+          <InfoRow label="Email" value={reg['email']} />
+          <InfoRow label="Phone" value={reg['phone']} />
+          <InfoRow label="Address 1" value={reg['address1']} />
+          <InfoRow label="Apartment, Suite, etc." value={reg['apartment']} />
+          <InfoRow label="City" value={reg['city']} />
+          <InfoRow label="Region" value={reg['region']} />
+          <InfoRow label="Country" value={reg['country']} />
+          <InfoRow label="ZIP/Postal Code" value={reg['zip']} />
         </InfoGrid>
       </InfoCard>
     </div>
@@ -417,15 +657,35 @@ function DomainsSub() {
 /** No backing table for a network-wide IP blacklist in this app (offer-level traffic controls have
  * their own real blacklist/whitelist rules elsewhere) — real, interactive rows like every other
  * Control Center edit form, saved to local state only. */
-function EditIpsBlacklistForm({ onCancel }: { onCancel: () => void }) {
+function EditIpsBlacklistForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?: () => void }) {
   const [rows, setRows] = useState<{ id: number; from: string; to: string }[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const nextId = useRef(1);
+  const { run, busy, error } = useMutation((ranges: { from: string; to?: string }[]) => cc.ipBlacklist.put(ranges));
+
+  useEffect(() => {
+    cc.ipBlacklist.get().then((data) => {
+      setRows(data.map((r) => ({ id: nextId.current++, from: r.from, to: r.to })));
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
   const addRow = () => setRows((r) => [...r, { id: nextId.current++, from: '', to: '' }]);
   const removeRow = (id: number) => setRows((r) => r.filter((x) => x.id !== id));
   const setField = (id: number, k: 'from' | 'to', v: string) => setRows((r) => r.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
+
+  const save = async () => {
+    const ranges = rows.filter((r) => r.from.trim()).map((r) => ({ from: r.from.trim(), to: r.to.trim() || undefined }));
+    const ok = await run(ranges);
+    if (ok) { onSaved?.(); onCancel(); }
+  };
+
+  if (!loaded) return <StateBlock><Spinner /></StateBlock>;
+
   return (
     <div className="card space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
+      {error && <p className="text-small text-danger-text">{error}</p>}
       <div className="flex items-center gap-2">
         <label className="text-small font-semibold text-fg">IP Blacklist</label>
         <button type="button" onClick={addRow} title="Add a range" className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Plus size={14} /></button>
@@ -445,8 +705,8 @@ function EditIpsBlacklistForm({ onCancel }: { onCancel: () => void }) {
         ))}
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn-primary" onClick={onCancel}>Save</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="btn-primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );
@@ -454,27 +714,42 @@ function EditIpsBlacklistForm({ onCancel }: { onCancel: () => void }) {
 
 function IPsSub() {
   const [editing, setEditing] = useState(false);
-  if (editing) return <EditIpsBlacklistForm onCancel={() => setEditing(false)} />;
+  const { data, loading, refetch } = useQuery<Array<{ id: string; from: string; to: string }>>('/api/control-center/ip-blacklist');
+  const rows = (data ?? []).map((r) => ({
+    id: r.id,
+    cells: { From: r.from, To: r.to },
+  }));
+
+  if (editing) return <EditIpsBlacklistForm onCancel={() => setEditing(false)} onSaved={refetch} />;
   return (
     <InfoCard title="IPs Blacklist" action={<button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>}>
-      <EmptyShellTable columns={['From', 'To']} />
+      <EmptyShellTable columns={['From', 'To']} rows={rows} loading={loading} search={false} />
     </InfoCard>
   );
 }
 
 function NotificationsSub() {
+  const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const saved = (config?.notifications as Record<string, NotifySaved> | undefined) ?? {};
+
+  const mkSave = (key: string) => async (values: NotifySaved) => {
+    const res = await cc.putConfig('platform', { notifications: { ...saved, [key]: values } });
+    if (res) refetch();
+    return !!res;
+  };
+
   return (
     <div className="space-y-4">
       <HeadsUpBanner>Note that editing the default notifications will not modify any existing notification setting. It will only affect new accounts.</HeadsUpBanner>
-      <NotificationCard title="Partners" notifs={PARTNER_NOTIFS} />
-      <NotificationCard title="Offers" notifs={OFFER_NOTIFS_PLATFORM} />
-      <NotificationCard title="Offer Groups" notifs={OFFER_GROUP_NOTIFS} />
-      <NotificationCard title="Advertisers" notifs={ADVERTISER_NOTIFS} />
-      <NotificationCard title="Actions" notifs={ACTION_NOTIFS} />
-      <NotificationCard title="Billing" notifs={BILLING_NOTIFS} />
-      <NotificationCard title="Network" notifs={NETWORK_NOTIFS} />
-      <NotificationCard title="Security" notifs={SECURITY_NOTIFS} />
-      <NotificationCard title="Traffic Health" notifs={TRAFFIC_HEALTH_NOTIFS} />
+      <NotificationCard title="Partners" notifs={PARTNER_NOTIFS} saved={saved['partners']} onSave={mkSave('partners')} />
+      <NotificationCard title="Offers" notifs={OFFER_NOTIFS_PLATFORM} saved={saved['offers']} onSave={mkSave('offers')} />
+      <NotificationCard title="Offer Groups" notifs={OFFER_GROUP_NOTIFS} saved={saved['offerGroups']} onSave={mkSave('offerGroups')} />
+      <NotificationCard title="Advertisers" notifs={ADVERTISER_NOTIFS} saved={saved['advertisers']} onSave={mkSave('advertisers')} />
+      <NotificationCard title="Actions" notifs={ACTION_NOTIFS} saved={saved['actions']} onSave={mkSave('actions')} />
+      <NotificationCard title="Billing" notifs={BILLING_NOTIFS} saved={saved['billing']} onSave={mkSave('billing')} />
+      <NotificationCard title="Network" notifs={NETWORK_NOTIFS} saved={saved['network']} onSave={mkSave('network')} />
+      <NotificationCard title="Security" notifs={SECURITY_NOTIFS} saved={saved['security']} onSave={mkSave('security')} />
+      <NotificationCard title="Traffic Health" notifs={TRAFFIC_HEALTH_NOTIFS} saved={saved['trafficHealth']} onSave={mkSave('trafficHealth')} />
     </div>
   );
 }
@@ -518,12 +793,20 @@ const ADVERTISER_BILLING_FIELDS: EditField[] = [
 ];
 
 function BillingSub() {
+  const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
+  const billing = (config?.billing as Record<string, unknown> | undefined) ?? {};
+  const saveSection = useMutation(async (key: string) => {
+    const res = await cc.putConfig('platform', { billing: { ...billing, [key]: billing[key] ?? {} } });
+    if (res) refetch();
+    return !!res;
+  });
+
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} />
-      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} />
-      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} />
-      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} />
+      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} onSave={async () => !!(await saveSection.run('general'))} />
+      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} onSave={async () => !!(await saveSection.run('partner'))} />
+      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} onSave={async () => !!(await saveSection.run('partnerRestricted'))} />
+      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} onSave={async () => !!(await saveSection.run('advertiser'))} />
     </div>
   );
 }

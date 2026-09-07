@@ -4,7 +4,7 @@
  * with dozens of toggles) — InfoRow/InfoCard render them as honest "—" static display, never fake
  * editable state. Real values (passed in explicitly by each tab) render normally.
  */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, HelpCircle, Pencil, Check, Info } from 'lucide-react';
 import { Field } from '../../../components/ui';
 
@@ -87,22 +87,46 @@ export function Toggle({ on: initial }: { on: boolean }) {
 
 const NOTIFY_SCOPES = ['Notify me for all events', 'Notify me for my managed accounts only'] as const;
 
+export function EditHeaderAction({
+  editing, saving, onEdit, onCancel, onSave,
+}: {
+  editing: boolean; saving?: boolean;
+  onEdit: () => void; onCancel: () => void; onSave?: () => void;
+}) {
+  if (!editing) {
+    return (
+      <button type="button" className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={onEdit}>
+        <Pencil size={12} />Edit
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <button type="button" className="btn-ghost !py-1.5 !px-3 text-tiny" onClick={onCancel} disabled={saving}>Cancel</button>
+      {onSave && (
+        <button type="button" className="btn-primary !py-1.5 !px-3 text-tiny" onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+      )}
+    </div>
+  );
+}
+
 /** Real popover — matches the reference's own notification-scope dropdown: two options with a
  * checkmark on whichever is selected, closes on pick or outside click. */
-function NotifyScopeSelect() {
+function NotifyScopeSelect({ value, onChange, disabled }: {
+  value: string; onChange: (v: string) => void; disabled?: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState<(typeof NOTIFY_SCOPES)[number]>(NOTIFY_SCOPES[0]);
   return (
     <div className="relative shrink-0">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="input flex !w-auto items-center gap-2 !py-1.5">
+      <button type="button" disabled={disabled} onClick={() => !disabled && setOpen((o) => !o)} className="input flex !w-auto items-center gap-2 !py-1.5 disabled:opacity-70">
         {value}<ChevronDown size={14} className="text-fg-muted" />
       </button>
-      {open && (
+      {open && !disabled && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute left-0 z-20 mt-1 w-72 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             {NOTIFY_SCOPES.map((o) => (
-              <button key={o} type="button" onClick={() => { setValue(o); setOpen(false); }}
+              <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-small text-fg hover:bg-page">
                 <span className="w-3.5 shrink-0">{value === o && <Check size={13} />}</span>
                 {o}
@@ -116,44 +140,88 @@ function NotifyScopeSelect() {
 }
 
 export interface NotifyDef { name: string; desc: string; inApp?: boolean; email: boolean; dropdown?: boolean }
+export type NotifySaved = Record<string, { inApp?: boolean; email?: boolean; scope?: string }>;
 
-export function NotificationRow({ n }: { n: NotifyDef }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border py-4 last:border-0">
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold text-fg">{n.name}</p>
-        <p className="mt-0.5 text-small text-fg-secondary">{n.desc}</p>
-      </div>
-      {n.dropdown && <NotifyScopeSelect />}
-      {n.inApp !== undefined && (
-        <div className="flex shrink-0 flex-col items-start gap-1">
-          <span className="text-tiny text-fg-secondary">In-app</span>
-          <Toggle on={n.inApp} />
-        </div>
-      )}
-      <div className="flex shrink-0 flex-col items-start gap-1">
-        <span className="text-tiny text-fg-secondary">Email</span>
-        <Toggle on={n.email} />
-      </div>
-    </div>
-  );
+function yesNo(v: boolean) {
+  return <span className={`text-tiny font-medium ${v ? 'text-success-text' : 'text-fg-muted'}`}>{v ? 'Yes' : 'No'}</span>;
 }
 
-/** A notification section — real "Edit" toggles an editing state that shows a Cancel/Save bar
- * (Save stays inert: no backing table for default notification preferences in this app), matching
- * every other Control Center edit flow. The Yes/No pills and scope dropdowns above are already
- * interactive in both states. */
-export function NotificationCard({ title, notifs }: { title: string; notifs: NotifyDef[] }) {
+/** A notification section. Edit enables toggles; Save persists the row state via onSave. */
+export function NotificationCard({ title, notifs, saved, onSave }: {
+  title: string; notifs: NotifyDef[]; saved?: NotifySaved;
+  onSave?: (values: NotifySaved) => Promise<boolean>;
+}) {
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [rows, setRows] = useState<NotifySaved>({});
+
+  useEffect(() => {
+    if (editing) return;
+    const next: NotifySaved = {};
+    for (const n of notifs) {
+      const s = saved?.[n.name] ?? {};
+      next[n.name] = {
+        inApp: s.inApp ?? n.inApp ?? false,
+        email: s.email ?? n.email,
+        scope: s.scope ?? NOTIFY_SCOPES[0],
+      };
+    }
+    setRows(next);
+  }, [notifs, saved, editing]);
+
+  const patch = (name: string, part: NotifySaved[string]) => {
+    setRows((prev) => ({ ...prev, [name]: { ...prev[name], ...part } }));
+  };
+
+  const handleSave = async () => {
+    if (onSave) {
+      setSaving(true);
+      try {
+        if (await onSave(rows)) setEditing(false);
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      setEditing(false);
+    }
+  };
+
   return (
-    <InfoCard title={title} action={editing ? <span /> : <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>}>
-      <div>{notifs.map((n) => <NotificationRow key={n.name} n={n} />)}</div>
-      {editing && (
-        <div className="mt-2 flex justify-end gap-2 border-t border-border pt-4">
-          <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button>
-          <button type="button" className="btn-primary" onClick={() => setEditing(false)}>Save</button>
-        </div>
-      )}
+    <InfoCard title={title} action={<EditHeaderAction editing={editing} saving={saving} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onSave={handleSave} />}>
+      <div>
+        {notifs.map((n) => {
+          const st = rows[n.name] ?? {};
+          return (
+            <div key={n.name} className="flex flex-wrap items-center justify-between gap-4 border-b border-border py-4 last:border-0">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-fg">{n.name}</p>
+                <p className="mt-0.5 text-small text-fg-secondary">{n.desc}</p>
+              </div>
+              {n.dropdown && (
+                <NotifyScopeSelect
+                  value={String(st.scope ?? NOTIFY_SCOPES[0])}
+                  onChange={(scope) => patch(n.name, { scope })}
+                  disabled={!editing}
+                />
+              )}
+              {n.inApp !== undefined && (
+                <div className="flex shrink-0 flex-col items-start gap-1">
+                  <span className="text-tiny text-fg-secondary">In-app</span>
+                  {editing
+                    ? <YesNoToggle value={!!st.inApp} onChange={(inApp) => patch(n.name, { inApp })} />
+                    : yesNo(!!st.inApp)}
+                </div>
+              )}
+              <div className="flex shrink-0 flex-col items-start gap-1">
+                <span className="text-tiny text-fg-secondary">Email</span>
+                {editing
+                  ? <YesNoToggle value={!!st.email} onChange={(email) => patch(n.name, { email })} />
+                  : yesNo(!!st.email)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </InfoCard>
   );
 }
@@ -162,7 +230,22 @@ export interface EditField { label: string; type?: 'boolean' | 'text' }
 
 /** Real editable field grid — booleans render as checkboxes, everything else as a text input.
  * Reusable across any Control Center card built from an InfoGrid of InfoRows. */
-function InfoRowsEditForm({ fields, onCancel }: { fields: EditField[]; onCancel: () => void }) {
+function InfoRowsEditForm({ fields, onCancel, onSave }: { fields: EditField[]; onCancel: () => void; onSave?: () => Promise<boolean> }) {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (onSave) {
+      setSaving(true);
+      try {
+        if (await onSave()) onCancel();
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      onCancel();
+    }
+  };
+
   return (
     <div className="space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
@@ -177,8 +260,8 @@ function InfoRowsEditForm({ fields, onCancel }: { fields: EditField[]; onCancel:
         ))}
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
-        <button type="button" className="btn-primary" onClick={onCancel}>Save</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );
@@ -187,12 +270,12 @@ function InfoRowsEditForm({ fields, onCancel }: { fields: EditField[]; onCancel:
 /** A settings card built from an InfoGrid of read-only InfoRows — real "Edit" swaps it for a real,
  * interactive field grid (InfoRowsEditForm); Save stays honest (no backing table for any of these
  * network-config fields) but the toggle/edit interaction itself is real. */
-export function EditableInfoCard({ title, fields, action, children }: { title: string; fields: EditField[]; action?: ReactNode; children?: ReactNode }) {
+export function EditableInfoCard({ title, fields, action, children, onSave }: { title: string; fields: EditField[]; action?: ReactNode; children?: ReactNode; onSave?: () => Promise<boolean> }) {
   const [editing, setEditing] = useState(false);
   return (
     <InfoCard title={title} action={action ?? (editing ? <span /> : <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>)}>
       {editing ? (
-        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} />
+        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} onSave={onSave} />
       ) : (
         <InfoGrid>{fields.map((f) => <InfoRow key={f.label} label={f.label} />)}</InfoGrid>
       )}

@@ -24,10 +24,14 @@ import { Link } from 'react-router-dom';
 import { Search, Filter, MoreVertical, Pencil, ChevronRight, HelpCircle, Info, FileCheck } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Field, StateBlock, Spinner, Modal } from '../../components/ui';
+import { PageHeader, Tabs, StateBlock, Spinner, Modal } from '../../components/ui';
 import { Accordion } from '../../components/Accordion';
 import { Pagination } from '../../components/ReportPageKit';
 import { ColumnsModal } from '../../components/TableActionsKit';
+import {
+  FraudDetectionTab, SuppressionListTab, BillingTab, CrmTab, ECommerceTab,
+  PayPerCallTab, EmailTab, ESignatureTab, MmpTab, MediaBuyingEverflowTab,
+} from './IntegrationsTabs';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 
 // Verified against the reference's real Configure pattern (24metrics detail page, Feed detail page):
@@ -63,7 +67,7 @@ function BuildYourOwnBanner() {
   return (
     <div className="card mb-4 flex items-center justify-between gap-4">
       <p className="text-small text-fg-secondary">Can't find the integration you need? Generate an API key and build your own.</p>
-      <Link to="/app/control-center" className="btn-ghost shrink-0">Get an API Key</Link>
+      <Link to="/app/control-center/security" className="btn-ghost shrink-0">Get an API Key</Link>
     </div>
   );
 }
@@ -88,120 +92,22 @@ export default function Integrations() {
       <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
       {(tab === 'CRM' || tab === 'E-Commerce') && <BuildYourOwnBanner />}
       {tab === 'Billing' && <InvoicesBanner />}
-      {tab === 'Media Buying' && <MediaBuyingTab />}
-      {tab === 'Feeds' && <FeedsTab />}
+      {tab === 'Fraud Detection' && <FraudDetectionTab />}
+      {tab === 'Suppression List' && <SuppressionListTab />}
+      {tab === 'Billing' && <BillingTab />}
+      {tab === 'Media Buying' && <MediaBuyingEverflowTab />}
+      {tab === 'CRM' && <CrmTab />}
+      {tab === 'E-Commerce' && <ECommerceTab />}
+      {tab === 'Pay Per Call' && <PayPerCallTab />}
+      {tab === 'Email' && <EmailTab />}
       {tab === 'MMP' && <MmpTab />}
-      {!['Media Buying', 'Feeds', 'MMP'].includes(tab) && <GenericNotConnected category={tab} />}
+      {tab === 'E-Signature' && <ESignatureTab />}
+      {tab === 'Feeds' && <FeedsTab />}
     </>
   );
 }
 
-// ── Shared card shell ──────────────────────────────────────────────────────
-function IntegrationRow({ name, desc, detail, action }: { name: string; desc: string; detail: string; action: ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 last:border-0">
-      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-[var(--radius)] bg-accent-subtle text-h3 font-bold text-accent-text">{name[0]}</div>
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold text-fg">{name}</p>
-        <p className="text-small font-medium text-fg-secondary">{desc}</p>
-        <p className="mt-1 text-tiny text-fg-muted">{detail}</p>
-      </div>
-      <div className="shrink-0">{action}</div>
-    </div>
-  );
-}
-
-function ConnectBtn({ disabled }: { disabled?: boolean }) {
-  return (
-    <button title={disabled ? 'Not available yet' : undefined} className="btn-primary">
-      Connect Integration
-    </button>
-  );
-}
-
-// ── Category with no backend concept: honest generic placeholder ───────────
-const CATEGORY_COPY: Record<string, string> = {
-  'Fraud Detection': 'Detect and prevent click, install, and conversion fraud in real time.',
-  'Suppression List': 'Exclude known bad actors and previously-converted users from your traffic.',
-  Billing: 'Automate partner payouts across countries and currencies.',
-  CRM: 'Sync leads and partner relationships with your customer database.',
-  'E-Commerce': 'Connect your storefront to attribute sales back to the right partner.',
-  'Pay Per Call': 'Track and attribute inbound call conversions.',
-  Email: 'Sync conversion events with your email marketing platform.',
-  'E-Signature': 'Automate partner agreement signing and storage.',
-};
-
-function GenericNotConnected({ category }: { category: string }) {
-  return (
-    <Accordion title="Not connected" defaultOpen>
-      <IntegrationRow
-        name={category}
-        desc={`${category} integration`}
-        detail={`${CATEGORY_COPY[category] ?? `Connect a ${category.toLowerCase()} provider.`} Not available yet.`}
-        action={<ConnectBtn disabled />}
-      />
-    </Accordion>
-  );
-}
-
-// ── Media Buying: real (Pin API + Facebook CAPI via /api/settings) — each row's own action is
-// "Configure" (connected) or "Connect Integration" (not), matching the reference's real per-row
-// pattern (every Fraud Detection/Billing/etc. card has its own action button in that row, never a
-// static "Connected" pill with the actual form living in an unrelated section further down the
-// page — that mismatch was a real bug here, fixed by opening a modal from the row itself).
-function MediaBuyingTab() {
-  const { data, loading, refetch } = useQuery<{ integrations: Record<string, unknown> }>('/api/settings');
-  const [modal, setModal] = useState<'fb' | 'pin' | null>(null);
-  const [editing, setEditing] = useState(false);
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  const cur = data?.integrations ?? {};
-  const fbConnected = Boolean(cur['fbAccessToken']);
-  const pinConnected = Boolean(cur['pinApiKey']);
-  const connectedCount = [fbConnected, pinConnected].filter(Boolean).length;
-
-  const openModal = (key: 'fb' | 'pin', connected: boolean) => { setModal(key); setEditing(!connected); };
-  const closeModal = () => setModal(null);
-
-  const ConfigureBtn = ({ connected, onClick }: { connected: boolean; onClick: () => void }) => (
-    <button type="button" className={connected ? 'btn-ghost' : 'btn-primary'} onClick={onClick}>{connected ? 'Configure' : 'Connect Integration'}</button>
-  );
-
-  return (
-    <div className="space-y-4">
-      <Accordion title="Media Buying Integrations" count={connectedCount || undefined} defaultOpen>
-        <IntegrationRow name="Facebook CAPI" desc="Send conversion events server-side to Meta"
-          detail={fbConnected ? 'Connected — click Configure to update.' : 'Not connected.'}
-          action={<ConfigureBtn connected={fbConnected} onClick={() => openModal('fb', fbConnected)} />} />
-        <IntegrationRow name="Pin API" desc="Network-level API key for partner integrations"
-          detail={pinConnected ? 'Connected — click Configure to update.' : 'Not connected.'}
-          action={<ConfigureBtn connected={pinConnected} onClick={() => openModal('pin', pinConnected)} />} />
-      </Accordion>
-
-      <Modal open={modal === 'fb'} onClose={closeModal} title="Facebook Conversions API">
-        {editing || !fbConnected ? (
-          <SettingsForm compact title="" fields={[
-            { key: 'fbPixelId', label: 'Dataset / Pixel ID' },
-            { key: 'fbAccessToken', label: 'Access Token', secret: true },
-          ]} onSaved={() => { closeModal(); refetch(); }} />
-        ) : (
-          <GeneralSection onEdit={() => setEditing(true)} fields={[
-            { label: 'Dataset / Pixel ID', value: (cur['fbPixelId'] as string) || '—' },
-            { label: 'Access Token', value: '••••••••' },
-          ]} />
-        )}
-      </Modal>
-      <Modal open={modal === 'pin'} onClose={closeModal} title="Pin (Network) API Key">
-        {editing || !pinConnected ? (
-          <SettingsForm compact title="" fields={[{ key: 'pinApiKey', label: 'API Key', secret: true }]} onSaved={() => { closeModal(); refetch(); }} />
-        ) : (
-          <GeneralSection onEdit={() => setEditing(true)} fields={[{ label: 'API Key', value: '••••••••' }]} />
-        )}
-      </Modal>
-    </div>
-  );
-}
-
-// ── Feeds: real (Offer Feed via /api/settings) — verified against the live reference's own
+// ── Feeds: real (Offer Feed via /api/settings)
 // "Add Integration" Setup wizard (Integration / Remote Offers / Offer Settings / Partner Settings /
 // Controls). Its ~100-platform picker (Everflow, AppsFlyer-style networks, HasOffers, etc.) isn't
 // replicated — same policy as every other tab, no fabricated vendor relationships — but step 1's own
@@ -309,7 +215,7 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
         <div className="space-y-3">
           <div>
             <label className="label mb-1 block">Feed URL <span className="text-danger-text">*</span>{urlSet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
-            <input className="input" value={url} placeholder={urlSet ? '••••••••' : ''} onChange={(e) => setUrl(e.target.value)} />
+            <input className="input" value={url} placeholder={urlSet ? '••••••••' : 'https://… or demo://offer-feed'} onChange={(e) => setUrl(e.target.value)} />
           </div>
           <div>
             <label className="label mb-1 block">Feed API Key <span className="text-danger-text">*</span>{keySet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
@@ -363,12 +269,24 @@ function AddFeedGrid({ q, onQ, onSetup }: { q: string; onQ: (v: string) => void;
   );
 }
 
+function formatSyncTime(iso: string | undefined): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return iso;
+  }
+}
+
 function FeedsTab() {
   const { data, loading, refetch } = useQuery<{ integrations: Record<string, unknown> }>('/api/settings');
   const { data: advertisers } = useQuery<{ id: string; name: string }[]>('/api/advertisers');
+  const { run: runSync, busy: syncing, error: syncError } = useMutation((_v: Record<string, never>) => api.post('/api/settings/integrations/offer-feed/sync', {}));
   const [configOpen, setConfigOpen] = useState(false);
   const [step, setStep] = useState<'grid' | 'form' | 'summary'>('grid');
   const [gridQuery, setGridQuery] = useState('');
+  const [tableSearch, setTableSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'paused'>('all');
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [showColumns, setShowColumns] = useState(false);
@@ -389,13 +307,33 @@ function FeedsTab() {
   const advertiserName = (advertisers ?? []).find((a) => a.id === advertiserId)?.name;
   const paused = cur['offerFeedStatus'] === 'paused';
   const shown = new Set(FEEDS_COLUMNS.filter((c) => !hiddenColumns.has(c)));
+  const feedName = (cur['offerFeedName'] as string) || 'Offer Feed';
+  const pulledToday = Number(cur['offerFeedPulledToday'] ?? 0);
+  const pulledMonth = Number(cur['offerFeedPulledMonth'] ?? 0);
+  const pulledTotal = Number(cur['offerFeedPulledTotal'] ?? 0);
+  const totalActive = cur['offerFeedTotalActiveOffers'] != null ? String(cur['offerFeedTotalActiveOffers']) : '—';
+  const totalOffers = cur['offerFeedTotalOffers'] != null ? String(cur['offerFeedTotalOffers']) : '—';
+  const lastStatusSync = formatSyncTime(cur['offerFeedLastStatusSync'] as string | undefined);
+  const lastFullSync = formatSyncTime(cur['offerFeedLastFullSync'] as string | undefined);
+  const createdAt = formatSyncTime(cur['offerFeedCreatedAt'] as string | undefined);
+  const modifiedAt = formatSyncTime(cur['offerFeedModifiedAt'] as string | undefined);
+  const lastSyncError = cur['offerFeedLastSyncError'] as string | undefined;
+
+  const rowMatchesSearch = !tableSearch.trim() || feedName.toLowerCase().includes(tableSearch.trim().toLowerCase())
+    || (advertiserName ?? '').toLowerCase().includes(tableSearch.trim().toLowerCase());
+  const rowMatchesStatus = statusFilter === 'all' || (statusFilter === 'paused' ? paused : !paused);
+  const showRow = connected && rowMatchesSearch && rowMatchesStatus;
+
+  const handleSync = async () => {
+    if (await runSync({})) refetch();
+  };
 
   const openModal = () => { setConfigOpen(true); setGridQuery(''); setStep(connected ? 'summary' : 'grid'); };
   const modalTitle = step === 'grid' ? 'Add Advertiser Feed' : 'Offer Feed';
-  const exportRows = () => connected ? [{
-    ID: 1, Name: (cur['offerFeedName'] as string) || 'Offer Feed', Advertiser: advertiserName ?? '', Partner: '',
-    'Sync Frequency': (cur['offerFeedSyncFrequency'] as string) ?? '', 'Total Active Offers': '', 'Total Offers': '',
-    'Last Status Sync': '', 'Last Full Sync': '', Created: '', Modified: '',
+  const exportRows = () => showRow ? [{
+    ID: 1, Name: feedName, Advertiser: advertiserName ?? '', Partner: '',
+    'Sync Frequency': (cur['offerFeedSyncFrequency'] as string) ?? '', 'Total Active Offers': totalActive, 'Total Offers': totalOffers,
+    'Last Status Sync': lastStatusSync, 'Last Full Sync': lastFullSync, Created: createdAt, Modified: modifiedAt,
   }] : [];
 
   return (
@@ -403,23 +341,36 @@ function FeedsTab() {
       <Accordion title="Summary" defaultOpen>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div><p className="text-tiny uppercase text-fg-muted">Integrations</p><p className="mt-1 text-h3 font-semibold text-fg">{connected ? 1 : 0}</p></div>
-          <div><p className="text-tiny uppercase text-fg-muted">Offers Pulled Today</p><p className="mt-1 text-h3 font-semibold text-fg">0</p></div>
-          <div><p className="text-tiny uppercase text-fg-muted">Offers Pulled This Month</p><p className="mt-1 text-h3 font-semibold text-fg">0</p></div>
-          <div><p className="text-tiny uppercase text-fg-muted">Total Offers Pulled</p><p className="mt-1 text-h3 font-semibold text-fg">0</p></div>
+          <div><p className="text-tiny uppercase text-fg-muted">Offers Pulled Today</p><p className="mt-1 text-h3 font-semibold text-fg">{pulledToday}</p></div>
+          <div><p className="text-tiny uppercase text-fg-muted">Offers Pulled This Month</p><p className="mt-1 text-h3 font-semibold text-fg">{pulledMonth}</p></div>
+          <div><p className="text-tiny uppercase text-fg-muted">Total Offers Pulled</p><p className="mt-1 text-h3 font-semibold text-fg">{pulledTotal}</p></div>
         </div>
+        {lastSyncError && connected && (
+          <p className="mt-3 text-small text-danger-text">Last sync error: {lastSyncError}</p>
+        )}
       </Accordion>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* Real (unlike the generic categories): we do have one genuine offer-feed setting,
-         * just not the reference's multi-feed-per-advertiser model, so "Add" opens the one config. */}
-        <button className="btn-primary" onClick={openModal}>+ {connected ? 'Configure' : 'Add'} Integration</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="btn-primary" onClick={openModal}>+ {connected ? 'Configure' : 'Add'} Integration</button>
+          {connected && (
+            <button type="button" className="btn-ghost" onClick={() => void handleSync()} disabled={syncing || paused}>
+              {syncing ? 'Syncing…' : 'Sync Now'}
+            </button>
+          )}
+        </div>
+        {syncError && <p className="text-small text-danger-text">{syncError}</p>}
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input title="Not available yet" placeholder="Search…" className="input !w-48 !pl-8" />
+            <input placeholder="Search…" className="input !w-48 !pl-8" value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} />
           </div>
-          <select title="Not available yet" className="input !w-auto"><option>Active</option></select>
-          <button title="Not available yet" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Filter size={15} /></button>
+          <select className="input !w-auto" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'paused')}>
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="paused">Paused</option>
+          </select>
+          <button type="button" title="Filter by status" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setStatusFilter('active')}><Filter size={15} /></button>
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg">
@@ -452,8 +403,8 @@ function FeedsTab() {
             <tr>{FEEDS_COLUMNS.filter((c) => shown.has(c)).map((c) => <th key={c} className="whitespace-nowrap px-4 py-3">{c}</th>)}</tr>
           </thead>
           <tbody>
-            {!connected ? (
-              <tr><td colSpan={shown.size} className="px-4 py-10 text-center text-small italic text-fg-muted">No Record Found</td></tr>
+            {!showRow ? (
+              <tr><td colSpan={shown.size} className="px-4 py-10 text-center text-small italic text-fg-muted">{connected ? 'No records match your filters' : 'No Record Found'}</td></tr>
             ) : (
               <tr className="border-t border-border">
                 {shown.has('ID') && <td className="px-4 py-3 text-fg-secondary">1</td>}
@@ -461,7 +412,7 @@ function FeedsTab() {
                   <td className="px-4 py-3">
                     <button type="button" onClick={openModal} className="flex items-center gap-2 font-medium text-fg hover:text-accent-text">
                       <span className={`h-2 w-2 shrink-0 rounded-full ${paused ? 'bg-fg-muted' : 'bg-success'}`} />
-                      {(cur['offerFeedName'] as string) || 'Offer Feed'}
+                      {feedName}
                     </button>
                   </td>
                 )}
@@ -472,12 +423,12 @@ function FeedsTab() {
                 )}
                 {shown.has('Partner') && <td className="px-4 py-3 text-fg-muted">—</td>}
                 {shown.has('Sync Frequency') && <td className="px-4 py-3 text-fg-secondary">{(cur['offerFeedSyncFrequency'] as string) ?? '—'}</td>}
-                {shown.has('Total Active Offers') && <td className="px-4 py-3 text-fg-muted">—</td>}
-                {shown.has('Total Offers') && <td className="px-4 py-3 text-fg-muted">—</td>}
-                {shown.has('Last Status Sync') && <td className="px-4 py-3 text-fg-muted">—</td>}
-                {shown.has('Last Full Sync') && <td className="px-4 py-3 text-fg-muted">—</td>}
-                {shown.has('Created') && <td className="px-4 py-3 text-fg-muted">—</td>}
-                {shown.has('Modified') && <td className="px-4 py-3 text-fg-muted">—</td>}
+                {shown.has('Total Active Offers') && <td className="px-4 py-3 text-fg-secondary">{totalActive}</td>}
+                {shown.has('Total Offers') && <td className="px-4 py-3 text-fg-secondary">{totalOffers}</td>}
+                {shown.has('Last Status Sync') && <td className="px-4 py-3 text-fg-secondary">{lastStatusSync}</td>}
+                {shown.has('Last Full Sync') && <td className="px-4 py-3 text-fg-secondary">{lastFullSync}</td>}
+                {shown.has('Created') && <td className="px-4 py-3 text-fg-secondary">{createdAt}</td>}
+                {shown.has('Modified') && <td className="px-4 py-3 text-fg-secondary">{modifiedAt}</td>}
               </tr>
             )}
           </tbody>
@@ -485,11 +436,8 @@ function FeedsTab() {
       </div>
       {showColumns && <ColumnsModal allColumns={FEEDS_COLUMNS} order={[...FEEDS_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
       <div className="flex justify-end">
-        <Pagination total={connected ? 1 : 0} page={1} pageSize={25} onPageChange={() => {}} />
+        <Pagination total={showRow ? 1 : 0} page={1} pageSize={25} onPageChange={() => {}} />
       </div>
-      <p className="text-tiny text-fg-muted">
-        Total Active Offers/Total Offers/Last Status Sync/Last Full Sync/Created/Modified aren't available yet — this network doesn't actually fetch from the configured feed URL, so there's nothing real to report for those columns.
-      </p>
 
       <Modal open={configOpen} onClose={() => setConfigOpen(false)} title={modalTitle}>
         {step === 'grid' ? (
@@ -497,63 +445,25 @@ function FeedsTab() {
         ) : step === 'form' ? (
           <FeedConfigForm cur={cur} advertisers={advertisers ?? []} onSaved={() => { setConfigOpen(false); refetch(); }} onCancel={() => setConfigOpen(false)} />
         ) : (
-          <GeneralSection onEdit={() => setStep('form')} fields={[
-            { label: 'Name', value: (cur['offerFeedName'] as string) || 'Offer Feed' },
-            { label: 'Status', value: paused ? 'Paused' : 'Active' },
-            { label: 'Sync Frequency', value: (cur['offerFeedSyncFrequency'] as string) || '—' },
-            { label: 'Default Advertiser', value: advertiserName ?? '—' },
-            { label: 'Feed URL', value: url ?? '—' },
-            { label: 'Feed API Key', value: cur['offerFeedKey'] ? '••••••••' : '—' },
-          ]} />
+          <>
+            <GeneralSection onEdit={() => setStep('form')} fields={[
+              { label: 'Name', value: feedName },
+              { label: 'Status', value: paused ? 'Paused' : 'Active' },
+              { label: 'Sync Frequency', value: (cur['offerFeedSyncFrequency'] as string) || '—' },
+              { label: 'Default Advertiser', value: advertiserName ?? '—' },
+              { label: 'Feed URL', value: url ?? '—' },
+              { label: 'Feed API Key', value: cur['offerFeedKey'] ? '••••••••' : '—' },
+              { label: 'Last Full Sync', value: lastFullSync },
+              { label: 'Total Offers', value: totalOffers },
+            ]} />
+            <div className="mt-4 flex justify-end">
+              <button type="button" className="btn-ghost" onClick={() => void handleSync()} disabled={syncing || paused}>
+                {syncing ? 'Syncing…' : 'Sync Now'}
+              </button>
+            </div>
+          </>
         )}
       </Modal>
     </div>
-  );
-}
-
-// ── MMP: setup catalog (industry-standard category names — same as before) ─
-const MMPS = [
-  { name: 'AppsFlyer', desc: 'Integrate AppsFlyer Data with Enhanced Reporting', detail: 'Bring your AppsFlyer data in for enhanced visibility and accounting across campaigns, partners, and events.' },
-  { name: 'Branch', desc: 'Deep linking and attribution', detail: 'Connect users across devices and channels with Branch deep links and attribution.' },
-  { name: 'Adjust', desc: 'Integrate Adjust with Flexible Attribution', detail: 'Get granular control by defining partners by ad group, creative, or other dimension.' },
-  { name: 'Kochava', desc: 'Omni-channel measurement', detail: 'Omni-channel measurement and attribution for apps.' },
-  { name: 'Singular', desc: 'Marketing analytics', detail: 'Cost aggregation and attribution across every channel.' },
-  { name: 'Tenjin', desc: 'Mobile marketing infrastructure', detail: 'Mobile marketing infrastructure and attribution.' },
-];
-
-function MmpTab() {
-  return (
-    <Accordion title="Not connected" defaultOpen>
-      {MMPS.map((m) => <IntegrationRow key={m.name} name={m.name} desc={m.desc} detail={m.detail} action={<ConnectBtn disabled />} />)}
-    </Accordion>
-  );
-}
-
-// ── Shared settings form (persists to /api/settings) ────────────────────────
-interface SF { key: string; label: string; secret?: boolean }
-function SettingsForm({ title, fields, compact, onSaved }: { title: string; fields: SF[]; compact?: boolean; onSaved?: () => void }) {
-  const { data, loading, refetch } = useQuery<{ integrations: Record<string, unknown> }>('/api/settings');
-  const [form, setForm] = useState<Record<string, string>>({});
-  const { run, busy, error } = useMutation((values: Record<string, unknown>) => api.put('/api/settings/integrations', { values }));
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  const cur = data?.integrations ?? {};
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    const values: Record<string, unknown> = {};
-    for (const f of fields) if (form[f.key] !== undefined && form[f.key] !== '') values[f.key] = form[f.key];
-    if (await run(values)) { setForm({}); refetch(); onSaved?.(); }
-  };
-  return (
-    <form onSubmit={submit} className={compact ? 'space-y-3' : 'card max-w-xl space-y-3'}>
-      {title && <h3 className="text-h3 font-medium text-fg">{title}</h3>}
-      {error && <p className="text-small text-danger-text">{error}</p>}
-      {fields.map((f) => (
-        <Field key={f.key} label={`${f.label}${cur[f.key] ? ' (set — leave blank to keep)' : ''}`}>
-          <input className="input" type={f.secret ? 'password' : 'text'} value={form[f.key] ?? ''}
-            placeholder={cur[f.key] ? '••••••••' : ''} onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))} />
-        </Field>
-      ))}
-      <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save integration'}</button>
-    </form>
   );
 }

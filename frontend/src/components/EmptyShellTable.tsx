@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, X, Info } from 'lucide-react';
-import { Field } from './ui';
+import { Field, Overlay } from './ui';
 import { Pagination } from './ReportPageKit';
 
 /**
@@ -17,25 +17,36 @@ import { Pagination } from './ReportPageKit';
  * have a backing table in this app.
  */
 const STATUS_DOTS: Record<string, string> = { All: 'bg-fg-muted', Active: 'bg-success', Ongoing: 'bg-success', Inactive: 'bg-warning', Deleted: 'bg-danger' };
+const STANDARD_STATUS_OPTIONS = ['All', 'Active', 'Inactive', 'Deleted'] as const;
 const SYSTEM_COLUMNS = new Set(['ID', 'Created', 'Modified', 'Status', 'Created By']);
 
-function StatusFilter({ initial }: { initial: string }) {
+function StatusFilter({
+  initial, value, onChange,
+}: {
+  initial: string;
+  value?: string;
+  onChange?: (next: string) => void;
+}) {
+  const [internal, setInternal] = useState(initial);
+  const selected = value ?? internal;
+  const setSelected = onChange ?? setInternal;
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(initial);
-  const options = Array.from(new Set(['All', initial, 'Deleted', 'Inactive']));
+  const options = (STANDARD_STATUS_OPTIONS as readonly string[]).includes(initial)
+    ? [...STANDARD_STATUS_OPTIONS]
+    : Array.from(new Set([...STANDARD_STATUS_OPTIONS, initial]));
   return (
     <div className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex !w-auto items-center gap-2 !py-1.5">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[value] ?? 'bg-fg-muted'}`} />{value}<ChevronDown size={14} className="text-fg-muted" />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[selected] ?? 'bg-fg-muted'}`} />{selected}<ChevronDown size={14} className="text-fg-muted" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
             {options.map((o) => (
-              <button key={o} type="button" onClick={() => { setValue(o); setOpen(false); }}
+              <button key={o} type="button" onClick={() => { setSelected(o); setOpen(false); }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-page">
-                <span className="w-3.5">{value === o && <Check size={13} />}</span>
+                <span className="w-3.5">{selected === o && <Check size={13} />}</span>
                 <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[o] ?? 'bg-fg-muted'}`} />{o}
               </button>
             ))}
@@ -52,7 +63,7 @@ function ColumnsCustomizationPanel({ columns, visible, onApply, onClose }: { col
   const filtered = columns.filter((c) => c.toLowerCase().includes(q.toLowerCase()));
   const toggle = (c: string) => setPending((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
   return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-black/30 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-card border border-border bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-h3 font-medium text-fg">Table Columns</h3>
@@ -81,7 +92,7 @@ function ColumnsCustomizationPanel({ columns, visible, onApply, onClose }: { col
           <button type="button" className="btn-primary" onClick={() => { onApply(pending); onClose(); }}>Apply</button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 
@@ -100,7 +111,7 @@ function ApiRequestModal({ title, onClose }: { title: string; onClose: () => voi
   const path = `/api/v1/network/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   const url = `${origin}${path}`;
   return (
-    <div className="fixed inset-0 z-30 grid place-items-center bg-black/30 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="w-full max-w-2xl rounded-card border border-border bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <h3 className="text-h3 font-medium text-fg">Table Request</h3>
@@ -120,7 +131,7 @@ function ApiRequestModal({ title, onClose }: { title: string; onClose: () => voi
           <a href={`${origin}/api/v1/openapi.json`} target="_blank" rel="noreferrer" className="text-tiny font-medium text-accent-text">View API Docs →</a>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 
@@ -152,12 +163,34 @@ function TableActionsMenu({ columns, visibleColumns, onColumnsChange, resourceNa
   );
 }
 
-function AddEntityForm({ title, columns, onCancel }: { title: string; columns: string[]; onCancel: () => void }) {
+function AddEntityForm({
+  title, columns, onCancel, onSubmit,
+}: {
+  title: string; columns: string[]; onCancel: () => void;
+  onSubmit?: (values: Record<string, string>) => Promise<boolean>;
+}) {
   const fields = columns.filter((c) => !SYSTEM_COLUMNS.has(c));
   const [v, setV] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!onSubmit) { onCancel(); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      if (await onSubmit(v)) onCancel();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="card mb-3 space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
+      {error && <p className="text-small text-danger-text">{error}</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {fields.map((f, i) => (
           <Field key={f} label={i < 2 ? `${f} *` : f}>
@@ -166,21 +199,56 @@ function AddEntityForm({ title, columns, onCancel }: { title: string; columns: s
         ))}
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
-        <button title="Not available yet" className="btn-primary" onClick={onCancel}>{title}</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="btn-primary" disabled={busy} onClick={submit}>
+          {busy ? 'Saving…' : title}
+        </button>
       </div>
     </div>
   );
 }
 
-export function EmptyShellTable({ columns, addLabel, entityName, search = true, status, left }: { columns: string[]; addLabel?: string; entityName?: string; search?: boolean; status?: string; left?: ReactNode }) {
+export interface ShellRow {
+  id: string;
+  cells: Record<string, string>;
+}
+
+export function EmptyShellTable({
+  columns, addLabel, entityName, search = true, status, statusFilter, onStatusFilterChange, left,
+  rows, loading, onAddSubmit, onDelete,
+}: {
+  columns: string[]; addLabel?: string; entityName?: string; search?: boolean; status?: string; left?: ReactNode;
+  /** Controlled status filter (All / Active / Inactive / Deleted). */
+  statusFilter?: string;
+  onStatusFilterChange?: (next: string) => void;
+  /** When set, table shows live data and add form saves via API. */
+  rows?: ShellRow[];
+  loading?: boolean;
+  onAddSubmit?: (values: Record<string, string>) => Promise<boolean>;
+  onDelete?: (id: string) => Promise<void>;
+}) {
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState(columns);
   const shown = visibleColumns.length ? visibleColumns : columns;
+  const wired = Boolean(onAddSubmit || rows);
+
+  const filtered = (rows ?? []).filter((row) => {
+    if (!q.trim()) return true;
+    const needle = q.toLowerCase();
+    return Object.values(row.cells).some((v) => v.toLowerCase().includes(needle));
+  });
+
   return (
     <div>
-      {adding && <AddEntityForm title={`Add ${entityName ?? addLabel}`} columns={columns} onCancel={() => setAdding(false)} />}
+      {adding && (
+        <AddEntityForm
+          title={`Add ${entityName ?? addLabel}`}
+          columns={columns}
+          onCancel={() => setAdding(false)}
+          onSubmit={onAddSubmit}
+        />
+      )}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         {left ?? (addLabel ? (
           <button className="btn-primary" onClick={() => setAdding(true)}>+ {addLabel}</button>
@@ -191,7 +259,13 @@ export function EmptyShellTable({ columns, addLabel, entityName, search = true, 
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="input !w-56 !pl-8" />
             </div>
-            {status && <StatusFilter initial={status} />}
+            {status && (
+              <StatusFilter
+                initial={status}
+                value={statusFilter}
+                onChange={onStatusFilterChange}
+              />
+            )}
             <TableActionsMenu columns={columns} visibleColumns={shown} onColumnsChange={setVisibleColumns} resourceName={entityName ?? addLabel ?? 'table'} />
           </div>
         )}
@@ -199,15 +273,31 @@ export function EmptyShellTable({ columns, addLabel, entityName, search = true, 
       <div className="overflow-x-auto rounded-card border border-border">
         <table className="w-full min-w-[640px] text-left text-body">
           <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-            <tr className="divide-x divide-border">{shown.map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}</tr>
+            <tr className="divide-x divide-border">{shown.map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}{onDelete && <th className="whitespace-nowrap px-4 py-3 font-semibold" />}</tr>
           </thead>
           <tbody className="divide-y divide-border">
-            <tr><td colSpan={shown.length} className="px-4 py-10 text-center text-small italic text-fg-muted">No Record Found</td></tr>
+            {loading ? (
+              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="px-4 py-10 text-center text-small text-fg-muted">Loading…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="px-4 py-10 text-center text-small italic text-fg-muted">No Record Found</td></tr>
+            ) : filtered.map((row) => (
+              <tr key={row.id} className="divide-x divide-border">
+                {shown.map((c) => (
+                  <td key={c} className="whitespace-nowrap px-4 py-3 text-small text-fg-secondary">{row.cells[c] ?? '—'}</td>
+                ))}
+                {onDelete && (
+                  <td className="px-4 py-3 text-right">
+                    <button type="button" className="text-tiny text-danger-text hover:underline"
+                      onClick={() => onDelete(row.id)}>Delete</button>
+                  </td>
+                )}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
       <div className="mt-2 flex justify-end">
-        <Pagination total={0} page={1} pageSize={25} onPageChange={() => {}} />
+        <Pagination total={wired ? filtered.length : 0} page={1} pageSize={25} onPageChange={() => {}} />
       </div>
     </div>
   );

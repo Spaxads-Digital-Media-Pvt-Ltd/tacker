@@ -3,7 +3,7 @@
  * pointed at the tracking surface's real `/sl` smart-link resolver instead of `/click`. */
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { Field } from '../../components/ui';
+import { Field, Overlay } from '../../components/ui';
 import { CopyBox } from '../../components/CopyBox';
 import { useQuery } from '../../lib/useApi';
 import type { Publisher, TrackingDomain } from '../../types';
@@ -24,7 +24,7 @@ export function SmartLinkTrackingLinksModal({ smartLink, domains, onClose }: { s
   }, [pubId, trackBase, smartLink.id]);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+    <Overlay onClose={onClose}>
       <div className="max-h-[85vh] w-full max-w-2xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold tracking-tight text-fg">Smart Link Tracking Links</h2>
@@ -60,6 +60,6 @@ export function SmartLinkTrackingLinksModal({ smartLink, domains, onClose }: { s
           </div>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

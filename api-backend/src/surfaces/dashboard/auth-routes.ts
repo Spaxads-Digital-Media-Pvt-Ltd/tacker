@@ -17,6 +17,7 @@ import { validateBody } from '../../lib/http/validate.js';
 import { unauthorized } from '../../lib/http/errors.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { isProd } from '../../config/env.js';
+import { recordLoginEvent } from './control-center/routes.js';
 
 const REFRESH_COOKIE = 'tracker_rt';
 const COOKIE_PATH = '/api/auth';
@@ -72,6 +73,19 @@ export function authRoutes(): Router {
       const { email, password } = req.body as z.infer<typeof loginSchema>;
       const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({ email, password });
       if (error || !data.session || !data.user) throw unauthorized('Invalid email or password.');
+      const meta = (data.user.app_metadata ?? {}) as Record<string, unknown>;
+      const umeta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
+      const networkId = meta['network_id'] ? String(meta['network_id']) : null;
+      if (networkId && meta['kind'] === 'admin') {
+        recordLoginEvent({
+          networkId,
+          userId: data.user.id,
+          employeeName: umeta['name'] ? String(umeta['name']) : null,
+          employeeEmail: data.user.email ?? email,
+          ip: typeof req.ip === 'string' ? req.ip : null,
+          userAgent: req.get('user-agent') ?? null,
+        }).catch(() => {});
+      }
       respondWithSession(res, data.session, data.user, email);
     }),
   );
