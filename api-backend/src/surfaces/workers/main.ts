@@ -11,6 +11,8 @@ import { closeDb } from '../../lib/db/pool.js';
 import { closeRedis } from '../../lib/redis.js';
 import { metricsText, metricsContentType, queueDepth } from '../../lib/metrics.js';
 import { initSentry, flushSentry, captureError } from '../../lib/observability/sentry.js';
+import { installClickHouseAnalyticsWriter } from '../../lib/analytics/clickhouse-writer.js';
+import { installClickHouseReportingProvider } from '../../lib/reporting/clickhouse.js';
 import { QUEUE, getQueue, type QueueName } from './queues.js';
 import { startClickPersistWorker } from './processors/click-persist.js';
 import { startOutboundPostbackWorker } from './processors/outbound-postback.js';
@@ -22,6 +24,10 @@ import { startOfferFeedSyncWorker, scheduleOfferFeedScan } from './processors/of
 const log = surfaceLogger('workers');
 
 void initSentry('workers'); // no-op unless SENTRY_DSN is set
+
+// Phase 8: install ClickHouse-backed AnalyticsWriter + ReportingProvider if configured.
+installClickHouseAnalyticsWriter();
+installClickHouseReportingProvider();
 
 // Phase 2: click persistence. Phase 3: outbound postbacks. Phase 6: fraud scan. Phase 8: retention.
 const workers = [

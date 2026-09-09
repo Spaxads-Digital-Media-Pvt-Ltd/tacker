@@ -28,7 +28,18 @@ const schema = z.object({
 
   REDIS_URL: z.string().url(),
 
-  TRACKING_BASE_DOMAIN: z.string().min(1).default('ourtracking.com'),
+ // --- ClickHouse analytics store (Phase 8) ---
+ // Optional so the app boots without ClickHouse configured (Phase 0-7 do not need it).
+ // When unset, getClickHouse() throws at first use; callers that need it must guard
+ // with isClickHouseEnabled() before touching the client.
+ CLICKHOUSE_URL: z.string().url().optional(),
+ CLICKHOUSE_DATABASE: z.string().min(1).default('tracker'),
+ CLICKHOUSE_USER: z.string().min(1).default('default'),
+ CLICKHOUSE_PASSWORD: z.string().min(1).optional(),
+ CLICKHOUSE_REQUEST_TIMEOUT: z.coerce.number().int().positive().default(10_000),
+ CLICKHOUSE_MAX_OPEN_CONNECTIONS: z.coerce.number().int().positive().default(10),
+
+ TRACKING_BASE_DOMAIN: z.string().min(1).default('ourtracking.com'),
 
   PORT_DASHBOARD: z.coerce.number().int().positive().default(4001),
   PORT_TRACKING: z.coerce.number().int().positive().default(4002),

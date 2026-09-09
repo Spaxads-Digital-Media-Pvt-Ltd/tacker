@@ -21,6 +21,7 @@ import { evaluateCustomerValueRules, recordCustomerValueFiring } from '../../../
 import { enqueueOutboundPostback } from './enqueue-postback.js';
 import { enqueueFacebookCapi } from '../../../lib/integrations/enqueue.js';
 import { loadIntegrations } from '../../../lib/integrations/settings.js';
+import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 
 export type ConversionOutcome =
   | 'approved' | 'pending' | 'rejected' | 'duplicate' | 'click_not_found' | 'security_failed';
@@ -250,7 +251,46 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
 
   if (!insertedOk) return { outcome: 'duplicate' };
 
-  // Fire the publisher's outbound postback only for approved conversions (spec §6).
+ // Phase 8: mirror the conversion event into the analytics store (best-effort — Postgres is
+ // source of truth, AnalyticsWriter swallows its own errors). geo/device fields come from the
+ // originating click when denormalized onto a future Phase 8.5 schema; for now the
+ // conversion flow only has access to the StoredClick subset, so those are recorded as null.
+  await getAnalyticsWriter().writeConversions([
+ {
+ conversionId,
+ clickId: input.clickId,
+ networkId: input.networkId,
+ offerId: click.offer_id,
+ publisherId: click.publisher_id ?? '',
+ timestamp: new Date().toISOString(),
+ advertiserId,
+ goalId,
+ status,
+ reason,
+ source: input.source,
+  eventName: input.event,
+ country: null,
+ region: null,
+ city: null,
+ isp: null,
+ device: null,
+ os: null,
+ browser: null,
+ sub1: click.sub1,
+ sub2: click.sub2,
+ sub3: click.sub3,
+ sub4: click.sub4,
+  sub5: click.sub5,
+ smartLinkId: null,
+  fraudScore,
+ fraudFlags,
+ payout,
+ revenue,
+ currency,
+ },
+ ]);
+
+ // Fire the publisher's outbound postback only for approved conversions (spec §6).
   if (status === 'approved') {
     await enqueueOutboundPostback({
       networkId: input.networkId,
