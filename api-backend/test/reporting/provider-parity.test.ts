@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { ClickHouseReportingProvider, installClickHouseReportingProvider } from '../../src/lib/reporting/clickhouse.js';
+import { ClickHouseReportingProvider, installReportingProvider } from '../../src/lib/reporting/clickhouse.js';
 import { PostgresReportingProvider } from '../../src/lib/reporting/postgres.js';
 import { getClickHouse } from '../../src/lib/clickhouse/client.js';
 import { query, closeDb } from '../../src/lib/db/pool.js';
@@ -155,7 +155,7 @@ async function cleanup(): Promise<void> {
 describe('Postgres vs ClickHouse provider parity', () => {
  beforeAll(async () => {
  if (SKIP) return;
- installClickHouseReportingProvider();
+ installReportingProvider();
  try {
  await setupPg();
  await setupCh();
@@ -176,7 +176,7 @@ describe('Postgres vs ClickHouse provider parity', () => {
  filters: { from: FROM, to: TO }, limit: 1, offset: 0,
  };
  const pg = await new PostgresReportingProvider().runReport(req);
- const ch = await new ClickHouseReportingProvider().runReport(req);
+ const ch = await new ClickHouseReportingProvider(getClickHouse()).runReport(req);
  const pgRow = pg.rows[0]!.metrics;
  const chRow = ch.rows[0]!.metrics;
  const close = (a: number, b: number) => Math.abs(a - b) < 0.01;
@@ -195,7 +195,7 @@ describe('Postgres vs ClickHouse provider parity', () => {
  filters: { from: FROM, to: TO }, limit: 100, offset: 0,
  };
  const pg = await new PostgresReportingProvider().runReport(req);
- const ch = await new ClickHouseReportingProvider().runReport(req);
+ const ch = await new ClickHouseReportingProvider(getClickHouse()).runReport(req);
  const build = (src: (typeof pg.rows)) => {
  const m = new Map<string, number>();
  for (const r of src) {
@@ -219,7 +219,7 @@ describe('Postgres vs ClickHouse provider parity', () => {
  filters: { from: FROM, to: TO }, limit: 100, offset: 0,
  };
  const pg = await new PostgresReportingProvider().runReport(req);
- const ch = await new ClickHouseReportingProvider().runReport(req);
+ const ch = await new ClickHouseReportingProvider(getClickHouse()).runReport(req);
  const build = (src: (typeof pg.rows)) => {
  const m = new Map<string, number>();
  for (const r of src) {
@@ -242,7 +242,7 @@ describe('Postgres vs ClickHouse provider parity', () => {
  groupBy: ['offer'], metrics: ['clicks'],
  filters: { from: FROM, to: TO }, limit: 100, offset: 0,
  };
- const ch = await new ClickHouseReportingProvider().runReport(req);
+ const ch = await new ClickHouseReportingProvider(getClickHouse()).runReport(req);
  expect(ch.rows).toHaveLength(0);
  expect(ch.total).toBe(0);
  });

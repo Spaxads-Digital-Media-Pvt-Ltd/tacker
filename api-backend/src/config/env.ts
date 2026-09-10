@@ -39,6 +39,10 @@ const schema = z.object({
  CLICKHOUSE_REQUEST_TIMEOUT: z.coerce.number().int().positive().default(10_000),
  CLICKHOUSE_MAX_OPEN_CONNECTIONS: z.coerce.number().int().positive().default(10),
 
+ REPORTING_PROVIDER: z
+ .enum(['postgres', 'clickhouse', 'clickhouse_with_fallback'])
+ .default('postgres'),
+
  TRACKING_BASE_DOMAIN: z.string().min(1).default('ourtracking.com'),
 
   PORT_DASHBOARD: z.coerce.number().int().positive().default(4001),

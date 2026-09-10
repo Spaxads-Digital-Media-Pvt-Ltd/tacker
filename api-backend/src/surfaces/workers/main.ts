@@ -12,7 +12,8 @@ import { closeRedis } from '../../lib/redis.js';
 import { metricsText, metricsContentType, queueDepth } from '../../lib/metrics.js';
 import { initSentry, flushSentry, captureError } from '../../lib/observability/sentry.js';
 import { installClickHouseAnalyticsWriter } from '../../lib/analytics/clickhouse-writer.js';
-import { installClickHouseReportingProvider } from '../../lib/reporting/clickhouse.js';
+import { installReportingProvider } from '../../lib/reporting/clickhouse.js';
+import { closeClickHouse, isClickHouseEnabled } from '../../lib/clickhouse/client.js';
 import { QUEUE, getQueue, type QueueName } from './queues.js';
 import { startClickPersistWorker } from './processors/click-persist.js';
 import { startOutboundPostbackWorker } from './processors/outbound-postback.js';
@@ -27,7 +28,7 @@ void initSentry('workers'); // no-op unless SENTRY_DSN is set
 
 // Phase 8: install ClickHouse-backed AnalyticsWriter + ReportingProvider if configured.
 installClickHouseAnalyticsWriter();
-installClickHouseReportingProvider();
+installReportingProvider();
 
 // Phase 2: click persistence. Phase 3: outbound postbacks. Phase 6: fraud scan. Phase 8: retention.
 const workers = [
@@ -95,7 +96,13 @@ const shutdown = async (signal: string) => {
   log.info({ signal }, 'shutting down workers');
   clearInterval(depthTimer);
   probe.close();
-  await Promise.allSettled([...workers.map((w) => w.close()), flushSentry(), closeDb(), closeRedis()]);
+  await Promise.allSettled([
+ ...workers.map((w) => w.close()),
+ flushSentry(),
+ closeDb(),
+ closeRedis(),
+ ...(isClickHouseEnabled() ? [closeClickHouse()] : []),
+ ]);
   process.exit(0);
 };
 process.on('SIGTERM', () => void shutdown('SIGTERM'));

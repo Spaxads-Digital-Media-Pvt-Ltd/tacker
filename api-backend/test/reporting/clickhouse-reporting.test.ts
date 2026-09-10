@@ -291,31 +291,70 @@ describe('ClickHouseReportingProvider — SQL structure', () => {
  });
 });
 
-describe('installClickHouseReportingProvider', () => {
+describe('installReportingProvider', () => {
  beforeEach(() => vi.resetModules());
 
- it('installs the ClickHouse provider when configured', async () => {
+ it('installs Postgres provider when REPORTING_PROVIDER=postgres', async () => {
+ vi.doMock('../../src/config/env.js', () => ({
+ env: { REPORTING_PROVIDER: 'postgres', NODE_ENV: 'test', LOG_LEVEL: 'info' },
+ isProd: false, isTest: true,
+ }));
+ const { installReportingProvider } = await import('../../src/lib/reporting/clickhouse.js');
+ const { getReportingProvider } = await import('../../src/lib/reporting/index.js');
+ const active = installReportingProvider();
+ expect(active).toBe('postgres');
+ const inst = getReportingProvider();
+ expect(inst.constructor.name).toBe('PostgresReportingProvider');
+ });
+
+ it('installs ClickHouse provider when REPORTING_PROVIDER=clickhouse and CH is configured', async () => {
+ vi.doMock('../../src/config/env.js', () => ({
+ env: { REPORTING_PROVIDER: 'clickhouse', NODE_ENV: 'test', LOG_LEVEL: 'info' },
+ isProd: false, isTest: true,
+ }));
  vi.doMock('../../src/lib/clickhouse/client.js', () => ({
  isClickHouseEnabled: () => true,
  getClickHouse: () => ({ query: vi.fn() } as unknown as ClickHouseClient),
  }));
- const { installClickHouseReportingProvider } = await import('../../src/lib/reporting/clickhouse.js');
- const ok = installClickHouseReportingProvider();
- expect(ok).toBe(true);
- const inst = (await import('../../src/lib/reporting/index.js')).getReportingProvider();
+ const { installReportingProvider } = await import('../../src/lib/reporting/clickhouse.js');
+ const { getReportingProvider } = await import('../../src/lib/reporting/index.js');
+ const active = installReportingProvider();
+ expect(active).toBe('clickhouse');
+ const inst = getReportingProvider();
  expect(inst.constructor.name).toBe('ClickHouseReportingProvider');
  });
 
- it('leaves the Postgres provider installed when ClickHouse is not configured', async () => {
+ it('installs ClickHouseWithFallback provider when REPORTING_PROVIDER=clickhouse_with_fallback and CH is configured', async () => {
+ vi.doMock('../../src/config/env.js', () => ({
+ env: { REPORTING_PROVIDER: 'clickhouse_with_fallback', NODE_ENV: 'test', LOG_LEVEL: 'info' },
+ isProd: false, isTest: true,
+ }));
+ vi.doMock('../../src/lib/clickhouse/client.js', () => ({
+ isClickHouseEnabled: () => true,
+ getClickHouse: () => ({ query: vi.fn() } as unknown as ClickHouseClient),
+ }));
+ const { installReportingProvider } = await import('../../src/lib/reporting/clickhouse.js');
+ const { getReportingProvider } = await import('../../src/lib/reporting/index.js');
+ const active = installReportingProvider();
+ expect(active).toBe('clickhouse_with_fallback');
+ const inst = getReportingProvider();
+ expect(inst.constructor.name).toBe('ClickHouseWithFallbackReportingProvider');
+ });
+
+ it('falls back to Postgres when CH mode requested but CLICKHOUSE_URL is not set (must never crash at boot)', async () => {
+ vi.doMock('../../src/config/env.js', () => ({
+ env: { REPORTING_PROVIDER: 'clickhouse', NODE_ENV: 'test', LOG_LEVEL: 'info' },
+ isProd: false, isTest: true,
+ }));
  vi.doMock('../../src/lib/clickhouse/client.js', () => ({
  isClickHouseEnabled: () => false,
  getClickHouse: () => { throw new Error('should not be called'); },
  }));
- const { installClickHouseReportingProvider } = await import('../../src/lib/reporting/clickhouse.js');
- const ok = installClickHouseReportingProvider();
- expect(ok).toBe(false);
- // Postgres provider should still be in place (default from index.js).
- const inst = (await import('../../src/lib/reporting/index.js')).getReportingProvider();
+ const { installReportingProvider } = await import('../../src/lib/reporting/clickhouse.js');
+ const { getReportingProvider } = await import('../../src/lib/reporting/index.js');
+ const active = installReportingProvider();
+ expect(active).toBe('postgres');
+ const inst = getReportingProvider();
  expect(inst.constructor.name).toBe('PostgresReportingProvider');
  });
 });
