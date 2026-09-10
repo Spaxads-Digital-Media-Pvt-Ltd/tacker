@@ -24,7 +24,7 @@ const schema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
 
-  PLATFORM_ADMIN_JWT_SECRET: z.string().min(1).optional(),
+  PLATFORM_ADMIN_JWT_SECRET: z.string().min(1),
 
   REDIS_URL: z.string().url(),
 
@@ -44,6 +44,9 @@ const schema = z.object({
  .default('postgres'),
 
  TRACKING_BASE_DOMAIN: z.string().min(1).default('ourtracking.com'),
+ TRACKING_TRUSTED_PROXIES: z.string().optional(), // comma-sep trusted IPs/CIDRs; loopback always trusted
+ TRACKING_ALLOWED_HOSTS: z.string().optional(), // comma-sep allowlist; empty = all (after validation)
+ TRACKING_REJECT_RAW_IPS: z.coerce.boolean().default(true),
 
   PORT_DASHBOARD: z.coerce.number().int().positive().default(4001),
   PORT_TRACKING: z.coerce.number().int().positive().default(4002),

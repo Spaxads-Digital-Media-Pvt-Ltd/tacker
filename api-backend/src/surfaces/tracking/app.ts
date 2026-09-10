@@ -73,12 +73,70 @@ function divertToCatchAll(reply: FastifyReply, catchAllOfferId: string | null): 
   return reply.code(204).send();
 }
 
+
+// Defense-in-depth (M-1): the tracking surface has no per-request auth, so the Host and
+// X-Forwarded-For headers cannot be trusted unless the immediate socket peer is a known proxy.
+// Cloudflare + nginx must be the only direct front-ends. A direct-connect attacker who bypasses
+// them hits this check regardless of host-header spoofing. Skipped in dev/test for local work.
+const CLOUDFLARE_IPV4 = [
+ '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+ '141.101.64.0/18', '188.114.96.0/19', '190.93.240.0/20', '197.234.240.0/22',
+ '198.41.128.0/17', '162.158.0.0/16', '104.16.0.0/12', '108.162.192.0/18',
+ '131.0.72.0/22', '141.0.0.0/9', '162.247.74.0/23', '172.64.0.0/13',
+ '173.0.0.0/8', '185.45.0.0/22', '188.68.0.0/22', '194.36.144.0/20',
+ '197.0.0.0/9', '198.51.100.0/24', '203.119.32.0/22', '203.32.120.0/22',
+];
+
+function ipInCidr(ip: string, cidr: string): boolean {
+ const [net, bits] = cidr.split('/');
+ const bitsNum = Number(bits ?? '0');
+ const mask = bitsNum === 0 ? 0 : (~0 << (32 - bitsNum)) >>> 0;
+ const ipNum = ip.split('.').reduce((a, b) => (a << 8) + Number(b), 0) >>> 0;
+ const netParts = net!.split('.');
+ const netNum = netParts.reduce((a, b) => (a << 8) + Number(b), 0) >>> 0;
+ return (ipNum & mask) === (netNum & mask);
+}
+
+function isTrustedProxy(ip: string): boolean {
+ if (!ip) return false;
+ const bare = ip.replace(/^::ffff:/i, '').replace(/^::1$/, '127.0.0.1');
+ const parts = bare.split('.');
+ const allNumeric = parts.length === 4 && parts.every(p => /^\d+$/.test(p));
+ if (allNumeric) {
+ if (bare === '127.0.0.1' || bare === '0.0.0.0') return true;
+ for (const cidr of CLOUDFLARE_IPV4) {
+ if (ipInCidr(bare, cidr)) return true;
+ }
+ }
+ if (env.TRACKING_TRUSTED_PROXIES) {
+ for (const extra of env.TRACKING_TRUSTED_PROXIES.split(',').map(s => s.trim()).filter(Boolean)) {
+ if (extra.includes('/')) {
+ if (allNumeric && ipInCidr(bare, extra)) return true;
+ } else {
+ if (bare === extra) return true;
+ }
+ }
+ }
+ return false;
+}
+
 export function buildTrackingApp(): FastifyInstance {
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
     trustProxy: true, // Cloudflare → Nginx → us; req.ip is the real client IP.
     disableRequestLogging: true, // hot path: we log our own compact line
   });
+
+ // Defense-in-depth (M-1): reject direct (non-proxied) connections that could spoof Host /
+ // X-Forwarded-For headers. Skipped in dev/test so local development still works.
+ app.addHook('onRequest', async (req, reply) => {
+ if (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') return;
+ const raw = req as unknown as { socket?: { remoteAddress?: string } };
+ if (!isTrustedProxy(raw.socket?.remoteAddress ?? '')) {
+ return reply.code(403).send({ error: 'forbidden' });
+ }
+ });
+
 
   // Report unexpected handler errors to Sentry (no-op when disabled), then hand back to Fastify's
   // default error response — the hot path must still fail fast and cheap.

@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+export const loginSchema = z.object({
+ email: z.string().email(),
+ password: z.string().min(8).max(200),
+});
+
 export const createNetworkSchema = z.object({
   name: z.string().min(1).max(200),
   slug: z.string().min(1).max(63).regex(/^[a-z0-9-]+$/, 'lowercase letters, digits, hyphens'),
@@ -35,6 +40,8 @@ export const assignSubscriptionSchema = z.object({
   currentPeriodEnd: z.string().datetime().optional(),
   renewsAt: z.string().datetime().optional(),
 });
+
+export type Login = z.infer<typeof loginSchema>;
 
 export type CreateNetwork = z.infer<typeof createNetworkSchema>;
 export type UpdateNetwork = z.infer<typeof updateNetworkSchema>;
