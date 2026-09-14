@@ -41,7 +41,8 @@
     "smoke": "tsx scripts/smoke.ts",
     "test": "vitest run",
     "test:isolation": "vitest run test/isolation",
-    "migrate:clickhouse": "tsx src/lib/clickhouse/cli-migrate.ts"
+    "migrate:clickhouse": "tsx src/lib/clickhouse/cli-migrate.ts",
+    "backup:postgres": "tsx scripts/backup-postgres.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",

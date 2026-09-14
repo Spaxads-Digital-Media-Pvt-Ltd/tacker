@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { env } from '../../config/env.js';
-import { buildHealthReport } from '../../lib/http/health.js';
+import { buildHealthReport, buildLivenessReport, buildReadinessReport } from '../../lib/http/health.js';
 import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
 import { lookupGeo, geoAvailable } from '../../lib/geo/geoip.js';
 import { parseUA } from '../../lib/ua.js';
@@ -151,7 +151,16 @@ export function buildTrackingApp(): FastifyInstance {
     return reply.code(report.status === 'ok' ? 200 : 503).send(report);
   });
 
-  // Prometheus scrape endpoint (spec §2). Fastify has no res buffering concern here.
+  app.get('/healthz', (_req, reply) => {
+ return reply.code(200).send(buildLivenessReport('tracking'));
+ });
+
+ app.get('/readyz', async (_req, reply) => {
+ const report = await buildReadinessReport('tracking');
+ return reply.code(report.status === 'unready' ? 503 : 200).send(report);
+ });
+
+ // Prometheus scrape endpoint (spec §2). Fastify has no res buffering concern here.
   app.get('/metrics', async (_req, reply) => {
     return reply.header('content-type', metricsContentType).send(await metricsText());
   });
