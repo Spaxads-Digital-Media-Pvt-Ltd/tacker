@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-14
 **Branch:** dev-gauri
-**Commits:** `1e2139c`, `372758c`, `88e1423`, `d34e849`
+**Commits:** `1e2139c`, `372758c`, `88e1423`, `d34e849`, `dfa8ebf`
 
 ---
 
@@ -119,7 +119,6 @@ New `scripts/migrate-status.ts` — lists applied vs pending migrations. Usage: 
 
 | Priority | Gap |
 |----------|-----|
-| Medium | Add BullMQ queue depth check to health endpoint |
 | Medium | Per-surface Postgres pool limits (PgBouncer sidecar) |
 | Medium | ClickHouse replicas + Distributed table |
 | Medium | Run EXPLAIN ANALYZE on top query paths and document indexes |
@@ -148,3 +147,7 @@ New `scripts/migrate-status.ts` — lists applied vs pending migrations. Usage: 
 | `api-backend/src/surfaces/workers/main.ts` | `/healthz` + `/readyz` |
 | `api-backend/package.json` | Add `migrate:status` |
 | `api-backend/scripts/backup-postgres.ts` | Fix import path |
+| `api-backend/src/lib/queues.ts` | **NEW** — shared queue registry |
+| `api-backend/src/lib/http/health.ts` | +26 lines — queue depth in readiness |
+| `api-backend/src/lib/integrations/enqueue.ts` | Update import path |
+| `api-backend/src/surfaces/workers/queues.ts` | Re-export from shared module |
