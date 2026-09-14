@@ -13,9 +13,12 @@
  * /health is kept as an alias for /readyz for backward compat with existing probes.
  */
 import { statfs } from 'node:fs/promises';
+import { Queue, ConnectionOptions } from 'bullmq';
 import { pingDb, getPoolStats } from '../db/pool.js';
 import { pingRedis } from '../redis.js';
 import { pingClickHouse, isClickHouseEnabled } from '../clickhouse/client.js';
+import { makeQueueConnection } from '../redis.js';
+import { QUEUE } from '../queues.js';
 import { BRAND } from '../../config/branding.js';
 import { env } from '../../config/env.js';
 
@@ -34,6 +37,8 @@ export interface HealthReport {
  pool?: { total: number; idle: number; waiting: number; utilization: number };
  /** Disk usage on the volume backing the process. null on Windows or if statfs fails. */
  disk?: { path: string; usedPct: number; freeBytes: number; totalBytes: number };
+ /** BullMQ queue backlog snapshot. Omitted when Redis is unreachable. */
+ queues?: Record<string, { waiting: number; active: number; delayed: number; total: number }>;
  timestamp: string;
 }
 
@@ -50,6 +55,25 @@ async function diskUsage(path: string): Promise<{ path: string; usedPct: number;
  return null;
  }
 }
+
+ async function sampleQueueDepth(): Promise<Record<string, { waiting: number; active: number; delayed: number; total: number }> | null> {
+ const out: Record<string, { waiting: number; active: number; delayed: number; total: number }> = {};
+ const names = Object.values(QUEUE);
+ for (const name of names) {
+ try {
+ const q = new Queue(name, { connection: makeQueueConnection() as unknown as ConnectionOptions });
+ const c = await q.getJobCounts('waiting', 'active', 'delayed');
+ const waiting = c.waiting ?? 0;
+ const active = c.active ?? 0;
+ const delayed = c.delayed ?? 0;
+ out[name] = { waiting, active, delayed, total: waiting + active + delayed };
+ await q.close();
+ } catch {
+ return null;
+ }
+ }
+ return out;
+ }
 
 async function probeDependencies(): Promise<HealthReport> {
  const service = 'unknown';
@@ -77,6 +101,7 @@ async function probeDependencies(): Promise<HealthReport> {
  const utilization = maxPool > 0 ? Math.round((stats.total - stats.idle) / maxPool * 100) : 0;
 
  const disk = await diskUsage('/');
+ const queues = redis ? await sampleQueueDepth() : null;
 
  const report: HealthReport = {
  service,
@@ -90,6 +115,7 @@ async function probeDependencies(): Promise<HealthReport> {
  timestamp: new Date().toISOString(),
  };
  if (disk) report.disk = disk;
+ if (queues) report.queues = queues;
  return report;
 }
 

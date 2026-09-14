@@ -1,8 +1,8 @@
 # Production Readiness Implementation — Section 2 & 3
 
 **Date:** 2026-09-14
-**Branch:** dev-gauri → main
-**Commits:** `1e2139c`, `372758c`, `88e1423`
+**Branch:** dev-gauri
+**Commits:** `1e2139c`, `372758c`, `88e1423`, `d34e849`
 
 ---
 
@@ -43,8 +43,8 @@ Connection pooling, migrations, retention, health endpoints, ClickHouse fallback
 
 | Component | Status | Gaps |
 |-----------|--------|------|
-| Postgres migrations (61 files) | PASS | 1 |
-| ClickHouse migrations (3 files) | PASS | 1 |
+| Postgres migrations | PASS | 1 |
+| ClickHouse migrations | PASS | 1 |
 | Connection pooling | PASS | 2 |
 | Redis | PASS | 3 |
 | ClickHouse | PASS | 3 |
@@ -61,119 +61,90 @@ Connection pooling, migrations, retention, health endpoints, ClickHouse fallback
 
 ---
 
-## Critical Fixes Implemented (`88e1423`)
-
-Three of the 15 gaps were addressed (all critical priority).
+## Batch 1: Critical Fixes (`88e1423`)
 
 ### 1. Health Endpoint Split: `/healthz` + `/readyz`
 
-**Problem:** Only tracking and workers had a `/health` endpoint. Dashboard, public-api, and platform-admin had none. A single `/health` endpoint cannot distinguish "process alive" from "ready to serve traffic."
-
-**Solution:**
-
 | Endpoint | Purpose | Response | Use case |
 |----------|---------|----------|----------|
-| `/healthz` | Liveness — process can answer | Always 200 | k8s livenessProbe (restart if fails) |
-| `/readyz` | Readiness — all dependencies healthy | 200 or 503 | k8s readinessProbe (route traffic if ready) |
+| `/healthz` | Liveness — process can answer | Always 200 | k8s livenessProbe |
+| `/readyz` | Readiness — all dependencies healthy | 200 or 503 | k8s readinessProbe |
 | `/health` | Backward-compatible alias for `/readyz` | 200 or 503 | Existing probes |
 
-**Files changed:**
-
-- [`src/lib/http/health.ts`](api-backend/src/lib/http/health.ts) — Added `buildLivenessReport()` (no DB calls, always 200) and `buildReadinessReport()` (full dependency checks). Added `mountHealthRoutes()` helper for Express surfaces.
-- [`src/surfaces/dashboard/main.ts`](api-backend/src/surfaces/dashboard/main.ts) — Mounted via `mountHealthRoutes(app, 'dashboard')`
-- [`src/surfaces/public-api/main.ts`](api-backend/src/surfaces/public-api/main.ts) — Mounted via `mountHealthRoutes(app, 'public-api')`
-- [`src/surfaces/platform-admin/main.ts`](api-backend/src/surfaces/platform-admin/main.ts) — Mounted via `mountHealthRoutes(app, 'platform-admin')`
-- [`src/surfaces/tracking/app.ts`](api-backend/src/surfaces/tracking/app.ts) — Added Fastify handlers for `/healthz` and `/readyz`
-- [`src/surfaces/workers/main.ts`](api-backend/src/surfaces/workers/main.ts) — Added raw http handlers for `/healthz` and `/readyz`
-
-**Readiness policy:**
-- `ok` → 200 (all dependencies healthy)
-- `degraded` → 200 (PG or Redis down, but fallback available)
-- `unready` → 503 (critical dependency down, cannot serve)
+Files: `src/lib/http/health.ts` (added `buildLivenessReport`, `buildReadinessReport`, `mountHealthRoutes`), all 5 surfaces mounted.
 
 ### 2. VACUUM After Retention
 
-**Problem:** Batch deletes leave dead tuples that accumulate and degrade query performance. No `VACUUM` was run after retention pruning.
-
-**Solution:**
-
-- Added `vacuumAfterRetention()` function in [`src/lib/retention/retention.ts`](api-backend/src/lib/retention/retention.ts)
-- Runs `VACUUM (ANALYZE)` on tables that had deletions, only when deletions actually occurred
-- Zero overhead when nothing was pruned
-- Logs per-table vacuum results; errors caught and logged but don't fail the retention job
-
-**Behavior:**
-- Clicks deleted → VACUUM `clicks` + `postback_logs`
-- Conversions deleted → VACUUM `conversions`
-- Ledger never touched (append-only)
+`vacuumAfterRetention()` in `src/lib/retention/retention.ts`. Runs `VACUUM (ANALYZE)` on tables that had deletions. Zero overhead on no-op runs.
 
 ### 3. Automated Postgres Backup
 
-**Problem:** No automated backup strategy. Volume loss = total data loss. No off-site storage.
-
-**Solution:**
-
-New file: [`scripts/backup-postgres.ts`](api-backend/scripts/backup-postgres.ts)
-
-**Features:**
-- `pg_dump --format=custom --compress=9 --no-owner --no-privileges`
-- Timestamped filenames: `backup-2026-09-14T15-30-00.dump`
-- Auto-prunes backups older than `BACKUP_RETENTION_DAYS` (default: 7 days)
-- Credentials redacted in logs
-- Errors thrown with clear messages; exit code 1 on failure
-
-**Environment variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | (required) | Target database connection string |
-| `BACKUP_DIR` | `./backups` | Directory for dump files |
-| `BACKUP_RETENTION_DAYS` | `7` | Keep backups for this many days |
-
-**Usage:**
-```
-npm run backup:postgres
-```
-
-**Cron example:**
-```
-0 2 * * * cd /app && npm run backup:postgres >> /var/log/backup.log 2>&1
-```
+New `scripts/backup-postgres.ts` — `pg_dump` custom format with compression, timestamped filenames, auto-pruning (default 7 days). Usage: `npm run backup:postgres`
 
 ---
 
-## Remaining Gaps (Not Yet Implemented)
+## Batch 2: High/Medium Priority Fixes (`d34e849`)
 
-These are documented in [`api-backend/docs/db-redis-clickhouse-readiness.md`](api-backend/docs/db-redis-clickhouse-readiness.md) for future implementation:
+### 4. Partition-Based Retention (High Priority)
+
+**Problem:** ctid batch deletes are O(n) with vacuum pressure.
+
+**Solution:**
+- Migration `1700000062000_partition-retention.sql` converts `clicks`, `conversions`, `postback_logs` to monthly RANGE partitions
+- Updated `retention.ts`:
+ - `ensureMonthlyPartitions()` — idempotently creates partitions for last/current/next/following months
+ - `dropOldPartitions()` — drops whole-month partitions older than cutoff (O(1))
+ - `pruneDefaultOlderThan()` — ctid fallback for partial months and DEFAULT partition
+ - VACUUM only when ctid fallback deleted rows
+
+### 5. Postgres Pool Metrics (Medium Priority)
+
+- `getPoolStats()` in `src/lib/db/pool.ts` exports `total/idle/waiting`
+- `tracker_pg_pool` gauge in `src/lib/metrics.ts`
+- Pool utilization included in `/readyz` response
+
+### 6. Health Endpoint Depth — Disk + Pool (Medium Priority)
+
+`/readyz` now includes:
+- `pool`: { total, idle, waiting, utilization }
+- `disk`: { path, usedPct, freeBytes, totalBytes } from `fs.statfs()`
+
+### 7. migrate:status Script (Medium Priority)
+
+New `scripts/migrate-status.ts` — lists applied vs pending migrations. Usage: `npm run migrate:status`
+
+---
+
+## Remaining Gaps
 
 | Priority | Gap |
 |----------|-----|
-| **High** | Convert retention from ctid batch deletes to partition-based `DROP PARTITION` |
-| **High** | Add Redis Sentinel or managed HA Redis in production |
-| **Medium** | Add per-surface Postgres pool limits (PgBouncer sidecar) |
-| **Medium** | Add connection pool metrics via prom-client |
-| **Medium** | Configure ClickHouse replicas + Distributed table |
-| **Medium** | Add disk space + BullMQ queue depth to health checks |
-| **Medium** | Add `migrate:status` for pre-deploy validation |
-| **Medium** | Run EXPLAIN ANALYZE on top query paths and document indexes |
-| **Low** | Configure ClickHouse user/role access control |
-| **Low** | Add `clickhouse-backup` tooling |
-| **Low** | Add ClickHouse TTL verification job |
+| Medium | Add BullMQ queue depth check to health endpoint |
+| Medium | Per-surface Postgres pool limits (PgBouncer sidecar) |
+| Medium | ClickHouse replicas + Distributed table |
+| Medium | Run EXPLAIN ANALYZE on top query paths and document indexes |
+| Low | ClickHouse user/role access control |
+| Low | clickhouse-backup tooling |
+| Low | ClickHouse TTL verification job |
 
 ---
 
-## Files Changed Summary
+## Files Changed
 
 | File | Change |
 |------|--------|
-| `docs/claude/MULTI_TENANT_ISOLATION_AUDIT.md` | **NEW** — 229 lines |
-| `api-backend/docs/db-redis-clickhouse-readiness.md` | **NEW** — 333 lines |
-| `api-backend/src/lib/http/health.ts` | +65 lines — liveness/readiness split |
-| `api-backend/src/lib/retention/retention.ts` | +17 lines — VACUUM after retention |
-| `api-backend/scripts/backup-postgres.ts` | **NEW** — 93 lines |
+| `docs/claude/MULTI_TENANT_ISOLATION_AUDIT.md` | **NEW** |
+| `api-backend/docs/db-redis-clickhouse-readiness.md` | **NEW** |
+| `api-backend/migrations/1700000062000_partition-retention.sql` | **NEW** |
+| `api-backend/scripts/migrate-status.ts` | **NEW** |
+| `api-backend/src/lib/retention/retention.ts` | +105 lines — partition retention |
+| `api-backend/src/lib/http/health.ts` | +38 lines — disk + pool |
+| `api-backend/src/lib/db/pool.ts` | +6 lines — `getPoolStats()` |
+| `api-backend/src/lib/metrics.ts` | +9 lines — `tracker_pg_pool` gauge |
 | `api-backend/src/surfaces/dashboard/main.ts` | Mount health routes |
 | `api-backend/src/surfaces/public-api/main.ts` | Mount health routes |
 | `api-backend/src/surfaces/platform-admin/main.ts` | Mount health routes |
-| `api-backend/src/surfaces/tracking/app.ts` | Add `/healthz` + `/readyz` |
-| `api-backend/src/surfaces/workers/main.ts` | Add `/healthz` + `/readyz` |
-| `api-backend/package.json` | Add `backup:postgres` script |
+| `api-backend/src/surfaces/tracking/app.ts` | `/healthz` + `/readyz` |
+| `api-backend/src/surfaces/workers/main.ts` | `/healthz` + `/readyz` |
+| `api-backend/package.json` | Add `migrate:status` |
+| `api-backend/scripts/backup-postgres.ts` | Fix import path |
