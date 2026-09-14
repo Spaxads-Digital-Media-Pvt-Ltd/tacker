@@ -12,8 +12,8 @@
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { env } from '../config/env.js';
-import { surfaceLogger } from '../logger.js';
+import { env } from '../src/config/env.js';
+import { surfaceLogger } from '../src/lib/logger.js';
 
 const log = surfaceLogger('backup');
 const BACKUP_DIR = resolve(process.cwd(), env.BACKUP_DIR ?? 'backups');

@@ -12,7 +12,8 @@
  *
  * /health is kept as an alias for /readyz for backward compat with existing probes.
  */
-import { pingDb } from '../db/pool.js';
+import { statfs } from 'node:fs/promises';
+import { pingDb, getPoolStats } from '../db/pool.js';
 import { pingRedis } from '../redis.js';
 import { pingClickHouse, isClickHouseEnabled } from '../clickhouse/client.js';
 import { BRAND } from '../../config/branding.js';
@@ -28,14 +29,32 @@ export interface HealthReport {
  reporting: {
  configured: string;
  active: 'postgres' | 'clickhouse' | 'clickhouse_with_fallback' | 'postgres(fallback)';
-  };
+ };
+ /** Pool utilization snapshot. null if surface has no DB traffic (e.g. workers health probe). */
+ pool?: { total: number; idle: number; waiting: number; utilization: number };
+ /** Disk usage on the volume backing the process. null on Windows or if statfs fails. */
+ disk?: { path: string; usedPct: number; freeBytes: number; totalBytes: number };
  timestamp: string;
+}
+
+/** Disk usage on a path. Returns null if statfs is unavailable or the path doesn't exist. */
+async function diskUsage(path: string): Promise<{ path: string; usedPct: number; freeBytes: number; totalBytes: number } | null> {
+ try {
+ const s = await statfs(path);
+ const totalBytes = s.blocks * s.bsize;
+ const freeBytes = s.bavail * s.bsize;
+ const usedBytes = totalBytes - freeBytes;
+ const usedPct = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 100) : 0;
+ return { path, usedPct, freeBytes, totalBytes };
+ } catch {
+ return null;
+ }
 }
 
 async function probeDependencies(): Promise<HealthReport> {
  const service = 'unknown';
  const [db, redis, chHealthy] = await Promise.all([
-  pingDb(),
+ pingDb(),
  pingRedis(),
  pingClickHouse(),
  ]);
@@ -53,7 +72,13 @@ async function probeDependencies(): Promise<HealthReport> {
  if (!db || !redis) status = 'degraded';
  if (reportingMode === 'clickhouse' && !chHealthy) status = 'degraded';
 
- return {
+ const stats = await getPoolStats();
+ const maxPool = 20; // matches lib/db/pool.ts prod default
+ const utilization = maxPool > 0 ? Math.round((stats.total - stats.idle) / maxPool * 100) : 0;
+
+ const disk = await diskUsage('/');
+
+ const report: HealthReport = {
  service,
  brand: BRAND.name,
  status,
@@ -61,8 +86,11 @@ async function probeDependencies(): Promise<HealthReport> {
  checks: { db, redis, clickhouse: chHealthy },
  clickhouse: { configured: chConfigured, healthy: chHealthy },
  reporting: { configured: reportingMode, active },
+ pool: { ...stats, utilization },
  timestamp: new Date().toISOString(),
  };
+ if (disk) report.disk = disk;
+ return report;
 }
 
 export function buildLivenessReport(service: string): { service: string; status: 'ok'; uptimeSeconds: number } {
@@ -106,5 +134,5 @@ export function mountHealthRoutes(app: { get: (path: string, handler: (req: unkn
  const report = await buildReadinessReport(service);
  const code = report.status === 'ok' ? 200 : 503;
  res.status(code).json(report);
-  });
+ });
 }
