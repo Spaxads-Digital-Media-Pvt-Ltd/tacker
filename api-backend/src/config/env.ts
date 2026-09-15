@@ -28,6 +28,11 @@ const schema = z.object({
 
   REDIS_URL: z.string().url(),
 
+ // --- Tracking surface rate limiting (AP-1 / Task 9.3.3) ---
+ // Requests per IP per sliding window (1-min buckets, 5-bucket window).
+ TRACKING_RL_CLICK_LIMIT: z.coerce.number().int().positive().default(120),
+ TRACKING_RL_POSTBACK_LIMIT: z.coerce.number().int().positive().default(60),
+
  // --- ClickHouse analytics store (Phase 8) ---
  // Optional so the app boots without ClickHouse configured (Phase 0-7 do not need it).
  // When unset, getClickHouse() throws at first use; callers that need it must guard
