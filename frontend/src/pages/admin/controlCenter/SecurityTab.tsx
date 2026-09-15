@@ -268,7 +268,7 @@ function MfaSub() {
   };
 
   const patchEmp = (id: string, part: Partial<EmployeeMfa>) => {
-    setEmp((prev) => ({ ...prev, [id]: { ...prev[id], ...part } }));
+    setEmp((prev: Record<string, EmployeeMfa>) => ({ ...prev, [id]: { ...(prev[id] as EmployeeMfa), ...part } as EmployeeMfa }));
   };
 
   return (

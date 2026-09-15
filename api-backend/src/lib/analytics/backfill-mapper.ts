@@ -26,6 +26,7 @@ export interface PgClickRow {
  resolved_payout: string | null;
  resolved_revenue: string | null;
  currency: string | null;
+ id: string;
 }
 
 export interface PgConversionRow {

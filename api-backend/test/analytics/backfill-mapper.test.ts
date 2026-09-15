@@ -32,6 +32,7 @@ describe('backfill mapper', () => {
  resolved_payout: '10.50',
  resolved_revenue: '20.75',
  currency: 'USD',
+ id: 'ck-1',
  };
 
  const ch = mapPgClickToCh(pg);
@@ -76,6 +77,7 @@ describe('backfill mapper', () => {
  resolved_payout: null,
  resolved_revenue: null,
  currency: null,
+ id: 'ck-2',
  };
  const ch = mapPgClickToCh(pg);
  expect(ch.publisher_id).toBeNull();
@@ -101,6 +103,7 @@ describe('backfill mapper', () => {
  fraud_score: 100000,
  fraud_flags: [],
  resolved_payout: null, resolved_revenue: null, currency: null,
+ id: 'ck-3',
  };
  expect(mapPgClickToCh(pg).fraud_score).toBe;
 
@@ -125,6 +128,7 @@ describe('backfill mapper', () => {
  fraud_score: 0,
  fraud_flags: [],
  resolved_payout: null, resolved_revenue: null, currency: null,
+ id: 'ck-4',
  };
  expect(mapPgClickToCh(pg).ip).toBe('2001:db8::1');
  });
@@ -146,6 +150,7 @@ describe('backfill mapper', () => {
  fraud_score: 0,
  fraud_flags: [],
  resolved_payout: null, resolved_revenue: null, currency: null,
+ id: 'ck-5',
  };
  expect(mapPgClickToCh(pg).is_unique).toBe(0);
 

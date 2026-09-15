@@ -8,7 +8,7 @@ import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../lib/http/pagination.js';
-import { badRequest, notFound, unauthorized, forbidden } from '../../lib/http/errors.js';
+import { badRequest, notFound, unauthorized, forbidden, tooMany } from '../../lib/http/errors.js';
 import { query } from '../../lib/db/pool.js';
 import { pool } from '../../lib/db/pool.js';
 import { writePlatformAudit } from '../../lib/audit.js';
@@ -17,9 +17,18 @@ import { signPlatformAdminToken } from '../../lib/auth/platform-admin-token.js';
 import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import { env } from '../../config/env.js';
 import {
+ checkLoginRateLimit,
+ recordLoginFailure,
+ resetLoginCounter,
+} from '../../lib/auth/login-rate-limit.js';
+import {
  createNetworkSchema, updateNetworkSchema, createPlanSchema, assignSubscriptionSchema, loginSchema,
  type CreateNetwork, type UpdateNetwork, type CreatePlan, type AssignSubscription, type Login,
 } from './schemas.js';
+
+function clientIp(req: { socket?: { remoteAddress?: string } }): string {
+ return req.socket?.remoteAddress ?? 'unknown';
+}
 
 /** Public (no auth) routes — login only. */
 export function publicPlatformRoutes(): Router {
@@ -27,17 +36,31 @@ export function publicPlatformRoutes(): Router {
 
  r.post('/login', validateBody(loginSchema), asyncHandler(async (req, _res) => {
  const b = req.body as Login;
+ const normalizedEmail = b.email.trim().toLowerCase();
+ const ip = clientIp(req);
+
+ const preCheck = await checkLoginRateLimit(ip, normalizedEmail);
+ if (preCheck.limited) {
+ const reason =
+ preCheck.reason === 'account'
+ ? 'Too many failed attempts for this account.'
+ : 'Too many login attempts from this network.';
+ throw tooMany(reason, { retryAfter: preCheck.retryAfterSeconds });
+ }
+
  const { rows } = await query<{ id: string; email: string; status: string; password_hash: string; auth_provider: string }>(
  `SELECT id, email, status, password_hash, auth_provider FROM platform_admins WHERE lower(email) = lower($1) LIMIT 1`,
  [b.email],
  );
  const admin = rows[0];
- if (!admin) throw unauthorized('Invalid email or password.');
- if (admin.auth_provider !== 'local') throw unauthorized('Invalid email or password.');
+ if (!admin) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
+ if (admin.auth_provider !== 'local') { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
  if (admin.status !== 'active') throw forbidden('Account is disabled.');
 
  const valid = await verifyPassword(b.password, admin.password_hash);
- if (!valid) throw unauthorized('Invalid email or password.');
+ if (!valid) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
+
+ await resetLoginCounter(normalizedEmail);
 
  const token = await signPlatformAdminToken(admin.id);
  return sendOk(_res, { token, admin: { id: admin.id, email: admin.email } });
