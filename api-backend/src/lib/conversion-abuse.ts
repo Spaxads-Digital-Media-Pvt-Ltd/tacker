@@ -13,34 +13,37 @@
  * never blocked by infra issues.
  */
 
-import { Redis } from 'ioredis';
-
 export const CONV_ABUSE_LIMIT = 10;
 export const CONV_ABUSE_KEY_TTL_S = 600;
 
 export interface ConversionAbuseResult {
- limited: boolean;
- count: number;
+  limited: boolean;
+  count: number;
+}
+
+export interface ConversionAbuseRedis {
+  incr(key: string): Promise<number>;
+  expire(key: string, ttl: number): Promise<number | boolean>;
 }
 
 export async function checkConversionAbuse(
- redis: Redis,
- clickId: string,
- txnId: string | null,
- networkId: string,
+  redis: ConversionAbuseRedis,
+  clickId: string,
+  txnId: string | null,
+  networkId: string,
 ): Promise<ConversionAbuseResult> {
- if (!txnId || txnId.trim().length === 0) {
- return { limited: false, count: 0 };
- }
+  if (!txnId || txnId.trim().length === 0) {
+    return { limited: false, count: 0 };
+  }
 
- try {
- const key = `convabuse:${networkId}:${clickId}`;
- const count = await redis.incr(key);
- if (count === 1) {
- try { await redis.expire(key, CONV_ABUSE_KEY_TTL_S); } catch { /* TTL failure is non-fatal */ }
- }
- return { limited: count > CONV_ABUSE_LIMIT, count };
- } catch {
- return { limited: false, count: 0 };
- }
+  try {
+    const key = `convabuse:${networkId}:${clickId}`;
+    const count = await redis.incr(key);
+    if (count === 1) {
+      try { await redis.expire(key, CONV_ABUSE_KEY_TTL_S); } catch { /* TTL failure is non-fatal */ }
+    }
+    return { limited: count > CONV_ABUSE_LIMIT, count };
+  } catch {
+    return { limited: false, count: 0 };
+  }
 }
