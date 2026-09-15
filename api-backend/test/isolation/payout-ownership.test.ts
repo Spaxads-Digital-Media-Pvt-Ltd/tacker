@@ -99,7 +99,7 @@ async function buildTestApp(
  return {
  ...(actual as object),
  apiKeyAuth: (_req: Request, _res: Response, next: NextFunction) => {
- ;(_req as unknown as { identity: ApiKeyIdentity }).identity = identity;
+ (_req as unknown as { identity: ApiKeyIdentity }).identity = identity;
  next();
  },
  };

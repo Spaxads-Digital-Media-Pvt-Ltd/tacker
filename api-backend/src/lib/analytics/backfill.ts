@@ -46,6 +46,7 @@ async function backfillClicks(opts: BackfillOptions): Promise<{ rows: number; ba
  let lastCreatedAt: string | null = null;
  let lastId: string | null = null;
 
+ // eslint-disable-next-line no-constant-condition
  while (true) {
  let where = 'WHERE created_at >= $1 AND created_at < $2';
  const params: (string | number)[] = [from, to];
@@ -148,6 +149,7 @@ async function backfillConversions(opts: BackfillOptions): Promise<{ rows: numbe
  let lastCreatedAt: string | null = null;
  let lastId: string | null = null;
 
+ // eslint-disable-next-line no-constant-condition
  while (true) {
  // Conversions don't carry geo/sub data in PG (inherited from click). LEFT JOIN
  // clicks to recover those columns so CH can denormalize them.
