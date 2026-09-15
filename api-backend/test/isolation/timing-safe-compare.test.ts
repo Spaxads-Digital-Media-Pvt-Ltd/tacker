@@ -81,7 +81,6 @@ describe('timingSafeCompare (T-1)', () => {
 
  it('reveals no partial-match info via response behavior', () => {
  const ref = 'AbCdEfGhIjKl';
- const _wrong = 'XbCdEfGhIjKl';
  const missing = timingSafeCompare(undefined, ref);
  const partial = timingSafeCompare('XbCdEfGhIjKl', ref);
  const empty = timingSafeCompare('', ref);

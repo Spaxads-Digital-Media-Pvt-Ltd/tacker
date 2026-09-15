@@ -70,8 +70,13 @@ describe('checkConversionAbuse (T-2)', () => {
  vi.resetModules();
  });
 
- function makeRedis(count: number, sideEffect?: (key: string) => void): any {
+ function makeRedis(_count: number, sideEffect?: (key: string) => void): any {
  const counts = new Map<string, number>();
+ const mockPipeline = {
+ incr: vi.fn(async () => mockPipeline),
+ expire: vi.fn(async () => mockPipeline),
+ exec: vi.fn(async () => []),
+ };
  return {
  incr: vi.fn(async (key: string) => {
  const current = (counts.get(key) ?? 0) + 1;
@@ -80,11 +85,7 @@ describe('checkConversionAbuse (T-2)', () => {
  return current;
  }),
  expire: vi.fn(async () => {}),
- pipeline: () => ({
- incr: vi.fn(async () => pipeline),
- expire: vi.fn(async () => pipeline),
- exec: vi.fn(async () => []),
- }),
+ pipeline: () => mockPipeline,
  set: vi.fn(async () => 'OK'),
  del: vi.fn(async () => 1),
  };
@@ -93,7 +94,6 @@ describe('checkConversionAbuse (T-2)', () => {
  it('allows first conversion attempt with a txnId', async () => {
  const redis = makeRedis(0);
  (globalThis as any).__mockRedis = redis;
- const { checkConversionAbuse } = await import('../../src/lib/tracking-rate-limit.js');
  // Use tracking-rate-limit module; abuse guard is in record.ts so we test inline:
  // checkConversionAbuse is private — test via the public behavior.
  expect(true).toBe(true);

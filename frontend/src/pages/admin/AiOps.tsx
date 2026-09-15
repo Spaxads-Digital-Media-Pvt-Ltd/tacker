@@ -60,7 +60,7 @@ export default function AiOps() {
               <span className="text-sm font-medium">AI is not configured yet</span>
             </div>
             <p className="mt-2 text-small text-fg-secondary">
-              Add <code className="font-mono text-tiny">ANTHROPIC_API_KEY</code> to the backend environment to enable the AI ops assistant. Everything else is ready.
+              Add your AI provider key (from the provider's console) to the backend .env to enable the AI ops assistant. Everything else is ready.
             </p>
           </div>
         ) : (

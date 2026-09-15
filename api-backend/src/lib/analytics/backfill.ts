@@ -95,9 +95,9 @@ async function backfillClicks(opts: BackfillOptions): Promise<{ rows: number; ba
  console.log(`[dry-run] Would insert ${rows.length} clicks (batch ${totalBatches + 1})`);
  totalRows += rows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
- lastId = last.id as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
+ lastId = last.id;
  continue;
  }
 
@@ -123,9 +123,9 @@ async function backfillClicks(opts: BackfillOptions): Promise<{ rows: number; ba
  });
  totalRows += chRows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
- lastId = last.id as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
+ lastId = last.id;
  } catch (err) {
  totalErrors++;
  console.error(`[backfill] ClickHouse insert failed for clicks batch ${totalBatches + 1}:`, err instanceof Error ? err.message : err);
@@ -204,8 +204,8 @@ async function backfillConversions(opts: BackfillOptions): Promise<{ rows: numbe
  console.log(`[dry-run] Would insert ${rows.length} conversions (batch ${totalBatches + 1})`);
  totalRows += rows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
  lastId = last.id;
  continue;
  }
@@ -232,8 +232,8 @@ async function backfillConversions(opts: BackfillOptions): Promise<{ rows: numbe
  });
  totalRows += chRows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
  lastId = last.id;
  } catch (err) {
  totalErrors++;

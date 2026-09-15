@@ -143,7 +143,8 @@ describe('A-2: POST /payouts — publisher ownership enforcement', () => {
  payoutResult,
  );
  expect(capturedPayoutCalls).toHaveLength(1);
- expect(capturedPayoutCalls[0].publisherIds).toEqual([PUB_OWNED_A1, PUB_OWNED_A2]);
+ const [firstCall] = capturedPayoutCalls;
+ expect(firstCall?.publisherIds).toEqual([PUB_OWNED_A1, PUB_OWNED_A2]);
  });
 
  it('rejects 403 when a foreign publisherId is in the array', async () => {
@@ -184,6 +185,7 @@ describe('A-2: POST /payouts — publisher ownership enforcement', () => {
  payoutResult,
  );
  expect(capturedPayoutCalls).toHaveLength(1);
- expect(capturedPayoutCalls[0].publisherIds).toBeUndefined();
+ const [firstCall] = capturedPayoutCalls;
+ expect(firstCall?.publisherIds).toBeUndefined();
  });
 });
