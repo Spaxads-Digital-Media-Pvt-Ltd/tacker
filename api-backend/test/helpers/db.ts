@@ -29,6 +29,11 @@ const TABLES = [
   'audit_log',
   'users',
   'networks',
+  // Ledger tables — appended by ledger test (spec §8). resetDb must clear idempotency keys
+  // so that writeConversionLedger can insert fresh entries on every test run.
+  'payout_batches',
+  'payouts',
+  'ledger_entries',
 ];
 
 function assertDestructiveAllowed(): void {

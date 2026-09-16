@@ -109,8 +109,8 @@ d('Platform-admin auth HTTP boundary (A-1)', () => {
  const adminId = '22222222-2222-2222-2222-222222222222';
  await query(
  `INSERT INTO platform_admins (id, email, status, auth_provider, password_hash)
- VALUES ($1, $2, 'suspended', 'local', $3)
- ON CONFLICT (id) DO UPDATE SET status = 'suspended'`,
+ VALUES ($1, $2, 'disabled', 'local', $3)
+ ON CONFLICT (id) DO UPDATE SET status = 'disabled'`,
  [adminId, `pa-inactive@test.local`, await hashPassword('test-pass-2')],
  );
  const token = await signPlatformAdminToken(adminId);
