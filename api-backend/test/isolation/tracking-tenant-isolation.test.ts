@@ -41,7 +41,7 @@ class DirectDbResolver implements HostResolver {
 
 async function get(app: ReturnType<typeof buildTrackingApp>, path: string, headers?: Record<string, string>): Promise<{ status: number; body: unknown }> {
  const res = await app.inject({ method: 'GET', url: path, headers });
- return { status: res.statusCode, body: JSON.parse(res.payload ?? '{}') };
+ return { status: res.statusCode, body: JSON.parse(res.payload || '{}') };
 }
 
 dDb('Tracking /click — DB-backed tenant isolation (M-1, INTEGRATION_DB=1)', () => {

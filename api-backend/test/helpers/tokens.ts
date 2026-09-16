@@ -20,7 +20,7 @@ function baseClaims(extra: Record<string, unknown>): Record<string, unknown> {
 
 export function operatorToken(opts: { userId: string; networkId: string; role?: string }): string {
  return jwt.sign(
- baseClaims({ sub: opts.userId, network_id: opts.networkId, kind: 'operator', role: opts.role ?? 'admin' }),
+ baseClaims({ sub: opts.userId, network_id: opts.networkId, kind: 'admin', role: opts.role ?? 'admin' }),
  secret,
  { expiresIn: '1h' },
  );

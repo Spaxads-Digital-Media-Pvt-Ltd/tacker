@@ -51,7 +51,7 @@ d('Platform-admin auth HTTP boundary (A-1)', () => {
 
  // --- Valid token ---
  it('valid platform-admin JWT returns 200 with identity', async () => {
- const adminId = 'test-pa-http-1';
+ const adminId = '11111111-1111-1111-1111-111111111111';
  await query(
  `INSERT INTO platform_admins (id, email, status, auth_provider, password_hash)
  VALUES ($1, $2, 'active', 'local', $3)
@@ -106,7 +106,7 @@ d('Platform-admin auth HTTP boundary (A-1)', () => {
 
  // --- Inactive admin (DB membership gate) ---
  it('REJECTS an inactive admin (403 after valid token)', async () => {
- const adminId = 'test-pa-http-inactive';
+ const adminId = '22222222-2222-2222-2222-222222222222';
  await query(
  `INSERT INTO platform_admins (id, email, status, auth_provider, password_hash)
  VALUES ($1, $2, 'suspended', 'local', $3)
