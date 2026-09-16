@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { PoolClient } from 'pg';
-import { pool, query, closeDb } from '../../src/lib/db/pool.js';
+import { pool, query } from '../../src/lib/db/pool.js';
 import {
   writeConversionLedger, reverseConversionLedger, accountBalance, createPayoutRun,
 } from '../../src/lib/ledger/ledger.js';
@@ -38,7 +38,9 @@ d('Ledger (live DB)', () => {
     await resetDb();
     fx = await seedFixture();
   });
-  afterAll(async () => { await closeDb(); });
+  afterAll(async () => {
+    // vitest exits after all suites; pool end here breaks subsequent DB test files.
+  });
 
   it('writes dual entries and derives correct balances', async () => {
     await inTx((c) => writeConversionLedger(c, {

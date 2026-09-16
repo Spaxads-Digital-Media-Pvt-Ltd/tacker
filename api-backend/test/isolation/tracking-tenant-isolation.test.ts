@@ -18,7 +18,6 @@ import { buildTrackingApp } from '../../src/surfaces/tracking/app.js';
 import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import type { HostResolver, ResolvedTenant } from '../../src/middleware/host-resolver.js';
 import { query } from '../../src/lib/db/pool.js';
-import { closeDb } from '../../src/lib/db/pool.js';
 import { canConnect, resetDb, seedFixture, type Fixture } from '../helpers/db.js';
 
 const runDb = process.env.INTEGRATION_DB === '1';
@@ -81,8 +80,8 @@ dDb('Tracking /click — DB-backed tenant isolation (M-1, INTEGRATION_DB=1)', ()
  });
 
  afterAll(async () => {
- await app.close();
- await closeDb();
+    await app.close();
+    // vitest exits after all suites; pool end here breaks subsequent DB test files.
  setHostResolver({ resolve: async () => null } as HostResolver);
  });
 

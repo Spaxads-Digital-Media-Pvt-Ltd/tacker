@@ -21,7 +21,6 @@ import { signPlatformAdminToken } from '../../src/lib/auth/platform-admin-token.
 import { hashPassword } from '../../src/lib/auth/platform-admin-password.js';
 import { buildPlatformAdminApp } from '../../src/surfaces/platform-admin/app.js';
 import { query } from '../../src/lib/db/pool.js';
-import { closeDb } from '../../src/lib/db/pool.js';
 import { canConnect } from '../helpers/db.js';
 
 const run = process.env.INTEGRATION_DB === '1';
@@ -47,8 +46,8 @@ d('Platform-admin auth HTTP boundary (A-1)', () => {
  });
 
  afterAll(async () => {
- await closeDb();
- });
+    // vitest exits after all suites; pool end here breaks subsequent DB test files.
+  });
 
  // --- Valid token ---
  it('valid platform-admin JWT returns 200 with identity', async () => {

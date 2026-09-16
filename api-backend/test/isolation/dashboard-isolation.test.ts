@@ -10,7 +10,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { buildDashboardApp } from '../../src/surfaces/dashboard/app.js';
-import { closeDb } from '../../src/lib/db/pool.js';
 import { canConnect, resetDb, seedFixture, type Fixture } from '../helpers/db.js';
 import { operatorToken, portalToken, bearer } from '../helpers/tokens.js';
 
@@ -31,7 +30,7 @@ d('Dashboard API isolation (live DB)', () => {
   });
 
   afterAll(async () => {
-    await closeDb();
+    // vitest exits after all suites; pool end here breaks subsequent DB test files.
   });
 
   // --- Tenant isolation (network A <-> network B) ---
