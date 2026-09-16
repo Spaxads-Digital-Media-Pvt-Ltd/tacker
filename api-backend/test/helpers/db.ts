@@ -2,12 +2,17 @@
 import { pool, query } from '../../src/lib/db/pool.js';
 
 export async function canConnect(): Promise<boolean> {
-  try {
-    await pool.query('SELECT 1');
-    return true;
-  } catch {
-    return false;
+  // CI Postgres may pass health checks before pg.Pool can actually connect.
+  // Retry a few times with short delays so timing-flaky CI runs don't false-negative.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await pool.query('SELECT 1');
+      return true;
+    } catch {
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 250));
+    }
   }
+  return false;
 }
 
 const TABLES = [
