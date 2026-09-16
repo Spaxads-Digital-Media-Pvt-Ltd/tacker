@@ -13,16 +13,41 @@
  * queries the DB (skipping Redis cache, which is unavailable in this test).
  * Requires INTEGRATION_DB=1 and a migrated database.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { buildTrackingApp } from '../../src/surfaces/tracking/app.js';
 import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import type { HostResolver, ResolvedTenant } from '../../src/middleware/host-resolver.js';
 import { query } from '../../src/lib/db/pool.js';
-import { closeDb } from '../../src/lib/db/pool.js';
 import { canConnect, resetDb, seedFixture, type Fixture } from '../helpers/db.js';
 
 const runDb = process.env.INTEGRATION_DB === '1';
 const dDb = runDb ? describe : describe.skip;
+
+// Mock Redis so buildTrackingApp() / app.ready() succeed without a live Redis instance.
+// These tests hit the /click handler which only goes through host resolution — no actual
+// Redis reads are needed, so a no-op stub is sufficient.
+vi.mock('../../src/lib/redis.js', () => {
+  const stub = () => Promise.resolve(null);
+  const pipelineStub = {
+    incr: () => pipelineStub,
+    expire: () => pipelineStub,
+    exec: () => Promise.resolve([]),
+  };
+  return {
+    getRedis: () => ({
+      incr: stub,
+      expire: stub,
+      eval: stub,
+      set: () => Promise.resolve('OK'),
+      get: stub,
+      del: stub,
+      ping: () => Promise.resolve('PONG'),
+      pipeline: () => pipelineStub,
+      quit: () => Promise.resolve('OK'),
+      on: () => {},
+    }),
+  };
+});
 
 // Resolver that hits Postgres directly (no Redis dependency).
 class DirectDbResolver implements HostResolver {
@@ -42,7 +67,7 @@ class DirectDbResolver implements HostResolver {
 
 async function get(app: ReturnType<typeof buildTrackingApp>, path: string, headers?: Record<string, string>): Promise<{ status: number; body: unknown }> {
  const res = await app.inject({ method: 'GET', url: path, headers });
- return { status: res.statusCode, body: JSON.parse(res.payload ?? '{}') };
+ return { status: res.statusCode, body: JSON.parse(res.payload || '{}') };
 }
 
 dDb('Tracking /click — DB-backed tenant isolation (M-1, INTEGRATION_DB=1)', () => {
@@ -81,8 +106,8 @@ dDb('Tracking /click — DB-backed tenant isolation (M-1, INTEGRATION_DB=1)', ()
  });
 
  afterAll(async () => {
- await app.close();
- await closeDb();
+    await app.close();
+    // vitest exits after all suites; pool end here breaks subsequent DB test files.
  setHostResolver({ resolve: async () => null } as HostResolver);
  });
 

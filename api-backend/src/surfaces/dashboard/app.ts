@@ -18,6 +18,7 @@ import { badRequest } from '../../lib/http/errors.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { query } from '../../lib/db/pool.js';
 import { dashboardAuth, requireAdmin, requireRole, requirePortal } from './auth.js';
+import { passwordSchema } from '../../lib/auth/password-policy.js';
 import { ownerIdOf } from '../../lib/db/from-request.js';
 import { apiKeyManagementRoutes } from './api-keys/routes.js';
 import { authRoutes } from './auth-routes.js';
@@ -198,7 +199,7 @@ export function buildDashboardApp(): Express {
   }));
 
   // Change own password (Profile → Change password).
-  authed.patch('/me/password', validateBody(z.object({ password: z.string().min(8).max(200) })), asyncHandler(async (req, res) => {
+  authed.patch('/me/password', validateBody(z.object({ password: passwordSchema })), asyncHandler(async (req, res) => {
     const userId = (req.identity as { userId?: string }).userId;
     if (!userId) return sendOk(res, { ok: false });
     await getSupabaseAdmin().auth.admin.updateUserById(userId, { password: (req.body as { password: string }).password });

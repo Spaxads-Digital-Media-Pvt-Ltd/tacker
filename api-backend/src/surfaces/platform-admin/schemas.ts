@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { passwordSchema } from '../../lib/auth/password-policy.js';
 
 export const loginSchema = z.object({
  email: z.string().email(),
- password: z.string().min(8).max(200),
+ password: passwordSchema,
 });
 
 export const createNetworkSchema = z.object({
@@ -13,7 +14,7 @@ export const createNetworkSchema = z.object({
   owner: z
     .object({
       email: z.string().email(),
-      password: z.string().min(8).max(200),
+      password: passwordSchema,
       name: z.string().max(200).optional(),
     })
     .optional(),

@@ -21,7 +21,6 @@ import { signPlatformAdminToken } from '../../src/lib/auth/platform-admin-token.
 import { hashPassword } from '../../src/lib/auth/platform-admin-password.js';
 import { buildPlatformAdminApp } from '../../src/surfaces/platform-admin/app.js';
 import { query } from '../../src/lib/db/pool.js';
-import { closeDb } from '../../src/lib/db/pool.js';
 import { canConnect } from '../helpers/db.js';
 
 const run = process.env.INTEGRATION_DB === '1';
@@ -47,12 +46,12 @@ d('Platform-admin auth HTTP boundary (A-1)', () => {
  });
 
  afterAll(async () => {
- await closeDb();
- });
+    // vitest exits after all suites; pool end here breaks subsequent DB test files.
+  });
 
  // --- Valid token ---
  it('valid platform-admin JWT returns 200 with identity', async () => {
- const adminId = 'test-pa-http-1';
+ const adminId = '11111111-1111-1111-1111-111111111111';
  await query(
  `INSERT INTO platform_admins (id, email, status, auth_provider, password_hash)
  VALUES ($1, $2, 'active', 'local', $3)
@@ -107,11 +106,11 @@ d('Platform-admin auth HTTP boundary (A-1)', () => {
 
  // --- Inactive admin (DB membership gate) ---
  it('REJECTS an inactive admin (403 after valid token)', async () => {
- const adminId = 'test-pa-http-inactive';
+ const adminId = '22222222-2222-2222-2222-222222222222';
  await query(
  `INSERT INTO platform_admins (id, email, status, auth_provider, password_hash)
- VALUES ($1, $2, 'suspended', 'local', $3)
- ON CONFLICT (id) DO UPDATE SET status = 'suspended'`,
+ VALUES ($1, $2, 'disabled', 'local', $3)
+ ON CONFLICT (id) DO UPDATE SET status = 'disabled'`,
  [adminId, `pa-inactive@test.local`, await hashPassword('test-pass-2')],
  );
  const token = await signPlatformAdminToken(adminId);

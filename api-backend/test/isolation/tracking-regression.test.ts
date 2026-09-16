@@ -9,10 +9,25 @@
  *
  * Uses a stub resolver so these are structural unit tests, not DB-backed integration tests.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { buildTrackingApp } from '../../src/surfaces/tracking/app.js';
 import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import type { HostResolver, ResolvedTenant } from '../../src/middleware/host-resolver.js';
+
+vi.mock('../../src/lib/redis.js', () => ({
+  getRedis: () => ({
+    get: async () => null,
+    set: async () => 'OK',
+    del: async () => 0,
+    incr: async () => 1,
+    expire: async () => 1,
+    pipeline: () => ({
+      incr: () => ({ expire: () => ({ exec: async () => [] }) }),
+      expire: () => ({ exec: async () => [] }),
+      exec: async () => [],
+    }),
+  }),
+}));
 
 // Stub resolver that maps hosts to specific networks.
 const stubResolver: HostResolver = {

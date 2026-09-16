@@ -461,9 +461,9 @@ function ChangeEmailModal({ current, onClose, onSaved }: {
 }
 
 function AnonymizeModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const { run, busy, error } = useMutation(() => api.post<{ ok: boolean }>('/api/me/anonymize', {}));
+  const { run, busy, error } = useMutation(() => api.post<{ ok: boolean }>('/api/me/anonymize', undefined));
   const confirm = async () => {
-    const r = await run();
+    const r = await run(undefined);
     if (r?.ok) onDone();
   };
   return (

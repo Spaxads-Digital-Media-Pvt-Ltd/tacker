@@ -46,6 +46,7 @@ async function backfillClicks(opts: BackfillOptions): Promise<{ rows: number; ba
  let lastCreatedAt: string | null = null;
  let lastId: string | null = null;
 
+ // eslint-disable-next-line no-constant-condition
  while (true) {
  let where = 'WHERE created_at >= $1 AND created_at < $2';
  const params: (string | number)[] = [from, to];
@@ -95,9 +96,9 @@ async function backfillClicks(opts: BackfillOptions): Promise<{ rows: number; ba
  console.log(`[dry-run] Would insert ${rows.length} clicks (batch ${totalBatches + 1})`);
  totalRows += rows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
- lastId = last.id as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
+ lastId = last.id;
  continue;
  }
 
@@ -123,9 +124,9 @@ async function backfillClicks(opts: BackfillOptions): Promise<{ rows: number; ba
  });
  totalRows += chRows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
- lastId = last.id as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
+ lastId = last.id;
  } catch (err) {
  totalErrors++;
  console.error(`[backfill] ClickHouse insert failed for clicks batch ${totalBatches + 1}:`, err instanceof Error ? err.message : err);
@@ -148,6 +149,7 @@ async function backfillConversions(opts: BackfillOptions): Promise<{ rows: numbe
  let lastCreatedAt: string | null = null;
  let lastId: string | null = null;
 
+ // eslint-disable-next-line no-constant-condition
  while (true) {
  // Conversions don't carry geo/sub data in PG (inherited from click). LEFT JOIN
  // clicks to recover those columns so CH can denormalize them.
@@ -204,8 +206,8 @@ async function backfillConversions(opts: BackfillOptions): Promise<{ rows: numbe
  console.log(`[dry-run] Would insert ${rows.length} conversions (batch ${totalBatches + 1})`);
  totalRows += rows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
  lastId = last.id;
  continue;
  }
@@ -232,8 +234,8 @@ async function backfillConversions(opts: BackfillOptions): Promise<{ rows: numbe
  });
  totalRows += chRows.length;
  totalBatches++;
- const last = rows[rows.length - 1];
- lastCreatedAt = last.created_at as unknown as string;
+ const last = rows[rows.length - 1]!;
+ lastCreatedAt = last.created_at;
  lastId = last.id;
  } catch (err) {
  totalErrors++;
