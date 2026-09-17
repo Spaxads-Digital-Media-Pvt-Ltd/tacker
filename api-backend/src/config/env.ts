@@ -28,6 +28,11 @@ const schema = z.object({
 
   REDIS_URL: z.string().url(),
 
+ // --- Login rate limiting (dashboard auth). AP-1 / spec §4. ---
+ // Requests per IP / per account per sliding window (1-min buckets, 5-bucket window).
+ LOGIN_RATE_LIMIT_IP: z.coerce.number().int().positive().default(10),
+ LOGIN_RATE_LIMIT_ACCOUNT: z.coerce.number().int().positive().default(5),
+
  // --- Tracking surface rate limiting (AP-1 / Task 9.3.3) ---
  // Requests per IP per sliding window (1-min buckets, 5-bucket window).
  TRACKING_RL_CLICK_LIMIT: z.coerce.number().int().positive().default(120),
@@ -61,6 +66,10 @@ const schema = z.object({
 
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   MAXMIND_LICENSE_KEY: z.string().min(1).optional(),
+
+  // MaxMind DB path overrides. Empty string = use the bundled data/geoip/*.mmdb fallback.
+  MAXMIND_CITY_DB: z.string().optional(),
+  MAXMIND_ASN_DB: z.string().optional(),
 
   // Error tracking (spec §2 observability). Optional: without a DSN the Sentry hook is a no-op.
   SENTRY_DSN: z.string().url().optional(),

@@ -38,6 +38,7 @@ export class AppError extends Error {
  }
 }
 
+export const conflict = (msg = 'Conflict') => new AppError('conflict', msg);
 export const forbidden = (msg = 'Forbidden') => new AppError('forbidden', msg);
 export const unauthorized = (msg = 'Unauthorized') => new AppError('unauthorized', msg);
 export const notFound = (msg = 'Not found') => new AppError('not_found', msg);

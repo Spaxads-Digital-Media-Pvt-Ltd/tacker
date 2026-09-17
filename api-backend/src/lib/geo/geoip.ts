@@ -11,6 +11,7 @@
  * MAXMIND_CITY_DB / MAXMIND_ASN_DB env, else data/geoip/*.mmdb.
  */
 import { existsSync } from 'node:fs';
+import { env } from '../../config/env.js';
 import { open, type Reader, type CityResponse, type AsnResponse } from 'maxmind';
 import { logger } from '../logger.js';
 
@@ -22,8 +23,8 @@ export interface GeoResult {
   isDatacenter: boolean;
 }
 
-const CITY_PATHS = [process.env.MAXMIND_CITY_DB, 'data/geoip/GeoLite2-City.mmdb'].filter(Boolean) as string[];
-const ASN_PATHS = [process.env.MAXMIND_ASN_DB, 'data/geoip/GeoLite2-ASN.mmdb'].filter(Boolean) as string[];
+const CITY_PATHS = [env.MAXMIND_CITY_DB, 'data/geoip/GeoLite2-City.mmdb'].filter(Boolean) as string[];
+const ASN_PATHS = [env.MAXMIND_ASN_DB, 'data/geoip/GeoLite2-ASN.mmdb'].filter(Boolean) as string[];
 
 let cityReader: Reader<CityResponse> | null = null;
 let asnReader: Reader<AsnResponse> | null = null;

@@ -29,15 +29,24 @@ export function createBaseApp(surface: string): Express {
   });
 
   // Liveness/readiness — no auth (spec §13 Phase 0 health checks).
+  // Returns 200 for 'ok' and 'degraded' (still functional); 503 only for 'unready'.
   app.get('/health', async (_req, res) => {
-    const report = await buildHealthReport(surface);
-    res.status(report.status === 'ok' ? 200 : 503).json(report);
+    try {
+      const report = await buildHealthReport(surface);
+      res.status(report.status === 'unready' ? 503 : 200).json(report);
+    } catch {
+      res.sendStatus(503);
+    }
   });
 
   // Prometheus scrape endpoint (spec §2 observability).
   app.get('/metrics', async (_req, res) => {
-    res.setHeader('content-type', metricsContentType);
-    res.send(await metricsText());
+    try {
+      res.setHeader('content-type', metricsContentType);
+      res.send(await metricsText());
+    } catch {
+      res.sendStatus(500);
+    }
   });
 
   return app;

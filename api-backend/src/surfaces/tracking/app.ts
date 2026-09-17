@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { env } from '../../config/env.js';
-import { buildHealthReport, buildLivenessReport, buildReadinessReport } from '../../lib/http/health.js';
+import { buildHealthReport, buildLivenessReport, buildReadinessReport, errorEnvelope } from '../../lib/http/index.js';
 import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
 import { lookupGeo, geoAvailable } from '../../lib/geo/geoip.js';
 import { parseUA } from '../../lib/ua.js';
@@ -140,7 +140,7 @@ export function buildTrackingApp(): FastifyInstance {
  if (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') return;
  const raw = req as unknown as { socket?: { remoteAddress?: string } };
  if (!isTrustedProxy(raw.socket?.remoteAddress ?? '')) {
- return reply.code(403).send({ error: 'forbidden' });
+ return reply.code(403).send(errorEnvelope('forbidden', 'Direct connection not allowed', 403));
  }
  });
 
@@ -149,12 +149,12 @@ export function buildTrackingApp(): FastifyInstance {
  app.setErrorHandler((err, req, reply) => {
  captureError(err, { url: req.url });
  req.log.error({ err }, 'tracking handler error');
- reply.code(err.statusCode ?? 500).send({ error: 'internal_error' });
+ reply.code(err.statusCode ?? 500).send(errorEnvelope('internal', 'Internal server error', err.statusCode ?? 500));
  });
 
  app.get('/health', async (_req, reply) => {
  const report = await buildHealthReport('tracking');
- return reply.code(report.status === 'ok' ? 200 : 503).send(report);
+ return reply.code(report.status === 'unready' ? 503 : 200).send(report);
  });
 
  // Health/liveness/readiness probes (from origin/main — combined with security branch).
@@ -193,18 +193,18 @@ export function buildTrackingApp(): FastifyInstance {
  const rl = await checkTrackingRateLimit(clientIp, 'click', CLICK_LIMIT);
  if (rl.limited) {
  req.log.warn({ endpoint: '/click', limited: true, count: rl.count }, 'rate_limited');
- return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send({ error: 'rate_limited' });
+ return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
  }
  }
 
  // 1. Resolve tenant from the tracking host.
  const host = (req.headers.host ?? '').toString();
  const tenant = await resolveHostToNetwork(host);
- if (!tenant) return reply.code(404).send({ error: 'unknown_tracking_host' });
+ if (!tenant) return reply.code(404).send(errorEnvelope('not_found', 'unknown_tracking_host', 404));
 
  const q = req.query as Record<string, unknown>;
  const offerId = firstStr(q['offer_id']) ?? firstStr(q['o']);
- if (!offerId) return reply.code(400).send({ error: 'missing_offer_id' });
+ if (!offerId) return reply.code(400).send(errorEnvelope('bad_request', 'missing_offer_id', 400));
  // publisher_id is a UUID column downstream (clicks/conversions). Ignore a malformed value rather
  // than 500 the conversion later — a bad pub_id shouldn't break attribution or the redirect.
  const publisherId = asUuid(firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
@@ -325,17 +325,17 @@ export function buildTrackingApp(): FastifyInstance {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'sl', CLICK_LIMIT);
  if (rl.limited) {
- return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send({ error: 'rate_limited' });
+ return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
  }
  }
 
  const host = (req.headers.host ?? '').toString();
  const tenant = await resolveHostToNetwork(host);
- if (!tenant) return reply.code(404).send({ error: 'unknown_tracking_host' });
+ if (!tenant) return reply.code(404).send(errorEnvelope('not_found', 'unknown_tracking_host', 404));
 
  const q = req.query as Record<string, unknown>;
  const slId = asUuid(firstStr(q['id']) ?? firstStr(q['sl']));
- if (!slId) return reply.code(400).send({ error: 'missing_smart_link_id' });
+ if (!slId) return reply.code(400).send(errorEnvelope('bad_request', 'missing_smart_link_id', 400));
 
  const linkRes = await query<{ id: string; status: string; redirect_mechanism: string; catch_all_offer_id: string | null }>(
  `SELECT id, status, redirect_mechanism, catch_all_offer_id FROM smart_links WHERE id = $1 AND network_id = $2 LIMIT 1`,
@@ -415,14 +415,14 @@ export function buildTrackingApp(): FastifyInstance {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'postback', POSTBACK_LIMIT);
  if (rl.limited) {
- return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send({ error: 'rate_limited' });
+ return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
  }
  }
 
  const r = await handleConversion(req, 'postback');
- if (!r.networkResolved) return reply.code(404).send({ error: 'unknown_tracking_host' });
- if (r.outcome === 'click_not_found') return reply.code(404).send({ status: 'click_not_found' });
- if (r.outcome === 'security_failed') return reply.code(403).send({ status: 'security_failed', error: 'invalid or missing secure_code' });
+ if (!r.networkResolved) return reply.code(404).send(errorEnvelope('not_found', 'unknown_tracking_host', 404));
+ if (r.outcome === 'click_not_found') return reply.code(404).send(errorEnvelope('not_found', 'click_not_found', 404));
+ if (r.outcome === 'security_failed') return reply.code(403).send(errorEnvelope('forbidden', 'invalid or missing secure_code', 403));
  return reply.code(200).send({ status: r.outcome, conversion_id: r.conversionId ?? null });
  };
  app.get('/postback', postback);
@@ -435,7 +435,7 @@ export function buildTrackingApp(): FastifyInstance {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'pixel', POSTBACK_LIMIT);
  if (rl.limited) {
- return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send({ error: 'rate_limited' });
+ return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
  }
  }
 
@@ -450,7 +450,7 @@ export function buildTrackingApp(): FastifyInstance {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'iframe', POSTBACK_LIMIT);
  if (rl.limited) {
- return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send({ error: 'rate_limited' });
+ return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
  }
  }
 

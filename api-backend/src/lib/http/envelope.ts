@@ -58,6 +58,14 @@ export function errorHandler(
  res.status(500).json(body);
 }
 
+/**
+ * Build a spec-compliant error envelope body. Used by non-Express surfaces (Fastify)
+ * that construct responses directly. Returns the same shape as errorHandler.
+ */
+export function errorEnvelope(code: ErrorCode, message: string, _status: number): ErrorEnvelope {
+  return { ok: false, error: { code, message } };
+}
+
 /** 404 fallthrough — deny-by-default for unknown routes (spec §3A). Register before errorHandler. */
 export function notFoundHandler(_req: Request, res: Response): void {
  const body: ErrorEnvelope = { ok: false, error: { code: 'not_found', message: 'Route not found' } };

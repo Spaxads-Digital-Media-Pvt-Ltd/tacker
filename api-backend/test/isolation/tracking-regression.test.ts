@@ -63,7 +63,7 @@ describe('Tracking /click regression (M-1)', () => {
  host: 'unknown.example.com',
  });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('raw IP → 404 (not a 500)', async () => {
@@ -83,7 +83,7 @@ describe('Tracking /click regression (M-1)', () => {
  it('missing offer_id → 400 (not a 500)', async () => {
  const res = await get(app, '/click', { host: 'track.example.com' });
  expect(res.status).toBe(400);
- expect((res.body as { error: string }).error).toBe('missing_offer_id');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'bad_request', message: 'missing_offer_id' } });
  });
 
  it('known host without Redis cache → non-500 when Redis is available', async () => {

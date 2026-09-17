@@ -16,6 +16,7 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly status: number,
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -25,7 +26,7 @@ export class ApiError extends Error {
 interface Envelope<T> {
   ok: boolean;
   data?: T;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; details?: unknown };
 }
 
 async function doFetch(path: string, init: RequestInit, token: string | null): Promise<Response> {
@@ -52,7 +53,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as Envelope<T>;
   if (!res.ok || body.ok === false) {
     const err = body.error ?? { code: 'unknown', message: res.statusText };
-    throw new ApiError(err.code, err.message, res.status);
+    throw new ApiError(err.code, err.message, res.status, err.details);
   }
   return body.data as T;
 }
