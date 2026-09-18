@@ -10,8 +10,8 @@
  */
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Plus, Pencil, Trash2, Send } from 'lucide-react';
-import { PageHeader, Tabs, Field, Modal, Spinner, StateBlock } from '../../components/ui';
-import { Pagination } from '../../components/ReportPageKit';
+import { PageHeader, Tabs, Field, Modal, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 

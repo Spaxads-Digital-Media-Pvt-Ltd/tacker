@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { Badge, Spinner } from '../../../components/ui';
-import { CopyBox } from '../../../components/CopyBox';
+import { Badge, Spinner } from '../../../shared-components/primitives/ui';
+import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import type { Offer, TrackingDomain } from '../../../types';
 
 type Row = { id: string; [k: string]: unknown };

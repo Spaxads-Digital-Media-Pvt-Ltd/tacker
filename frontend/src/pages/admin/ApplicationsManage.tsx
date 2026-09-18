@@ -11,9 +11,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical, ChevronDown } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Spinner, StateBlock, type Column } from '../../components/ui';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { PageHeader, Tabs, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, ApiRequestModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { OfferApplication, QuestionnaireListItem, Publisher, Offer, Advertiser, DashboardUser } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { approved: 'bg-success', pending: 'bg-warning', rejected: 'bg-danger' };
@@ -27,18 +27,6 @@ const APP_STATUS_OPTIONS = [
 const OFFER_STATUSES = ['draft', 'active', 'paused', 'archived'] as const;
 const APP_COLUMNS = ['Partner', 'Offer', 'Partner Manager', 'Status', 'Questionnaire', 'Request Date', 'Latest Update'] as const;
 const Q_COLUMNS = ['ID', 'Name', 'Questions', 'Offers', 'Created', 'Modified'] as const;
-
-function useDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return { open, setOpen, ref };
-}
 
 function StatusSelect<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: readonly { value: T; label: string; dot: string }[] }) {
   const { open, setOpen, ref } = useDropdown();

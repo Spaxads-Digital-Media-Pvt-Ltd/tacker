@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import { useNavigate, Link } from 'react-router-dom';
 import { Search, SlidersHorizontal, Image as ImageIcon, MoreVertical, ChevronDown } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../components/ui';
-import { SearchFilterDrawer, FieldBlock } from '../../components/SearchFilterDrawer';
+import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { TableActionsMenu, ALL_COLUMNS } from './OffersTableActions';
+import { useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import { CopyOfferModal } from './CopyOfferModal';
 import { CopyOfferSettingsModal } from './CopyOfferSettingsModal';
 import { TrackingLinksModal } from './offerDetail/TrackingLinksModal';
@@ -183,21 +184,6 @@ const SEARCH_FIELDS = [
   { value: 'id', label: 'ID' },
 ] as const;
 type SearchField = (typeof SEARCH_FIELDS)[number]['value'];
-
-/** Small dropdown trigger, closes on outside click. Shared shape for the search-field and status
- * selectors — both are single-select lists rendered right in the toolbar (not portal-based; the
- * toolbar itself isn't inside a clipped scroll container). */
-function useDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return { open, setOpen, ref };
-}
 
 /** A "Table Filters" row the reference has but this app's schema can't back — rendered as a real,
  * disabled control with a one-line reason, rather than fabricating options (same honesty convention

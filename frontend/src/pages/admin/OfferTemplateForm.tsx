@@ -10,7 +10,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
+import { PageHeader, Field } from '../../shared-components/primitives/ui';
 import { HelpIcon } from './controlCenter/shared';
 import { useFieldSpecs, type Template } from '../../data/offerTemplateFields';
 

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { MoreVertical, ChevronRight } from 'lucide-react';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 
 export function TableActionsMenu({
   selectedIds, allColumns, columnOrder, hiddenColumns, onApplyColumns, onExport, appliedFilters,

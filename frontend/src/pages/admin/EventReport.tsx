@@ -19,11 +19,11 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { FilterButton, CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FilterButton, CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { daysAgo, todayStr, toIso, DASH, Pagination, RowKebabMenu } from '../../components/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, Pagination, RowKebabMenu } from '../../shared-components/primitives/ReportPageKit';
 import type { Offer } from '../../types';
 
 interface GoalRow {

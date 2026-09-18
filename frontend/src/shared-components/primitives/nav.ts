@@ -1,4 +1,4 @@
-import type { Role } from '../auth/roles';
+import type { Role } from '../../auth/roles';
 import { Icon } from './icons';
 
 export interface NavLeaf { to: string; label: string; icon?: keyof typeof Icon }

@@ -9,10 +9,9 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { FilterDef } from '../lib/reportFilters';
+import type { FilterDef } from '../../lib/reportFilters';
 
-// EntitySearchSelect moved to ui.tsx (now shared by CollectionTab too); re-exported here so existing
-// `from '../../components/SearchFilterDrawer'` imports keep working.
+// EntitySearchSelect is defined in ui.tsx; re-exported here for consumers.
 export { EntitySearchSelect, type EntityOpt } from './ui';
 
 interface SearchFilterDrawerProps {

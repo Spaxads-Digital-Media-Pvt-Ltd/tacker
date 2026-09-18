@@ -23,6 +23,7 @@
  */
 
 import crypto from 'node:crypto';
+import { env } from '../config/env.js';
 import { getRedis } from './redis.js';
 import { logger } from './logger.js';
 
@@ -33,8 +34,8 @@ import { logger } from './logger.js';
 const BUCKET_MS = 60_000; // 1 minute
 const BUCKET_COUNT = 5; // 5-minute window
 
-export const CLICK_LIMIT = Number.parseInt(process.env.TRACKING_RL_CLICK_LIMIT ?? '120', 10);
-export const POSTBACK_LIMIT = Number.parseInt(process.env.TRACKING_RL_POSTBACK_LIMIT ?? '60', 10);
+export const CLICK_LIMIT = env.TRACKING_RL_CLICK_LIMIT;
+export const POSTBACK_LIMIT = env.TRACKING_RL_POSTBACK_LIMIT;
 
 // ---------------------------------------------------------------------------
 // Helpers

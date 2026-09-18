@@ -20,8 +20,8 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { MarketplaceProfileCards } from '../../components/MarketplaceProfileCards';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { MarketplaceProfileCards } from '../../features/marketplace/MarketplaceProfileCards';
 import { PAYOUT_TYPES, PROMOTIONAL_METHODS, DEVICE_TYPES, MARKETPLACE_CATEGORIES, CONVERSION_FUNNEL_EXPERTISE } from '../../lib/marketplaceProfile';
 import type { MarketplaceProfile } from '../../types';
 

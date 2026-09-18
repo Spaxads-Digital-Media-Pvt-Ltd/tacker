@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { CopyBox } from './CopyBox';
-import { useQuery } from '../lib/useApi';
-import { Overlay } from './ui';
-import type { Offer, Publisher, TrackingDomain } from '../types';
+import { useQuery } from '../../lib/useApi';
+import { Overlay } from '../primitives/ui';
+import type { Offer, Publisher, TrackingDomain } from '../../types';
 
 const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5', 'sub6', 'sub7', 'sub8', 'sub9'] as const;
 

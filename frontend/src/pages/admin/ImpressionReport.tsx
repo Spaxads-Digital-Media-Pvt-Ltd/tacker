@@ -17,8 +17,8 @@
  */
 import { useState } from 'react';
 import { Search, MoreVertical, Info } from 'lucide-react';
-import { PageHeader, StateBlock } from '../../components/ui';
-import { daysAgo, todayStr } from '../../components/ReportPageKit';
+import { PageHeader, StateBlock } from '../../shared-components/primitives/ui';
+import { daysAgo, todayStr } from '../../shared-components/primitives/ReportPageKit';
 
 const COLUMNS = ['Date', 'Offer', 'Partner', 'Country', 'Device', 'IP Address', 'Sub1', 'Sub2'] as const;
 

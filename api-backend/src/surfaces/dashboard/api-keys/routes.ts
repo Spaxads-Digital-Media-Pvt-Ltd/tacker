@@ -72,9 +72,8 @@ export function apiKeyManagementRoutes(audience: ApiAudience, getOwnerId: (req: 
         expires_at: b.expiresAt ?? null,
       });
       await writeAudit(req, { action: 'api_key.create', entityType: 'api_key', entityId: row.id, after: { audience, ownerId, prefix: generated.prefix } });
-      res.status(201);
       // The ONLY time the full key is returned.
-      sendOk(res, { ...toDTO(row), key: generated.fullKey });
+      sendOk(res, { ...toDTO(row), key: generated.fullKey }, undefined, 201);
     }),
   );
 

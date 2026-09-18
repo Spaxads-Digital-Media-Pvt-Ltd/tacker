@@ -63,8 +63,7 @@ export function trafficSourcesRoutes(): Router {
       visible_to_partners: b.visibleToPartners, parameters: JSON.stringify(b.parameters),
     });
     await writeAudit(req, { action: 'traffic_source.create', entityType: 'traffic_source', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto({ ...row, parameters: b.parameters }));
+    sendOk(res, dto({ ...row, parameters: b.parameters }), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

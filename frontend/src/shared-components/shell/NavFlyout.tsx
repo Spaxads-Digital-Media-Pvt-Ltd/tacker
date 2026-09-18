@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { X } from 'lucide-react';
-import { Icon } from './icons';
-import type { FlyoutItem, NavEntry } from './nav';
+import { Icon } from '../primitives/icons';
+import type { FlyoutItem, NavEntry } from '../primitives/nav';
 
 /**
  * Index of the flyout item that corresponds to the page currently open, or -1. An item is a

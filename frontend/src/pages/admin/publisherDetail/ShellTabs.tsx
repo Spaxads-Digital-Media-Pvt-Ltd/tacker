@@ -1,6 +1,6 @@
-import { EmptyShellTable } from '../../../components/EmptyShellTable';
-import { Accordion } from '../../../components/Accordion';
-import { ComingSoon } from '../../../components/ComingSoon';
+import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
+import { Accordion } from '../../../shared-components/panels/Accordion';
+import { ComingSoon } from '../../../shared-components/panels/ComingSoon';
 
 export function UsersTab() {
   return <EmptyShellTable addLabel="User" columns={['ID', 'Name', 'Title', 'Work Phone', 'Cell Phone', 'Email', 'Language', 'Created', 'Modified']} />;

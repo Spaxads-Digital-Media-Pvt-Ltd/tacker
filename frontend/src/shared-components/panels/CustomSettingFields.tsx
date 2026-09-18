@@ -3,9 +3,9 @@
  * "Partners Conditions" (Apply to all Partners toggle + dual-list), and a reduced "Targeting" step
  * (Countries/Devices/OS/Browsers as free-text values — see data/offerCustomSettings.ts for why this
  * app doesn't build the reference's full geo/ISP/device lookup tree). */
-import { Field } from './ui';
+import { Field } from '../primitives/ui';
 import { DualListPicker, type PickerOption } from './DualListPicker';
-import { splitValues, joinValues, type Targeting } from '../data/offerCustomSettings';
+import { splitValues, joinValues, type Targeting } from '../../data/offerCustomSettings';
 
 export function YesNoToggle({ value, onChange, labels = ['No', 'Yes'] }: { value: boolean; onChange: (v: boolean) => void; labels?: [string, string] }) {
   return (

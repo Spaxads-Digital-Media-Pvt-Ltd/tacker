@@ -25,16 +25,16 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronRight, MoreVertical, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../../components/ui';
-import { FilterButton, type FilterCategory, type FilterValues } from '../../../components/CategorizedFilters';
-import { ColumnsModal, ApiRequestModal } from '../../../components/TableActionsKit';
+import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
+import { FilterButton, type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../../lib/export';
 import {
   type AggResult, METRICS_PARAM, DASH, DEVICES, money, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, Pagination,
   type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
-} from '../../../components/ReportPageKit';
+} from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
 
 interface SmartLink { id: string; name: string }

@@ -137,8 +137,7 @@ export function controlCenterRoutes(): Router {
         metadata: JSON.stringify(metadata),
       });
       await writeAudit(req, { action: 'user.create', entityType: 'users', entityId: row.id, after: row });
-      res.status(201);
-      sendOk(res, userDto(row));
+      sendOk(res, userDto(row), undefined, 201);
     }),
   );
 
@@ -251,8 +250,7 @@ export function controlCenterRoutes(): Router {
     const db = dbForRequest(req);
     const b = req.body as { ipAddress: string };
     const row = await db.insert('network_api_whitelist', { ip_address: b.ipAddress });
-    res.status(201);
-    sendOk(res, { id: row.id, ipAddress: b.ipAddress, createdAt: row.created_at });
+    sendOk(res, { id: row.id, ipAddress: b.ipAddress, createdAt: row.created_at }, undefined, 201);
   }));
 
   r.delete('/api-whitelist/:id', requireRole('admin'), asyncHandler(async (req, res) => {
@@ -350,8 +348,7 @@ export function controlCenterRoutes(): Router {
       duration: b['duration'] ?? '',
       status: 'active',
     });
-    res.status(201);
-    sendOk(res, referralDto(row));
+    sendOk(res, referralDto(row), undefined, 201);
   }));
 
   r.delete('/partner-referrals/:id', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
@@ -390,8 +387,7 @@ export function controlCenterRoutes(): Router {
       user_agent: b['userAgent'] ?? null,
       ip_address: b['ipAddress'] ?? null,
     });
-    res.status(201);
-    sendOk(res, termsDto(row));
+    sendOk(res, termsDto(row), undefined, 201);
   }));
 
   // --- Tags with usage counts (Segmentations › Labels) ---
@@ -508,8 +504,7 @@ function crudRoutes(
     const db = dbForRequest(req);
     const row = await db.insert<Record<string, unknown>>(table, spec.toInsert(req.body as Record<string, unknown>));
     await writeAudit(req, { action: `control_center.${path}.create`, entityType: table, entityId: String(row['id']), after: row });
-    res.status(201);
-    sendOk(res, spec.toDto(row));
+    sendOk(res, spec.toDto(row), undefined, 201);
   }));
 
   r.delete(`/${path}/:id`, requireRole('admin', 'manager'), asyncHandler(async (req, res) => {

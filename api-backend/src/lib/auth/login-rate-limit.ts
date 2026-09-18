@@ -28,6 +28,7 @@
  */
 
 import crypto from 'node:crypto';
+import { env } from '../../config/env.js';
 import { getRedis } from '../redis.js';
 import { logger } from '../logger.js';
 
@@ -39,8 +40,8 @@ const WINDOW_MINUTES = 15;
 const BUCKET_MINUTES = 5;
 const BUCKET_COUNT = WINDOW_MINUTES / BUCKET_MINUTES; // 3
 
-const IP_LIMIT = Number.parseInt(process.env.LOGIN_RATE_LIMIT_IP ?? '10', 10);
-const ACCOUNT_LIMIT = Number.parseInt(process.env.LOGIN_RATE_LIMIT_ACCOUNT ?? '5', 10);
+const IP_LIMIT = env.LOGIN_RATE_LIMIT_IP;
+const ACCOUNT_LIMIT = env.LOGIN_RATE_LIMIT_ACCOUNT;
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,9 +1,10 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, Search } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { PublisherOffer } from '../../types';
 
 const PAGE_SIZE = 50;
@@ -22,18 +23,6 @@ const VISIBILITY_OPTS = [
  { value: 'private', label: 'Private' },
  { value: 'ask', label: 'Request access' },
 ];
-
-function useDropdown() {
- const [open, setOpen] = useState(false);
- const ref = useRef<HTMLDivElement>(null);
- useEffect(() => {
- if (!open) return;
- const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
- document.addEventListener('mousedown', onDown);
- return () => document.removeEventListener('mousedown', onDown);
- }, [open]);
- return { open, setOpen, ref };
-}
 
 function DropdownSelect({ options, value, onChange, width = 'w-36' }: { options: { value: string; label: string; dot?: string }[]; value: string; onChange: (v: string) => void; width?: string }) {
  const { open, setOpen, ref } = useDropdown();

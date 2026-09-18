@@ -8,9 +8,9 @@
  *                                id yet; the caller POSTs each name once the id is known.
  */
 import { useState } from 'react';
-import { api } from '../lib/api';
-import { useQuery, useMutation } from '../lib/useApi';
-import { Field } from './ui';
+import { api } from '../../lib/api';
+import { useQuery, useMutation } from '../../lib/useApi';
+import { Field } from '../primitives/ui';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
 

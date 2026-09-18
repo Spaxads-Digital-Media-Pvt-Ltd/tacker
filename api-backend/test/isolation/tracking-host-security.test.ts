@@ -117,25 +117,25 @@ describe('Tracking /click host security (M-1)', () => {
  it('returns 404 for a completely unknown tracking host', async () => {
  const res = await get(app, '/click?offer_id=11111111-1111-1111-1111-111111111111', { host: 'unknown.example.com' });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('returns 404 for a raw IP in the Host header', async () => {
  const res = await get(app, '/click?offer_id=11111111-1111-1111-1111-111111111111', { host: '10.0.0.1' });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('returns 404 for a host with scheme injection', async () => {
  const res = await get(app, '/click?offer_id=11111111-1111-1111-1111-111111111111', { host: 'http://evil.com' });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('normalises case before resolving (uppercase host → 404, no 500)', async () => {
  const res = await get(app, '/click?offer_id=11111111-1111-1111-1111-111111111111', { host: 'TRACK.EXAMPLE.COM' });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('returns 404 for a host with a port appended (port stripping)', async () => {
@@ -161,6 +161,6 @@ dDb('Tracking /click — DB-backed resolver (M-1, INTEGRATION_DB=1)', () => {
  it('returns 404 for a host not in tracking_domains', async () => {
  const res = await get(app, '/click?offer_id=11111111-1111-1111-1111-111111111111', { host: 'nonexistent.example.com' });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 });

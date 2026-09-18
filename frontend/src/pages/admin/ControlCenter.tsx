@@ -14,7 +14,7 @@
  * version.
  */
 import { useParams } from 'react-router-dom';
-import { PageHeader } from '../../components/ui';
+import { PageHeader } from '../../shared-components/primitives/ui';
 import AccountsTab from './controlCenter/AccountsTab';
 import PlatformTab from './controlCenter/PlatformTab';
 import PartnersTab from './controlCenter/PartnersTab';

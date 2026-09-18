@@ -6,7 +6,7 @@
  */
 import { Link } from 'react-router-dom';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 
 type Row = Record<string, unknown>;
 type Kind = 'deals';

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { PageHeader, Field } from '../../../components/ui';
+import { PageHeader, Field } from '../../../shared-components/primitives/ui';
 import type { PartnerChannel } from '../../../data/segmentations';
 
 export default function ChannelForm() {

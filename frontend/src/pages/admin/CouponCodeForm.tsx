@@ -7,7 +7,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
 import type { CouponCode, Offer, Publisher } from '../../types';
 
 function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {

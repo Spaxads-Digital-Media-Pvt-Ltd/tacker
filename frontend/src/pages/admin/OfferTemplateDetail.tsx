@@ -8,7 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Pencil, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, MenuPopover, MenuItem } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, MenuPopover, MenuItem } from '../../shared-components/primitives/ui';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
 import { useFieldSpecs, valueLabel, fmtDateTime, type Template } from '../../data/offerTemplateFields';
 

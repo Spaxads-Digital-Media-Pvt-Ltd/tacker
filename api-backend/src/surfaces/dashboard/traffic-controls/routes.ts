@@ -139,8 +139,7 @@ export function trafficControlsRoutes(): Router {
     const row = await db.insert<Row>(TABLE, columns(b));
     await writeAudit(req, { action: 'traffic_control.create', entityType: TABLE, entityId: row.id, after: row });
     if (row.status === 'active') await invalidateForRule(db.scope.networkId, row);
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

@@ -6,7 +6,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, HelpCircle, Pencil, Check, Info } from 'lucide-react';
-import { Field } from '../../../components/ui';
+import { Field } from '../../../shared-components/primitives/ui';
 
 /** Wraps a lucide icon in a `title`-bearing span — Lucide icon components don't accept `title`
  * directly (TS: "Property 'title' does not exist on type LucideProps"). */

@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
-import type { Role } from '../auth/roles';
-import { NAV, type NavEntry } from './nav';
+import type { Role } from '../../auth/roles';
+import { NAV, type NavEntry } from '../primitives/nav';
 
 /** Group whose children include the current path, if any. Exact match only — every current NAV
  * child is a standalone leaf route, and a detail page nested under one (e.g. `/app/offers/:id`)

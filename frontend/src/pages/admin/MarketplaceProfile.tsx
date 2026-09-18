@@ -4,9 +4,9 @@
 import { Link } from 'react-router-dom';
 import { MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { Icon } from '../../components/icons';
-import { MarketplaceProfileCards } from '../../components/MarketplaceProfileCards';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { Icon } from '../../shared-components/primitives/icons';
+import { MarketplaceProfileCards } from '../../features/marketplace/MarketplaceProfileCards';
 import type { MarketplaceProfile } from '../../types';
 
 export default function MarketplaceProfilePage() {

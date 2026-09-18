@@ -11,8 +11,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Tabs, Spinner, StateBlock, Segmented } from '../../components/ui';
-import { LabelsEditor } from '../../components/LabelsEditor';
+import { PageHeader, Field, Tabs, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
 import type { Advertiser, DashboardUser } from '../../types';
 
 const TABS = ['General', 'Address', 'Billing', 'Additional Information'] as const;

@@ -23,9 +23,9 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MoreVertical, Search } from 'lucide-react';
-import { PageHeader, Tabs, StateBlock } from '../../components/ui';
-import { EmptyShellTable } from '../../components/EmptyShellTable';
-import { loadSavedReports, persistSavedReports, type SavedReportConfig } from '../../components/ReportPageKit';
+import { PageHeader, Tabs, StateBlock } from '../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
+import { loadSavedReports, persistSavedReports, type SavedReportConfig } from '../../shared-components/primitives/ReportPageKit';
 
 const TABS = ['Saved Reports', 'Scheduled Reports', 'Requested Reports'] as const;
 

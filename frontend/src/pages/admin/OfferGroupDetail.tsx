@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../components/ui';
+import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../shared-components/primitives/ui';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
 import { fmtDateTime, fmtMoney, CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL, type OfferGroup } from '../../data/offerGroups';
 import type { Advertiser, Offer } from '../../types';

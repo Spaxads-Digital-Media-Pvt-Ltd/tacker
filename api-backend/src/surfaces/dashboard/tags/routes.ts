@@ -52,8 +52,7 @@ export function tagsRoutes(): Router {
     const b = req.body as z.infer<typeof createTagSchema>;
     const row = await findOrCreateTag(db, b.name, b.color ?? null);
     await writeAudit(req, { action: 'tag.create', entityType: 'tag', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, tagDTO(row));
+    sendOk(res, tagDTO(row), undefined, 201);
   }));
 
   // Bulk tag→entity map for list-page filtering (e.g. "filter Offers by tag"), so the caller
@@ -129,8 +128,7 @@ export function attachTagRoutes(r: Router, entityType: EntityType): void {
       await db.insert('taggings', { tag_id: tag.id, entity_type: entityType, entity_id: req.params.id });
     }
     await writeAudit(req, { action: `${entityType}.tag.assign`, entityType: 'tagging', entityId: tag.id });
-    res.status(201);
-    sendOk(res, tagDTO(tag));
+    sendOk(res, tagDTO(tag), undefined, 201);
   }));
 
   r.delete('/:id/tags/:tagId', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {

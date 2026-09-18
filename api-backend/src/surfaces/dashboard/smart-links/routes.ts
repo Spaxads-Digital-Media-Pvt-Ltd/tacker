@@ -115,8 +115,7 @@ export function smartLinksRoutes(): Router {
       await db.insert(ITEMS, { smart_link_id: row.id, ...itemColumns(b.redirectMechanism, item) });
     }
     await writeAudit(req, { action: 'smart_link.create', entityType: 'smart_link', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, linkDTO(row));
+    sendOk(res, linkDTO(row), undefined, 201);
   }));
 
   r.post('/:id/copy', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
@@ -135,8 +134,7 @@ export function smartLinksRoutes(): Router {
       await db.insert(ITEMS, { smart_link_id: copy.id, offer_id: it.offer_id, weight: it.weight, position: it.position, country: it.country, offer_url: it.offer_url });
     }
     await writeAudit(req, { action: 'smart_link.copy', entityType: 'smart_link', entityId: copy.id, after: copy });
-    res.status(201);
-    sendOk(res, linkDTO(copy));
+    sendOk(res, linkDTO(copy), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateLinkSchema), asyncHandler(async (req, res) => {
@@ -194,8 +192,7 @@ export function smartLinksRoutes(): Router {
     if (!offer) throw badRequest('offerId does not belong to this network');
     const row = await db.insert<ItemRow>(ITEMS, { smart_link_id: req.params.id, ...itemColumns(link.redirect_mechanism, b) });
     await writeAudit(req, { action: 'smart_link.item.create', entityType: 'smart_link_item', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, itemDTO(row));
+    sendOk(res, itemDTO(row), undefined, 201);
   }));
 
   r.delete('/:id/items/:itemId', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {

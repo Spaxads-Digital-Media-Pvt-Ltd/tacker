@@ -56,8 +56,7 @@ export function customFieldRoutes(): Router {
       options: b.options, required: b.required, sort_order: b.sortOrder,
     });
     await writeAudit(req, { action: 'custom_field.create', entityType: 'custom_field_def', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, toDTO(row));
+    sendOk(res, toDTO(row), undefined, 201);
   }));
 
   r.delete('/:id', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {

@@ -33,9 +33,9 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Search } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { Pagination } from '../../components/ReportPageKit';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import type { MarketplaceAdvertiser } from '../../types';
 
 const DASH = '—';

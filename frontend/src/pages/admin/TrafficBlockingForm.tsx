@@ -6,7 +6,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
 import type { Publisher, Offer, TrafficBlocking, TrafficBlockingFieldKey, TrafficBlockingMatchType } from '../../types';
 
 const STATUSES = ['active', 'inactive'] as const;

@@ -150,8 +150,7 @@ export function investigatorRoutes(): Router {
     });
     const full = await fetchRow(networkId, row.id);
     await writeAudit(req, { action: 'investigation.create', entityType: 'investigation', entityId: row.id, after: full });
-    res.status(201);
-    sendOk(res, toDto(full!));
+    sendOk(res, toDto(full!), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

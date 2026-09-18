@@ -19,11 +19,11 @@ import { Plus, Search, MoreVertical, Eye, SlidersHorizontal, X } from 'lucide-re
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, TableScroll, Modal, Segmented, MenuPopover, MenuItem } from '../../components/ui';
-import { Pagination } from '../../components/ReportPageKit';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
-import { SearchFilterDrawer, FieldBlock } from '../../components/SearchFilterDrawer';
-import { DualListPicker } from '../../components/DualListPicker';
+import { PageHeader, Field, Spinner, StateBlock, TableScroll, Modal, Segmented, MenuPopover, MenuItem } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
+import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
+import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
+import { DualListPicker } from '../../shared-components/panels/DualListPicker';
 import {
   ADD_MENU, FILE_ACCEPT, TYPE_LABEL, MACROS,
   readFileAsDataUrl, typeToMenuKey, type Creative, type CreativeType, type MenuKey,

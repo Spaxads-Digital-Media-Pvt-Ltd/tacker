@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { ROLE_HOME } from './auth/roles';
-import { AppShell } from './components/AppShell';
+import { AppShell } from './shared-components/shell/AppShell';
 import { NetworkListPage } from './pages/admin/NetworkListPage';
 import { CustomFieldsManage } from './pages/admin/CustomFieldsManage';
 

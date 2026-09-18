@@ -11,8 +11,8 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Segmented } from '../../components/ui';
-import { Stepper } from '../../components/Stepper';
+import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { Stepper } from '../../shared-components/panels/Stepper';
 import type { DashboardUser } from '../../types';
 
 const BILLING_FREQUENCIES = ['Weekly', 'Bimonthly', 'Monthly'];

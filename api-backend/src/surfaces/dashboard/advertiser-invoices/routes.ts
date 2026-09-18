@@ -131,9 +131,8 @@ export function advertiserInvoicesRoutes(): Router {
       billed_amount: billed, paid_amount: '0', notes: b.notes ?? null,
     });
     await writeAudit(req, { action: 'advertiser-invoice.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE i.id = $1 AND i.network_id = $2`, [row.id, networkId]);
-    sendOk(res, dto(rows[0]!));
+    sendOk(res, dto(rows[0]!), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

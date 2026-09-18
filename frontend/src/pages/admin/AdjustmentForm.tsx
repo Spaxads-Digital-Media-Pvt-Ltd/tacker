@@ -9,7 +9,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Modal, Table, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Field, Modal, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import type { Publisher, Offer, ReportingAdjustmentDetail, ReportingAdjustmentDayOverride } from '../../types';
 
 interface PreviewResponse {

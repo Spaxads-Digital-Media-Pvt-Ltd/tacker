@@ -112,8 +112,7 @@ export function networkApi(): Router {
  ...(b.note ? { note: b.note } : {}),
  createdBy: `apikey:${id.keyId}`,
  });
- res.status(201);
- sendOk(res, result);
+ sendOk(res, result, undefined, 201);
  }),
  );
 

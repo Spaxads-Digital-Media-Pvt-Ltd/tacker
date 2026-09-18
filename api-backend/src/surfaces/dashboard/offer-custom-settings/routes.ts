@@ -73,8 +73,7 @@ export function offerCustomSettingsRoutes(): Router {
       event: b.event ?? null, value: b.value ?? null, status: b.status,
     });
     await writeAudit(req, { action: 'offer_custom_setting.create', entityType: 'offer_custom_setting', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

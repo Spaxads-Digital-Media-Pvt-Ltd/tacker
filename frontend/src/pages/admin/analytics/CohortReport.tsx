@@ -23,12 +23,12 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, MoreVertical } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../../components/ui';
-import { FilterButton, type FilterCategory, type FilterValues } from '../../../components/CategorizedFilters';
+import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
+import { FilterButton, type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import {
   DASH, DEVICES, money, toIso, daysAgo, todayStr,
   type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
-} from '../../../components/ReportPageKit';
+} from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts } from '../Reports';
 
 interface SmartLink { id: string; name: string }

@@ -2,8 +2,8 @@
  * MacroTokenPicker — clickable chip list of postback URL macros (Everflow-style).
  * Clicking a macro appends its token to the current URL value.
  */
-import { MACROS } from '../data/creatives';
-import { Field } from './ui';
+import { MACROS } from '../../data/creatives';
+import { Field } from '../../shared-components/primitives/ui';
 
 export function MacroTokenPicker({
  value, onChange,

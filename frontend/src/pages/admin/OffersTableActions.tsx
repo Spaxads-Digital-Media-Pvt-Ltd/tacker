@@ -16,8 +16,8 @@ import { useNavigate } from 'react-router-dom';
 import { MoreVertical, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { Modal, Field } from '../../components/ui';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { Modal, Field } from '../../shared-components/primitives/ui';
+import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { Advertiser, Publisher } from '../../types';
 
 interface Template { id: string; name: string; fieldValues: Record<string, string> }

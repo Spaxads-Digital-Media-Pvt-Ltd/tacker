@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { Badge, Spinner } from '../../../components/ui';
-import { Icon } from '../../../components/icons';
+import { Badge, Spinner } from '../../../shared-components/primitives/ui';
+import { Icon } from '../../../shared-components/primitives/icons';
 import { useQuery } from '../../../lib/useApi';
 import type { Publisher } from '../../../types';
 

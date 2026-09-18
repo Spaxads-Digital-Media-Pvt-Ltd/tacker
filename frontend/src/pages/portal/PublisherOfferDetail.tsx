@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { ChevronLeft, Check } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Spinner, StateBlock, StatCard } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, StatCard } from '../../shared-components/primitives/ui';
 import type { PublisherOffer } from '../../types';
 
 function CopyButton({ url, label = 'Copy link' }: { url: string | null; label?: string }) {

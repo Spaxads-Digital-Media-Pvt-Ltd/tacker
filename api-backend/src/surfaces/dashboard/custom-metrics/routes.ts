@@ -55,8 +55,7 @@ export function customMetricsRoutes(): Router {
       name: b.name, formula: JSON.stringify(b.formula), format: b.format,
     });
     await writeAudit(req, { action: 'custom_metric.create', entityType: 'custom_metric', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

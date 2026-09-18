@@ -5,14 +5,14 @@
  * Empty). Sub6-10 exist on the rule but aren't shown as list columns by default, matching the
  * reference (available via Columns Customization).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column } from '../../components/ui';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { TrafficBlocking, Publisher, Offer } from '../../types';
 
@@ -23,18 +23,6 @@ const STATUS_OPTIONS = [
   { value: 'inactive', label: 'Inactive', dot: STATUS_DOT['inactive']! },
 ] as const;
 const ALL_COLUMNS = ['ID', 'Offer', 'Partner', 'Sub1', 'Sub2', 'Sub3', 'Sub4', 'Sub5', 'Source ID', 'Status', 'Created', 'Modified'] as const;
-
-function useDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return { open, setOpen, ref };
-}
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { open, setOpen, ref } = useDropdown();

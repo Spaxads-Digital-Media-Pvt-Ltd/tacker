@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
-import { PostbackTester } from '../../components/PostbackTester';
+import { PageHeader, Field } from '../../shared-components/primitives/ui';
+import { PostbackTester } from '../../features/postback/PostbackTester';
 import type { Advertiser } from '../../types';
 
 /** Advertisers › Debug Postback — pick an advertiser, then fire a debug conversion postback. */

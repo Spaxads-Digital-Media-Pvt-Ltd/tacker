@@ -8,7 +8,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronUp, GripVertical, Trash2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Modal, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Modal, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { Questionnaire, QuestionnaireDataField, QuestionnaireField } from '../../types';
 
 const DATA_FIELDS: { value: QuestionnaireDataField; label: string }[] = [

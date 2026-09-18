@@ -132,8 +132,7 @@ export function customerValueRoutes(): Router {
       name: b.name, data_type: b.dataType, parameter_key: b.parameterKey,
     });
     await writeAudit(req, { action: 'customer_data_point.create', entityType: DATA_POINTS_TABLE, entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dataPointDto(row));
+    sendOk(res, dataPointDto(row), undefined, 201);
   }));
   r.patch('/data-points/:id', requireRole('admin', 'manager'), validateBody(dataPointSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof dataPointSchema>;
@@ -165,8 +164,7 @@ export function customerValueRoutes(): Router {
     const b = req.body as z.infer<typeof ruleSchema>;
     const row = await dbForRequest(req).insert<RuleRow>(RULES_TABLE, ruleToColumns(b));
     await writeAudit(req, { action: 'customer_value_rule.create', entityType: RULES_TABLE, entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, ruleDto(row));
+    sendOk(res, ruleDto(row), undefined, 201);
   }));
   r.get('/rules/:id', asyncHandler(async (req, res) => {
     const row = await dbForRequest(req).selectOne<RuleRow>(RULES_TABLE, { id: req.params.id });

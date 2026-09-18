@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, StatCard, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, StatCard, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { NetworkRow } from '../../types';
 
 interface UsageResponse {

@@ -8,9 +8,9 @@
  */
 import { useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
-import { api } from '../lib/api';
-import { useQuery, useMutation } from '../lib/useApi';
-import { Table, Modal, Field, Spinner, StateBlock, EntitySearchSelect, DurationField, type Column, type EntityOpt } from './ui';
+import { api } from '../../lib/api';
+import { useQuery, useMutation } from '../../lib/useApi';
+import { Table, Modal, Field, Spinner, StateBlock, EntitySearchSelect, DurationField, type Column, type EntityOpt } from '../primitives/ui';
 
 export interface FieldDef {
   key: string;

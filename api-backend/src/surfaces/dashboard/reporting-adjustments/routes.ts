@@ -231,9 +231,8 @@ export function reportingAdjustmentsRoutes(): Router {
       days: JSON.stringify(b.days.map(cleanDay)), last_modified_by: actorId,
     });
     await writeAudit(req, { action: 'reporting_adjustment.create', entityType: 'reporting_adjustment', entityId: row.id, after: row });
-    res.status(201);
     const { rows } = await query<Row & JoinFields>(`${SELECT} WHERE a.id = $1 AND a.network_id = $2`, [row.id, req.scope!.networkId]);
-    sendOk(res, await listDTO(req.scope!.networkId, rows[0]!));
+    sendOk(res, await listDTO(req.scope!.networkId, rows[0]!), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

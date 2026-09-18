@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
-import { Modal } from '../../components/ui';
+import { Modal } from '../../shared-components/primitives/ui';
 
 interface Options {
   includeCustomSettings: boolean;

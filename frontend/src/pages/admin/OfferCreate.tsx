@@ -19,10 +19,10 @@ import { useNavigate } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, UnavailableField, Segmented } from '../../components/ui';
-import { HelpHint } from '../../components/HelpHint';
-import { LabelsInput } from '../../components/LabelsEditor';
-import { Stepper } from '../../components/Stepper';
+import { PageHeader, Field, UnavailableField, Segmented } from '../../shared-components/primitives/ui';
+import { HelpHint } from '../../shared-components/panels/HelpHint';
+import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
+import { Stepper } from '../../shared-components/panels/Stepper';
 import type { Advertiser, Offer, TrackingDomain } from '../../types';
 
 const STEPS = ['General', 'Tracking & Controls', 'Revenue & Payout', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'];

@@ -95,9 +95,8 @@ export function couponCodesRoutes(): Router {
       starts_at: b.startsAt ?? null, ends_at: b.endsAt ?? null, description: b.description ?? null, notes: b.notes ?? null,
     });
     await writeAudit(req, { action: 'coupon.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE c.id = $1 AND c.network_id = $2`, [row.id, req.scope!.networkId]);
-    sendOk(res, dto(rows[0]!));
+    sendOk(res, dto(rows[0]!), undefined, 201);
   }));
 
   const bulkCreateSchema = z.object({ items: z.array(createSchema).min(1).max(100) });
@@ -119,8 +118,7 @@ export function couponCodesRoutes(): Router {
       await writeAudit(req, { action: 'coupon.create', entityType: TABLE, entityId: row.id, after: row });
       created.push(row);
     }
-    res.status(201);
-    sendOk(res, { created: created.length });
+    sendOk(res, { created: created.length }, undefined, 201);
   }));
 
   const bulkUpdateSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500), status: z.enum(['active', 'expired', 'disabled']) });

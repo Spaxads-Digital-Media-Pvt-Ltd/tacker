@@ -11,8 +11,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Segmented } from '../../components/ui';
-import { DualListPicker } from '../../components/DualListPicker';
+import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { DualListPicker } from '../../shared-components/panels/DualListPicker';
 import { CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL, CURRENCIES, type OfferGroup } from '../../data/offerGroups';
 import type { Advertiser, Offer } from '../../types';
 

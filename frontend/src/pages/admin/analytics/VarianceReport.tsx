@@ -23,14 +23,14 @@ import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronRight, MoreVertical, Search } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../../components/ui';
-import { FilterButton, type FilterCategory, type FilterValues } from '../../../components/CategorizedFilters';
-import { ApiRequestModal } from '../../../components/TableActionsKit';
+import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
+import { FilterButton, type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
+import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
   type AggResult, METRICS_PARAM, DASH, DEVICES, money, pct, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow,
   type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
-} from '../../../components/ReportPageKit';
+} from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
 
 interface SmartLink { id: string; name: string }

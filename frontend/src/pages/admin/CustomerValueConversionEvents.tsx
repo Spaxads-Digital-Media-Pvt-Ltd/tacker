@@ -16,10 +16,10 @@
  */
 import { useMemo, useState } from 'react';
 import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { daysAgo, todayStr, toIso, DASH } from '../../components/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
 import { useQuery } from '../../lib/useApi';
 
 interface EventRow {

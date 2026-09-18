@@ -20,9 +20,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Search, MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Spinner, StateBlock, Overlay } from '../../components/ui';
-import { FilterButton, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { PageHeader, Spinner, StateBlock, Overlay } from '../../shared-components/primitives/ui';
+import { FilterButton, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import {
@@ -31,7 +31,7 @@ import {
   type MetricFilters, passesMetricFilters,
   reportingFiltersCount, ReportingFiltersFlyout,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
-} from '../../components/ReportPageKit';
+} from '../../shared-components/primitives/ReportPageKit';
 
 const ALL_COLUMNS = [
   'Clicks', 'Uniq. Clicks', 'Dup. Clicks', 'Invalid Clicks', 'Total CV', 'CV', 'Throttle', 'Events',

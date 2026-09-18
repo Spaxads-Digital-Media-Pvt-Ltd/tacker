@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Image as ImageIcon } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
-import { Table, Spinner, StateBlock, type Column } from '../../../components/ui';
+import { Table, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
 import type { Offer } from '../../../types';
 
 /** Real data — offers that belong to this advertiser. */

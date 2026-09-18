@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, Overlay, type Column } from '../../components/ui';
+import { PageHeader, Table, Spinner, StateBlock, Overlay, type Column } from '../../shared-components/primitives/ui';
 import type { AdvertiserInvoice, AdvertiserInvoiceLedgerEntry } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', deleted: 'bg-danger-text' };

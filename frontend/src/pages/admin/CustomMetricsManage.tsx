@@ -20,7 +20,7 @@ import { useState } from 'react';
 import { MoreVertical, Plus, Search } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, Modal } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, Modal } from '../../shared-components/primitives/ui';
 import {
   METRIC_KEYS, METRIC_LABELS, OPERATORS, FORMAT_LABELS,
   type FormulaToken, type MetricFormat, tokenLabel,

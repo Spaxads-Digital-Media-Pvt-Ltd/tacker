@@ -1,5 +1,5 @@
-import { PageHeader } from '../../components/ui';
-import { PostbackTester } from '../../components/PostbackTester';
+import { PageHeader } from '../../shared-components/primitives/ui';
+import { PostbackTester } from '../../features/postback/PostbackTester';
 
 /** Standalone affiliate postback tester (Affiliates › Postbacks Test). */
 export default function PostbackTestPage() {

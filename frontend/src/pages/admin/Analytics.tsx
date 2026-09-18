@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { PageHeader } from '../../components/ui';
+import { PageHeader } from '../../shared-components/primitives/ui';
 import { OptsCtx, useReportOpts } from './Reports';
 import { DimensionalReport } from './analytics/DimensionalReport';
 import FlexReport from './analytics/FlexReport';

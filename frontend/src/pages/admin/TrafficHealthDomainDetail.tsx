@@ -15,9 +15,9 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Calendar, CheckCircle2, ShieldAlert, Lock } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Badge, Spinner, StateBlock } from '../../components/ui';
-import { EmptyShellTable } from '../../components/EmptyShellTable';
-import { daysAgo, todayStr, toIso } from '../../components/ReportPageKit';
+import { PageHeader, Badge, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
+import { daysAgo, todayStr, toIso } from '../../shared-components/primitives/ReportPageKit';
 import type { TrackingDomain } from '../../types';
 
 const TABS = ['All Activity', 'Uptime Incidents', 'Reputation Flags', 'Tasks', 'Usage', 'Assignments', 'Mismatches', 'Configuration'] as const;

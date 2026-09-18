@@ -1,7 +1,7 @@
 import { Check, Globe, Link2, Mail, X } from 'lucide-react';
-import { Icon } from './icons';
-import { PAYOUT_TYPES } from '../lib/marketplaceProfile';
-import type { MarketplaceProfile } from '../types';
+import { Icon } from '../../shared-components/primitives/icons';
+import { PAYOUT_TYPES } from '../../lib/marketplaceProfile';
+import type { MarketplaceProfile } from '../../types';
 
 const DASH = '—';
 

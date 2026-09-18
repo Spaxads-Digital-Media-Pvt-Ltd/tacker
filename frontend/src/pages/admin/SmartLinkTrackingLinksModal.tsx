@@ -3,8 +3,8 @@
  * pointed at the tracking surface's real `/sl` smart-link resolver instead of `/click`. */
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { Field, Overlay } from '../../components/ui';
-import { CopyBox } from '../../components/CopyBox';
+import { Field, Overlay } from '../../shared-components/primitives/ui';
+import { CopyBox } from '../../shared-components/panels/CopyBox';
 import { useQuery } from '../../lib/useApi';
 import type { Publisher, TrackingDomain } from '../../types';
 import type { SmartLink } from '../../data/smartLinks';

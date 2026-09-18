@@ -6,8 +6,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented, DurationField } from '../../components/ui';
-import { MacroTokenPicker } from '../../components/MacroTokenPicker';
+import { PageHeader, Field, Spinner, StateBlock, Segmented, DurationField } from '../../shared-components/primitives/ui';
+import { MacroTokenPicker } from '../../features/postback/MacroTokenPicker';
 import type { Postback, Publisher, Offer } from '../../types';
 
 const STATUSES = ['active', 'disabled'] as const;

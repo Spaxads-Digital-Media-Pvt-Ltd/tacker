@@ -80,8 +80,7 @@ export function smartSwitchRoutes(): Router {
     });
     await db.insert(HISTORY, { rule_id: row.id, rule_name: row.name, change: 'Rule created', employee: actorId(req) });
     await writeAudit(req, { action: 'smartswitch_rule.create', entityType: 'smartswitch_rule', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, ruleDto(row));
+    sendOk(res, ruleDto(row), undefined, 201);
   }));
 
   r.patch('/rules/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

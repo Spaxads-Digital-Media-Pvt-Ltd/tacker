@@ -4,7 +4,7 @@
  * drag-to-reorder, Reset to default) and a "Table Request" modal (shows the actual request the page
  * issues, honestly noting when filtering happens client-side rather than as query params).
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GripVertical, Search as SearchIcon } from 'lucide-react';
 import { Modal } from './ui';
 
@@ -119,5 +119,11 @@ export function ApiRequestModal({
 export function useDropdown() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
   return { open, setOpen, ref };
 }

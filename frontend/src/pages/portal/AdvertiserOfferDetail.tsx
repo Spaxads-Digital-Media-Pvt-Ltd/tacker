@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, StatCard } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, StatCard } from '../../shared-components/primitives/ui';
 import type { AdvertiserOffer } from '../../types';
 
 export default function AdvertiserOfferDetail() {

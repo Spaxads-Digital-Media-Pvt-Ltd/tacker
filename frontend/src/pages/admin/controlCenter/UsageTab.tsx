@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Table, Spinner, StateBlock, type Column } from '../../../components/ui';
+import { Table, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
 import { useQuery } from '../../../lib/useApi';
 
 interface Row { month: string; impressions: number; offersPulled: number }

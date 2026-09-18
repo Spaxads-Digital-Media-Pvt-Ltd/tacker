@@ -83,8 +83,7 @@ export function trackingDomainsAdminRoutes(): Router {
         throw err;
       }
       await writeAudit(req, { action: 'tracking_domain.create', entityType: 'tracking_domain', entityId: row.id, after: row });
-      res.status(201);
-      sendOk(res, toDTO(row));
+      sendOk(res, toDTO(row), undefined, 201);
     }),
   );
 

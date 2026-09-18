@@ -13,8 +13,8 @@
  * "Not available yet" controls instead of live filtering that doesn't exist.
  */
 import { Filter, MoreVertical } from 'lucide-react';
-import { PageHeader } from '../../components/ui';
-import { EmptyShellTable } from '../../components/EmptyShellTable';
+import { PageHeader } from '../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 
 const COLUMNS = ['SKU / Partner', 'Total CV', 'CV', 'VT CV', 'Throttle', 'Event', 'Gross Sales'];
 

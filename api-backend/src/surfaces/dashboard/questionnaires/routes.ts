@@ -109,8 +109,7 @@ export function questionnairesRoutes(): Router {
     const row = await db.insert<Row>(TABLE, { name: b.name, status: b.status });
     await replaceFields(db, row.id, b.fields);
     await writeAudit(req, { action: 'questionnaire.create', entityType: 'questionnaire', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, { id: row.id, name: row.name, status: row.status, fields: b.fields.map((f, i) => ({ ...f, id: '', position: i })), createdAt: row.created_at, updatedAt: row.updated_at });
+    sendOk(res, { id: row.id, name: row.name, status: row.status, fields: b.fields.map((f, i) => ({ ...f, id: '', position: i })), createdAt: row.created_at, updatedAt: row.updated_at }, undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

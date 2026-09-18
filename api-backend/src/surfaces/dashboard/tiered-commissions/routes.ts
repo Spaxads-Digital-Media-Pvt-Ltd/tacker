@@ -127,8 +127,7 @@ export function tieredCommissionsRoutes(): Router {
       revenue_enabled: b.revenueEnabled, revenue_action: b.revenueAction ?? null, revenue_value: b.revenueValue ?? null,
     });
     await writeAudit(req, { action: 'tiered-commission.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

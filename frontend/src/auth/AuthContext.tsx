@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { loadSession, type Session } from './session';
-import * as authClient from '../lib/authClient';
+import * as authClient from './authClient';
 
 interface AuthContextValue {
   session: Session | null;

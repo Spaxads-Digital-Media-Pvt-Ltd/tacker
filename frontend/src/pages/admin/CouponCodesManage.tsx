@@ -13,9 +13,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical, Link2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../components/ui';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { CouponCode, Publisher, Offer, TrackingDomain } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', expired: 'bg-fg-muted', disabled: 'bg-warning' };
@@ -26,18 +26,6 @@ const STATUS_OPTIONS = [
   { value: 'paused', label: 'Paused', dot: STATUS_DOT['disabled']! },
 ] as const;
 const ALL_COLUMNS = ['ID', 'Coupon Code', 'Partner', 'Offer', 'Start Date', 'End Date', 'Description', 'Created', 'Modified'] as const;
-
-function useDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return { open, setOpen, ref };
-}
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { open, setOpen, ref } = useDropdown();
@@ -209,13 +197,14 @@ export default function CouponCodesManage() {
     setTableActionsOpen(false);
     setBulkBusy(true);
     try {
-      const token = JSON.parse(localStorage.getItem('tracker.session.v2') ?? '{}').token;
-      await fetch('/api/coupon-codes/bulk', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ids: Array.from(selected), status: nextStatus }),
+      const result = await api.patch<{ ok: boolean }>('/api/coupon-codes/bulk', {
+        ids: Array.from(selected),
+        status: nextStatus,
       });
-      setSelected(new Set());
-      refetch();
+      if (result?.ok) {
+        setSelected(new Set());
+        refetch();
+      }
     } finally {
       setBulkBusy(false);
     }

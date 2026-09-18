@@ -8,7 +8,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { HelpCircle, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { TrafficSource, TrafficSourceParam } from '../../types';
 
 const MACROS: { token: string; description: string }[] = [

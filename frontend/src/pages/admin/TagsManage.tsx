@@ -6,7 +6,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 
 interface Tag { id: string; name: string; color: string | null }
 
