@@ -1,7 +1,7 @@
 /**
  * Enqueue async integration jobs (Facebook CAPI, offer feed sync).
  */
-import { getQueue, QUEUE } from '../../surfaces/workers/queues.js';
+import { getQueue, QUEUE } from '../queues.js';
 
 export interface FacebookCapiJob {
   networkId: string;
