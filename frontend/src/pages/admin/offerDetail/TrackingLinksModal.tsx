@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
-import { Field, Overlay } from '../../../components/ui';
-import { CopyBox } from '../../../components/CopyBox';
+import { Field, Overlay } from '../../../shared-components/primitives/ui';
+import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import { useQuery } from '../../../lib/useApi';
 import type { Offer, Publisher, TrackingDomain, TrafficSource } from '../../../types';
 

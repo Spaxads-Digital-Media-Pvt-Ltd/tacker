@@ -149,8 +149,7 @@ export function publishersAdminRoutes(): Router {
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
       });
       await writeAudit(req, { action: 'publisher.create', entityType: 'publisher', entityId: row.id, after: row });
-      res.status(201);
-      sendOk(res, toAdminDTO(row));
+      sendOk(res, toAdminDTO(row), undefined, 201);
     }),
   );
 
@@ -230,8 +229,7 @@ export function publishersAdminRoutes(): Router {
       level: b.level,
     });
     await writeAudit(req, { action: 'publisher.postback.create', entityType: 'publisher_postback', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, toPostbackDTO(row));
+    sendOk(res, toPostbackDTO(row), undefined, 201);
   }));
 
   r.patch('/:id/postbacks/:pbId', requireRole('admin', 'manager'), validateBody(updatePostbackSchema), asyncHandler(async (req, res) => {
@@ -331,8 +329,7 @@ export function publisherPortalRoutes(): Router {
         offer_id: b.offerId ?? null,
         event: b.event ?? null,
       });
-      res.status(201);
-      sendOk(res, toPostbackDTO(row));
+      sendOk(res, toPostbackDTO(row), undefined, 201);
     }),
   );
 

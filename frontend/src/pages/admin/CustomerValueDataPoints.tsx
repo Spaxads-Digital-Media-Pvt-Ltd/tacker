@@ -14,9 +14,9 @@
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Plus, Pencil, Trash2, Search, MoreVertical, ChevronDown } from 'lucide-react';
-import { PageHeader, Field, Modal, Spinner, StateBlock } from '../../components/ui';
-import { Pagination } from '../../components/ReportPageKit';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, Field, Modal, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
+import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 
@@ -29,18 +29,6 @@ const TYPE_OPTIONS = [
   { value: 'text', label: 'Text' },
   { value: 'number', label: 'Number' },
 ] as const;
-
-function useDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return { open, setOpen, ref };
-}
 
 function TypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { open, setOpen, ref } = useDropdown();

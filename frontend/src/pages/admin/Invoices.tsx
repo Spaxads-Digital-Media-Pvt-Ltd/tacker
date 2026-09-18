@@ -5,7 +5,7 @@
  * approval and payment tracking; this page keeps the read-only advertiser half.
  */
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 
 interface Row { id: string; name: string; amount: string; currency: string; entries: number }
 interface Data { advertiserBilling: Row[]; affiliatePayable: Row[] }

@@ -10,7 +10,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { UploadCloud } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader } from '../../components/ui';
+import { PageHeader } from '../../shared-components/primitives/ui';
 import type { Offer, Publisher } from '../../types';
 
 const TEMPLATE_CSV = 'coupon_code,offer_id,affiliate_id,status,description,notes,start_date,end_date\nSAVE10,,,active,,,,\n';

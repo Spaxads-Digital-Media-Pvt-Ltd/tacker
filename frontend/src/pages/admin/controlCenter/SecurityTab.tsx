@@ -5,8 +5,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../../../lib/api';
 import { cc } from '../../../lib/controlCenter';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { Tabs, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../../components/ui';
-import { EmptyShellTable } from '../../../components/EmptyShellTable';
+import { Tabs, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import { InfoCard, InfoGrid, InfoRow, YesNoToggle, EditHeaderAction } from './shared';
 
 const SUB_TABS = ['API Keys', 'API Whitelist', 'Logins', 'Multi-Factor Authentication'] as const;

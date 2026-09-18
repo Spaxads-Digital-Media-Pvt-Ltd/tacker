@@ -8,8 +8,8 @@ import { Info } from 'lucide-react';
 import { cc } from '../../../lib/controlCenter';
 import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { Tabs, Field } from '../../../components/ui';
-import { EmptyShellTable } from '../../../components/EmptyShellTable';
+import { Tabs, Field } from '../../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import { InfoCard, InfoGrid, InfoRow, NotificationCard, InfoBanner, HeadsUpBanner, YesNoToggle, HelpIcon, EditHeaderAction, type NotifyDef, type NotifySaved } from './shared';
 
 const SUB_TABS = ['General', 'Default Notifications', 'Partner Referral', 'Terms & Conditions'] as const;

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { Modal, Field } from '../../components/ui';
+import { Modal, Field } from '../../shared-components/primitives/ui';
 import type { Offer } from '../../types';
 
 interface Options {

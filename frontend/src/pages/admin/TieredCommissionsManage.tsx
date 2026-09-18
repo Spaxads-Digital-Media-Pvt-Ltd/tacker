@@ -12,9 +12,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical, ChevronDown } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Modal, Spinner, StateBlock, type Column } from '../../components/ui';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { PageHeader, Tabs, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, ApiRequestModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { TieredCommission, TieredCommissionSummaryRow, Offer, Publisher, Advertiser } from '../../types';
 
 const ALL_COLUMNS = ['ID', 'Name', 'Offers', 'Partners', 'Advertisers', 'Event', 'Rules', 'Payout Setting', 'Revenue Setting', 'Start Date', 'End Date', 'Created', 'Modified'] as const;
@@ -25,18 +25,6 @@ const STATUS_OPTIONS = [
   { value: 'active', label: 'Active', dot: 'bg-success' },
   { value: 'inactive', label: 'Inactive', dot: 'bg-warning' },
 ] as const;
-
-function useDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return { open, setOpen, ref };
-}
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { open, setOpen, ref } = useDropdown();

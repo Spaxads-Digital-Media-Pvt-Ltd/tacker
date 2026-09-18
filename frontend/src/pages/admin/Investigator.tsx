@@ -7,8 +7,8 @@ import { Link } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
-import { daysAgo, todayStr } from '../../components/ReportPageKit';
+import { PageHeader, Table, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { daysAgo, todayStr } from '../../shared-components/primitives/ReportPageKit';
 import type { Publisher } from '../../types';
 
 interface Investigation {

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Brandmark } from '../components/Brandmark';
+import { Brandmark } from '../shared-components/primitives/Brandmark';
 
 /**
  * Placeholder destination for the login page's "Forgot password?" link. There is no self-serve

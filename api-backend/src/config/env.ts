@@ -71,6 +71,10 @@ const schema = z.object({
   MAXMIND_CITY_DB: z.string().optional(),
   MAXMIND_ASN_DB: z.string().optional(),
 
+  // CORS: comma-separated origins allowed to call the Express API surfaces from a browser.
+  // Defaults to the Vite dev server (localhost:5173) when unset. Pass '*' to allow all origins.
+  DASHBOARD_ORIGINS: z.string().optional(),
+
   // Error tracking (spec §2 observability). Optional: without a DSN the Sentry hook is a no-op.
   SENTRY_DSN: z.string().url().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),

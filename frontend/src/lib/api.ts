@@ -7,9 +7,10 @@
  * refresh fails the session is cleared and the user is sent to login.
  */
 import { getToken } from '../auth/session';
-import { refreshToken } from './authClient';
+import { refreshToken } from '../auth/authClient';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+const REQUEST_TIMEOUT = 30_000;
 
 export class ApiError extends Error {
   constructor(
@@ -30,32 +31,45 @@ interface Envelope<T> {
 }
 
 async function doFetch(path: string, init: RequestInit, token: string | null): Promise<Response> {
-  const headers = new Headers(init.headers);
-  headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch(`${BASE}${path}`, { ...init, headers, credentials: 'include' });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+  try {
+    const headers = new Headers(init.headers);
+    headers.set('Content-Type', 'application/json');
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    return await fetch(`${BASE}${path}`, { ...init, headers, credentials: 'include', signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  let res = await doFetch(path, init, getToken());
-
-  // Transparent one-shot refresh on expiry.
-  if (res.status === 401) {
-    const fresh = await refreshToken();
-    if (fresh) {
-      res = await doFetch(path, init, fresh);
-    } else {
-      if (!location.pathname.startsWith('/login')) location.href = '/login';
-      throw new ApiError('unauthorized', 'Session expired', 401);
+  try {
+    let res = await doFetch(path, init, getToken());
+    if (res.status === 401) {
+      const fresh = await refreshToken();
+      if (fresh) {
+        res = await doFetch(path, init, fresh);
+      } else {
+        if (!location.pathname.startsWith('/login')) location.href = '/login';
+        throw new ApiError('unauthorized', 'Session expired', 401);
+      }
     }
-  }
 
-  const body = (await res.json().catch(() => ({}))) as Envelope<T>;
-  if (!res.ok || body.ok === false) {
-    const err = body.error ?? { code: 'unknown', message: res.statusText };
-    throw new ApiError(err.code, err.message, res.status, err.details);
+    const body = (await res.json().catch(() => ({}))) as Envelope<T>;
+    if (!res.ok || body.ok === false) {
+      const err = body.error ?? { code: 'unknown', message: res.statusText };
+      throw new ApiError(err.code, err.message, res.status, err.details);
+    }
+    return body.data as T;
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    if (e instanceof NetworkError) throw e;
+    if (e instanceof DOMException) {
+      if (e.name === 'AbortError') throw new NetworkError('timeout', `Request timed out after ${REQUEST_TIMEOUT}ms`);
+    }
+    throw new NetworkError('network', e instanceof Error ? e.message : 'Network error');
   }
-  return body.data as T;
 }
 
 export const api = {
@@ -68,3 +82,12 @@ export const api = {
     request<T>(path, { method: 'PUT', body: data ? JSON.stringify(data) : undefined }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
+
+/** Network-level error types so callers can distinguish them from HTTP errors. */
+export type NetworkErrorKind = 'timeout' | 'network';
+export class NetworkError extends Error {
+  constructor(public readonly kind: NetworkErrorKind, message: string) {
+    super(message);
+    this.name = 'NetworkError';
+  }
+}

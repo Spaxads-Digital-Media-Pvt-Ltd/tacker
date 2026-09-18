@@ -9,7 +9,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Edit2, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Tabs, Table, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import type { PartnerTier, PartnerTierMember, PartnerTierOffer, Offer } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' };

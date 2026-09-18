@@ -5,10 +5,10 @@ import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABELS, type Role } from '../auth/roles';
 import { useQuery } from '../lib/useApi';
 import { useClickOutside } from '../lib/useClickOutside';
-import { PageHeader, StatCard, Spinner, StateBlock } from '../components/ui';
-import { Sparkline } from '../components/Sparkline';
-import { PerformanceChart } from '../components/PerformanceChart';
-import { TrackingLinkGeneratorModal } from '../components/TrackingLinkGeneratorModal';
+import { PageHeader, StatCard, Spinner, StateBlock } from '../shared-components/primitives/ui';
+import { Sparkline } from '../shared-components/charts/Sparkline';
+import { PerformanceChart } from '../shared-components/charts/PerformanceChart';
+import { TrackingLinkGeneratorModal } from '../shared-components/panels/TrackingLinkGeneratorModal';
 import { MOCK_DASHBOARD, mockNameMap, mockTopRows, mockHourlySeries } from './dashboardMock';
 import type { Offer, Publisher, Advertiser } from '../types';
 

@@ -1,5 +1,5 @@
-import { Spinner } from '../../../components/ui';
-import { EmptyShellTable } from '../../../components/EmptyShellTable';
+import { Spinner } from '../../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import { useQuery } from '../../../lib/useApi';
 
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }

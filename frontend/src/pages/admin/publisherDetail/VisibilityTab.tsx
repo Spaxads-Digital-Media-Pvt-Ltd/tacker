@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Image as ImageIcon } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
-import { Table, Spinner, StateBlock, type Column } from '../../../components/ui';
+import { Table, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
 import type { Offer, Advertiser } from '../../../types';
 
 /** No bulk "offers visible to publisher X" endpoint exists — this shows all offers with an

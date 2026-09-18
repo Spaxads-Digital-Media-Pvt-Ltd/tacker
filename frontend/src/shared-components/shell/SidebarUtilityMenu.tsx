@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, User, HelpCircle, BookOpen, Keyboard, Mail } from 'lucide-react';
-import { useQuery } from '../lib/useApi';
+import { useQuery } from '../../lib/useApi';
 
 interface HistoryRow {
   id: string; ref: number; operationTime: string; service: string; changes: string; isNew: boolean;

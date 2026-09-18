@@ -24,7 +24,7 @@ import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, Modal } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock, Modal } from '../../shared-components/primitives/ui';
 
 type ImportType = 'create' | 'update_by_transaction_id' | 'update_by_conversion_id';
 const TYPE_OPTIONS: { value: ImportType; label: string; columns: string }[] = [

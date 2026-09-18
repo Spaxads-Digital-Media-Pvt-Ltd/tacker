@@ -33,8 +33,7 @@ export function businessUnitsRoutes(): Router {
     const b = req.body as z.infer<typeof createSchema>;
     const row = await dbForRequest(req).insert<Row>(TABLE, { name: b.name });
     await writeAudit(req, { action: 'business_unit.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

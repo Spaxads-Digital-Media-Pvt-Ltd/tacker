@@ -5,13 +5,13 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import { z, type ZodTypeAny } from 'zod';
-import { AppError } from './errors.js';
+import { validationFailed } from './errors.js';
 
 export function validateBody<S extends ZodTypeAny>(schema: S) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      return next(new AppError('validation_failed', 'Request body failed validation', flatten(result.error)));
+      return next(validationFailed('Request body failed validation', flatten(result.error)));
     }
     req.body = result.data;
     return next();
@@ -23,7 +23,7 @@ export function validateQuery<S extends ZodTypeAny>(schema: S) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.query);
     if (!result.success) {
-      return next(new AppError('validation_failed', 'Query failed validation', flatten(result.error)));
+      return next(validationFailed('Query failed validation', flatten(result.error)));
     }
     res.locals.query = result.data;
     return next();

@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Info } from 'lucide-react';
 import { cc } from '../../../lib/controlCenter';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { Tabs, Field } from '../../../components/ui';
-import { EmptyShellTable } from '../../../components/EmptyShellTable';
+import { Tabs, Field } from '../../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import {
   InfoCard, InfoGrid, InfoRow, NotificationCard, YesNoToggle, EditHeaderAction,
   type NotifyDef, type NotifySaved,

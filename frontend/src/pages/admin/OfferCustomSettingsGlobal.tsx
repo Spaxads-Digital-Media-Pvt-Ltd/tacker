@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Tabs, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
-import { CollectionTab, type FieldDef } from '../../components/CollectionTab';
+import { PageHeader, Tabs, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
 import type { Offer, Publisher } from '../../types';
 
 type Row = { id: string; [k: string]: unknown };

@@ -147,9 +147,11 @@ export function buildTrackingApp(): FastifyInstance {
  // Report unexpected handler errors to Sentry (no-op when disabled), then hand back to Fastify's
  // default error response — the hot path must still fail fast and cheap.
  app.setErrorHandler((err, req, reply) => {
- captureError(err, { url: req.url });
- req.log.error({ err }, 'tracking handler error');
- reply.code(err.statusCode ?? 500).send(errorEnvelope('internal', 'Internal server error', err.statusCode ?? 500));
+  const errCode = (err as any).code || 'internal';
+  const errMsg = (err as any).message || 'Internal server error';
+  captureError(err, { url: req.url, code: errCode });
+  req.log.error({ err, code: errCode }, 'tracking handler error');
+  reply.code(err.statusCode ?? 500).send(errorEnvelope(errCode, errMsg, err.statusCode ?? 500));
  });
 
  app.get('/health', async (_req, reply) => {

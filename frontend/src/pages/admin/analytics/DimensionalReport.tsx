@@ -27,8 +27,8 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, Filter, Plus, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
-import { Spinner, StateBlock } from '../../../components/ui';
-import { daysAgo, todayStr, toIso, DASH, money, num } from '../../../components/ReportPageKit';
+import { Spinner, StateBlock } from '../../../shared-components/primitives/ui';
+import { daysAgo, todayStr, toIso, DASH, money, num } from '../../../shared-components/primitives/ReportPageKit';
 import { METRIC_KEYS, METRIC_LABELS, type MetricKey } from '../../../lib/customMetrics';
 import { useReportOpts, type Opts } from '../Reports';
 

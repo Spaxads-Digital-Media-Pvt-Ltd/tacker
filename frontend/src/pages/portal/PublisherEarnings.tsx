@@ -1,5 +1,5 @@
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, StatCard, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, StatCard, Table, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 
 interface StatementEntry {
   type: string; direction: string; amount: string; currency: string; status: string; createdAt: string;

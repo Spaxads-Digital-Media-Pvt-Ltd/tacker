@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Link2, Pencil } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { recordView } from '../../lib/recentlyViewed';
-import { PageHeader, Tabs, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Tabs, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { GeneralTab } from './publisherDetail/GeneralTab';
 import { VisibilityTab } from './publisherDetail/VisibilityTab';
 import { PostbacksTab } from './publisherDetail/PostbacksTab';

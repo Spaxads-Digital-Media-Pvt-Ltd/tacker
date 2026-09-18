@@ -57,8 +57,7 @@ export function offerTemplatesRoutes(): Router {
       field_values: JSON.stringify(b.fieldValues),
     });
     await writeAudit(req, { action: 'offer_template.create', entityType: 'offer_template', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

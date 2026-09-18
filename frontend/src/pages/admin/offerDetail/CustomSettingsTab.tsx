@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { CollectionTab, type FieldDef } from '../../../components/CollectionTab';
-import { Accordion } from '../../../components/Accordion';
-import type { Column } from '../../../components/ui';
+import { CollectionTab, type FieldDef } from '../../../shared-components/panels/CollectionTab';
+import { Accordion } from '../../../shared-components/panels/Accordion';
+import type { Column } from '../../../shared-components/primitives/ui';
 
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => ReactNode): Column<Row> => ({ header, cell });

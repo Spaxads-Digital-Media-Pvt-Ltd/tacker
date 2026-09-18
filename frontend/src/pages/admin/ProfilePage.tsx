@@ -10,8 +10,8 @@ import { ROLE_LABELS } from '../../auth/roles';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { loadSession, saveSession } from '../../auth/session';
-import { PageHeader, Badge, Modal, Field, Tabs } from '../../components/ui';
-import { EmptyShellTable, type ShellRow } from '../../components/EmptyShellTable';
+import { PageHeader, Badge, Modal, Field, Tabs } from '../../shared-components/primitives/ui';
+import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
 
 const ACCOUNT_TABS = ['General', 'Logins'] as const;
 const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Portuguese'];

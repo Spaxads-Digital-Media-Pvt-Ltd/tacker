@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { usePageTitle } from './PageTitle';
-import { HelpHint } from './HelpHint';
+import { HelpHint } from '../panels/HelpHint';
 
 /**
  * Declares the page title/subtitle (rendered in the top header, Section 2 — NOT duplicated in the

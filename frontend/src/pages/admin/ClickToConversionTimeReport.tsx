@@ -20,10 +20,10 @@ import { Fragment, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { FilterButton, CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ApiRequestModal } from '../../components/TableActionsKit';
-import { daysAgo, todayStr, toIso, Pagination, RowKebabMenu } from '../../components/ReportPageKit';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FilterButton, CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
+import { daysAgo, todayStr, toIso, Pagination, RowKebabMenu } from '../../shared-components/primitives/ReportPageKit';
 import type { Offer, Publisher } from '../../types';
 
 interface BucketRow { key: string; b0: number; b1: number; b2: number; b3: number; b4: number; b5: number; b6: number; total: number }

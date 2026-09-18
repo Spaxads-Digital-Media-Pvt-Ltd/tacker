@@ -16,10 +16,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Tabs, Spinner, StateBlock, UnavailableField, type Column, Segmented } from '../../components/ui';
-import { HelpHint } from '../../components/HelpHint';
-import { LabelsEditor } from '../../components/LabelsEditor';
-import { CollectionTab, type FieldDef } from '../../components/CollectionTab';
+import { PageHeader, Field, Tabs, Spinner, StateBlock, UnavailableField, type Column, Segmented } from '../../shared-components/primitives/ui';
+import { HelpHint } from '../../shared-components/panels/HelpHint';
+import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
+import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
 import type { Offer, Advertiser, TrackingDomain } from '../../types';
 
 const TABS = ['General', 'Tracking & Controls', 'Revenue & Payout (Events)', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'] as const;

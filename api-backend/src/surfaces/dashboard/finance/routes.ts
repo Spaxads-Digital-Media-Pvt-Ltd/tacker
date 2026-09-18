@@ -95,8 +95,7 @@ export function financeRoutes(): Router {
         ...(userId ? { createdBy: userId } : {}),
       });
       await writeAudit(req, { action: 'payout.batch.create', entityType: 'payout_batch', entityId: result.batchId, after: result });
-      res.status(201);
-      sendOk(res, result);
+      sendOk(res, result, undefined, 201);
     }),
   );
 

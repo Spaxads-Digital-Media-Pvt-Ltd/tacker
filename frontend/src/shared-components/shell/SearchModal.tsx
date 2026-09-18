@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, History, Clock } from 'lucide-react';
-import { useQuery } from '../lib/useApi';
-import { getRecentViews, getQueryHistory, recordQuery, type RecentKind } from '../lib/recentlyViewed';
-import { Icon } from './icons';
-import { Overlay } from './ui';
-import type { Offer, Publisher, Advertiser } from '../types';
+import { useQuery } from '../../lib/useApi';
+import { getRecentViews, getQueryHistory, recordQuery, type RecentKind } from '../../lib/recentlyViewed';
+import { Icon } from '../primitives/icons';
+import { Overlay } from '../primitives/ui';
+import type { Offer, Publisher, Advertiser } from '../../types';
 
 interface Result { kind: RecentKind; id: string; ref: number | null; name: string; status: string }
 

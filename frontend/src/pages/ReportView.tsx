@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../components/ui';
+import { PageHeader, Table, Spinner, StateBlock, type Column } from '../shared-components/primitives/ui';
 
 interface ReportRow {
   dimensions: Record<string, string | null>;

@@ -10,7 +10,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
+import { PageHeader, Field } from '../../shared-components/primitives/ui';
 import { CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL } from '../../data/offerGroups';
 import type { CustomSetting } from '../../data/offerCustomSettings';
 import type { Offer, Publisher } from '../../types';

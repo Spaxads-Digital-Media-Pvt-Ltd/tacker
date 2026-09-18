@@ -108,8 +108,7 @@ export function postbackControlsRoutes(): Router {
       condition_logic: b.conditionLogic, rules: JSON.stringify(b.rules),
     });
     await writeAudit(req, { action: 'postback-control.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

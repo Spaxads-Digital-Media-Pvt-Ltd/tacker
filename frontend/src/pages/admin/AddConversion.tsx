@@ -15,7 +15,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
+import { PageHeader, Field } from '../../shared-components/primitives/ui';
 import type { Offer, Publisher } from '../../types';
 
 function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {

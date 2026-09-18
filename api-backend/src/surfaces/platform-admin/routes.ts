@@ -167,8 +167,7 @@ export function platformRoutes(): Router {
 
  await client.query('COMMIT');
  await writePlatformAudit(req, net.id, { action: 'network.create', entityType: 'network', entityId: net.id, after: net });
- res.status(201);
- sendOk(res, { ...net, ownerUserId });
+ sendOk(res, { ...net, ownerUserId }, undefined, 201);
  } catch (err) {
  await client.query('ROLLBACK');
  if (isUnique(err)) throw badRequest('A network with that slug already exists');
@@ -225,8 +224,7 @@ export function platformRoutes(): Router {
  [b.code, b.name, b.priceCents, b.currency, JSON.stringify(b.limits)],
  );
  await writePlatformAudit(req, null, { action: 'plan.create', entityType: 'subscription_plan', entityId: rows[0]!.id, after: rows[0] });
- res.status(201);
- sendOk(res, rows[0]);
+ sendOk(res, rows[0], undefined, 201);
  } catch (err) {
  if (isUnique(err)) throw badRequest('A plan with that code already exists');
  throw err;

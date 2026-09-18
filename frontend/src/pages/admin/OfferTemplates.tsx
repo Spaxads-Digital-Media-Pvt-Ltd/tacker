@@ -12,8 +12,8 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Modal, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../components/ui';
-import { Pagination } from '../../components/ReportPageKit';
+import { PageHeader, Modal, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { useFieldSpecs, valueLabel, fmtDateTime, type Template, type FieldSpec } from '../../data/offerTemplateFields';
 

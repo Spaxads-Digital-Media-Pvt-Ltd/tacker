@@ -4,9 +4,9 @@
  * `testPath` is the backend endpoint that performs the fire (e.g. /api/publishers/:id/postbacks/test).
  */
 import { useState, type FormEvent } from 'react';
-import { api } from '../lib/api';
-import { useMutation } from '../lib/useApi';
-import { Field } from './ui';
+import { api } from '../../lib/api';
+import { useMutation } from '../../lib/useApi';
+import { Field } from '../../shared-components/primitives/ui';
 
 interface TestResult { ok: boolean; status: number | null; ms: number; finalUrl: string; error: string | null; body: string | null }
 

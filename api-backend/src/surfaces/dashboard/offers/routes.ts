@@ -224,8 +224,7 @@ export function offersAdminRoutes(): Router {
  ...(b.description || b.kpi ? { metadata: { description: b.description ?? null, kpi: b.kpi ?? null } } : {}),
  });
  await writeAudit(req, { action: 'offer.create', entityType: 'offer', entityId: row.id, after: row });
- res.status(201);
- sendOk(res, toAdminDTO(row));
+ sendOk(res, toAdminDTO(row), undefined, 201);
  }),
  );
 
@@ -360,8 +359,7 @@ export function offersAdminRoutes(): Router {
  if (opts.includeForwardingRules) await copyTable('offer_forwarding_rules', 'name, partner_ids, offer_urls, destination, countries, status');
 
  await writeAudit(req, { action: 'offer.duplicate', entityType: 'offer', entityId: copy.id, after: copy });
- res.status(201);
- sendOk(res, toAdminDTO(copy));
+ sendOk(res, toAdminDTO(copy), undefined, 201);
  }));
 
  // --- "Copy Offer Settings" — same idea as duplicate, but onto an EXISTING offer instead of a
@@ -431,8 +429,7 @@ export function offersAdminRoutes(): Router {
  });
  await writeAudit(req, { action: 'offer.geo_rule.create', entityType: 'offer_geo_rule', entityId: row.id, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!);
- res.status(201);
- sendOk(res, toGeoRuleDTO(row));
+ sendOk(res, toGeoRuleDTO(row), undefined, 201);
  }),
  );
 
@@ -500,8 +497,7 @@ export function offersAdminRoutes(): Router {
  });
  await writeAudit(req, { action: 'offer.access.create', entityType: 'offer_publisher_access', entityId: row.id, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!); // block/allow takes effect on next click
- res.status(201);
- sendOk(res, toAccessDTO(row));
+ sendOk(res, toAccessDTO(row), undefined, 201);
  }),
  );
 
@@ -551,8 +547,7 @@ export function offersAdminRoutes(): Router {
  status: b.status,
  });
  await writeAudit(req, { action: 'offer.scheduled_action.create', entityType: 'offer_scheduled_actions', entityId: row.id, after: row });
- res.status(201);
- sendOk(res, toScheduledActionDTO(row));
+ sendOk(res, toScheduledActionDTO(row), undefined, 201);
  }),
  );
 
@@ -798,8 +793,7 @@ export function offerPortalRoutes(): Router {
  [networkId, offerId, ownerId, b.access],
  );
  await writeAudit(req, { action: 'offer.access.request', entityType: 'offer_publisher_access', entityId: row.rows[0]!.id, after: { offerId, access: b.access } });
- res.status(201);
- sendOk(res, { access: b.access, approvalStatus: 'pending' });
+ sendOk(res, { access: b.access, approvalStatus: 'pending' }, undefined, 201);
  }),
  );
 

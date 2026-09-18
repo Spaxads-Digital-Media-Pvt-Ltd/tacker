@@ -9,8 +9,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field } from '../../components/ui';
-import { StatusToggle, TargetingStep, YesNoToggle } from '../../components/CustomSettingFields';
+import { PageHeader, Field } from '../../shared-components/primitives/ui';
+import { StatusToggle, TargetingStep, YesNoToggle } from '../../shared-components/panels/CustomSettingFields';
 import type { CustomSetting, Targeting } from '../../data/offerCustomSettings';
 import type { Offer, Publisher } from '../../types';
 

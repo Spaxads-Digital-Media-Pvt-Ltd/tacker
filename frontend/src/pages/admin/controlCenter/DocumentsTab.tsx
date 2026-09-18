@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { EmptyShellTable } from '../../../components/EmptyShellTable';
+import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import { cc } from '../../../lib/controlCenter';
 import { useQuery } from '../../../lib/useApi';
 

@@ -30,6 +30,8 @@ export {
   notFound,
   tooMany,
   conflict,
+  validationFailed,
+  payloadTooLarge,
 } from './errors.js';
 
 // Health reporters

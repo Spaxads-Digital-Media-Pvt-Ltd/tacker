@@ -3,7 +3,7 @@
  * Platform Configurations › Default Notifications (network-wide defaults) and My Account › My
  * Notification Preferences (this user's own overrides), verified live against both pages.
  */
-import type { NotifyDef } from '../pages/admin/controlCenter/shared';
+import type { NotifyDef } from './notifyDef';
 
 export const PARTNER_NOTIFS: NotifyDef[] = [
   { name: 'Partner Reached Custom Daily Cap', desc: 'When the partner reaches a custom daily cap', dropdown: true, inApp: true, email: false },

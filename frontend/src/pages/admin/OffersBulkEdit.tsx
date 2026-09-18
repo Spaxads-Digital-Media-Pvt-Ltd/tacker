@@ -8,7 +8,7 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { Plus, Trash2, Search } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { Offer, Advertiser } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-fg-muted', draft: 'bg-warning', archived: 'bg-danger' };

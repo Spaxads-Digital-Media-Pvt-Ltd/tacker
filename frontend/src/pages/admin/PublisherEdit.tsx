@@ -10,7 +10,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Tabs, Spinner, StateBlock, Segmented } from '../../components/ui';
+import { PageHeader, Field, Tabs, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
 import type { Publisher, DashboardUser } from '../../types';
 
 const TABS = ['General', 'Address', 'Billing'] as const;

@@ -24,8 +24,9 @@ export interface ErrorEnvelope {
  error: { code: ErrorCode; message: string; details?: unknown };
 }
 
-export function sendOk<T>(res: Response, data: T, pagination?: Pagination): void {
+export function sendOk<T>(res: Response, data: T, pagination?: Pagination, status?: number): void {
  const body: SuccessEnvelope<T> = pagination ? { ok: true, data, pagination } : { ok: true, data };
+ if (status) res.status(status);
  res.json(body);
 }
 
@@ -37,6 +38,21 @@ export function errorHandler(
  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Express needs 4 args to treat this as an error handler.
  _next: NextFunction,
 ): void {
+ // Body too large (express.json limit) and JSON parse errors surface as plain Errors from the
+ // body-parser middleware. Map them to typed envelopes so callers see the real status code
+ // instead of a misleading 500.
+ const e = err as { status?: number; statusCode?: number; type?: string; expose?: boolean };
+ if (e?.type === 'entity.too.large' || e?.status === 413 || e?.statusCode === 413) {
+ const body: ErrorEnvelope = { ok: false, error: { code: 'payload_too_large', message: 'Request body exceeds size limit' } };
+ res.status(413).json(body);
+ return;
+ }
+ if (e?.type === 'entity.parse.failed' || (err instanceof SyntaxError && 'body' in (err as object))) {
+ const body: ErrorEnvelope = { ok: false, error: { code: 'bad_request', message: 'Malformed JSON body' } };
+ res.status(400).json(body);
+ return;
+ }
+
  if (err instanceof AppError) {
  const details = err.details as { retryAfter?: number } | undefined;
  const body: ErrorEnvelope = {

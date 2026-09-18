@@ -77,9 +77,8 @@ export function linkTemplatesRoutes(): Router {
       name: b.name, advertiser_id: b.advertiserId, destination_url: b.destinationUrl,
     });
     await writeAudit(req, { action: 'link-template.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE t.id = $1 AND t.network_id = $2`, [row.id, req.scope!.networkId]);
-    sendOk(res, dto(rows[0]!));
+    sendOk(res, dto(rows[0]!), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

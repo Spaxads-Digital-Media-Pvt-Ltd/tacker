@@ -133,8 +133,7 @@ export function partnerTiersRoutes(): Router {
     await setLabels(db, row.id, b.labels);
     await setMembers(db, req.scope!.networkId, row.id, b.partnerIds);
     await writeAudit(req, { action: 'partner_tier.create', entityType: 'partner_tier', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto({ ...row, partners_preview: [], partners_total: b.partnerIds.length, labels: b.labels }));
+    sendOk(res, dto({ ...row, partners_preview: [], partners_total: b.partnerIds.length, labels: b.labels }), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

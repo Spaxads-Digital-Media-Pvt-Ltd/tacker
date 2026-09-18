@@ -29,13 +29,13 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, MoreVertical, Search } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../../components/ui';
-import { FilterButton, type FilterCategory, type FilterValues } from '../../../components/CategorizedFilters';
-import { ApiRequestModal } from '../../../components/TableActionsKit';
+import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
+import { FilterButton, type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
+import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
   DASH, DEVICES, daysAgo, todayStr,
   type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
-} from '../../../components/ReportPageKit';
+} from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
 
 interface Goal { id: string; name: string; eventName: string | null; isDefault: boolean; sortOrder: number }

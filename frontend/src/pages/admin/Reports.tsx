@@ -10,8 +10,8 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import {
   SearchFilterDrawer, EntitySearchSelect, CheckboxGrid, CompactCheckboxGrid, FieldBlock,
-} from '../../components/SearchFilterDrawer';
-import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
+} from '../../shared-components/primitives/SearchFilterDrawer';
+import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import type { Offer, Publisher, Advertiser } from '../../types';
 import {
   GROUP_BY_ALL, REPORT_OPTIONS, DEFAULT_METRICS, DEFAULT_GROUP_BY, COMPACT_EXTRA_DIMS,

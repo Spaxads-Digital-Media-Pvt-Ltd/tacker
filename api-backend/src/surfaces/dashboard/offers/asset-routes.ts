@@ -77,8 +77,7 @@ function mountAsset(r: Router, spec: AssetSpec): void {
     const row = await db.insert<Row>(spec.table, { offer_id: req.params.id, ...toColumns(body, spec.colMap, spec.jsonCols) });
     await writeAudit(req, { action: `offer.${spec.auditKind}.create`, entityType: spec.table, entityId: row.id, after: row });
     if (spec.invalidateCache) await invalidateOfferConfig(db.scope.networkId, req.params.id!);
-    res.status(201);
-    sendOk(res, spec.dto(row));
+    sendOk(res, spec.dto(row), undefined, 201);
   }));
 
   r.patch(`${base}/:assetId`, requireRole('admin', 'manager'), validateBody(spec.updateSchema), asyncHandler(async (req, res) => {

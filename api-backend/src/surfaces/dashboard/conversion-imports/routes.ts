@@ -135,8 +135,7 @@ export function conversionImportsRoutes(): Router {
     );
     const job = jobRows[0]!;
     await writeAudit(req, { action: 'conversion_import.create', entityType: 'import_export_log', entityId: job.id });
-    res.status(201);
-    sendOk(res, job);
+    sendOk(res, job, undefined, 201);
   }));
 
   return r;

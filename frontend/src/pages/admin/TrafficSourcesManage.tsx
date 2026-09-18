@@ -9,8 +9,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column } from '../../components/ui';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { TrafficSource } from '../../types';
 

@@ -151,8 +151,7 @@ export function offerGroupsRoutes(): Router {
       caps_enabled: b.capsEnabled, caps: JSON.stringify(b.caps),
     });
     await writeAudit(req, { action: 'offer_group.create', entityType: 'offer_group', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

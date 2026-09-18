@@ -14,8 +14,8 @@
  * that doesn't exist.
  */
 import { Filter, MoreVertical } from 'lucide-react';
-import { PageHeader } from '../../components/ui';
-import { EmptyShellTable } from '../../components/EmptyShellTable';
+import { PageHeader } from '../../shared-components/primitives/ui';
+import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 
 const COLUMNS = [
   'Conversion Status', 'Refund Date', 'Offer', 'Partner', 'Advertiser', 'Revenue', 'Payout',

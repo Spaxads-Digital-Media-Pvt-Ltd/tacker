@@ -9,7 +9,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
 import type { PartnerTier, Publisher } from '../../types';
 
 const STATUSES = ['active', 'paused', 'deleted'] as const;

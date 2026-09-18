@@ -1,4 +1,4 @@
-import { BRAND } from '../config/branding';
+import { BRAND } from '../../config/branding';
 
 /** The wordmark. Uses the single branding constant so a rename propagates everywhere (spec §14). */
 export function Brandmark({ compact = false }: { compact?: boolean }) {

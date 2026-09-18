@@ -10,10 +10,10 @@ import { Link } from 'react-router-dom';
 import { Search, MoreVertical, ChevronDown, HelpCircle, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, StateBlock, Spinner } from '../../components/ui';
-import { Pagination } from '../../components/ReportPageKit';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, StateBlock, Spinner } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { Offer, Publisher, Advertiser } from '../../types';
 
 const ALL_COLUMNS = [
@@ -45,18 +45,6 @@ const STATUS_OPTIONS = [
   { value: 'active', label: 'Active', dot: 'bg-success' },
   { value: 'inactive', label: 'Inactive', dot: 'bg-warning' },
 ] as const;
-
-function useDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-  return { open, setOpen, ref };
-}
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { open, setOpen, ref } = useDropdown();

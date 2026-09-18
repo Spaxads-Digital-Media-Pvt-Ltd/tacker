@@ -7,8 +7,8 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Segmented, Spinner } from '../../components/ui';
-import { Stepper } from '../../components/Stepper';
+import { PageHeader, Field, Segmented, Spinner } from '../../shared-components/primitives/ui';
+import { Stepper } from '../../shared-components/panels/Stepper';
 
 const STEPS = ['General', 'Address', 'Billing', 'User'];
 const STATUSES = ['active', 'pending', 'inactive'] as const;

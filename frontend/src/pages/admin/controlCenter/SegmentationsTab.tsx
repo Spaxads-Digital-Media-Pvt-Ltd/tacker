@@ -7,7 +7,7 @@ import { Search, MoreVertical, ChevronDown } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { cc } from '../../../lib/controlCenter';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { StateBlock, Spinner, Tabs } from '../../../components/ui';
+import { StateBlock, Spinner, Tabs } from '../../../shared-components/primitives/ui';
 
 const SUB_TABS = ['Categories', 'Channels', 'Labels', 'Business Unit'] as const;
 

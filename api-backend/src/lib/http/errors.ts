@@ -10,6 +10,7 @@ export type ErrorCode =
  | 'not_found'
  | 'conflict'
  | 'rate_limited'
+ | 'payload_too_large'
  | 'validation_failed'
  | 'internal';
 
@@ -20,6 +21,7 @@ const STATUS: Record<ErrorCode, number> = {
  not_found: 404,
  conflict: 409,
  rate_limited: 429,
+ payload_too_large: 413,
  validation_failed: 422,
  internal: 500,
 };
@@ -44,5 +46,11 @@ export const unauthorized = (msg = 'Unauthorized') => new AppError('unauthorized
 export const notFound = (msg = 'Not found') => new AppError('not_found', msg);
 export const badRequest = (msg = 'Bad request', details?: unknown) =>
  new AppError('bad_request', msg, details);
+export const validationFailed = (msg = 'Validation failed', details?: unknown) =>
+  new AppError('validation_failed', msg, details);
+
+export const payloadTooLarge = (msg = 'Payload too large') =>
+  new AppError('payload_too_large', msg);
+
 export const tooMany = (msg = 'Too many requests', details?: unknown) =>
  new AppError('rate_limited', msg, details);

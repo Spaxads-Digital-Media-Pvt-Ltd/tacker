@@ -103,9 +103,8 @@ export function trafficBlockingRoutes(): Router {
     });
     await writeAudit(req, { action: 'traffic_blocking.create', entityType: 'traffic_blocking', entityId: row.id, after: row });
     if (row.status === 'active') await invalidateOfferConfig(req.scope!.networkId, row.offer_id);
-    res.status(201);
-    const { rows } = await query<JoinedRow>(`${SELECT} WHERE t.id = $1 AND t.network_id = $2`, [row.id, req.scope!.networkId]);
-    sendOk(res, dto(rows[0]!));
+    const { rows } = await query<JoinedRow>(`${SELECT} WHERE t.id = $1 AND t.network_id = $2`, [req.params.id, req.scope!.networkId]);
+    sendOk(res, dto(rows[0]!), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

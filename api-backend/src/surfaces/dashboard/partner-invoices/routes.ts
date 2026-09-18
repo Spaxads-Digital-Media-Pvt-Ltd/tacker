@@ -140,9 +140,8 @@ export function partnerInvoicesRoutes(): Router {
       public_notes: b.publicNotes ?? null, internal_notes: b.internalNotes ?? null,
     });
     await writeAudit(req, { action: 'invoice.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE i.id = $1 AND i.network_id = $2`, [row.id, networkId]);
-    sendOk(res, dto(rows[0]!));
+    sendOk(res, dto(rows[0]!), undefined, 201);
   }));
 
   const bulkApprovePaySchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) });

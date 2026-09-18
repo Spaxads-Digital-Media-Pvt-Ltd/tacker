@@ -12,9 +12,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../components/ui';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
 import type { ReportingAdjustment, Publisher, Offer, AdjustmentMetrics } from '../../types';
 
 const ALL_COLUMNS = ['Partner', 'Offer', 'Advertiser', 'Total Clicks', 'Conversions', 'Payout', 'Revenue', 'Gross Sales', 'Impressions', 'Created', 'Modified', 'Last Modified By'] as const;

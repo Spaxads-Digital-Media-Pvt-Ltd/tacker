@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { EmptyShellTable } from '../../../components/EmptyShellTable';
+import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 
 export function EventsTab() {
   return <EmptyShellTable addLabel="Event" columns={['ID', 'Name', 'Associated to', 'Created', 'Modified']} />;

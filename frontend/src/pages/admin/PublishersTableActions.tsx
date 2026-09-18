@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { MoreVertical, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 
 interface RequestBalancesResult { requested: { publisherId: string; balance: string }[] }
 

@@ -21,11 +21,11 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, Badge } from '../../components/ui';
-import { FilterButton, CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
-import { ColumnsModal, ApiRequestModal } from '../../components/TableActionsKit';
+import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
+import { FilterButton, CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { daysAgo, todayStr, toIso, DASH } from '../../components/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 
 interface ConvRow {

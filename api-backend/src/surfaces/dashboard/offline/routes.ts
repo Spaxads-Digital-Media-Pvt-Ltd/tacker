@@ -82,8 +82,7 @@ export function offlineRoutes(): Router {
       client.release();
     }
     await writeAudit(req, { action: 'conversion.offline.create', entityType: 'conversion', entityId: conversionId });
-    res.status(201);
-    sendOk(res, { conversionId });
+    sendOk(res, { conversionId }, undefined, 201);
   }));
 
   return r;

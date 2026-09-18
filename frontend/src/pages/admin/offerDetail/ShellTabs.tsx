@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { useQuery } from '../../../lib/useApi';
-import { Accordion } from '../../../components/Accordion';
-import { CollectionTab, type FieldDef } from '../../../components/CollectionTab';
-import { StateBlock, Spinner, Table, type Column } from '../../../components/ui';
+import { Accordion } from '../../../shared-components/panels/Accordion';
+import { CollectionTab, type FieldDef } from '../../../shared-components/panels/CollectionTab';
+import { StateBlock, Spinner, Table, type Column } from '../../../shared-components/primitives/ui';
 
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => ReactNode): Column<Row> => ({ header, cell });

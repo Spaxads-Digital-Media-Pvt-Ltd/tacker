@@ -241,8 +241,7 @@ export function communicationHubRoutes(): Router {
       name: b.name, message_type: b.messageType, subject: b.subject, body: b.body,
     });
     await writeAudit(req, { action: 'email_template.create', entityType: 'email_template', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, { id: row.id });
+    sendOk(res, { id: row.id }, undefined, 201);
   }));
   r.put('/templates/:id', requireRole('admin', 'manager'), validateBody(templateSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof templateSchema>;
@@ -278,8 +277,7 @@ export function communicationHubRoutes(): Router {
       name: b.name, group_type: b.groupType, status_filter: b.statusFilter, tier_id: b.tierId ?? null,
     });
     await writeAudit(req, { action: 'audience.create', entityType: 'audience', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, { id: row.id });
+    sendOk(res, { id: row.id }, undefined, 201);
   }));
   r.put('/audiences/:id', requireRole('admin', 'manager'), validateBody(audienceSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof audienceSchema>;
@@ -328,8 +326,7 @@ export function communicationHubRoutes(): Router {
       row = await performSend(req, row);
       await writeAudit(req, { action: 'email_message.send', entityType: 'email_message', entityId: row.id, after: row });
     }
-    res.status(201);
-    sendOk(res, { id: row.id, status: row.status, recipientCount: row.recipient_count, sendError: row.send_error });
+    sendOk(res, { id: row.id, status: row.status, recipientCount: row.recipient_count, sendError: row.send_error }, undefined, 201);
   }));
   r.put('/emails/:id', requireRole('admin', 'manager'), validateBody(emailSchema.omit({ action: true })), asyncHandler(async (req, res) => {
     const existing = await dbForRequest(req).selectOne<EmailRow>('email_messages', { id: req.params.id });
@@ -372,8 +369,7 @@ export function communicationHubRoutes(): Router {
       publish_at: b.publishAt || null, expire_at: b.expireAt || null,
     });
     await writeAudit(req, { action: 'banner.create', entityType: 'banner', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, bannerDto(row));
+    sendOk(res, bannerDto(row), undefined, 201);
   }));
   r.put('/banners/:id', requireRole('admin', 'manager'), validateBody(bannerSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof bannerSchema>;

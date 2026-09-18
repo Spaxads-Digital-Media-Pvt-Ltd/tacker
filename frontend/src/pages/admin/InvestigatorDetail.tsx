@@ -5,8 +5,8 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Badge, Spinner, StateBlock, type Column } from '../../components/ui';
-import { Accordion } from '../../components/Accordion';
+import { PageHeader, Tabs, Table, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { Accordion } from '../../shared-components/panels/Accordion';
 
 interface Investigation {
   id: string; ref: number; startDate: string; endDate: string;

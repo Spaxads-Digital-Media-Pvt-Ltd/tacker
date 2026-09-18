@@ -11,7 +11,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, Search, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
 import type { PostbackControl, PostbackControlRule, PostbackControlVariable, PostbackControlOperator, Offer, Publisher, Advertiser } from '../../types';
 
 const STEPS = ['General', 'Rules'] as const;

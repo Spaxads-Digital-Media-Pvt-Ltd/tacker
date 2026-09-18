@@ -118,8 +118,7 @@ export function creativesRoutes(): Router {
       await writeAudit(req, { action: 'offer.creative.create', entityType: TABLE, entityId: row.id, after: row });
       created.push(row);
     }
-    res.status(201);
-    sendOk(res, created.map(dto));
+    sendOk(res, created.map(dto), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateBodySchema), asyncHandler(async (req, res) => {

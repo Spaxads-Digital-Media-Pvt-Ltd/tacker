@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import type { TrackingDomain } from '../../types';
 
 const columns: Column<TrackingDomain>[] = [

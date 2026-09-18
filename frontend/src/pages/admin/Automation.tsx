@@ -6,8 +6,8 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs } from '../../components/ui';
-import { EmptyShellTable, type ShellRow } from '../../components/EmptyShellTable';
+import { PageHeader, Tabs } from '../../shared-components/primitives/ui';
+import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
 import type { Offer, Publisher } from '../../types';
 
 const TOP_TABS = ['Scheduled Actions', 'Alerts', 'Webhooks'] as const;

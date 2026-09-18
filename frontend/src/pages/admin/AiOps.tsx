@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner } from '../../components/ui';
-import { Icon } from '../../components/icons';
+import { PageHeader, Spinner } from '../../shared-components/primitives/ui';
+import { Icon } from '../../shared-components/primitives/icons';
 
 interface ChatResult {
   conversationId: string;

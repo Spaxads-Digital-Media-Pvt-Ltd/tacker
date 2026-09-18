@@ -18,10 +18,10 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, Search, Filter, MoreVertical, CheckCircle2, AlertCircle, ShieldAlert } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../components/ui';
-import { Accordion } from '../../components/Accordion';
-import { EmptyShellTable } from '../../components/EmptyShellTable';
-import { daysAgo, todayStr, toIso } from '../../components/ReportPageKit';
+import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { Accordion } from '../../shared-components/panels/Accordion';
+import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
+import { daysAgo, todayStr, toIso } from '../../shared-components/primitives/ReportPageKit';
 import type { TrackingDomain } from '../../types';
 
 const TAB_LIST = ['Overview', 'Uptime Incidents', 'Reputation Flags', 'Tasks', 'Usage', 'Configurations'] as const;

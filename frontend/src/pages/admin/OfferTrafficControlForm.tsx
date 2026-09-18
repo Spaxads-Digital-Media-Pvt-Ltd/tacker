@@ -8,10 +8,10 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PageHeader, Field, Segmented } from '../../components/ui';
+import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { DualListPicker } from '../../components/DualListPicker';
+import { DualListPicker } from '../../shared-components/panels/DualListPicker';
 import { VARIABLES, COMPARISON_METHODS, type TrafficControl } from '../../data/trafficControls';
 import type { Advertiser, Offer, Publisher } from '../../types';
 

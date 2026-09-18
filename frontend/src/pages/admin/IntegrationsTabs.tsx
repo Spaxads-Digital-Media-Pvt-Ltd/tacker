@@ -5,8 +5,8 @@ import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { Field, Modal, StateBlock, Spinner } from '../../components/ui';
-import { Accordion } from '../../components/Accordion';
+import { Field, Modal, StateBlock, Spinner } from '../../shared-components/primitives/ui';
+import { Accordion } from '../../shared-components/panels/Accordion';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

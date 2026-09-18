@@ -6,7 +6,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Badge, Field, Modal, Spinner, StateBlock, type Column } from '../../components/ui';
+import { PageHeader, Table, Badge, Field, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 
 interface Def { id: string; key: string; label: string; fieldType: string; options: string[]; required: boolean }
 

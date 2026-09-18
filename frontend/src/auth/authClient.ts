@@ -2,9 +2,9 @@
  * Auth client — talks ONLY to the backend auth endpoints (spec §0). The refresh token lives in
  * an httpOnly cookie the browser sends automatically (credentials: 'include'); JS never sees it.
  */
-import { ApiError } from './api.js';
-import { saveSession, clearSession, updateToken, type Session } from '../auth/session';
-import type { Role } from '../auth/roles';
+import { ApiError } from '../lib/api.js';
+import { saveSession, clearSession, updateToken, type Session } from './session';
+import type { Role } from './roles';
 
 interface Identity {
   kind: string;

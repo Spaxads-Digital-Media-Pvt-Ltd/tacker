@@ -196,8 +196,7 @@ export function automationRoutes(): Router {
         entityId: row.id,
         after: row,
       });
-      res.status(201);
-      sendOk(res, toDto(full!));
+      sendOk(res, toDto(full!), undefined, 201);
     }),
   );
 
@@ -278,8 +277,7 @@ export function automationRoutes(): Router {
         entityId: row.id,
         after: row,
       });
-      res.status(201);
-      sendOk(res, alertRuleDto(row));
+      sendOk(res, alertRuleDto(row), undefined, 201);
     }),
   );
 
@@ -358,8 +356,7 @@ export function automationRoutes(): Router {
         entityId: row.id,
         after: row,
       });
-      res.status(201);
-      sendOk(res, webhookDto(row));
+      sendOk(res, webhookDto(row), undefined, 201);
     }),
   );
 

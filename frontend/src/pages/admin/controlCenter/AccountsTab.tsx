@@ -11,9 +11,9 @@
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Calendar, Search, Filter, MoreVertical, ChevronDown, ChevronRight } from 'lucide-react';
-import { Tabs, Badge, Spinner, StateBlock, Field } from '../../../components/ui';
-import { ColumnsModal } from '../../../components/TableActionsKit';
-import { Pagination, daysAgo, todayStr, toIso, DASH } from '../../../components/ReportPageKit';
+import { Tabs, Badge, Spinner, StateBlock, Field } from '../../../shared-components/primitives/ui';
+import { ColumnsModal } from '../../../shared-components/primitives/TableActionsKit';
+import { Pagination, daysAgo, todayStr, toIso, DASH } from '../../../shared-components/primitives/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../../lib/export';
 import { cc } from '../../../lib/controlCenter';
 import { useQuery, useMutation } from '../../../lib/useApi';

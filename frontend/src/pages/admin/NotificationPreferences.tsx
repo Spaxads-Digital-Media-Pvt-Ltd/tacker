@@ -3,7 +3,7 @@
  * Center › Platform Configurations › Default Notifications edits network-wide. Reached from the
  * sidebar Account / Profile menu.
  */
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { NotificationCard, HeadsUpBanner, type NotifySaved } from './controlCenter/shared';
 import { api } from '../../lib/api';
 import { useQuery } from '../../lib/useApi';

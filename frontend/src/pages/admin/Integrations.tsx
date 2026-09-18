@@ -24,10 +24,10 @@ import { Link } from 'react-router-dom';
 import { Search, Filter, MoreVertical, Pencil, ChevronRight, HelpCircle, Info, FileCheck } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, StateBlock, Spinner, Modal } from '../../components/ui';
-import { Accordion } from '../../components/Accordion';
-import { Pagination } from '../../components/ReportPageKit';
-import { ColumnsModal } from '../../components/TableActionsKit';
+import { PageHeader, Tabs, StateBlock, Spinner, Modal } from '../../shared-components/primitives/ui';
+import { Accordion } from '../../shared-components/panels/Accordion';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
+import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
 import {
   FraudDetectionTab, SuppressionListTab, BillingTab, CrmTab, ECommerceTab,
   PayPerCallTab, EmailTab, ESignatureTab, MmpTab, MediaBuyingEverflowTab,

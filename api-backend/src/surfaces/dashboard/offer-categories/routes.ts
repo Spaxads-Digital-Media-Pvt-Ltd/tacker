@@ -44,8 +44,7 @@ export function offerCategoriesRoutes(): Router {
     const b = req.body as z.infer<typeof createSchema>;
     const row = await dbForRequest(req).insert<Row>(TABLE, { name: b.name, status: b.status });
     await writeAudit(req, { action: 'offer_category.create', entityType: TABLE, entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto(row));
+    sendOk(res, dto(row), undefined, 201);
   }));
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {

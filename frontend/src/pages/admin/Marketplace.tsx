@@ -15,8 +15,8 @@ import {
 } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Spinner, StateBlock } from '../../components/ui';
-import { CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../components/CategorizedFilters';
+import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import type { MarketplaceAdvertiser } from '../../types';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Connected', pending: 'Pending', inactive: 'Inactive' };

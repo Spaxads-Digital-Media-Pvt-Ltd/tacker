@@ -129,8 +129,7 @@ export function advertisersAdminRoutes(): Router {
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
       });
       await writeAudit(req, { action: 'advertiser.create', entityType: 'advertiser', entityId: row.id, after: row });
-      res.status(201);
-      sendOk(res, toAdminDTO(row));
+      sendOk(res, toAdminDTO(row), undefined, 201);
     }),
   );
 

@@ -14,8 +14,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
-import { PageHeader, Field } from '../../../components/ui';
-import { DualListPicker } from '../../../components/DualListPicker';
+import { PageHeader, Field } from '../../../shared-components/primitives/ui';
+import { DualListPicker } from '../../../shared-components/panels/DualListPicker';
 import type { Offer, Advertiser, Publisher } from '../../../types';
 import type { SmartLink } from '../../../data/smartLinks';
 

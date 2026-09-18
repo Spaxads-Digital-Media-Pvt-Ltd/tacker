@@ -99,8 +99,7 @@ export function postbacksRoutes(): Router {
       delay: b.delay ?? null, event: b.event ?? null, url: b.url ?? null, method: b.method, status: b.status,
     });
     await writeAudit(req, { action: 'postback.create', entityType: 'postback', entityId: row.id, after: row });
-    res.status(201);
-    sendOk(res, dto({ ...row, publisher_name: null, offer_name: null }));
+    sendOk(res, dto({ ...row, publisher_name: null, offer_name: null }), undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

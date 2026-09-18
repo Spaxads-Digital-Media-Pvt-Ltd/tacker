@@ -8,8 +8,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../components/ui';
-import { Stepper } from '../../components/Stepper';
+import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { Stepper } from '../../shared-components/panels/Stepper';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import type { Offer, Publisher, Advertiser } from '../../types';

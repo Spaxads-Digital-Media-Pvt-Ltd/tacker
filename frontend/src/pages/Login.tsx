@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_HOME } from '../auth/roles';
 import { loadSession } from '../auth/session';
-import { Brandmark } from '../components/Brandmark';
+import { Brandmark } from '../shared-components/primitives/Brandmark';
 import { BRAND } from '../config/branding';
 
 /** Decorative "tracking flow" motif for the brand panel — clicks (small dots) travelling a rising
