@@ -35,7 +35,6 @@ export function errorHandler(
  err: unknown,
  _req: Request,
  res: Response,
- // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Express needs 4 args to treat this as an error handler.
  _next: NextFunction,
 ): void {
  // Body too large (express.json limit) and JSON parse errors surface as plain Errors from the
