@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, Search, ChevronRight, ChevronsLeft, X } from 'lucide-react';
+import { Menu, Search, ChevronRight, X } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
-import { ROLE_HOME, type Role } from '../auth/roles';
+import { type Role } from '../auth/roles';
 import { NAV, type NavEntry } from './nav';
 import { Icon } from './icons';
 import { Brandmark } from './Brandmark';
@@ -48,7 +48,7 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
   const { title, subtitle } = usePageTitleValue();
   const heading = title ?? routeTitle(loc.pathname, role);
   return (
-    <header className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
+    <header className="relative z-40 flex items-center gap-3 border-b border-black/80 bg-gradient-to-t from-teal-950/95 to-emerald-900/95 backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.4),inset_0_-1px_0_rgba(45,212,191,0.2)] px-4 py-2.5">
       {/* Left zone — nav trigger + brand (both < md only) + page title. flex-1 so it balances
           the right zone and keeps the centre search bar actually centred. */}
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -56,7 +56,7 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
           type="button"
           onClick={onMenu}
           aria-label="Open navigation"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg md:hidden"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-white/70 transition-colors hover:bg-black/30 hover:text-white md:hidden"
         >
           <Menu size={18} />
         </button>
@@ -64,32 +64,31 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
             hamburger already carries the nav affordance there. */}
         <div className="hidden shrink-0 sm:block md:hidden"><Brandmark compact /></div>
         <div className="min-w-0">
-          <h1 className="truncate text-h2 font-semibold leading-tight text-fg">{heading}</h1>
-          {subtitle && <p className="truncate text-tiny text-fg-secondary">{subtitle}</p>}
+          <h1 className="truncate text-h2 font-semibold leading-tight text-white">{heading}</h1>
+          {subtitle && <p className="truncate text-tiny text-white/60">{subtitle}</p>}
         </div>
       </div>
 
-      {/* Centre zone — the search pill, centred from md up (persistent rail, no hamburger).
-          Below md it drops out and the compact icon in the right zone takes over. */}
-      <div className="hidden flex-1 justify-center md:flex">
+      {/* Right zone — holds search, theme toggle, and profile. */}
+      <div className="flex flex-[2] items-center justify-end gap-3">
+        {/* Desktop Search */}
         <button
           type="button" onClick={onSearch}
-          className="flex w-full max-w-xs items-center gap-2 rounded-[var(--radius)] border border-border bg-page px-3 py-1.5 text-small text-fg-muted transition-colors hover:border-fg-muted hover:text-fg-secondary"
+          className="group hidden w-full max-w-[240px] items-center gap-2 rounded-[var(--radius)] border border-slate-300 bg-white px-3 py-1.5 text-small text-slate-500 shadow-sm transition-all hover:bg-slate-50 hover:border-slate-400 hover:shadow md:flex md:mr-12"
         >
-          <Search size={15} className="shrink-0" />
-          <span className="flex-1 text-left">Search…</span>
-          <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-fg-muted">⌘K</kbd>
+          <Search size={15} className="shrink-0 text-slate-500 transition-colors group-hover:text-slate-600" />
+          <span className="flex-1 text-left font-medium">Search…</span>
+          <kbd className="shrink-0 rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 shadow-sm transition-colors group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700">⌘K</kbd>
         </button>
-      </div>
 
-      {/* Right zone — flex-1 + justify-end so it mirrors the left zone's width. */}
-      <div className="flex flex-1 items-center justify-end gap-1.5">
+        {/* Mobile Search */}
         <button
           type="button" onClick={onSearch} aria-label="Search"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg md:hidden"
+          className="mr-8 grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-white shadow-[0_2px_4px_rgba(0,0,0,0.5)] ring-1 ring-white/20 transition-colors hover:bg-black/30 hover:text-white md:hidden"
         >
           <Search size={18} />
         </button>
+
         <ThemeToggle />
         <ProfileMenu initials={initials} displayName={displayName} email={email} onSignOut={onSignOut} />
       </div>
@@ -141,7 +140,7 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
   // Expanded rail gets the premium treatment (accent-gradient active row, dimmer idle text,
   // gradient icon chip on the active item, trailing chevron for flyout groups). The collapsed
   // icon rail is left exactly as-is for responsive parity.
-  const railIdle = 'text-[rgb(var(--sidebar-fg))] hover:bg-[rgb(var(--sidebar-hover-bg))] hover:text-[rgb(var(--sidebar-fg-strong))]';
+  const railIdle = 'text-[rgb(var(--sidebar-fg))] hover:bg-[rgb(var(--sidebar-active-bg))] hover:text-[rgb(var(--sidebar-accent))]';
   const rowClass = expanded
     ? `relative flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2.5 text-small font-medium transition-colors ${
         on ? 'sidebar-active' : railIdle
@@ -170,17 +169,16 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
 
   if (entry.flyout) {
     return (
-      <div className={expanded ? 'w-full px-2' : ''}>
+      <div className={expanded ? 'w-full px-2' : 'w-full flex justify-center'}>
         <button
           ref={btnRef}
           type="button"
           aria-haspopup="menu"
           aria-expanded={isOpen}
-          onClick={() => onToggle(entry.label)}
+          onClick={() => onToggle(entry.label, btnRef.current?.getBoundingClientRect().top ?? 12)}
           onPointerEnter={(e) => {
-            // Hover another flyout icon while one is open → swap instantly. Mouse only, so touch
-            // keeps pure tap-to-open (no hover on touch); doesn't open a flyout from nothing.
-            if (e.pointerType === 'mouse' && openLabel && openLabel !== entry.label) onSwap(entry.label);
+            // Hover opens the flyout instantly
+            if (e.pointerType === 'mouse') onSwap(entry.label, btnRef.current?.getBoundingClientRect().top ?? 12);
           }}
           className={`group relative ${rowClass}`}
         >
@@ -191,7 +189,7 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
   }
 
   return (
-    <div className={expanded ? 'w-full px-2' : ''}>
+    <div className={expanded ? 'w-full px-2' : 'w-full flex justify-center'}>
       <Link to={entry.to ?? '#'} className={`group relative ${rowClass}`}>
         {content}
       </Link>
@@ -206,6 +204,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const [openFlyout, setOpenFlyout] = useState<string | null>(null);
+  const [flyoutTop, setFlyoutTop] = useState(12);
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -234,8 +233,14 @@ export function AppShell() {
 
   const toggleProps = {
     openLabel: openFlyout,
-    onToggle: (label: string) => setOpenFlyout((cur) => (cur === label ? null : label)),
-    onSwap: (label: string) => setOpenFlyout(label),
+    onToggle: (label: string, top: number) => {
+      setOpenFlyout((cur) => (cur === label ? null : label));
+      setFlyoutTop(top);
+    },
+    onSwap: (label: string, top: number) => {
+      setOpenFlyout(label);
+      setFlyoutTop(top);
+    },
   };
   // One persistent flyout instance (was one per rail item) so hover-swapping between sections
   // changes content in place instead of unmount/remount — no re-animation, no scrim flash.
@@ -257,28 +262,21 @@ export function AppShell() {
         />
       )}
       <aside
-        className={`flex flex-col border-r border-border bg-[rgb(var(--sidebar-bg))] text-[rgb(var(--sidebar-fg))] pt-4 pb-6 fixed inset-y-0 left-0 z-50 w-72 transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-none ${
+        onMouseLeave={() => setOpenFlyout(null)}
+        className={`flex flex-col border-r border-black/80 shadow-[2px_0_12px_rgba(0,0,0,0.4),inset_-1px_0_0_rgba(45,212,191,0.2)] bg-[rgb(var(--sidebar-bg))]/95 backdrop-blur-xl text-[rgb(var(--sidebar-fg))] pt-4 pb-6 fixed inset-y-0 left-0 z-50 w-72 transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-none ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${expanded ? 'md:w-64' : 'md:w-16 md:items-center'}`}
       >
         {/* Brand area — logo always sits at the very top of the rail. Expanded/drawer: logo +
          * wordmark in a row with the toggle. Collapsed: just the mark, stacked above the toggle. */}
         <div className={labeled ? 'mb-3 flex items-center gap-2 px-3.5' : 'mb-3 flex flex-col items-center gap-1'}>
-          <Link
-            to={ROLE_HOME[session.role]}
-            aria-label="Home"
-            className={`text-[rgb(var(--sidebar-fg-strong))] ${labeled ? 'min-w-0 flex-1' : 'grid h-11 w-11 place-items-center'}`}
-          >
-            <Brandmark compact={!labeled} />
-          </Link>
-          {/* desktop: collapse / expand the rail */}
           <button
             type="button"
             onClick={() => setExpanded((e) => !e)}
             aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
-            className="hidden h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-[rgb(var(--sidebar-fg))] transition-colors hover:bg-[rgb(var(--sidebar-hover-bg))] hover:text-[rgb(var(--sidebar-fg-strong))] md:grid"
+            className={`text-[rgb(var(--sidebar-fg-strong))] text-left outline-none ${labeled ? 'min-w-0 flex-1' : 'grid h-11 w-11 place-items-center'}`}
           >
-            {expanded ? <ChevronsLeft size={18} /> : <Menu size={18} />}
+            <Brandmark compact={!labeled} />
           </button>
           {/* mobile: close the drawer */}
           <button
@@ -294,7 +292,7 @@ export function AppShell() {
           <p className="mb-1.5 mt-1 px-5 text-tiny font-semibold uppercase tracking-wider text-[rgb(var(--sidebar-fg-muted))]">Core Platform</p>
         )}
 
-        <nav className={`scrollbar-slim flex flex-1 flex-col overflow-y-auto ${labeled ? 'w-full gap-1' : 'items-center gap-1'}`}>
+        <nav className="scrollbar-slim flex w-full flex-1 flex-col overflow-y-auto gap-1">
           {items.map((item) => {
             const showHeader = labeled && item.group && item.group !== lastGroup;
             lastGroup = item.group;
@@ -309,9 +307,9 @@ export function AppShell() {
           })}
         </nav>
 
-        {openEntry && <NavFlyout entry={openEntry} expanded={labeled} onClose={() => setOpenFlyout(null)} />}
+        {openEntry && <NavFlyout entry={openEntry} expanded={labeled} topOffset={flyoutTop} onClose={() => setOpenFlyout(null)} />}
 
-        <div className={labeled ? 'w-full space-y-1 border-t border-[rgb(var(--sidebar-border))] px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[rgb(var(--sidebar-border))] pt-2'}>
+        <div className={labeled ? 'w-full space-y-1 border-t border-[rgb(var(--sidebar-accent))]/20 px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[rgb(var(--sidebar-accent))]/20 pt-2'}>
           <NotificationsBell expanded={labeled} />
           <HelpMenu expanded={labeled} />
           <AccountLink expanded={labeled} />
@@ -323,7 +321,7 @@ export function AppShell() {
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
           email={session.email} onSignOut={async () => { await signOut(); navigate('/login'); }}
           onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
-        <main className="flex-1 overflow-auto p-4">
+        <main className="flex-1 overflow-auto p-12">
           <div className="w-full animate-fade-in">
             <SectionTabs role={session.role} />
             <Outlet />

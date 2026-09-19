@@ -1,0 +1,13 @@
+@@ -2,10 +2,11 @@
+ import { Icon } from './icons';
++import * as Lucide from 'lucide-react';
+ 
+ export interface NavLeaf { to: string; label: string; icon?: keyof typeof Icon }
+-export interface FlyoutItem { label: string; description: string; to?: string }
++export interface FlyoutItem { label: string; description: string; to?: string; icon?: React.ElementType }
+ export interface NavEntry {
+   label: string;
+   icon: keyof typeof Icon;
+ 
+ 
+ 

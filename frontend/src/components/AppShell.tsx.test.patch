@@ -1,0 +1,6 @@
+--- src/components/AppShell.tsx
++++ src/components/AppShell.tsx
+@@ -311,7 +311,8 @@
+         {openEntry && <NavFlyout entry={openEntry} expanded={labeled} onClose={() => setOpenFlyout(null)} />}
+ 
+         <div className={labeled ? 'w-full space-y-1 border-t border-[rgb(var(--sidebar-border))] px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[rgb(var(--sidebar-border))] pt-2'}>
