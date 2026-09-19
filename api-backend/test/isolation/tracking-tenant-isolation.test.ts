@@ -132,7 +132,7 @@ dDb('Tracking /click — DB-backed tenant isolation (M-1, INTEGRATION_DB=1)', ()
  host: 'no-such-domain.example.com',
  });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('a raw IP returns 404 unknown_tracking_host', async () => {
@@ -140,7 +140,7 @@ dDb('Tracking /click — DB-backed tenant isolation (M-1, INTEGRATION_DB=1)', ()
  host: '10.0.0.1',
  });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('a disabled domain returns 404', async () => {
@@ -154,7 +154,7 @@ dDb('Tracking /click — DB-backed tenant isolation (M-1, INTEGRATION_DB=1)', ()
  host: disabledHost,
  });
  expect(res.status).toBe(404);
- expect((res.body as { error: string }).error).toBe('unknown_tracking_host');
+ expect(res.body).toMatchObject({ ok: false, error: { code: 'not_found', message: 'unknown_tracking_host' } });
  });
 
  it('a pending domain (not yet verified) returns 404', async () => {
