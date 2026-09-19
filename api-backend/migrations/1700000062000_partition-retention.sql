@@ -36,17 +36,22 @@ CREATE TABLE clicks_new (
  fraud_flags text[] NOT NULL DEFAULT '{}',
  resolved_payout numeric(14,4),
  resolved_revenue numeric(14,4),
- currency text
+ currency text,
+ smart_link_id uuid
 ) PARTITION BY RANGE (created_at);
 
--- 2. Recreate indexes on the partitioned table (must be before attaching)
-CREATE UNIQUE INDEX clicks_click_id_key ON clicks_new (click_id);
+-- 2. Drop old indexes and recreate on the partitioned table
+DROP INDEX IF EXISTS clicks_click_id_key;
+DROP INDEX IF EXISTS clicks_network_created_idx;
+DROP INDEX IF EXISTS clicks_offer_idx;
+DROP INDEX IF EXISTS clicks_publisher_idx;
+CREATE UNIQUE INDEX clicks_click_id_key ON clicks_new (click_id, created_at);
 CREATE INDEX clicks_network_created_idx ON clicks_new (network_id, created_at DESC);
 CREATE INDEX clicks_offer_idx ON clicks_new (network_id, offer_id, created_at DESC);
 CREATE INDEX clicks_publisher_idx ON clicks_new (network_id, publisher_id, created_at DESC);
 
--- 3. Attach existing clicks data as a partition
-ALTER TABLE clicks_new ATTACH PARTITION clicks PARTITION DEFAULT;
+-- 3. Copy existing clicks data into the partitioned table (lands in auto-created default partition)
+INSERT INTO clicks_new SELECT * FROM clicks;
 
 -- 4. Drop old table, rename
 DROP TABLE clicks;
@@ -71,11 +76,22 @@ CREATE TABLE conversions_new (
  currency text,
  transaction_id text,
  source text NOT NULL CHECK (source IN ('postback', 'pixel', 'iframe')),
- raw_params jsonb NOT NULL DEFAULT '{}'::jsonb
+ raw_params jsonb NOT NULL DEFAULT '{}'::jsonb,
+ fraud_score integer NOT NULL DEFAULT 0,
+ fraud_flags text[] NOT NULL DEFAULT '{}',
+ goal_id uuid
 ) PARTITION BY RANGE (created_at);
 
-CREATE UNIQUE INDEX conversions_conversion_id_key ON conversions_new (conversion_id);
-CREATE UNIQUE INDEX conversions_offer_txn_key ON conversions_new (offer_id, transaction_id)
+-- Drop old conversions indexes before recreating on partitioned table
+DROP INDEX IF EXISTS conversions_conversion_id_key;
+DROP INDEX IF EXISTS conversions_offer_txn_key;
+DROP INDEX IF EXISTS conversions_network_created_idx;
+DROP INDEX IF EXISTS conversions_click_idx;
+DROP INDEX IF EXISTS conversions_offer_idx;
+DROP INDEX IF EXISTS conversions_publisher_idx;
+DROP INDEX IF EXISTS conversions_status_idx;
+CREATE UNIQUE INDEX conversions_conversion_id_key ON conversions_new (conversion_id, created_at);
+CREATE UNIQUE INDEX conversions_offer_txn_key ON conversions_new (offer_id, transaction_id, created_at)
  WHERE transaction_id IS NOT NULL;
 CREATE INDEX conversions_network_created_idx ON conversions_new (network_id, created_at DESC);
 CREATE INDEX conversions_click_idx ON conversions_new (network_id, click_id);
@@ -83,8 +99,12 @@ CREATE INDEX conversions_offer_idx ON conversions_new (network_id, offer_id, cre
 CREATE INDEX conversions_publisher_idx ON conversions_new (network_id, publisher_id, created_at DESC);
 CREATE INDEX conversions_status_idx ON conversions_new (network_id, status);
 
--- Attach existing data
-ALTER TABLE conversions_new ATTACH PARTITION conversions PARTITION DEFAULT;
+-- Copy existing data
+INSERT INTO conversions_new SELECT * FROM conversions;
+
+-- Drop old table, rename
+DROP TABLE conversions;
+ALTER TABLE conversions_new RENAME TO conversions;
 
 -- 6. publisher_postbacks (referenced by FK, not retention target — no partition change needed)
 -- No changes to publisher_postbacks.
@@ -103,10 +123,16 @@ CREATE TABLE postback_logs_new (
  created_at timestamptz NOT NULL DEFAULT now()
 ) PARTITION BY RANGE (created_at);
 
+-- Drop old postback_logs indexes before recreating on partitioned table
+DROP INDEX IF EXISTS postback_logs_conversion_idx;
+DROP INDEX IF EXISTS postback_logs_created_idx;
 CREATE INDEX postback_logs_conversion_idx ON postback_logs_new (network_id, conversion_id);
 CREATE INDEX postback_logs_created_idx ON postback_logs_new (network_id, created_at DESC);
 
-ALTER TABLE postback_logs_new ATTACH PARTITION postback_logs PARTITION DEFAULT;
+-- Copy existing postback_logs data
+INSERT INTO postback_logs_new SELECT * FROM postback_logs;
+
+-- Drop old table, rename
 DROP TABLE postback_logs;
 ALTER TABLE postback_logs_new RENAME TO postback_logs;
 
