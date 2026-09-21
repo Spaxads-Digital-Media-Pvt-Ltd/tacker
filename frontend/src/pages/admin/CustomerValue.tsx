@@ -1,18 +1,18 @@
 /**
  * Customer Value › Payout & Revenue Rules — Manage list, matched item-by-item against the live
  * reference's real list page: exact columns (incl. the 3 with a help-icon tooltip), Status filter,
- * Table Filters (categorized flyout, 7 real categories), and Table Actions (Columns Customization).
- * Real CRUD, and real enforcement: active rules are evaluated for every real approved conversion
- * in recordConversion() (see api-backend/src/lib/customer-value/evaluate.ts).
+ * Table Filters (SearchFilterDrawer with 7 categories of multi-select fields), and Table Actions
+ * (Columns Customization). Real CRUD, and real enforcement: active rules are evaluated for every
+ * real approved conversion in recordConversion() (see api-backend/src/lib/customer-value/evaluate.ts).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown, HelpCircle, Pencil, Trash2 } from 'lucide-react';
+import { Search, SlidersHorizontal, MoreVertical, ChevronDown, HelpCircle, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, StateBlock, Spinner } from '../../shared-components/primitives/ui';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { Offer, Publisher, Advertiser } from '../../types';
 
@@ -95,7 +95,7 @@ export default function CustomerValue() {
 
   const [status, setStatus] = useState('active');
   const [q, setQ] = useState('');
-  const [filters, setFilters] = useState<FilterValues>({});
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [showColumns, setShowColumns] = useState(false);
@@ -114,18 +114,73 @@ export default function CustomerValue() {
   const advertiserName = (id: string) => advertisers?.find((a) => a.id === id)?.name ?? id.slice(0, 8);
   const partnerName = (id: string) => publishers?.find((p) => p.id === id)?.name ?? id.slice(0, 8);
 
-  const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
-    { key: 'advertiser', label: 'Advertisers Rule Applies To', options: (advertisers ?? []).map((a) => ({ value: a.id, label: a.name })) },
-    { key: 'grouping', label: 'Conversion Events Grouping', options: [{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: 'Separately By' }] },
-    { key: 'dataPoint', label: 'Custom Data Points Used in Goal', options: (dataPoints ?? []).map((d) => ({ value: d.id, label: d.name })) },
-    { key: 'cycleDuration', label: 'Goal Cycle Duration', options: [
-      { value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' },
-      { value: 'quarterly', label: 'Quarterly' }, { value: 'continuous', label: 'Continuous' },
-    ] },
-    { key: 'metricType', label: 'Metrics Used in Goal', options: [{ value: 'text', label: 'Text' }, { value: 'number', label: 'Number' }] },
-    { key: 'offer', label: 'Offers Rule Applies To', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
-    { key: 'partner', label: 'Partners Rule Applies To', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
-  ], [advertisers, offers, publishers, dataPoints]);
+  const [dAdvertisers, setDAdvertisers] = useState<string[]>([]);
+  const [dOffers, setDOffers] = useState<string[]>([]);
+  const [dPartners, setDPartners] = useState<string[]>([]);
+  const [dGrouping, setDGrouping] = useState<string[]>([]);
+  const [dDataPoints, setDDataPoints] = useState<string[]>([]);
+  const [dCycle, setDCycle] = useState<string[]>([]);
+  const [dMetricType, setDMetricType] = useState<string[]>([]);
+
+  const activeFilterCount = [dAdvertisers, dOffers, dPartners, dGrouping, dDataPoints, dCycle, dMetricType]
+    .filter((a) => a.length > 0).length;
+
+  const applyFilters = () => {
+    const v: Record<string, string[]> = {};
+    if (dAdvertisers.length) v.advertiser = dAdvertisers;
+    if (dOffers.length) v.offer = dOffers;
+    if (dPartners.length) v.partner = dPartners;
+    if (dGrouping.length) v.grouping = dGrouping;
+    if (dDataPoints.length) v.dataPoint = dDataPoints;
+    if (dCycle.length) v.cycleDuration = dCycle;
+    if (dMetricType.length) v.metricType = dMetricType;
+    setFilters(v);
+    setPage(1);
+    setFilterOpen(false);
+  };
+  const clearDraft = () => {
+    setDAdvertisers([]); setDOffers([]); setDPartners([]); setDGrouping([]);
+    setDDataPoints([]); setDCycle([]); setDMetricType([]);
+  };
+
+  useEffect(() => {
+    const f = filters;
+    setDAdvertisers(f.advertiser ?? []);
+    setDOffers(f.offer ?? []);
+    setDPartners(f.partner ?? []);
+    setDGrouping(f.grouping ?? []);
+    setDDataPoints(f.dataPoint ?? []);
+    setDCycle(f.cycleDuration ?? []);
+    setDMetricType(f.metricType ?? []);
+  }, [filters]);
+
+  const mSel = (sel: string[], set: (v: string[]) => void, opts: { value: string; label: string }[]) => {
+    const toggle = (v: string) => sel.includes(v) ? set(sel.filter((x) => x !== v)) : set([...sel, v]);
+    return (
+      <div className="mb-3">
+        <label className="label">Select values</label>
+        <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+          {opts.map((o) => (
+            <label key={o.value} className="flex cursor-pointer items-center gap-2 text-small text-fg hover:bg-page">
+              <input type="checkbox" className="chk" checked={sel.includes(o.value)} onChange={() => toggle(o.value)} />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const advertiserOpts = (advertisers ?? []).map((a) => ({ value: a.id, label: a.name }));
+  const offerOpts = (offers ?? []).map((o) => ({ value: o.id, label: o.name }));
+  const partnerOpts = (publishers ?? []).map((p) => ({ value: p.id, label: p.name }));
+  const dataPointOpts = (dataPoints ?? []).map((d) => ({ value: d.id, label: d.name }));
+  const groupingOpts = [{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: 'Separately By' }];
+  const cycleOpts = [
+    { value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' },
+    { value: 'quarterly', label: 'Quarterly' }, { value: 'continuous', label: 'Continuous' },
+  ];
+  const metricOpts = [{ value: 'text', label: 'Text' }, { value: 'number', label: 'Number' }];
 
   const filtered = useMemo(() => {
     let rows = (data ?? []).filter((r) => status === 'all' || r.status === status);
@@ -188,13 +243,50 @@ export default function CustomerValue() {
           <input className="input !w-56 !pl-8" placeholder="Search by name…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         </div>
         <StatusSelect value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
-        <div className="relative">
-          <FilterButton count={appliedFilterCount(filters)} onClick={() => setFilterOpen((o) => !o)} />
-          {filterOpen && (
-            <CategorizedFiltersFlyout categories={FILTER_CATEGORIES} values={filters}
-              onApply={(v) => { setFilters(v); setPage(1); }} onClose={() => setFilterOpen(false)} storageKey="customer-value-rules" />
+        <button type="button" onClick={() => setFilterOpen((o) => !o)}
+          className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
+          <SlidersHorizontal size={15} />
+          {activeFilterCount > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+              {activeFilterCount}
+            </span>
           )}
-        </div>
+        </button>
+        {filterOpen && (
+          <SearchFilterDrawer appliedCount={activeFilterCount} onClose={() => setFilterOpen(false)} onApply={applyFilters}>
+            <div className="mb-3 flex justify-end">
+              <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={clearDraft}>Clear</button>
+            </div>
+
+            <FieldBlock label="Advertisers Rule Applies To">
+              {mSel(dAdvertisers, setDAdvertisers, advertiserOpts)}
+            </FieldBlock>
+
+            <FieldBlock label="Conversion Events Grouping">
+              {mSel(dGrouping, setDGrouping, groupingOpts)}
+            </FieldBlock>
+
+            <FieldBlock label="Custom Data Points Used in Goal">
+              {mSel(dDataPoints, setDDataPoints, dataPointOpts)}
+            </FieldBlock>
+
+            <FieldBlock label="Goal Cycle Duration">
+              {mSel(dCycle, setDCycle, cycleOpts)}
+            </FieldBlock>
+
+            <FieldBlock label="Metrics Used in Goal">
+              {mSel(dMetricType, setDMetricType, metricOpts)}
+            </FieldBlock>
+
+            <FieldBlock label="Offers Rule Applies To">
+              {mSel(dOffers, setDOffers, offerOpts)}
+            </FieldBlock>
+
+            <FieldBlock label="Partners Rule Applies To">
+              {mSel(dPartners, setDPartners, partnerOpts)}
+            </FieldBlock>
+          </SearchFilterDrawer>
+        )}
         <div ref={tableActionsRef} className="relative">
           <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
             className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">

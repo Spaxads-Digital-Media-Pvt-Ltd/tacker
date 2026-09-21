@@ -7,7 +7,12 @@
       "Bash(curl -s -o /dev/null -w \"http_code=%{http_code}\\\\n\" http://localhost:5173)",
       "Bash(curl -s -o /dev/null -w \"http_code=%{http_code}\\\\n\" http://localhost:4001/api/me)",
       "Bash(grep -n \"Add.*Integration\\\\`}</button>\" \"/Users/gaurijindal/Desktop/Trcker 2/frontend/src/pages/admin/Integrations.tsx\")",
-      "Bash(rm scripts/audit-isolation.ts 2>/dev/null; echo \"removed\")"
+      "Bash(rm scripts/audit-isolation.ts 2>/dev/null; echo \"removed\")",
+      "Bash(xargs -I{} basename {})",
+      "Bash(sed -i '' \"s/_title = 'Table Filters'//\" \"/Users/gaurijindal/Desktop/Trcker 2/frontend/src/shared-components/primitives/CategoryFilterDrawer.tsx\")",
+      "Bash(sed -i '' \"s/, _title//\" \"/Users/gaurijindal/Desktop/Trcker 2/frontend/src/shared-components/primitives/CategoryFilterDrawer.tsx\")",
+      "Bash(sed -i '' \"s/_title?: string;//\" \"/Users/gaurijindal/Desktop/Trcker 2/frontend/src/shared-components/primitives/CategoryFilterDrawer.tsx\")",
+      "Bash(curl -s http://localhost:5173/)"
     ],
     "additionalDirectories": [
       "/Users/gaurijindal/Desktop/Trcker 2/api-backend/scripts"

@@ -9,11 +9,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown } from 'lucide-react';
+import { Search, SlidersHorizontal, MoreVertical, ChevronDown } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { CategoryFilterDrawer } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { TableActionsMenu } from './AdvertisersTableActions';
 import { useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { Advertiser, DashboardUser } from '../../types';
@@ -177,21 +177,14 @@ export default function Advertisers() {
   const [tab, setTab] = useState<Tab>('existing');
   const [status, setStatus] = useState('');
   const [nameQ, setNameQ] = useState('');
-  const [filters, setFilters] = useState<FilterValues>({});
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const tabbed = useMemo(() => {
-    const rows = data ?? [];
-    if (tab === 'pending') return rows.filter((a) => a.status === 'pending');
-    if (tab === 'unverified') return rows.filter((a) => a.status !== 'pending' && !a.hasPortalAccount);
-    return rows.filter((a) => a.status !== 'pending' && a.hasPortalAccount);
-  }, [data, tab]);
-  const pendingCount = useMemo(() => (data ?? []).filter((a) => a.status === 'pending').length, [data]);
-  const unverifiedCount = useMemo(() => (data ?? []).filter((a) => a.status !== 'pending' && !a.hasPortalAccount).length, [data]);
+  const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
 
-  const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
+  const FILTER_CATEGORIES = useMemo(() => [
     { key: 'accountManager', label: 'Account Manager', options: (users ?? []).map((u) => ({ value: u.id, label: u.name })) },
     { key: 'salesManager', label: 'Sales Manager', options: (users ?? []).map((u) => ({ value: u.id, label: u.name })) },
     { key: 'billingFrequency', label: 'Billing Frequency', options: BILLING_FREQUENCIES.map((v) => ({ value: v, label: v })) },
@@ -320,10 +313,18 @@ export default function Advertisers() {
           </div>
           <StatusFilterSelect value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
           <div className="relative">
-            <FilterButton count={appliedFilterCount(filters)} onClick={() => setFilterOpen((o) => !o)} />
+            <button type="button" onClick={() => setFilterOpen((o) => !o)}
+              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
+              <SlidersHorizontal size={15} />
+              {activeFilterCount > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
             {filterOpen && (
-              <CategorizedFiltersFlyout categories={FILTER_CATEGORIES} values={filters}
-                onApply={(v) => { setFilters(v); setPage(1); }} onClose={() => setFilterOpen(false)} storageKey="advertisers" />
+              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
+                onApply={(v) => { setFilters(v); setPage(1); }} onClose={() => setFilterOpen(false)} />
             )}
           </div>
           <TableActionsMenu

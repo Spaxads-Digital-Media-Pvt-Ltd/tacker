@@ -7,11 +7,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown } from 'lucide-react';
+import { Search, MoreVertical, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { PartnerTier, PartnerTierMember, Publisher } from '../../types';
 
@@ -153,8 +153,9 @@ export default function TiersManage() {
 
   const [searchField, setSearchField] = useState<SearchField>('name');
   const [q, setQ] = useState('');
-  const [filters, setFilters] = useState<FilterValues>({});
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
+  const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
   const [viewAllTier, setViewAllTier] = useState<PartnerTier | null>(null);
   const [showColumns, setShowColumns] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
@@ -245,10 +246,18 @@ export default function TiersManage() {
           </div>
           <StatusFilterSelect value={status} onChange={setStatus} />
           <div className="relative">
-            <FilterButton count={appliedFilterCount(filters)} onClick={() => setFilterOpen((o) => !o)} />
+            <button type="button" onClick={() => setFilterOpen((o) => !o)}
+              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
+              <SlidersHorizontal size={15} />
+              {activeFilterCount > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
             {filterOpen && (
-              <CategorizedFiltersFlyout categories={FILTER_CATEGORIES} values={filters}
-                onApply={setFilters} onClose={() => setFilterOpen(false)} storageKey="tiers" />
+              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
+                onApply={setFilters} onClose={() => setFilterOpen(false)} />
             )}
           </div>
           <div ref={tableActionsRef} className="relative">

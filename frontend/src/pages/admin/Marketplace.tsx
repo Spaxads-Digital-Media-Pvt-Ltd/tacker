@@ -16,7 +16,8 @@ import {
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
-import { CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
+import { appliedFilterCount } from '../../shared-components/primitives/CategorizedFilters';
 import type { MarketplaceAdvertiser } from '../../types';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Connected', pending: 'Pending', inactive: 'Inactive' };
@@ -318,20 +319,17 @@ export default function Marketplace() {
               <ChevronDown size={13} className="text-fg-muted" />
             </button>
             {filterOpen && (
-              <CategorizedFiltersFlyout
-                title="Marketplace Advertiser Filters"
+              <CategoryFilterDrawer
                 categories={filterCategories}
-                inertLabels={[...INERT_FILTER_LABELS]}
                 values={filtersToValues(filters)}
                 singleSelectKeys={['funnel']}
+                inertLabels={[...INERT_FILTER_LABELS]}
                 onApply={(v) => {
                   const next = valuesToFilters(v);
                   setFilters(next);
                   setAppliedFilters(next);
                 }}
                 onClose={() => setFilterOpen(false)}
-                showPresets={false}
-                align="left"
               />
             )}
           </div>

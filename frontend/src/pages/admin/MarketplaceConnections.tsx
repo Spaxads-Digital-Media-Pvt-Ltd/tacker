@@ -30,12 +30,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown, Search, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
-import { CategorizedFiltersFlyout, FilterButton, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import type { MarketplaceAdvertiser } from '../../types';
 
 const DASH = '—';
@@ -54,8 +54,6 @@ function filtersToValues(f: Filters): FilterValues {
 function valuesToFilters(v: FilterValues): Filters {
   return { categories: v.categories ?? [], payoutModels: v.payoutModels ?? [] };
 }
-
-const INERT_FILTER_LABELS = ['Promotional Methods', 'Regions'] as const;
 
 const PAGE_SIZE = 25;
 
@@ -86,6 +84,7 @@ export default function MarketplaceConnections() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
+  const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<string | null>(null);
@@ -134,7 +133,6 @@ export default function MarketplaceConnections() {
     { key: 'awaiting', label: 'Awaiting Your Approval' },
     { key: 'pending', label: 'Pending Approval' },
   ];
-  const filterCount = appliedFilterCount(filtersToValues(appliedFilters));
   const filterCategories = useMemo((): FilterCategory[] => [
     { key: 'categories', label: 'Categories', options: allCategories.map((c) => ({ value: c, label: c })) },
     { key: 'payoutModels', label: 'Payout Types', options: allPayoutModels.map((p) => ({ value: p, label: p })) },
@@ -185,17 +183,19 @@ export default function MarketplaceConnections() {
           <input className="input !w-64 !pl-8" placeholder="Search…" value={q} onChange={(e) => changeQ(e.target.value)} />
         </div>
         <div className="relative">
-          <FilterButton count={filterCount} onClick={() => setFilterOpen((o) => !o)} title="Table Filters" />
+          <button type="button" onClick={() => setFilterOpen((o) => !o)}
+            className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative"
+            title="Table Filters">
+            <SlidersHorizontal size={15} />
+            {activeFilterCount > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
           {filterOpen && (
-            <CategorizedFiltersFlyout
-              title="Table Filters"
-              categories={filterCategories}
-              inertLabels={[...INERT_FILTER_LABELS]}
-              values={filtersToValues(filters)}
-              onApply={(v) => applyFilters(valuesToFilters(v))}
-              onClose={() => setFilterOpen(false)}
-              showPresets={false}
-            />
+            <CategoryFilterDrawer categories={filterCategories} values={filtersToValues(filters)}
+              onApply={(v) => applyFilters(valuesToFilters(v))} onClose={() => setFilterOpen(false)} />
           )}
         </div>
       </div>

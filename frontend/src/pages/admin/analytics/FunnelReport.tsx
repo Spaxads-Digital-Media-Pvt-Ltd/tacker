@@ -27,10 +27,10 @@
  */
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, MoreVertical, Search } from 'lucide-react';
+import { ChevronDown, MoreVertical, Search, SlidersHorizontal } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
-import { FilterButton, type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
+import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
   DASH, DEVICES, daysAgo, todayStr,
@@ -251,10 +251,15 @@ export default function FunnelReport() {
           <ChildPicker value={childDim} onChange={setChildDim} />
           <EventsPicker goals={goals} selected={selectedGoalIds} onChange={setSelectedGoalIds} disabled={!offerId} />
           <div className="relative">
-            <FilterButton
-              count={reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic })}
-              onClick={() => setFilterOpen((o) => !o)}
-            />
+            <button type="button" onClick={() => setFilterOpen((o) => !o)}
+              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
+              <SlidersHorizontal size={15} />
+              {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic }) > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                  {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic })}
+                </span>
+              )}
+            </button>
             {filterOpen && (
               <ReportingFiltersFlyout
                 dimCategories={FILTER_CATEGORIES}

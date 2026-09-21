@@ -19,10 +19,10 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Search, MoreVertical, ChevronRight, ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
-import { FilterButton, CategorizedFiltersFlyout, appliedFilterCount, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
+import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
@@ -215,15 +215,18 @@ export default function ConversionReport() {
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <div className="relative">
-            <FilterButton count={appliedFilterCount(appliedFilters)} onClick={() => setFilterOpen((o) => !o)} />
+            <button type="button" onClick={() => setFilterOpen((o) => !o)}
+              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
+              <SlidersHorizontal size={15} />
+              {Object.values(appliedFilters).reduce((n, arr) => n + (arr?.length ?? 0), 0) > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                  {Object.values(appliedFilters).reduce((n, arr) => n + (arr?.length ?? 0), 0)}
+                </span>
+              )}
+            </button>
             {filterOpen && (
-              <CategorizedFiltersFlyout
-                categories={FILTER_CATEGORIES}
-                values={filters}
-                onApply={setFilters}
-                onClose={() => setFilterOpen(false)}
-                storageKey="conversion-report"
-              />
+              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
+                onApply={setFilters} onClose={() => setFilterOpen(false)} />
             )}
           </div>
           <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
