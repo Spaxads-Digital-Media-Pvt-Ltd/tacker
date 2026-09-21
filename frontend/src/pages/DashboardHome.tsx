@@ -31,7 +31,7 @@ interface MoneyPeriod { today: string; yesterday: string; month: string; lastMon
 interface Dashboard {
   clicks: Period; conversions: Period; cr: Period;
   revenue: MoneyPeriod; payout: MoneyPeriod; margin: MoneyPeriod;
-  series: { clicks: number[]; conversions: number[]; revenue: number[]; payout: number[] };
+  series: { clicks: number[]; conversions: number[]; revenue: number[]; payout: number[]; margin: number[]; cr: number[] };
 }
 
 const nfmt = new Intl.NumberFormat('en-US');
@@ -129,6 +129,10 @@ function AdminDashboard({ name }: { name: string }) {
   const advMap: RefMap = import.meta.env.DEV && advs.error
     ? mockNameMap('advertiser') : new Map((advs.data ?? []).map((a) => [a.id, a.ref != null ? `(${a.ref}) ${a.name}` : a.name]));
 
+  // Backend returns 4 hourly series; derive margin and cr sparklines from them.
+  const seriesMargin = useMemo(() => (data ? data.series.revenue.map((r, i) => r - (data.series.payout[i] ?? 0)) : []), [data]);
+  const seriesCr = useMemo(() => (data ? data.series.clicks.map((c, i) => c > 0 ? +(data.series.conversions[i]! / c * 100).toFixed(2) : 0) : []), [data]);
+
   const [visible, setVisible] = useState<Record<SectionId, boolean>>(loadVisible);
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(visible)); }, [visible]);
   const [linkGenOpen, setLinkGenOpen] = useState(false);
@@ -158,7 +162,7 @@ function AdminDashboard({ name }: { name: string }) {
                     <Kpi label="Clicks" value={compact(data.clicks.today)} series={data.series.clicks}
                       d={delta(data.clicks.today, data.clicks.yesterday)}
                       rows={[['Yesterday', compact(data.clicks.yesterday)], ['This month', compact(data.clicks.month)], ['Last month', compact(data.clicks.lastMonth)]]} />
-                    <Kpi label="Conv. rate" value={`${data.cr.today}%`} series={data.series.conversions}
+                    <Kpi label="Conv. rate" value={`${data.cr.today}%`} series={seriesCr}
                       d={delta(data.cr.today, data.cr.yesterday)}
                       rows={[['Yesterday', `${data.cr.yesterday}%`], ['This month', `${data.cr.month}%`], ['Last month', `${data.cr.lastMonth}%`]]} />
                   </div>
@@ -176,7 +180,7 @@ function AdminDashboard({ name }: { name: string }) {
                     <Kpi label="Payout" value={money(data.payout.today)} series={data.series.payout}
                       d={delta(Number(data.payout.today), Number(data.payout.yesterday))}
                       rows={[['Yesterday', money(data.payout.yesterday)], ['This month', money(data.payout.month)], ['Last month', money(data.payout.lastMonth)]]} />
-                    <Kpi label="Margin" value={money(data.margin.today)} series={data.series.revenue}
+                    <Kpi label="Margin" value={money(data.margin.today)} series={seriesMargin}
                       d={delta(Number(data.margin.today), Number(data.margin.yesterday))}
                       rows={[['Yesterday', money(data.margin.yesterday)], ['This month', money(data.margin.month)], ['Last month', money(data.margin.lastMonth)]]} />
                     <Kpi label="Conversions" value={compact(data.conversions.today)} series={data.series.conversions}
@@ -301,7 +305,9 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
               </div>
             </div>
             <div className="px-4 pb-1 pt-3">
-              {series.loading
+              {series.error
+                ? <p className="grid h-16 place-items-center text-small text-fg-muted">Could not load chart data</p>
+                : series.loading
                 ? <div className="grid h-16 place-items-center"><Spinner /></div>
                 : <Sparkline data={points.length ? points : [0]} color="rgb(var(--accent))" height={64} />}
             </div>
