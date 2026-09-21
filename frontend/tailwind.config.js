@@ -94,12 +94,18 @@ export default {
       },
       keyframes: {
         'fade-in': { from: { opacity: '0', transform: 'translateY(4px)' }, to: { opacity: '1', transform: 'none' } },
+        'fade-in-up': { from: { opacity: '0', transform: 'translateY(12px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
         'slide-in-right': { from: { opacity: '0', transform: 'translateX(-12px)' }, to: { opacity: '1', transform: 'translateX(0)' } },
+        'slide-in-left': { from: { opacity: '0', transform: 'translateX(-32px)' }, to: { opacity: '1', transform: 'translateX(0)' } },
+        'unwrap': { from: { opacity: '0', transform: 'perspective(1000px) rotateX(-90deg)', transformOrigin: 'top' }, to: { opacity: '1', transform: 'perspective(1000px) rotateX(0deg)', transformOrigin: 'top' } },
         'draw-line': { to: { strokeDashoffset: '0' } },
       },
       animation: { 
         'fade-in': 'fade-in 0.3s ease-out both',
+        'fade-in-up': 'fade-in-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both',
         'slide-in-right': 'slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'slide-in-left': 'slide-in-left 0.6s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'unwrap': 'unwrap 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) both',
         'draw-line': 'draw-line 1.5s ease-out forwards',
       },
     },

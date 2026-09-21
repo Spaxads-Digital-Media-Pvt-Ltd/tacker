@@ -114,7 +114,7 @@ export function PerformanceChart({
     : { left: `${leftPct}%`, transform: 'translateX(-50%)' };
 
   return (
-    <div className="card flex h-full flex-col !p-4 transition-all duration-300 hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]">
+    <div className="card flex h-full flex-col !p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <PiPulseDuotone size={20} className="text-indigo-500" />

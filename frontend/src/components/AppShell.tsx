@@ -123,9 +123,9 @@ function isGroupActive(entry: NavEntry, pathname: string): boolean {
  * as the reference — the accent tint only shows for the active/open item. */
 function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
   entry: NavEntry; pathname: string; expanded: boolean; openLabel: string | null;
-  onToggle: (label: string) => void;
+  onToggle: (label: string, top: number) => void;
   /** Hover-swap: mouse-enter a different flyout icon while one is already open → switch to it. */
-  onSwap: (label: string) => void;
+  onSwap: (label: string, top: number) => void;
 }) {
   const Ic = Icon[entry.icon];
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -321,7 +321,7 @@ export function AppShell() {
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
           email={session.email} onSignOut={async () => { await signOut(); navigate('/login'); }}
           onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
-        <main className="flex-1 overflow-auto p-12">
+        <main className="flex-1 overflow-auto px-12 pt-4 pb-12">
           <div className="w-full animate-fade-in">
             <SectionTabs role={session.role} />
             <Outlet />
