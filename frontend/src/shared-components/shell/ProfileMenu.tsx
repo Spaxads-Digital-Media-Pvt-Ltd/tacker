@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { User, Bell, CreditCard, LogOut, type LucideIcon } from 'lucide-react';
+import { User, Bell, CreditCard, LogOut, ChevronDown, type LucideIcon } from 'lucide-react';
 
 interface Item { label: string; to: string; icon: LucideIcon }
 const ITEMS: Item[] = [
@@ -36,10 +36,11 @@ export function ProfileMenu({ initials, displayName, email, onSignOut }: {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-2.5 rounded-[var(--radius)] px-1 py-1 transition-colors hover:bg-accent-subtle"
+        className="flex items-center gap-2 rounded-[var(--radius)] py-1 pl-1 pr-2 transition-colors hover:bg-black/30"
       >
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-tiny font-semibold text-white">{initials}</span>
-        <span className="hidden text-small font-medium text-fg sm:block">{displayName}</span>
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-black/30 text-tiny font-semibold text-white shadow-[0_2px_4px_rgba(0,0,0,0.5)] ring-1 ring-white/20">{initials}</span>
+        <span className="hidden text-small font-medium text-white sm:block">{displayName}</span>
+        <ChevronDown size={14} className="hidden text-white/70 sm:block" />
       </button>
 
       {open && (

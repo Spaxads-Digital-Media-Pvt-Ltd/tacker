@@ -19,7 +19,7 @@
  * (lib/api.ts) discards the response envelope's pagination metadata app-wide, and plumbing a real
  * total through it is a bigger, riskier change than this page warrants.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, MoreVertical, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
@@ -38,6 +38,10 @@ interface ClickRow {
   is_unique: boolean; fraud_score: number; fraud_flags: string[];
   sub1: string | null; sub2: string | null; sub3: string | null; sub4: string | null; sub5: string | null;
   converted: boolean;
+}
+interface GroupedRow {
+  k: string; clicks: number; conversions: number; payout: string; revenue: string; profit: string;
+  label: string; ref: number | null;
 }
 
 const ALL_COLUMNS = [
@@ -70,6 +74,38 @@ export default function ClickReport() {
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [groupBy, setGroupBy] = useState('');
+
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const stripTime = (v: string | null) => (v ? v.split('T')[0] : null);
+    const f = stripTime(sp.get('from'));
+    const t = stripTime(sp.get('to'));
+    const gb = sp.get('groupBy');
+    const offerId = sp.get('offerId');
+    const pubId = sp.get('publisherId');
+    const slId = sp.get('smartLinkId');
+    const country = sp.get('country');
+    const device = sp.get('device');
+    const hasParams = f || t || gb || offerId || pubId || slId || country || device;
+    if (!hasParams) return;
+    const newFrom = f ?? daysAgo(7);
+    const newTo = t ?? todayStr();
+    const initial: FilterValues = {
+      ...(offerId ? { offer: [offerId] } : {}),
+      ...(pubId ? { partner: [pubId] } : {}),
+      ...(slId ? { smartLink: [slId] } : {}),
+      ...(country ? { country: [country] } : {}),
+      ...(device ? { device: [device] } : {}),
+    };
+    setFrom(newFrom);
+    setTo(newTo);
+    setAppliedFrom(newFrom);
+    setAppliedTo(newTo);
+    setFilters(initial);
+    setAppliedFilters(initial);
+    setGroupBy(gb ?? '');
+  }, []);
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
@@ -108,22 +144,34 @@ export default function ClickReport() {
 
   const tableQs = qs({
     from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    groupBy: groupBy || undefined,
     offerId: offerIdFilter, publisherId: publisherIdFilter, smartLinkId: smartLinkIdFilter,
     country: countryFilter, device: deviceFilter,
-    limit: pageSize + 1, offset: (page - 1) * pageSize,
+    limit: groupBy ? undefined : pageSize + 1, offset: groupBy ? undefined : (page - 1) * pageSize,
   });
-  const { data, loading, error } = useQuery<ClickRow[]>(hasRun ? `/api/reports/clicks?${tableQs}` : null);
-  const hasNextPage = (data?.length ?? 0) > pageSize;
-  const pageRows = (data ?? []).slice(0, pageSize);
+  const groupedPath = groupBy ? `/api/reports/grouped?${tableQs}` : null;
+  const rowPath = groupBy ? null : `/api/reports/clicks?${tableQs}`;
+  const groupedQ = useQuery<GroupedRow[]>(hasRun && groupedPath ? groupedPath : null);
+  const rowQ = useQuery<ClickRow[]>(hasRun && rowPath ? rowPath : null);
 
-  const rows = useMemo(() => pageRows.filter((r) => {
-    if (!q.trim()) return true;
-    const needle = q.trim().toLowerCase();
+  const [filteredRows, setFilteredRows] = useState<ClickRow[]>([]);
+  useEffect(() => {
+    setFilteredRows((rowQ.data ?? []).slice(0, pageSize));
+  }, [rowQ.data, pageSize]);
+
+  const groupedRows = groupBy ? (groupedQ.data ?? []) : [];
+  const isLoading = groupBy ? groupedQ.loading : rowQ.loading;
+  const displayError = groupBy ? groupedQ.error : rowQ.error;
+  const hasNextPage = !groupBy && (rowQ.data?.length ?? 0) > pageSize;
+
+  const searchNeedle = q.trim().toLowerCase();
+  const rows = useMemo(() => filteredRows.filter((r) => {
+    if (!searchNeedle) return true;
     const offerName = offerMap.get(r.offer_id) ?? '';
     const pubName = r.publisher_id ? (pubMap.get(r.publisher_id) ?? '') : '';
     return [offerName, pubName, r.country, r.city, r.ip, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
-      .some((v) => (v ?? '').toLowerCase().includes(needle));
-  }), [pageRows, q, offerMap, pubMap]);
+      .some((v) => (v ?? '').toLowerCase().includes(searchNeedle));
+  }), [filteredRows, searchNeedle, offerMap, pubMap]);
 
   const runReport = () => {
     setAppliedFrom(from); setAppliedTo(to); setAppliedFilters(filters);
@@ -226,9 +274,39 @@ export default function ClickReport() {
           </div>
         </div>
 
-        {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
-          : loading ? <StateBlock><Spinner /></StateBlock>
-          : error ? <StateBlock>{error}</StateBlock>
+        {groupBy && !isLoading && !displayError && groupedRows.length > 0 ? (
+          <div className="overflow-x-auto rounded-card border border-border">
+            <table className="w-full min-w-[600px] text-left text-body">
+              <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+                <tr>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{groupBy === 'day' ? 'Day' : 'Dimension'}</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Clicks</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Conversions</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Conv. Rate</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Payout</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {groupedRows.map((r) => (
+                  <tr key={r.k} className="hover:bg-accent-subtle/40">
+                    <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{r.label}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.clicks.toLocaleString()}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.conversions.toLocaleString()}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.clicks > 0 ? ((r.conversions / r.clicks) * 100).toFixed(2) : '0.00'}%</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.payout}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.revenue}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : groupBy && isLoading ? <StateBlock><Spinner /></StateBlock>
+          : groupBy && displayError ? <StateBlock>{displayError}</StateBlock>
+          : groupBy && !groupedRows.length ? <StateBlock>No Record Found</StateBlock>
+          : !hasRun ? <StateBlock>Set parameters and run report</StateBlock>
+          : isLoading ? <StateBlock><Spinner /></StateBlock>
+          : displayError ? <StateBlock>{displayError}</StateBlock>
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">

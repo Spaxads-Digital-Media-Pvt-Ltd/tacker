@@ -1,3 +1,5 @@
+import type React from "react";
+
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
@@ -40,10 +42,11 @@ function activeFlyoutIndex(items: FlyoutItem[], pathname: string, search: string
  * is swapped in place (hover another nav icon while it's open), so the panel never unmounts.
  * Items with a real page navigate; items with none render identically but inert, with a
  * "Not available yet" tooltip — same honesty convention used everywhere else in this app. */
-export function NavFlyout({ entry, expanded = false, onClose }: {
+export function NavFlyout({ entry, expanded = false, topOffset, onClose }: {
   entry: NavEntry;
   /** The rail's own expanded state — shifts the panel so it opens just past the rail, not over it. */
   expanded?: boolean;
+  topOffset?: number;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -64,6 +67,11 @@ export function NavFlyout({ entry, expanded = false, onClose }: {
   const items = entry.flyout ?? [];
   const activeIndex = activeFlyoutIndex(items, pathname, search);
 
+  const flyoutHeight = 60 + items.length * 52 + 16;
+  const adjustedTop = topOffset !== undefined
+    ? Math.max(12, Math.min(topOffset, typeof window !== 'undefined' ? window.innerHeight - flyoutHeight - 24 : topOffset))
+    : 12;
+
   // Two states that can coexist on *different* items at once:
   //  • hover  — transient accent-subtle wash (unchanged), no bar, default label colour.
   //  • active — the current route: same wash made persistent, PLUS an inset left accent bar and
@@ -71,13 +79,16 @@ export function NavFlyout({ entry, expanded = false, onClose }: {
   // The bar + label colour are what tell the two apart — a hovered non-active item never has
   // them — and when the active item is itself hovered the wash simply doesn't compound, so it
   // still reads as "active, and under the cursor" rather than breaking.
-  const itemBase = 'block px-5 py-3 text-left transition-colors hover:bg-accent-subtle';
-  const activeClass = 'bg-accent-subtle shadow-[inset_3px_0_0_rgb(var(--accent-text))]';
-  const body = (it: { label: string; description: string }, isActive: boolean) => (
-    <>
-      <p className={`text-body font-semibold ${isActive ? 'text-accent-text' : 'text-fg'}`}>{it.label}</p>
-      <p className="mt-0.5 text-tiny text-fg-secondary">{it.description}</p>
-    </>
+  const itemBase = 'group block w-[calc(100%-16px)] mx-2 my-1 px-3 py-2.5 rounded-lg text-left transition-all duration-200 hover:bg-[rgb(var(--sidebar-accent))]/10 hover:shadow-[0_2px_10px_rgba(45,212,191,0.05)]';
+  const activeClass = 'bg-[rgb(var(--sidebar-accent))]/15 shadow-[inset_3px_0_0_rgb(var(--sidebar-accent))]';
+  const body = (it: { label: string; description: string; icon?: React.ElementType }, isActive: boolean) => (
+    <div className="flex items-start gap-3 w-full">
+      {it.icon && <it.icon size={18} className={`mt-0.5 shrink-0 transition-colors duration-200 ${isActive ? 'text-[rgb(var(--sidebar-accent))]' : 'text-[rgb(var(--sidebar-fg-muted))] group-hover:text-[rgb(var(--sidebar-accent))]'}`} />}
+      <div className="flex-1">
+        <p className={`text-body font-semibold transition-colors duration-200 ${isActive ? 'text-[rgb(var(--sidebar-accent))]' : 'text-[rgb(var(--sidebar-fg-strong))] group-hover:text-white'}`}>{it.label}</p>
+        <p className={`mt-0.5 text-tiny transition-colors duration-200 ${isActive ? 'text-[rgb(var(--sidebar-fg))]' : 'text-[rgb(var(--sidebar-fg-muted))] group-hover:text-[rgb(var(--sidebar-fg))]'}`}>{it.description}</p>
+      </div>
+    </div>
   );
 
   return createPortal(
@@ -97,14 +108,15 @@ export function NavFlyout({ entry, expanded = false, onClose }: {
       <div
         ref={ref}
         role="menu"
-        className={`fixed top-3 z-50 left-4 right-4 max-h-[calc(100vh-24px)] animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated shadow-elevated md:right-auto md:w-64 ${
+        style={{ top: adjustedTop, maxHeight: `calc(100vh - ${adjustedTop + 24}px)` }}
+        className={`fixed z-50 left-4 right-4 animate-slide-in-right overflow-y-auto scrollbar-slim rounded-card border border-black/80 bg-[rgb(var(--sidebar-bg))]/90 backdrop-blur-xl shadow-[0_8px_20px_rgba(0,0,0,0.4),inset_0_0_0_1px_rgba(45,212,191,0.2)] md:right-auto md:w-64 ${
           expanded ? 'md:left-[260px]' : 'md:left-[68px]'
         }`}
       >
-        <div className="sticky top-0 flex items-center gap-2.5 border-b border-border bg-elevated px-5 py-4">
-          <span className="text-accent-text"><Ic /></span>
-          <h2 className="flex-1 text-h3 font-semibold tracking-tight text-fg">{entry.label}</h2>
-          <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={17} /></button>
+        <div className="sticky top-0 flex items-center gap-2.5 border-b border-[rgb(var(--sidebar-accent))]/20 bg-transparent px-5 py-4">
+          <span className="text-[rgb(var(--sidebar-accent))]"><Ic /></span>
+          <h2 className="flex-1 text-h3 font-semibold tracking-tight text-[rgb(var(--sidebar-fg-strong))]">{entry.label}</h2>
+          <button onClick={onClose} className="text-[rgb(var(--sidebar-fg))] hover:text-[rgb(var(--sidebar-fg-strong))]" aria-label="Close"><X size={17} /></button>
         </div>
         <div className="py-2">
           {items.map((it, i) => {

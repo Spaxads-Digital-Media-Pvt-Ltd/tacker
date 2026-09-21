@@ -17,7 +17,7 @@
  * Pagination is "has more" (overfetch by one row), matching Click Report — the shared API client
  * discards response pagination metadata app-wide.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
@@ -89,6 +89,33 @@ export default function ConversionReport() {
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const stripTime = (v: string | null) => (v ? v.split('T')[0] : null);
+    const f = stripTime(sp.get('from'));
+    const t = stripTime(sp.get('to'));
+    const offerId = sp.get('offerId');
+    const pubId = sp.get('publisherId');
+    const advId = sp.get('advertiserId');
+    const status = sp.get('status');
+    const hasParams = f || t || offerId || pubId || advId || status;
+    if (!hasParams) return;
+    const newFrom = f ?? daysAgo(7);
+    const newTo = t ?? todayStr();
+    const initial: FilterValues = {
+      ...(offerId ? { offer: [offerId] } : {}),
+      ...(pubId ? { partner: [pubId] } : {}),
+      ...(advId ? { advertiser: [advId] } : {}),
+      ...(status ? { status: [status] } : {}),
+    };
+    setFrom(newFrom);
+    setTo(newTo);
+    setAppliedFrom(newFrom);
+    setAppliedTo(newTo);
+    setFilters(initial);
+    setAppliedFilters(initial);
+  }, []);
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
