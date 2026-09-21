@@ -95,10 +95,12 @@ export default {
       keyframes: {
         'fade-in': { from: { opacity: '0', transform: 'translateY(4px)' }, to: { opacity: '1', transform: 'none' } },
         'slide-in-right': { from: { opacity: '0', transform: 'translateX(-12px)' }, to: { opacity: '1', transform: 'translateX(0)' } },
+        'draw-line': { to: { strokeDashoffset: '0' } },
       },
       animation: { 
         'fade-in': 'fade-in 0.3s ease-out both',
-        'slide-in-right': 'slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) both' 
+        'slide-in-right': 'slide-in-right 0.4s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'draw-line': 'draw-line 1.5s ease-out forwards',
       },
     },
   },

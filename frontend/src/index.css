@@ -41,7 +41,7 @@
   --text-muted: 100 116 139;     /* #64748B slate-500 */
 
   /* --- Typography --- */
-  --font-sans: 'Sora', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
   --fs-h1: 28px; --fs-h2: 22px; --fs-h3: 18px;
   --fs-body: 14px; --fs-small: 13px; --fs-tiny: 12px;

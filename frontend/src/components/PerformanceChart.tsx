@@ -138,9 +138,13 @@ export function PerformanceChart({
         <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full" aria-hidden>
           <defs>
             <linearGradient id="perf-rev" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.12" />
-              <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0" />
+              <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0.02" />
             </linearGradient>
+            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
           </defs>
 
           {yAxis.map(({ y }, i) => (
@@ -152,15 +156,15 @@ export function PerformanceChart({
 
           {mode === 'area' ? (
             <>
-              <path d={revArea} fill="url(#perf-rev)" />
-              <path d={revLine} fill="none" stroke="rgb(var(--accent))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <path d={revArea} fill="url(#perf-rev)" className="animate-fade-in" />
+              <path d={revLine} fill="none" stroke="rgb(var(--accent))" strokeWidth="2.5" filter="url(#glow)" className="animate-draw-line" style={{ strokeDasharray: 3000, strokeDashoffset: 3000 }} vectorEffect="non-scaling-stroke" />
             </>
           ) : (
             revenue.map((v, i) => (
               <rect key={i} x={x(i) - barW / 2} y={yRev(v)} width={barW} height={padT + plotH - yRev(v)} rx="1.5" fill="rgb(var(--accent))" fillOpacity="0.55" />
             ))
           )}
-          <path d={clickLine} fill="none" stroke="rgb(var(--text-muted))" strokeWidth="1.5" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+          <path d={clickLine} fill="none" stroke="rgb(var(--text-muted))" strokeWidth="1.5" strokeDasharray="4 3" className="animate-fade-in delay-200" vectorEffect="non-scaling-stroke" />
 
           {yAxis.map(({ y, label }, i) => (
             <text key={i} x={padL + 3} y={y - 4} fontSize="9" textAnchor="start" fill="rgb(var(--text-muted))">

@@ -135,13 +135,18 @@ function AdminDashboard({ name }: { name: string }) {
 
   return (
     <>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <PageHeader title="Dashboard" subtitle={`Welcome back, ${name}`} />
-        <div className="flex items-center gap-2">
-          <button className="btn-ghost" onClick={() => setLinkGenOpen(true)}><Link2 size={15} /> Tracking Link Generator</button>
-          <CustomizeCards visible={visible} onChange={setVisible} />
-        </div>
-      </div>
+      <PageHeader 
+        title="Dashboard" 
+        subtitle={`Welcome back, ${name}`} 
+        action={
+          <>
+            <button className="flex h-9 items-center gap-2 rounded-[var(--radius)] bg-slate-900 px-3 text-sm font-medium text-white transition-all hover:bg-slate-800 hover:scale-105 active:scale-95" onClick={() => setLinkGenOpen(true)}>
+              <Link2 size={15} /> Tracking Link Generator
+            </button>
+            <CustomizeCards visible={visible} onChange={setVisible} />
+          </>
+        }
+      />
       {linkGenOpen && <TrackingLinkGeneratorModal onClose={() => setLinkGenOpen(false)} />}
 
       {loading ? <StateBlock><Spinner /></StateBlock>
@@ -149,76 +154,92 @@ function AdminDashboard({ name }: { name: string }) {
         : (
           <>
             {(visible.kpi || visible.performance) && (
-              <div className={`grid grid-cols-1 gap-4 ${visible.kpi ? 'xl:grid-cols-[minmax(0,260px)_1fr_minmax(0,260px)]' : ''}`}>
+              <>
                 {visible.kpi && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:flex xl:flex-col">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 animate-fade-in mb-6">
                     <Kpi label="Revenue" value={money(data.revenue.today)} series={data.series.revenue}
                       d={delta(Number(data.revenue.today), Number(data.revenue.yesterday))}
                       rows={[['Yesterday', money(data.revenue.yesterday)], ['This month', money(data.revenue.month)], ['Last month', money(data.revenue.lastMonth)]]} />
-                    <Kpi label="Clicks" value={compact(data.clicks.today)} series={data.series.clicks}
-                      d={delta(data.clicks.today, data.clicks.yesterday)}
-                      rows={[['Yesterday', compact(data.clicks.yesterday)], ['This month', compact(data.clicks.month)], ['Last month', compact(data.clicks.lastMonth)]]} />
-                    <Kpi label="Conv. rate" value={`${data.cr.today}%`} series={data.series.conversions}
-                      d={delta(data.cr.today, data.cr.yesterday)}
-                      rows={[['Yesterday', `${data.cr.yesterday}%`], ['This month', `${data.cr.month}%`], ['Last month', `${data.cr.lastMonth}%`]]} />
-                  </div>
-                )}
-
-                {visible.performance && (
-                  <PerformanceChart
-                    revenue={data.series.revenue} clicks={data.series.clicks}
-                    revenueLabel={money(data.revenue.today)} clicksLabel={compact(data.clicks.today)}
-                  />
-                )}
-
-                {visible.kpi && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:flex xl:flex-col">
                     <Kpi label="Payout" value={money(data.payout.today)} series={data.series.payout}
                       d={delta(Number(data.payout.today), Number(data.payout.yesterday))}
                       rows={[['Yesterday', money(data.payout.yesterday)], ['This month', money(data.payout.month)], ['Last month', money(data.payout.lastMonth)]]} />
                     <Kpi label="Margin" value={money(data.margin.today)} series={data.series.revenue}
                       d={delta(Number(data.margin.today), Number(data.margin.yesterday))}
                       rows={[['Yesterday', money(data.margin.yesterday)], ['This month', money(data.margin.month)], ['Last month', money(data.margin.lastMonth)]]} />
+                    <Kpi label="Clicks" value={compact(data.clicks.today)} series={data.series.clicks}
+                      d={delta(data.clicks.today, data.clicks.yesterday)}
+                      rows={[['Yesterday', compact(data.clicks.yesterday)], ['This month', compact(data.clicks.month)], ['Last month', compact(data.clicks.lastMonth)]]} />
                     <Kpi label="Conversions" value={compact(data.conversions.today)} series={data.series.conversions}
                       d={delta(data.conversions.today, data.conversions.yesterday)}
                       rows={[['Yesterday', compact(data.conversions.yesterday)], ['This month', compact(data.conversions.month)], ['Last month', compact(data.conversions.lastMonth)]]} />
                   </div>
                 )}
-              </div>
+
+                {(visible.kpi || visible.performance) && (
+                  <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 animate-fade-in delay-100">
+                    {visible.performance && (
+                      <div className="lg:col-span-3 h-full">
+                        <PerformanceChart
+                          revenue={data.series.revenue} clicks={data.series.clicks}
+                          revenueLabel={money(data.revenue.today)} clicksLabel={compact(data.clicks.today)}
+                        />
+                      </div>
+                    )}
+                    {visible.kpi && (
+                      <div className="lg:col-span-2 h-full">
+                        <Kpi label="Conv. rate" value={`${data.cr.today}%`} series={data.series.conversions}
+                          d={delta(data.cr.today, data.cr.yesterday)}
+                          rows={[['Yesterday', `${data.cr.yesterday}%`], ['This month', `${data.cr.month}%`], ['Last month', `${data.cr.lastMonth}%`]]}
+                          className="h-full" />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
 
-            {/* Top rankings + per-entity mini chart */}
-            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-              {visible.offers && <EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" />}
-              {visible.publishers && <EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" />}
-              {visible.advertisers && <EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" />}
-            </div>
+            {/* Top Performers Section */}
+            {(visible.offers || visible.publishers || visible.advertisers) && (
+              <div className="mt-12 pt-8 border-t border-border/60 animate-fade-in delay-200">
+                <div className="mb-6">
+                  <h2 className="text-xl font-bold tracking-tight text-fg">Performance Reports</h2>
+                  <p className="mt-1 text-sm text-fg-muted">Overview of your highest grossing offers, partners, and advertisers</p>
+                </div>
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                  {visible.offers && <EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" />}
+                  {visible.publishers && <EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" />}
+                  {visible.advertisers && <EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" />}
+                </div>
+              </div>
+            )}
           </>
         )}
     </>
   );
 }
 
-function Kpi({ label, value, series, d, rows }: {
+function Kpi({ label, value, series, d, rows, className = '' }: {
   label: string; value: string; series: number[];
   d: { pct: number; up: boolean } | null; rows: [string, string][];
+  className?: string;
 }) {
   // Trend-direction color for the sparkline, using the existing --success / --danger tokens
   // (no new colors). Neutral accent when there's no comparable prior period. Passed through
   // Sparkline's existing `color` prop, so its API is unchanged and EntityPanel stays navy.
   const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
   return (
-    <div className="card !p-4">
-      <div className="flex items-start justify-between">
-        <p className="text-small font-medium text-fg-secondary">{label}</p>
+    <div className={`card !p-6 hover:shadow-elevated transition-all relative overflow-hidden group flex flex-col ${className}`}>
+      <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+      <div className="relative z-10 flex items-start justify-between">
+        <p className="text-xs font-semibold text-fg-secondary uppercase tracking-wider">{label}</p>
         {d && (
-          <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-tiny font-semibold ${d.up ? 'bg-success-bg text-success-text' : 'bg-danger-bg text-danger-text'}`}>
-            {d.up ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />} {Math.abs(d.pct)}%
+          <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold ${d.up ? 'bg-success/15 text-success-text' : 'bg-danger/15 text-danger-text'}`}>
+            {d.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {Math.abs(d.pct)}%
           </span>
         )}
       </div>
-      <p className="mt-1 text-[30px] font-bold leading-tight tracking-tight text-fg">{value}</p>
-      <div className="mt-2"><Sparkline data={series} color={trendColor} /></div>
+      <p className="relative z-10 mt-2 text-3xl font-extrabold leading-tight tracking-tight text-fg">{value}</p>
+      <div className="mt-auto pt-2"><Sparkline data={series} color={trendColor} /></div>
       <dl className="mt-3 space-y-1 border-t border-border pt-2 text-tiny">
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between"><dt className="text-fg-muted">{k}</dt><dd className="font-medium tabular-nums text-fg-secondary">{v}</dd></div>
@@ -264,7 +285,7 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
     .map((r) => Number(r.metrics[metric] ?? 0));
 
   return (
-    <div className="card !p-0">
+    <div className="card !p-0 hover:shadow-elevated transition-all">
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <h2 className="text-h3 font-medium text-fg">{title}</h2>
         <Link to={viewAll} title="View all" className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
@@ -367,7 +388,7 @@ function RoleTiles({ role, name }: { role: Exclude<Role, 'admin'>; name: string 
   return (
     <>
       <PageHeader title={`Welcome, ${name}`} subtitle={`${ROLE_LABELS[role]} · last 24 hours`} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 animate-fade-in delay-100">
         {cfg.tiles.map((t) => (
           <StatCard key={t.label} label={t.label} hint={t.hint} value={loading ? '…' : data ? t.val(data) : '—'} />
         ))}
