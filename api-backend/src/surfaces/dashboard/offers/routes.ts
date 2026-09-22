@@ -383,12 +383,38 @@ export function offersAdminRoutes(): Router {
  );
  };
 
+ // offer_geo_rules has a unique index (offer_id, country, COALESCE(region, '')).
+ // Use a NOT EXISTS subquery so that when the target already has a geo rule for the same
+ // country/region as the source, the target's existing row is preserved and the source's
+ // row is silently skipped. This avoids a 500 on a normal "copy settings" operation while
+ // never destroying existing target configuration.
+ const copyGeoRules = async (): Promise<number> => {
+ const { rowCount } = await query(
+ `INSERT INTO ${GEO} (network_id, offer_id, country, region, action, payout_override, revenue_override, destination_override)
+ SELECT src.network_id, $2, src.country, src.region, src.action, src.payout_override, src.revenue_override, src.destination_override
+ FROM ${GEO} src
+ WHERE src.network_id = $1 AND src.offer_id = $3
+ AND NOT EXISTS (
+   SELECT 1 FROM ${GEO} tgt
+   WHERE tgt.network_id = $1 AND tgt.offer_id = $2
+     AND tgt.country = src.country
+     AND COALESCE(tgt.region, '') = COALESCE(src.region, '')
+ )`,
+ [networkId, target.id, src.id],
+ );
+ return rowCount;
+ };
+
+ const result: { copied: boolean; targetOfferId: string; geoRulesInserted?: number } = {
+ copied: true, targetOfferId: target.id,
+ };
+
  if (opts.includeCreatives) await copyTable('offer_creatives', 'name, type, url, html, width, height, language, status');
  if (opts.includeCustomSettings) {
- await copyTable(GEO, 'country, region, action, payout_override, revenue_override, destination_override');
+ result.geoRulesInserted = await copyGeoRules();
  await query(
- `INSERT INTO offer_custom_settings (network_id, offer_id, category, name, partner_ids, description, public_description, event, value, status)
- SELECT network_id, $2, category, name, partner_ids, description, public_description, event, value, status
+ `INSERT INTO offer_custom_settings (network_id, offer_id, category, name, partner_ids, description, public_description, status, ref, partner_id, apply_all_partners, effective_from, effective_to, targeting, apply_custom_payout, payout_model, payout_value, apply_custom_revenue, revenue_model, revenue_value, goal_id, fire_partner_postback, caps, conversion_status, throttle_rate, set_parameter_goal, landing_page_url, creative_type, creative_url, creative_thumbnail_url, email_from, email_subject)
+ SELECT network_id, $2, category, name, partner_ids, description, public_description, status, ref, partner_id, apply_all_partners, effective_from, effective_to, targeting, apply_custom_payout, payout_model, payout_value, apply_custom_revenue, revenue_model, revenue_value, goal_id, fire_partner_postback, caps, conversion_status, throttle_rate, set_parameter_goal, landing_page_url, creative_type, creative_url, creative_thumbnail_url, email_from, email_subject
  FROM offer_custom_settings WHERE network_id = $1 AND offer_id = $3`,
  [networkId, target.id, src.id],
  );
@@ -396,7 +422,7 @@ export function offersAdminRoutes(): Router {
  if (opts.includeForwardingRules) await copyTable('offer_forwarding_rules', 'name, partner_ids, offer_urls, destination, countries, status');
 
  await writeAudit(req, { action: 'offer.copy_settings_to', entityType: 'offer', entityId: target.id, after: { sourceOfferId: src.id, ...opts } });
- sendOk(res, { copied: true, targetOfferId: target.id });
+ sendOk(res, result);
  }));
 
  // --- Geo rules (nested) ---

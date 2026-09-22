@@ -25,19 +25,18 @@ const CATEGORIES = ['revenue_payout', 'caps', 'throttle_rates', 'landing_pages',
 
 interface Row {
   id: string; category: string; name: string; offer_id: string | null; partner_ids: string[];
-  description: string | null; public_description: string | null; event: string | null; value: string | null;
+  description: string | null; public_description: string | null;
   status: string; created_at: string; updated_at: string;
 }
 const dto = (r: Row) => ({
   id: r.id, category: r.category, name: r.name, offerId: r.offer_id, partnerIds: r.partner_ids,
-  description: r.description, publicDescription: r.public_description, event: r.event, value: r.value,
+  description: r.description, publicDescription: r.public_description,
   status: r.status, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
-// `event` and `value` are generic text columns re-labelled per category (cap amount, throttle %,
-// weight, URL, creative name). The dashboard forms coerce number-typed inputs to JS numbers, so
+// `name` is the primary text field. Per-category typed columns (payout_value, caps, etc.)
+// carry the structured data. The dashboard forms coerce number-typed inputs to JS numbers, so
 // accept a number here and normalise to string.
-const textOrNumber = z.union([z.string(), z.number().transform((n) => String(n))]).nullable().optional();
 const createSchema = z.object({
   category: z.enum(CATEGORIES),
   name: z.string().min(1).max(200),
@@ -45,8 +44,6 @@ const createSchema = z.object({
   partnerIds: z.array(z.string().uuid()).default([]),
   description: z.string().nullable().optional(),
   publicDescription: z.string().nullable().optional(),
-  event: textOrNumber,
-  value: textOrNumber,
   status: z.enum(['active', 'paused']).default('active'),
 });
 const updateSchema = createSchema.partial();
@@ -70,7 +67,7 @@ export function offerCustomSettingsRoutes(): Router {
     const row = await dbForRequest(req).insert<Row>(TABLE, {
       category: b.category, name: b.name, offer_id: b.offerId ?? null, partner_ids: JSON.stringify(b.partnerIds),
       description: b.description ?? null, public_description: b.publicDescription ?? null,
-      event: b.event ?? null, value: b.value ?? null, status: b.status,
+      status: b.status,
     });
     await writeAudit(req, { action: 'offer_custom_setting.create', entityType: 'offer_custom_setting', entityId: row.id, after: row });
     sendOk(res, dto(row), undefined, 201);
@@ -86,8 +83,6 @@ export function offerCustomSettingsRoutes(): Router {
     if (b.partnerIds !== undefined) patch['partner_ids'] = JSON.stringify(b.partnerIds);
     if (b.description !== undefined) patch['description'] = b.description;
     if (b.publicDescription !== undefined) patch['public_description'] = b.publicDescription;
-    if (b.event !== undefined) patch['event'] = b.event;
-    if (b.value !== undefined) patch['value'] = b.value;
     if (b.status !== undefined) patch['status'] = b.status;
     const [row] = await db.update<Row>(TABLE, patch, { id: req.params.id });
     if (!row) throw notFound('Custom setting not found');
