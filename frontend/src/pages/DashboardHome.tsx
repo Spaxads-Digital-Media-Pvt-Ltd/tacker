@@ -296,14 +296,16 @@ function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, series, d, r
           {Icon && <Icon size={20} className={iconColor} />}
           <p className="text-xs font-semibold text-fg-secondary uppercase tracking-wider">{label}</p>
         </div>
-        {onClick && (
-          <ExternalLink className="size-3.5 text-fg-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100" aria-hidden="true" />
-        )}
-        {d && !onClick && (
-          <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold ${d.up ? 'bg-success/15 text-success-text' : 'bg-danger/15 text-danger-text'}`}>
-            {d.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {Math.abs(d.pct)}%
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {d && (
+            <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold ${d.up ? 'bg-success/15 text-success-text' : 'bg-danger/15 text-danger-text'}`}>
+              {d.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {Math.abs(d.pct)}%
+            </span>
+          )}
+          {onClick && (
+            <ExternalLink className="size-3.5 text-fg-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100" aria-hidden="true" />
+          )}
+        </div>
       </div>
       <p className="relative z-10 mt-[5px] text-3xl font-extrabold leading-tight tracking-tight text-fg">{value}</p>
       <div className="mt-auto pt-6 ml-auto w-1/2"><Sparkline data={series} color={trendColor} /></div>
@@ -466,7 +468,8 @@ function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, s
   onClick?: () => void;
 }) {
   const [mode, setMode] = useState<'area' | 'bar'>('area');
-  const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))');
+  const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
+  void onClick;
 
   return (
     <div className={`card !p-6 transition-all duration-300 relative overflow-hidden group flex flex-col hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)] ${className}`}>
