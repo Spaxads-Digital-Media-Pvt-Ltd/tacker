@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react';
+import { useState } from 'react';
 
 function smoothPath(
   pts: ReadonlyArray<readonly [number, number]>,
@@ -65,9 +65,9 @@ export function InteractiveSingleSeriesChart({
   const barW = Math.max(2, (plotW / n) * 0.6);
 
   // Hover logic
-  const handleMove = (e: MouseEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const handleMove = (clientX: number, target: EventTarget & SVGSVGElement) => {
+    const rect = target.getBoundingClientRect();
+    const mx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const idx = Math.round(mx * (n - 1));
     if (idx >= 0 && idx < n) setHoverIdx(idx);
   };
@@ -91,11 +91,11 @@ export function InteractiveSingleSeriesChart({
         viewBox={`0 0 ${w} ${h}`}
         preserveAspectRatio="none"
         className="h-full w-full overflow-visible touch-none"
-        onMouseMove={handleMove}
+        onMouseMove={(e) => handleMove(e.clientX, e.currentTarget)}
         onMouseLeave={handleLeave}
         onTouchMove={(e) => {
           const t = e.touches[0];
-          if (t) handleMove({ clientX: t.clientX, currentTarget: e.currentTarget } as any);
+          if (t) handleMove(t.clientX, e.currentTarget);
         }}
         onTouchEnd={handleLeave}
       >
