@@ -101,4 +101,37 @@ d('Dashboard API isolation (live DB)', () => {
     const res = await request(app).get('/api/advertisers');
     expect(res.status).toBe(401);
   });
+
+  // --- RBAC: read_only cannot mutate offers (A-1 fix) ---
+  it('read_only role gets 403 on POST /api/offers', async () => {
+    const res = await request(app)
+      .post('/api/offers')
+      .set(bearer(operatorToken({ userId: 'uA-readonly', networkId: fx.networkA, role: 'read_only' })))
+      .send({
+        advertiserId: fx.advA,
+        name: 'RBAC test offer',
+        currency: 'USD',
+        destinationUrl: 'https://example.com',
+        trackingDomainId: null,
+        defaultRevenue: 10,
+        defaultPayout: 5,
+      });
+    expect(res.status).toBe(403);
+  });
+
+  it('admin role can create an offer (200)', async () => {
+    const res = await request(app)
+      .post('/api/offers')
+      .set(bearer(operatorToken({ userId: 'uA-admin', networkId: fx.networkA, role: 'admin' })))
+      .send({
+        advertiserId: fx.advA,
+        name: 'RBAC admin offer',
+        currency: 'USD',
+        destinationUrl: 'https://example.com',
+        trackingDomainId: null,
+        defaultRevenue: 10,
+        defaultPayout: 5,
+      });
+    expect(res.status).toBe(201);
+  });
 });

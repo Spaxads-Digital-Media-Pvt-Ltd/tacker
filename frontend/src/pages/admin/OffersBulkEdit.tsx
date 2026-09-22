@@ -110,12 +110,15 @@ export default function OffersBulkEdit() {
   const [changes, setChanges] = useState<Change[]>([]);
   const [reviewing, setReviewing] = useState(false);
 
-  const advName = (id: string) => advertisers?.find((a) => a.id === id)?.name ?? id.slice(0, 8) + '…';
+  const advName = useMemo(() => {
+    const m = new Map((advertisers ?? []).map((a) => [a.id, a]));
+    return (id: string) => m.get(id)?.name ?? id.slice(0, 8) + '…';
+  }, [advertisers]);
   const filteredOffers = useMemo(() => {
     const qq = q.trim().toLowerCase();
     if (!qq) return offers ?? [];
     return (offers ?? []).filter((o) => o.name.toLowerCase().includes(qq) || advName(o.advertiserId).toLowerCase().includes(qq));
-  }, [offers, q, advertisers]);
+  }, [offers, q, advName]);
   const available = filteredOffers.filter((o) => !selectedIds.has(o.id));
   const selected = (offers ?? []).filter((o) => selectedIds.has(o.id));
 
