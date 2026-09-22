@@ -134,7 +134,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
         }>
           {stats.loading ? <Spinner /> : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[480px] text-left text-small">
+              <table className="premium-table">
                 <thead className="text-tiny uppercase text-fg-muted"><tr>
                   <th className="py-2 pr-4">Revenue</th><th className="py-2 pr-4">Payout</th><th className="py-2 pr-4">Margin</th>
                   <th className="py-2 pr-4">Clicks</th><th className="py-2 pr-4">CV</th><th className="py-2">CVR</th>
@@ -154,9 +154,9 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
 
         <Card title="Revenue & Payout (Events)">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-left text-small">
+            <table className="premium-table">
               <thead className="text-tiny uppercase text-fg-muted"><tr><th className="py-2">Name</th><th className="py-2 text-right">Revenue</th><th className="py-2 text-right">Payout</th><th className="py-2 pl-4">Currency</th></tr></thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 <tr><td className="py-2 font-medium">Base (Default)</td><td className="py-2 text-right tabular-nums">{amt(offer.defaultRevenue)}</td><td className="py-2 text-right tabular-nums">{amt(offer.defaultPayout)}</td><td className="py-2 pl-4">{offer.currency}</td></tr>
                 {(goals.data ?? []).map((g) => (
                   <tr key={g.id}><td className="py-2 font-medium">{String(g.name)}</td><td className="py-2 text-right tabular-nums">{amt(g.revenue as string | number)}</td><td className="py-2 text-right tabular-nums">{amt(g.payout as string | number)}</td><td className="py-2 pl-4">{String(g.currency ?? offer.currency)}</td></tr>
@@ -168,7 +168,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
 
         <Card title="Offer URLs">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[420px] text-left text-small">
+            <table className="premium-table">
               <thead className="text-tiny uppercase text-fg-muted"><tr><th className="py-2">Name</th><th className="py-2">URL</th></tr></thead>
               <tbody><tr><td className="py-2 font-medium">Default</td><td className="max-w-xs truncate py-2 font-mono text-tiny text-accent-text">{offer.destinationUrl}</td></tr></tbody>
             </table>
@@ -177,9 +177,9 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
 
         <Card title="Caps & Control">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[380px] text-left text-small">
+            <table className="premium-table">
               <thead className="text-tiny uppercase text-fg-muted"><tr><th className="py-2">Type</th><th className="py-2 text-right">Daily</th><th className="py-2 text-right">Total</th></tr></thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 <tr><td className="py-2">Clicks</td><td className="py-2 text-right">{offer.dailyClickCap ?? '—'}</td><td className="py-2 text-right">—</td></tr>
                 <tr><td className="py-2">Conversions</td><td className="py-2 text-right">{offer.dailyConversionCap ?? '—'}</td><td className="py-2 text-right">{offer.totalConversionCap ?? '—'}</td></tr>
               </tbody>

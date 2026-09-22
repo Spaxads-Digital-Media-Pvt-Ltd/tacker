@@ -376,8 +376,8 @@ export default function Marketplace() {
           </div>
         ) : (
           <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
-            <table className="w-full text-left text-body">
-              <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+            <table className="premium-table">
+              <thead>
                 <tr>
                   <th className="px-5 py-3 font-semibold">Advertiser</th>
                   <th className="px-5 py-3 font-semibold">Categories</th>
@@ -387,7 +387,7 @@ export default function Marketplace() {
                   <th className="px-5 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {rows.map((a) => {
                   const stats = statsMap.get(a.id);
                   const site = websiteLabel(a.contactEmail, a.name);

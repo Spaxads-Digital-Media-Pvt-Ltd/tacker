@@ -85,16 +85,16 @@ function SavedReportsTab() {
         <StateBlock>{q.trim() ? 'No Record Found' : 'No saved reports yet — open any report and use its page menu to Save one.'}</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full text-left text-body">
-            <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+          <table className="premium-table">
+            <thead>
               <tr>
-                <th className="whitespace-nowrap px-4 py-3 font-semibold">Name</th>
-                <th className="whitespace-nowrap px-4 py-3 font-semibold">Report Type</th>
-                <th className="whitespace-nowrap px-4 py-3 font-semibold">Interval</th>
+                <th >Name</th>
+                <th >Report Type</th>
+                <th >Interval</th>
                 <th className="w-9" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {filtered.map((r) => (
                 <tr key={`${r.source}-${r.name}`} className="hover:bg-accent-subtle/40">
                   <td className="px-4 py-3">

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, X, Info } from 'lucide-react';
-import { Field, Overlay, ScrollReveal } from './ui';
+import { Field, Overlay, ScrollReveal, TableScroll } from './ui';
 import { Pagination } from './ReportPageKit';
 
 /**
@@ -270,23 +270,23 @@ export function EmptyShellTable({
           </div>
         )}
       </div>
-      <div className="overflow-x-auto rounded-card border border-border">
-        <table className="w-full min-w-[640px] text-left text-body">
-          <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-            <tr className="divide-x divide-border">{shown.map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}{onDelete && <th className="whitespace-nowrap px-4 py-3 font-semibold" />}</tr>
+      <TableScroll>
+        <table className="premium-table">
+          <thead>
+            <tr>{shown.map((c) => <th key={c}>{c}</th>)}{onDelete && <th />}</tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody>
             {loading ? (
-              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="px-4 py-10 text-center text-small text-fg-muted">Loading…</td></tr>
+              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">Loading…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="px-4 py-10 text-center text-small italic text-fg-muted">No Record Found</td></tr>
+              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">No Record Found</td></tr>
             ) : filtered.map((row) => (
-              <tr key={row.id} className="divide-x divide-border">
+              <tr key={row.id}>
                 {shown.map((c) => (
-                  <td key={c} className="whitespace-nowrap px-4 py-3 text-small text-fg-secondary">{row.cells[c] ?? '—'}</td>
+                  <td key={c}>{row.cells[c] ?? '—'}</td>
                 ))}
                 {onDelete && (
-                  <td className="px-4 py-3 text-right">
+                  <td className="text-right">
                     <button type="button" className="text-tiny text-danger-text hover:underline"
                       onClick={() => onDelete(row.id)}>Delete</button>
                   </td>
@@ -295,7 +295,7 @@ export function EmptyShellTable({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
       <div className="mt-2 flex justify-end">
         <Pagination total={wired ? filtered.length : 0} page={1} pageSize={25} onPageChange={() => {}} />
       </div>

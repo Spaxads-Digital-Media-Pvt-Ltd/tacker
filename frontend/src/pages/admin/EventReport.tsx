@@ -205,31 +205,31 @@ export default function EventReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[1600px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Offer</th>
-                    {shown.has('Impressions') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Impressions</th>}
-                    {shown.has('Clicks') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Clicks</th>}
-                    {shown.has('CTR') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CTR</th>}
-                    {shown.has('Total (from VT)') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Total (from VT)</th>}
-                    {shown.has('Events') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Events</th>}
-                    {shown.has('Total (from Clicks)') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Total (from Clicks)</th>}
-                    {shown.has('CVR') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CVR</th>}
-                    {shown.has('EVR') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">EVR</th>}
-                    {shown.has('Revenue') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Revenue</th>}
-                    {shown.has('Payout') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Payout</th>}
-                    {shown.has('Profit') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Profit</th>}
-                    {shown.has('Margin') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Margin</th>}
-                    {shown.has('Gross Sales (from Clicks)') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Gross Sales (from Clicks)</th>}
-                    {shown.has('Gross Sales (from VT)') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Gross Sales (from VT)</th>}
+                    <th >Offer</th>
+                    {shown.has('Impressions') && <th className="text-right font-semibold">Impressions</th>}
+                    {shown.has('Clicks') && <th className="text-right font-semibold">Clicks</th>}
+                    {shown.has('CTR') && <th className="text-right font-semibold">CTR</th>}
+                    {shown.has('Total (from VT)') && <th className="text-right font-semibold">Total (from VT)</th>}
+                    {shown.has('Events') && <th >Events</th>}
+                    {shown.has('Total (from Clicks)') && <th className="text-right font-semibold">Total (from Clicks)</th>}
+                    {shown.has('CVR') && <th className="text-right font-semibold">CVR</th>}
+                    {shown.has('EVR') && <th className="text-right font-semibold">EVR</th>}
+                    {shown.has('Revenue') && <th className="text-right font-semibold">Revenue</th>}
+                    {shown.has('Payout') && <th className="text-right font-semibold">Payout</th>}
+                    {shown.has('Profit') && <th className="text-right font-semibold">Profit</th>}
+                    {shown.has('Margin') && <th className="text-right font-semibold">Margin</th>}
+                    {shown.has('Gross Sales (from Clicks)') && <th className="text-right font-semibold">Gross Sales (from Clicks)</th>}
+                    {shown.has('Gross Sales (from VT)') && <th className="text-right font-semibold">Gross Sales (from VT)</th>}
                     <th className="w-9" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <tr key={`${r.offer_id}-${r.goal}`} className="hover:bg-accent-subtle/40">
-                      <td className="whitespace-nowrap px-4 py-3 font-medium"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>
+                      <td className="font-medium"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>
                       {shown.has('Impressions') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
                       {shown.has('Clicks') && <td className="px-4 py-3 text-right">{r.clicks.toLocaleString()}</td>}
                       {shown.has('CTR') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}

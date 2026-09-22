@@ -236,32 +236,32 @@ export default function AdvertiserPostbackReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[1900px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Date</th>
-                    {shown.has('Partner') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Partner</th>}
-                    {shown.has('Offer') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Offer</th>}
-                    {shown.has('Advertiser') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Advertiser</th>}
-                    {shown.has('Payload') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Payload</th>}
-                    {shown.has('Conversion ID') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Conversion ID</th>}
-                    {shown.has('Transaction ID') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Transaction ID</th>}
-                    {shown.has('Status') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Status</th>}
-                    {shown.has('CV Method') && <th className="whitespace-nowrap px-4 py-3 font-semibold">CV Method</th>}
-                    {shown.has('Revenue') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Revenue</th>}
-                    {shown.has('Payout') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Payout</th>}
+                    <th >Date</th>
+                    {shown.has('Partner') && <th >Partner</th>}
+                    {shown.has('Offer') && <th >Offer</th>}
+                    {shown.has('Advertiser') && <th >Advertiser</th>}
+                    {shown.has('Payload') && <th >Payload</th>}
+                    {shown.has('Conversion ID') && <th >Conversion ID</th>}
+                    {shown.has('Transaction ID') && <th >Transaction ID</th>}
+                    {shown.has('Status') && <th >Status</th>}
+                    {shown.has('CV Method') && <th >CV Method</th>}
+                    {shown.has('Revenue') && <th className="text-right font-semibold">Revenue</th>}
+                    {shown.has('Payout') && <th className="text-right font-semibold">Payout</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <tr key={r.conversion_id} className="hover:bg-accent-subtle/40">
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{formatDate(r.created_at)}</td>
+                      <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
                       {shown.has('Partner') && <td className="px-4 py-3">{r.publisher_id ? <Link to={`/app/publishers/${r.publisher_id}`} className="text-accent-text hover:underline">{pubMap.get(r.publisher_id) ?? r.publisher_id}</Link> : DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
                       {shown.has('Advertiser') && <td className="px-4 py-3">{r.advertiser_id ? <Link to={`/app/advertisers/${r.advertiser_id}`} className="text-accent-text hover:underline">{advMap.get(r.advertiser_id) ?? r.advertiser_id}</Link> : DASH}</td>}
                       {shown.has('Payload') && <td className="max-w-xs truncate px-4 py-3 font-mono text-tiny" title={payloadPreview(r.raw_params)}>{payloadPreview(r.raw_params)}</td>}
-                      {shown.has('Conversion ID') && <td className="whitespace-nowrap px-4 py-3 font-mono text-tiny">{r.conversion_id.slice(0, 12)}…</td>}
-                      {shown.has('Transaction ID') && <td className="whitespace-nowrap px-4 py-3 font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
+                      {shown.has('Conversion ID') && <td className="font-mono text-tiny">{r.conversion_id.slice(0, 12)}…</td>}
+                      {shown.has('Transaction ID') && <td className="font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3"><Badge value={r.status} /></td>}
                       {shown.has('CV Method') && <td className="px-4 py-3">{METHOD_OPTIONS.find((m) => m.value === r.source)?.label ?? r.source}</td>}
                       {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(r.revenue)}</td>}

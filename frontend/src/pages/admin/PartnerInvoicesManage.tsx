@@ -6,14 +6,14 @@
  * app has no separate payments ledger to record partial amounts against.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeOff, CheckCircle2, Trash2, Download, Clock } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, ApiRequestModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { PartnerInvoice, PartnerInvoiceSummary, Publisher } from '../../types';
 
 /** Real client-side CSV/JSON export (same pattern as Offers/Publishers Table Actions) — no export
@@ -149,7 +149,7 @@ function ApprovePayModal({ invoices, onClose, onDone }: { invoices: PartnerInvoi
         </div>
         {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full text-left text-small">
+          <table className="premium-table">
             <thead className="bg-page text-tiny uppercase text-fg-secondary">
               <tr><th className="px-3 py-2">ID</th><th className="px-3 py-2">Partner</th><th className="px-3 py-2">Payment Method</th><th className="px-3 py-2 text-right">Payment Amount</th></tr>
             </thead>
@@ -175,79 +175,47 @@ function ApprovePayModal({ invoices, onClose, onDone }: { invoices: PartnerInvoi
 }
 
 function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/partner-invoices/${invoice.id}`));
   const toggleVisible = useMutation((body: Record<string, unknown>) => api.patch(`/api/partner-invoices/${invoice.id}`, body));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-      setExportOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const doDelete = async () => {
-    setOpen(false);
+  const doDelete = async (menu: { close: () => void }) => {
+    menu.close();
     if (!confirm(`Delete Invoice ID: ${invoice.ref}?`)) return;
     if (await del.run(undefined)) onChanged();
   };
-  const doToggleVisible = async () => {
-    setOpen(false);
+  const doToggleVisible = async (menu: { close: () => void }) => {
+    menu.close();
     if (await toggleVisible.run({ visibleToPartner: !invoice.visibleToPartner })) onChanged();
   };
 
-  const item = (label: string, onClick: () => void, opts?: { disabled?: boolean; hasSubmenu?: boolean }) => (
-    <button role="menuitem" disabled={opts?.disabled} onClick={onClick}
-      className="flex w-full items-center justify-between whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
-      {label}
-      {opts?.hasSubmenu && <ChevronRight size={13} className="text-fg-muted" />}
-    </button>
-  );
-
   return (
     <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-44 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => { setOpen(false); nav(`/app/aff-invoices/${invoice.id}/edit`); }, { disabled: invoice.status === 'deleted' })}
-          {item(invoice.visibleToPartner ? 'Hide from Partner' : 'Show to Partner', doToggleVisible, { disabled: invoice.status === 'deleted' })}
-          {item('Mark Invoice as Paid', async () => { setOpen(false); await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); }, { disabled: invoice.status !== 'unpaid' })}
-          {item('Delete', doDelete, { disabled: invoice.status === 'deleted' })}
-          <div className="relative" onMouseEnter={() => setExportOpen(true)} onMouseLeave={() => setExportOpen(false)}>
-            {item('Export', () => setExportOpen((s) => !s), { hasSubmenu: true })}
-            {exportOpen && (
-              <div className="absolute right-full top-0 mr-1 w-28 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                {item('CSV', () => runExport('csv', [invoice], () => { setOpen(false); setExportOpen(false); }))}
-                {item('JSON', () => runExport('json', [invoice], () => { setOpen(false); setExportOpen(false); }))}
-              </div>
-            )}
-          </div>
-          {item('History', () => { setOpen(false); setHistoryOpen(true); })}
-        </div>,
-        document.body,
-      )}
+      <TableRowMenu>
+        {(menu) => (
+          <>
+            <MenuItem icon={Pencil} disabled={invoice.status === 'deleted'} onSelect={() => { menu.close(); nav(`/app/aff-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
+            <MenuItem icon={invoice.visibleToPartner ? EyeOff : Eye} disabled={invoice.status === 'deleted'} onSelect={() => doToggleVisible(menu)}>{invoice.visibleToPartner ? 'Hide from Partner' : 'Show to Partner'}</MenuItem>
+            <MenuItem icon={CheckCircle2} disabled={invoice.status !== 'unpaid'} onSelect={async () => { menu.close(); await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); }}>Mark Invoice as Paid</MenuItem>
+            <MenuItem icon={Trash2} tone="danger" disabled={invoice.status === 'deleted'} onSelect={() => doDelete(menu)}>Delete</MenuItem>
+            <div className="relative" onMouseEnter={() => setExportOpen(true)} onMouseLeave={() => setExportOpen(false)}>
+              <MenuItem icon={Download} onSelect={() => setExportOpen((s) => !s)}>
+                <span className="flex-1">Export</span>
+                <ChevronRight size={13} className="text-fg-muted" />
+              </MenuItem>
+              {exportOpen && (
+                <div className="absolute right-full top-0 mr-1 w-28 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                  <MenuItem onSelect={() => runExport('csv', [invoice], () => { menu.close(); setExportOpen(false); })}>CSV</MenuItem>
+                  <MenuItem onSelect={() => runExport('json', [invoice], () => { menu.close(); setExportOpen(false); })}>JSON</MenuItem>
+                </div>
+              )}
+            </div>
+            <MenuItem icon={Clock} onSelect={() => { menu.close(); setHistoryOpen(true); }}>History</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
       {historyOpen && <HistoryModal invoiceId={invoice.id} onClose={() => setHistoryOpen(false)} />}
     </>
   );
@@ -422,7 +390,7 @@ export default function PartnerInvoicesManage() {
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-              <MoreVertical size={15} />
+              
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-60 rounded-card border border-border bg-elevated py-1 shadow-elevated">

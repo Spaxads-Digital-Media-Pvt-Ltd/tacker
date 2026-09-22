@@ -48,7 +48,7 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
   const { title, subtitle } = usePageTitleValue();
   const heading = title ?? routeTitle(loc.pathname, role);
   return (
-    <header className="relative z-40 flex items-center gap-3 border-b border-black/80 bg-gradient-to-t from-teal-950/95 to-emerald-900/95 backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.4),inset_0_-1px_0_rgba(45,212,191,0.2)] px-4 py-2.5">
+    <header className="relative z-40 flex items-center gap-3 border-b border-black/80 bg-[rgb(27,35,53)] backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.4),inset_0_-1px_0_rgba(45,212,191,0.2)] px-4 py-2.5">
       {/* Left zone — nav trigger + brand (both < md only) + page title. flex-1 so it balances
           the right zone and keeps the centre search bar actually centred. */}
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -74,11 +74,11 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
         {/* Desktop Search */}
         <button
           type="button" onClick={onSearch}
-          className="group hidden w-full max-w-[240px] items-center gap-2 rounded-[var(--radius)] border border-slate-300 bg-white px-3 py-1.5 text-small text-slate-500 shadow-sm transition-all hover:bg-slate-50 hover:border-slate-400 hover:shadow md:flex md:mr-12"
+          className="group hidden w-full max-w-[240px] items-center gap-2 rounded-[var(--radius)] border border-white/20 bg-white/10 px-3 py-1.5 text-small text-white/80 shadow-sm transition-all hover:bg-white/20 hover:border-white/30 md:flex md:mr-12"
         >
-          <Search size={15} className="shrink-0 text-slate-500 transition-colors group-hover:text-slate-600" />
+          <Search size={15} className="shrink-0 text-white/60 transition-colors group-hover:text-white/90" />
           <span className="flex-1 text-left font-medium">Search…</span>
-          <kbd className="shrink-0 rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 shadow-sm transition-colors group-hover:border-slate-400 group-hover:bg-slate-200 group-hover:text-slate-700">⌘K</kbd>
+          <kbd className="shrink-0 rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[10px] font-bold text-white/70 shadow-sm transition-colors group-hover:border-white/30 group-hover:bg-white/20 group-hover:text-white">⌘K</kbd>
         </button>
 
         {/* Mobile Search */}

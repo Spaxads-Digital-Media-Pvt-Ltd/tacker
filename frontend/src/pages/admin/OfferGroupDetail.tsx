@@ -32,7 +32,7 @@ function StatsCard({ id }: { id: string }) {
       </div>
     }>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[480px] text-left text-small">
+        <table className="premium-table">
           <thead className="text-tiny uppercase tracking-wide text-fg-secondary">
             <tr><th className="pb-2 pr-4 font-semibold">Revenue</th><th className="pb-2 pr-4 font-semibold">Payout</th><th className="pb-2 pr-4 font-semibold">Margin</th><th className="pb-2 pr-4 font-semibold">Clicks</th><th className="pb-2 pr-4 font-semibold">CV</th><th className="pb-2 font-semibold">CVR</th></tr>
           </thead>
@@ -59,11 +59,11 @@ function CapsCard({ data, id, nav }: { data: OfferGroup; id: string; nav: (p: st
       ) : (
         <>
           <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full min-w-[480px] text-left text-small">
+            <table className="premium-table">
               <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
                 <tr><th className="px-4 py-2">Type</th>{TIME_INTERVALS.map((i) => <th key={i} className="px-4 py-2 text-right">{TIME_INTERVAL_LABEL[i]}</th>)}</tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {CAP_TYPES.map((t) => (
                   <tr key={t.key}>
                     <td className="px-4 py-2 font-medium text-fg">{CAP_TYPE_ROW_LABEL[t.key]}</td>
@@ -113,11 +113,11 @@ function OffersTab({ data, offers, advertisers }: { data: OfferGroup; offers: Of
         <p className="p-4 text-small text-fg-muted">No offers in this group.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-small">
+          <table className="premium-table">
             <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
               <tr><th className="px-4 py-2">ID</th><th className="px-4 py-2">Name</th><th className="px-4 py-2">Visibility</th><th className="px-4 py-2">Advertiser</th><th className="px-4 py-2">Category</th></tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {members.map((o) => (
                 <tr key={o.id}>
                   <td className="px-4 py-2 tabular-nums text-fg-secondary">{o.ref ?? '—'}</td>

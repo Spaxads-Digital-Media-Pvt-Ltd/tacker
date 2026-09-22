@@ -125,15 +125,15 @@ export default function PacingReport() {
         <h3 className="mb-3 text-small font-medium text-fg">Summary</h3>
         {!data ? <div className="pt-2"><Spinner /></div> : (
           <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full text-left text-body">
-              <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+            <table className="premium-table">
+              <thead>
                 <tr>
                   <th className="px-4 py-3 font-semibold">Category</th>
                   <th className="px-4 py-3 text-right font-semibold">Daily Cap Used</th>
                   <th className="px-4 py-3 text-right font-semibold">Global Cap Used</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {data.summary.map((s) => (
                   <tr key={s.category}>
                     <td className="px-4 py-3 font-medium text-fg">{CATEGORY_LABELS[s.category]}</td>
@@ -154,20 +154,20 @@ export default function PacingReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Date</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">{appliedCategory === 'click' || appliedCategory === 'conversion' ? 'Offer' : 'Offer Group'}</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">% Daily {CATEGORY_LABELS[appliedCategory]} Cap Used</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Daily {CATEGORY_LABELS[appliedCategory]} Cap</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">{appliedCategory === 'click' ? 'Clicks' : appliedCategory === 'conversion' ? 'Conversions' : CATEGORY_LABELS[appliedCategory]}</th>
+                    <th >Date</th>
+                    <th >{appliedCategory === 'click' || appliedCategory === 'conversion' ? 'Offer' : 'Offer Group'}</th>
+                    <th className="text-right font-semibold">% Daily {CATEGORY_LABELS[appliedCategory]} Cap Used</th>
+                    <th className="text-right font-semibold">Daily {CATEGORY_LABELS[appliedCategory]} Cap</th>
+                    <th className="text-right font-semibold">{appliedCategory === 'click' ? 'Clicks' : appliedCategory === 'conversion' ? 'Conversions' : CATEGORY_LABELS[appliedCategory]}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <tr key={`${r.date}-${r.entityId}`} className="hover:bg-accent-subtle/40">
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{formatDate(r.date)}</td>
+                      <td className="font-medium text-fg">{formatDate(r.date)}</td>
                       <td className="px-4 py-3"><Link to={entityHref(r)} className="text-accent-text hover:underline">{r.entity}</Link></td>
                       <td className="px-4 py-3 text-right">{pctCell(r.usedPct)}</td>
                       <td className="px-4 py-3 text-right">{CAP_UNIT[appliedCategory](r.cap)}</td>

@@ -160,25 +160,25 @@ export default function CustomerValueConversionEvents() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[960px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Created</th>
-                    {shown.has('Conversion ID') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Conversion ID</th>}
-                    {shown.has('Offer') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Offer</th>}
-                    {shown.has('Event') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Event</th>}
-                    {shown.has('Status') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Status</th>}
-                    {shown.has('Payout') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Payout</th>}
-                    {shown.has('Revenue') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Revenue</th>}
-                    {shown.has('Data Points') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Data Points</th>}
-                    {shown.has('Rule Applied') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Rule Applied</th>}
+                    <th >Created</th>
+                    {shown.has('Conversion ID') && <th >Conversion ID</th>}
+                    {shown.has('Offer') && <th >Offer</th>}
+                    {shown.has('Event') && <th >Event</th>}
+                    {shown.has('Status') && <th >Status</th>}
+                    {shown.has('Payout') && <th className="text-right font-semibold">Payout</th>}
+                    {shown.has('Revenue') && <th className="text-right font-semibold">Revenue</th>}
+                    {shown.has('Data Points') && <th >Data Points</th>}
+                    {shown.has('Rule Applied') && <th >Rule Applied</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((e) => (
                     <tr key={e.conversionId} className="hover:bg-accent-subtle/40">
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{formatDate(e.createdAt)}</td>
-                      {shown.has('Conversion ID') && <td className="whitespace-nowrap px-4 py-3 font-mono text-tiny text-fg-secondary" title={e.conversionId}>{e.conversionId.slice(0, 12)}…</td>}
+                      <td className="font-medium text-fg">{formatDate(e.createdAt)}</td>
+                      {shown.has('Conversion ID') && <td className="font-mono text-tiny text-fg-secondary" title={e.conversionId}>{e.conversionId.slice(0, 12)}…</td>}
                       {shown.has('Offer') && <td className="px-4 py-3">{e.offerName}</td>}
                       {shown.has('Event') && <td className="px-4 py-3">{e.eventName ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3 capitalize">{e.status}</td>}

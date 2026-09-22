@@ -7,15 +7,15 @@
  * pattern already shipped for Partners.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, MoreVertical, ChevronDown } from 'lucide-react';
+import { Search, SlidersHorizontal, MoreVertical, ChevronDown, Pencil, User, FileText, Clock, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { TableActionsMenu } from './AdvertisersTableActions';
-import { useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { TableActionsMenu, } from './AdvertisersTableActions';
+import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { Advertiser, DashboardUser } from '../../types';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
@@ -81,70 +81,43 @@ function HistoryModal({ advertiserId, onClose }: { advertiserId: string; onClose
 }
 
 function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const impersonate = useMutation(() => api.post<{ link: string }>(`/api/advertisers/${advertiser.id}/impersonate`, {}));
   const del = useMutation(() => api.del(`/api/advertisers/${advertiser.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const go = (to: string) => { setOpen(false); nav(to); };
-  const doImpersonate = async () => {
-    setOpen(false);
+  const go = (api: { close: () => void }, to: string) => { api.close(); nav(to); };
+  const doImpersonate = async (api: { close: () => void }) => {
+    if (!advertiser.hasPortalAccount) return;
+    api.close();
     const res = await impersonate.run(undefined);
     if (res) window.open(res.link, '_blank', 'noopener');
   };
-  const doDelete = async () => {
-    setOpen(false);
+  const doDelete = async (api: { close: () => void }) => {
+    api.close();
     if (!confirm(`Delete advertiser "${advertiser.name}"?`)) return;
     if (await del.run(undefined)) onChanged();
   };
 
-  const item = (label: string, onClick: () => void, inert?: string) => (
-    <button role="menuitem" title={inert} onClick={onClick} disabled={Boolean(inert)}
-      className={`block w-full whitespace-nowrap px-3 py-1.5 text-left text-small hover:bg-accent-subtle disabled:cursor-not-allowed ${inert ? 'text-fg-muted' : 'text-fg'}`}>
-      {label}
-    </button>
-  );
-
   return (
     <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-52 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => go(`/app/advertisers/${advertiser.id}/edit`))}
-          {item(impersonate.busy ? 'Impersonating…' : 'Impersonate', doImpersonate,
-            advertiser.hasPortalAccount ? undefined : 'This advertiser has no linked portal account yet')}
-          {item('View Advertiser Report', () => go(`/app/reports/advertiser?advertiserId=${advertiser.id}`))}
-          {item('History', () => { setOpen(false); setHistoryOpen(true); })}
-          {item('Delete', doDelete)}
-        </div>,
-        document.body,
-      )}
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Pencil} onSelect={() => go(api, `/app/advertisers/${advertiser.id}/edit`)}>Edit</MenuItem>
+            {advertiser.hasPortalAccount ? (
+              <MenuItem icon={User} onSelect={() => doImpersonate(api)}>{impersonate.busy ? 'Impersonating…' : 'Impersonate'}</MenuItem>
+            ) : (
+              <div title="This advertiser has no linked portal account yet" className="opacity-50 pointer-events-none">
+                <MenuItem icon={User} onSelect={() => {}}>Impersonate</MenuItem>
+              </div>
+            )}
+            <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/advertiser?advertiserId=${advertiser.id}`)}>View Advertiser Report</MenuItem>
+            <MenuItem icon={Clock} onSelect={() => { api.close(); setHistoryOpen(true); }}>History</MenuItem>
+            <MenuItem icon={Trash2} tone="danger" onSelect={() => doDelete(api)}>Delete</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
       {historyOpen && <HistoryModal advertiserId={advertiser.id} onClose={() => setHistoryOpen(false)} />}
     </>
   );

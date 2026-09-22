@@ -211,8 +211,8 @@ export default function MarketplaceConnections() {
         : tab === 'pending' || rows.length === 0 ? (
           tab === 'pending' ? (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
                     <th className="px-4 py-3 font-semibold">Logo</th>
                     <th className="px-4 py-3 font-semibold">Name</th>
@@ -243,8 +243,8 @@ export default function MarketplaceConnections() {
           </StateBlock>
         ) : tab === 'connected' ? (
           <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full text-left text-body">
-              <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+            <table className="premium-table">
+              <thead>
                 <tr>
                   <th className="px-4 py-3 font-semibold">Logo</th>
                   <th className="cursor-pointer select-none px-4 py-3 font-semibold" onClick={toggleSort}>Advertiser Name {sortDir === 'desc' ? '↓' : '↑'}</th>
@@ -254,7 +254,7 @@ export default function MarketplaceConnections() {
                   <th className="px-4 py-3 font-semibold">Contact</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {pagedRows.map((a) => (
                   <tr key={a.id} className="hover:bg-accent-subtle/40">
                     <td className="px-4 py-3"><AdvertiserLogo name={a.name} /></td>
@@ -276,8 +276,8 @@ export default function MarketplaceConnections() {
           // advertisers — Offer has `notes`, Advertiser doesn't) so they're shown, real column, but
           // honestly dashed.
           <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full text-left text-body">
-              <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+            <table className="premium-table">
+              <thead>
                 <tr>
                   <th className="px-4 py-3 font-semibold">Logo</th>
                   <th className="cursor-pointer select-none px-4 py-3 font-semibold" onClick={toggleSort}>Name {sortDir === 'desc' ? '↓' : '↑'}</th>
@@ -290,7 +290,7 @@ export default function MarketplaceConnections() {
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {pagedRows.map((a) => (
                   <tr key={a.id} className="hover:bg-accent-subtle/40">
                     <td className="px-4 py-3"><AdvertiserLogo name={a.name} /></td>

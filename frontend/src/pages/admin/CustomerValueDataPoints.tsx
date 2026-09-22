@@ -169,7 +169,7 @@ export default function CustomerValueDataPoints() {
         <StateBlock>No Record Found</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full text-small">
+          <table className="premium-table">
             <thead className="bg-page text-tiny text-fg-secondary">
               <tr>
                 {orderedShown.map((h) => <th key={h} className="whitespace-nowrap px-3 py-2 text-left">{h}</th>)}

@@ -183,37 +183,37 @@ export default function OfferGroups() {
         : (
           <>
             <TableScroll>
-              <table className="w-full min-w-[1300px] text-left text-body">
+              <table className="premium-table">
                 <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-                  <tr className="divide-x divide-border">
+                  <tr>
                     <th className="px-4 py-3 font-semibold">ID</th>
                     <th className="px-4 py-3 font-semibold">Name</th>
                     <th className="px-4 py-3 font-semibold">Advertiser</th>
                     <th className="px-4 py-3 font-semibold">Offers</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Today's Clicks</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Today's Payout</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Today's Revenue</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Daily Payout Cap</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Daily Revenue Cap</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Daily Click Cap</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Daily Conversion Cap</th>
+                    <th >Today's Clicks</th>
+                    <th >Today's Payout</th>
+                    <th >Today's Revenue</th>
+                    <th >Daily Payout Cap</th>
+                    <th >Daily Revenue Cap</th>
+                    <th >Daily Click Cap</th>
+                    <th >Daily Conversion Cap</th>
                     <th className="px-4 py-3 font-semibold" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {paged.map((r) => (
                     <tr key={r.id}>
                       <td className="px-4 py-3 tabular-nums text-fg-secondary">{r.ref}</td>
                       <td className="px-4 py-3"><button className="font-medium text-accent-text hover:underline" onClick={() => nav(`/app/offers-groups/${r.id}`)}>{r.name}</button></td>
                       <td className="px-4 py-3 text-accent-text">{advName(r.advertiserId)}</td>
                       <td className="px-4 py-3 tabular-nums text-fg-secondary">{r.offerIds.length}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{(r.today?.clicks ?? 0).toLocaleString()}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{fmtMoney(r.today?.payout)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{fmtMoney(r.today?.revenue)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.payout?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.revenue?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.clicks?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.conversions?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="text-small tabular-nums">{(r.today?.clicks ?? 0).toLocaleString()}</td>
+                      <td className="text-small tabular-nums">{fmtMoney(r.today?.payout)}</td>
+                      <td className="text-small tabular-nums">{fmtMoney(r.today?.revenue)}</td>
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.payout?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.revenue?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.clicks?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.conversions?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end">
                           <RowMenu onEdit={() => nav(`/app/offers-groups/${r.id}/edit`)} />

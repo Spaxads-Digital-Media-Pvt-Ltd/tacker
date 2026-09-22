@@ -8,12 +8,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Pencil, Play, Trash2, Clock, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, ApiRequestModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { useDropdown, ColumnsModal, ApiRequestModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { Postback, Publisher, Offer } from '../../types';
 
 const TABS = [['conversion', 'Conversions'], ['event', 'Events'], ['cpc', 'CPC']] as const;
@@ -103,73 +103,48 @@ function HistoryModal({ postbackId, onClose }: { postbackId: string; onClose: ()
 }
 
 function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const test = useMutation(() => api.post<{ success: boolean; statusCode?: number }>(`/api/postbacks/${postback.id}/test`, {}));
   const del = useMutation(() => api.del(`/api/postbacks/${postback.id}`));
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(t);
   }, [toast]);
 
-  const item = (label: string, onClick: () => void, inert?: string) => (
-    <button role="menuitem" title={inert} onClick={onClick} disabled={Boolean(inert)}
-      className={`block w-full whitespace-nowrap px-3 py-1.5 text-left text-small hover:bg-accent-subtle disabled:cursor-not-allowed ${inert ? 'text-fg-muted' : 'text-fg'}`}>
-      {label}
-    </button>
-  );
-
-  const doTest = async () => {
-    setOpen(false);
+  const doTest = async (api: { close: () => void }) => {
+    if (!postback.url) return;
+    api.close();
     const res = await test.run(undefined);
     if (res) setToast(res.success ? `Test fired successfully (HTTP ${res.statusCode ?? '—'}).` : 'Test fired but the endpoint returned an error.');
   };
-  const doDelete = async () => {
-    setOpen(false);
+  const doDelete = async (api: { close: () => void }) => {
+    api.close();
     if (!confirm('Delete this postback?')) return;
     if (await del.run(undefined)) onDeleted();
   };
 
   return (
     <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-44 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => { setOpen(false); nav(`/app/aff-postbacks/${postback.id}/edit`); })}
-          {item(test.busy ? 'Testing…' : 'Test', doTest, postback.url ? undefined : 'This postback has no URL to test')}
-          {item('Delete', doDelete)}
-          {item('History', () => { setOpen(false); setHistoryOpen(true); })}
-        </div>,
-        document.body,
-      )}
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Pencil} onSelect={() => { api.close(); nav(`/app/aff-postbacks/${postback.id}/edit`); }}>Edit</MenuItem>
+            {postback.url ? (
+              <MenuItem icon={Play} onSelect={() => doTest(api)}>{test.busy ? 'Testing…' : 'Test'}</MenuItem>
+            ) : (
+              <div title="This postback has no URL to test" className="opacity-50 pointer-events-none">
+                <MenuItem icon={Play} onSelect={() => {}}>Test</MenuItem>
+              </div>
+            )}
+            <MenuItem icon={Trash2} tone="danger" onSelect={() => doDelete(api)}>Delete</MenuItem>
+            <MenuItem icon={Clock} onSelect={() => { api.close(); setHistoryOpen(true); }}>History</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
       {historyOpen && <HistoryModal postbackId={postback.id} onClose={() => setHistoryOpen(false)} />}
       {toast && createPortal(
         <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-border bg-elevated px-4 py-3 text-small text-fg shadow-elevated">{toast}</div>,

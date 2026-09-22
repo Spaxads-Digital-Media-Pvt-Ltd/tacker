@@ -102,24 +102,24 @@ function AccountsList() {
       </div>
       {rows.length === 0 ? <StateBlock>No accounts found.</StateBlock> : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full min-w-[1100px] text-left text-body">
-            <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-              <tr>{ACCOUNT_COLUMNS.map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}</tr>
+          <table className="premium-table">
+            <thead>
+              <tr>{ACCOUNT_COLUMNS.map((c) => <th key={c} >{c}</th>)}</tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {rows.map((u) => (
                 <tr key={u.id} className="bg-surface text-fg hover:bg-accent-subtle/40">
-                  <td className="whitespace-nowrap px-4 py-3 font-medium text-accent-text">{u.name}</td>
+                  <td className="font-medium text-accent-text">{u.name}</td>
                   <td className="px-4 py-3 text-fg-secondary">{u.businessUnit ?? '—'}</td>
-                  <td className="whitespace-nowrap px-4 py-3">{u.email}</td>
+                  <td >{u.email}</td>
                   <td className="px-4 py-3"><Badge value={u.role} /></td>
                   <td className="px-4 py-3 text-fg-secondary">{yn(u.partnerManager)}</td>
                   <td className="px-4 py-3 text-fg-secondary">{yn(u.advertiserManager)}</td>
                   <td className="px-4 py-3 text-fg-secondary">{u.primaryPhone ?? '—'}</td>
                   <td className="px-4 py-3 text-fg-secondary">{u.title ?? '—'}</td>
                   <td className="px-4 py-3 text-fg-secondary">{yn(u.superUser)}</td>
-                  <td className="whitespace-nowrap px-4 py-3">{new Date(u.createdAt).toLocaleDateString()}</td>
-                  <td className="whitespace-nowrap px-4 py-3">{new Date(u.updatedAt).toLocaleDateString()}</td>
+                  <td >{new Date(u.createdAt).toLocaleDateString()}</td>
+                  <td >{new Date(u.updatedAt).toLocaleDateString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -349,14 +349,14 @@ function HistoryLog() {
         : filtered.length === 0 ? <StateBlock>No activity recorded in this period.</StateBlock>
         : (
           <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full min-w-[1200px] text-left text-body">
-              <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-                <tr>{orderedShown.map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}</tr>
+            <table className="premium-table">
+              <thead>
+                <tr>{orderedShown.map((c) => <th key={c} >{c}</th>)}</tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {pageRows.map((r) => (
                   <tr key={r.id} className="bg-surface text-fg hover:bg-accent-subtle/40">
-                    {orderedShown.map((c) => <td key={c} className="whitespace-nowrap px-4 py-3">{cellFor(c, r)}</td>)}
+                    {orderedShown.map((c) => <td key={c} >{cellFor(c, r)}</td>)}
                   </tr>
                 ))}
               </tbody>

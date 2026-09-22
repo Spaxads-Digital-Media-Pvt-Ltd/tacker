@@ -279,26 +279,26 @@ export default function ClickReport() {
 
         {groupBy && !isLoading && !displayError && groupedRows.length > 0 ? (
           <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full min-w-[600px] text-left text-body">
-              <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+            <table className="premium-table">
+              <thead>
                 <tr>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{groupBy === 'day' ? 'Day' : 'Dimension'}</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Clicks</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Conversions</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Conv. Rate</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Payout</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold text-right">Revenue</th>
+                  <th >{groupBy === 'day' ? 'Day' : 'Dimension'}</th>
+                  <th className="font-semibold text-right">Clicks</th>
+                  <th className="font-semibold text-right">Conversions</th>
+                  <th className="font-semibold text-right">Conv. Rate</th>
+                  <th className="font-semibold text-right">Payout</th>
+                  <th className="font-semibold text-right">Revenue</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {groupedRows.map((r) => (
                   <tr key={r.k} className="hover:bg-accent-subtle/40">
-                    <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{r.label}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.clicks.toLocaleString()}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.conversions.toLocaleString()}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.clicks > 0 ? ((r.conversions / r.clicks) * 100).toFixed(2) : '0.00'}%</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.payout}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{r.revenue}</td>
+                    <td className="font-medium text-fg">{r.label}</td>
+                    <td className="text-right tabular-nums">{r.clicks.toLocaleString()}</td>
+                    <td className="text-right tabular-nums">{r.conversions.toLocaleString()}</td>
+                    <td className="text-right tabular-nums">{r.clicks > 0 ? ((r.conversions / r.clicks) * 100).toFixed(2) : '0.00'}%</td>
+                    <td className="text-right tabular-nums">{r.payout}</td>
+                    <td className="text-right tabular-nums">{r.revenue}</td>
                   </tr>
                 ))}
               </tbody>
@@ -313,34 +313,34 @@ export default function ClickReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[1800px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Date</th>
-                    {shown.has('Converted') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Converted</th>}
-                    {shown.has('Offer') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Offer</th>}
-                    {shown.has('Partner') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Partner</th>}
-                    {shown.has('Country') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Country</th>}
-                    {shown.has('Region') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Region</th>}
-                    {shown.has('City') && <th className="whitespace-nowrap px-4 py-3 font-semibold">City</th>}
-                    {shown.has('ISP') && <th className="whitespace-nowrap px-4 py-3 font-semibold">ISP</th>}
-                    {shown.has('Device') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Device</th>}
-                    {shown.has('OS') && <th className="whitespace-nowrap px-4 py-3 font-semibold">OS</th>}
-                    {shown.has('Browser') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Browser</th>}
-                    {shown.has('Unique') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Unique</th>}
-                    {shown.has('Fraud') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Fraud</th>}
-                    {shown.has('IP Address') && <th className="whitespace-nowrap px-4 py-3 font-semibold">IP Address</th>}
-                    {shown.has('Sub1') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub1</th>}
-                    {shown.has('Sub2') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub2</th>}
-                    {shown.has('Sub3') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub3</th>}
-                    {shown.has('Sub4') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub4</th>}
-                    {shown.has('Sub5') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub5</th>}
+                    <th >Date</th>
+                    {shown.has('Converted') && <th >Converted</th>}
+                    {shown.has('Offer') && <th >Offer</th>}
+                    {shown.has('Partner') && <th >Partner</th>}
+                    {shown.has('Country') && <th >Country</th>}
+                    {shown.has('Region') && <th >Region</th>}
+                    {shown.has('City') && <th >City</th>}
+                    {shown.has('ISP') && <th >ISP</th>}
+                    {shown.has('Device') && <th >Device</th>}
+                    {shown.has('OS') && <th >OS</th>}
+                    {shown.has('Browser') && <th >Browser</th>}
+                    {shown.has('Unique') && <th >Unique</th>}
+                    {shown.has('Fraud') && <th className="text-right font-semibold">Fraud</th>}
+                    {shown.has('IP Address') && <th >IP Address</th>}
+                    {shown.has('Sub1') && <th >Sub1</th>}
+                    {shown.has('Sub2') && <th >Sub2</th>}
+                    {shown.has('Sub3') && <th >Sub3</th>}
+                    {shown.has('Sub4') && <th >Sub4</th>}
+                    {shown.has('Sub5') && <th >Sub5</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <tr key={r.click_id} className="hover:bg-accent-subtle/40">
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{formatDate(r.created_at)}</td>
+                      <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
                       {shown.has('Converted') && <td className="px-4 py-3">{r.converted ? <Check size={15} className="text-success-text" /> : <span className="text-fg-muted">{DASH}</span>}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
                       {shown.has('Partner') && <td className="px-4 py-3">{r.publisher_id ? <Link to={`/app/publishers/${r.publisher_id}`} className="text-accent-text hover:underline">{pubMap.get(r.publisher_id) ?? r.publisher_id}</Link> : DASH}</td>}
@@ -353,7 +353,7 @@ export default function ClickReport() {
                       {shown.has('Browser') && <td className="px-4 py-3">{r.browser ?? DASH}</td>}
                       {shown.has('Unique') && <td className="px-4 py-3">{r.is_unique ? 'Y' : 'N'}</td>}
                       {shown.has('Fraud') && <td className={`px-4 py-3 text-right ${r.fraud_score >= 40 ? 'text-danger-text' : r.fraud_score > 0 ? 'text-warning-text' : ''}`}>{r.fraud_score}</td>}
-                      {shown.has('IP Address') && <td className="whitespace-nowrap px-4 py-3 font-mono text-tiny">{r.ip ?? DASH}</td>}
+                      {shown.has('IP Address') && <td className="font-mono text-tiny">{r.ip ?? DASH}</td>}
                       {shown.has('Sub1') && <td className="px-4 py-3">{r.sub1 ?? DASH}</td>}
                       {shown.has('Sub2') && <td className="px-4 py-3">{r.sub2 ?? DASH}</td>}
                       {shown.has('Sub3') && <td className="px-4 py-3">{r.sub3 ?? DASH}</td>}

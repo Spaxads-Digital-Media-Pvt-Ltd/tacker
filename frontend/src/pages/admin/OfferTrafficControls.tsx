@@ -262,15 +262,15 @@ export default function OfferTrafficControls() {
         : (
           <>
             <TableScroll>
-              <table className="w-full min-w-[1100px] text-left text-body">
+              <table className="premium-table">
                 <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-                  <tr className="divide-x divide-border">
+                  <tr>
                     <th className="px-4 py-3 font-semibold">ID</th>
-                    {columnOrder.filter(showCol).map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}
+                    {columnOrder.filter(showCol).map((c) => <th key={c} >{c}</th>)}
                     <th className="px-4 py-3 font-semibold" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {paged.map((r) => (
                     <tr key={r.id}>
                       <td className="px-4 py-3 tabular-nums text-fg-secondary">{r.ref}</td>

@@ -315,19 +315,19 @@ export default function FunnelReport() {
               <h3 className="mb-3 text-h3 font-medium text-fg">Detailed Report</h3>
               {!breakdownRows.length ? <p className="text-small text-fg-muted">No activity for this period.</p> : (
                 <div className="overflow-x-auto rounded-card border border-border">
-                  <table className="w-full min-w-[720px] text-left text-body">
-                    <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+                  <table className="premium-table">
+                    <thead>
                       <tr>
-                        <th className="whitespace-nowrap px-4 py-3 font-semibold">{CHILD_DIM_OPTIONS.find((d) => d.key === applied.childDim)?.label}</th>
-                        {stages.map((s) => <th key={s.goalId} className="whitespace-nowrap px-4 py-3 text-right font-semibold">{s.goal?.name ?? DASH}</th>)}
+                        <th >{CHILD_DIM_OPTIONS.find((d) => d.key === applied.childDim)?.label}</th>
+                        {stages.map((s) => <th key={s.goalId} className="text-right font-semibold">{s.goal?.name ?? DASH}</th>)}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border">
+                    <tbody>
                       {breakdownRows.map((r) => {
                         const url = linkForChild(applied.childDim, r.key);
                         return (
                           <tr key={r.key} className="hover:bg-accent-subtle/40">
-                            <td className="whitespace-nowrap px-4 py-3">
+                            <td >
                               {url ? <Link to={url} className="text-accent-text hover:underline">{r.name}</Link> : r.name}
                             </td>
                             {applied.goalIds.map((gid) => (

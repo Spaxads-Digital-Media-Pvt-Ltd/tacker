@@ -49,11 +49,11 @@ function Toolbar({ addLabel, status, onAdd, onStatusChange, moreVertical }: {
 function SegTable({ columns, children }: { columns: string[]; children: ReactNode }) {
   return (
     <div className="overflow-x-auto rounded-card border border-border">
-      <table className="w-full min-w-[640px] text-left text-body">
+      <table className="premium-table">
         <thead className="bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-          <tr>{columns.map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}</tr>
+          <tr>{columns.map((c) => <th key={c} >{c}</th>)}</tr>
         </thead>
-        <tbody className="divide-y divide-border">{children}</tbody>
+        <tbody>{children}</tbody>
       </table>
     </div>
   );
