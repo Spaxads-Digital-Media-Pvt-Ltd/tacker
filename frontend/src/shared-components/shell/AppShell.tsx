@@ -321,7 +321,7 @@ export function AppShell() {
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
           email={session.email} onSignOut={async () => { await signOut(); navigate('/login'); }}
           onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
-        <main className="flex-1 overflow-auto p-12">
+        <main className="flex-1 overflow-auto px-12 pt-4 pb-12">
           <div className="w-full animate-fade-in">
             <SectionTabs role={session.role} />
             <Outlet />

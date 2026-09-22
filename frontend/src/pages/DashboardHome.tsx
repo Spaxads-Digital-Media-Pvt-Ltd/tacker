@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowUpRight, ArrowDownRight, ExternalLink, SlidersHorizontal, Link2 } from 'lucide-react';
+import { PiCoinsDuotone, PiCreditCardDuotone, PiChartPieSliceDuotone, PiCursorClickDuotone, PiTrendUpDuotone, PiChartLineUpDuotone, PiPulseDuotone } from 'react-icons/pi';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABELS, type Role } from '../auth/roles';
 import { useQuery } from '../lib/useApi';
 import { useClickOutside } from '../lib/useClickOutside';
 import { PageHeader, StatCard, Spinner, StateBlock } from '../shared-components/primitives/ui';
+import { InteractiveSingleSeriesChart } from '../shared-components/charts/InteractiveSingleSeriesChart';
 import { Sparkline } from '../shared-components/charts/Sparkline';
 import { PerformanceChart } from '../shared-components/charts/PerformanceChart';
 import { TrackingLinkGeneratorModal } from '../shared-components/panels/TrackingLinkGeneratorModal';
@@ -195,34 +197,44 @@ function AdminDashboard({ name }: { name: string }) {
             {(visible.kpi || visible.performance) && (
               <>
                 {visible.kpi && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 animate-fade-in mb-6">
-                    <Kpi label="Revenue" value={money(data.revenue.today)} series={data.series.revenue}
-                      d={delta(Number(data.revenue.today), Number(data.revenue.yesterday))}
-                      rows={[['Yesterday', money(data.revenue.yesterday)], ['This month', money(data.revenue.month)], ['Last month', money(data.revenue.lastMonth)]]}
-                      onClick={() => goToReport('revenue')} />
-                    <Kpi label="Payout" value={money(data.payout.today)} series={data.series.payout}
-                      d={delta(Number(data.payout.today), Number(data.payout.yesterday))}
-                      rows={[['Yesterday', money(data.payout.yesterday)], ['This month', money(data.payout.month)], ['Last month', money(data.payout.lastMonth)]]}
-                      onClick={() => goToReport('payout')} />
-                    <Kpi label="Margin" value={money(data.margin.today)} series={seriesMargin}
-                      d={delta(Number(data.margin.today), Number(data.margin.yesterday))}
-                      rows={[['Yesterday', money(data.margin.yesterday)], ['This month', money(data.margin.month)], ['Last month', money(data.margin.lastMonth)]]}
-                      onClick={() => goToReport('margin')} />
-                    <Kpi label="Clicks" value={compact(data.clicks.today)} series={data.series.clicks}
-                      d={delta(data.clicks.today, data.clicks.yesterday)}
-                      rows={[['Yesterday', compact(data.clicks.yesterday)], ['This month', compact(data.clicks.month)], ['Last month', compact(data.clicks.lastMonth)]]}
-                      onClick={() => goToReport('clicks')} />
-                    <Kpi label="Conversions" value={compact(data.conversions.today)} series={data.series.conversions}
-                      d={delta(data.conversions.today, data.conversions.yesterday)}
-                      rows={[['Yesterday', compact(data.conversions.yesterday)], ['This month', compact(data.conversions.month)], ['Last month', compact(data.conversions.lastMonth)]]}
-                      onClick={() => goToReport('conversions')} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-6 animate-fade-in">
+                    <div className="animate-slide-in-left h-full" style={{ animationDelay: '0ms' }}>
+                      <Kpi label="Revenue" icon={PiCoinsDuotone} iconColor="text-emerald-500" value={money(data.revenue.today)} series={data.series.revenue}
+                        d={delta(Number(data.revenue.today), Number(data.revenue.yesterday))}
+                        rows={[['Yesterday', money(data.revenue.yesterday)], ['This month', money(data.revenue.month)], ['Last month', money(data.revenue.lastMonth)]]}
+                        onClick={() => goToReport('revenue')} />
+                    </div>
+                    <div className="animate-slide-in-left h-full" style={{ animationDelay: '110ms' }}>
+                      <Kpi label="Payout" icon={PiCreditCardDuotone} iconColor="text-blue-500" value={money(data.payout.today)} series={data.series.payout}
+                        d={delta(Number(data.payout.today), Number(data.payout.yesterday))}
+                        rows={[['Yesterday', money(data.payout.yesterday)], ['This month', money(data.payout.month)], ['Last month', money(data.payout.lastMonth)]]}
+                        onClick={() => goToReport('payout')} />
+                    </div>
+                    <div className="animate-slide-in-left h-full" style={{ animationDelay: '220ms' }}>
+                      <Kpi label="Margin" icon={PiChartPieSliceDuotone} iconColor="text-purple-500" value={money(data.margin.today)} series={seriesMargin}
+                        d={delta(Number(data.margin.today), Number(data.margin.yesterday))}
+                        rows={[['Yesterday', money(data.margin.yesterday)], ['This month', money(data.margin.month)], ['Last month', money(data.margin.lastMonth)]]}
+                        onClick={() => goToReport('margin')} />
+                    </div>
+                    <div className="animate-slide-in-left h-full" style={{ animationDelay: '330ms' }}>
+                      <Kpi label="Clicks" icon={PiCursorClickDuotone} iconColor="text-orange-500" value={compact(data.clicks.today)} series={data.series.clicks}
+                        d={delta(data.clicks.today, data.clicks.yesterday)}
+                        rows={[['Yesterday', compact(data.clicks.yesterday)], ['This month', compact(data.clicks.month)], ['Last month', compact(data.clicks.lastMonth)]]}
+                        onClick={() => goToReport('clicks')} />
+                    </div>
+                    <div className="animate-slide-in-left h-full" style={{ animationDelay: '440ms' }}>
+                      <Kpi label="Conversions" icon={PiTrendUpDuotone} iconColor="text-teal-500" value={compact(data.conversions.today)} series={data.series.conversions}
+                        d={delta(data.conversions.today, data.conversions.yesterday)}
+                        rows={[['Yesterday', compact(data.conversions.yesterday)], ['This month', compact(data.conversions.month)], ['Last month', compact(data.conversions.lastMonth)]]}
+                        onClick={() => goToReport('conversions')} />
+                    </div>
                   </div>
                 )}
 
                 {(visible.kpi || visible.performance) && (
-                  <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 animate-fade-in delay-100">
+                  <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                     {visible.performance && (
-                      <div className="lg:col-span-3 h-full">
+                      <div className="lg:col-span-3 h-full animate-fade-in-up" style={{ animationDelay: '750ms' }}>
                         <PerformanceChart
                           revenue={data.series.revenue} clicks={data.series.clicks}
                           revenueLabel={money(data.revenue.today)} clicksLabel={compact(data.clicks.today)}
@@ -230,8 +242,8 @@ function AdminDashboard({ name }: { name: string }) {
                       </div>
                     )}
                     {visible.kpi && (
-                      <div className="lg:col-span-2 h-full">
-                        <Kpi label="Conv. rate" value={`${data.cr.today}%`} series={data.series.conversions}
+                      <div className="lg:col-span-2 h-full animate-fade-in-up" style={{ animationDelay: '850ms' }}>
+                        <InteractiveKpi label="Conversion Rate" icon={PiChartLineUpDuotone} iconColor="text-pink-500" value={`${data.cr.today}%`} series={data.series.conversions}
                           d={delta(data.cr.today, data.cr.yesterday)}
                           rows={[['Yesterday', `${data.cr.yesterday}%`], ['This month', `${data.cr.month}%`], ['Last month', `${data.cr.lastMonth}%`]]}
                           className="h-full"
@@ -251,9 +263,9 @@ function AdminDashboard({ name }: { name: string }) {
                   <p className="mt-1 text-sm text-fg-muted">Overview of your highest grossing offers, partners, and advertisers</p>
                 </div>
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                  {visible.offers && <EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" />}
-                  {visible.publishers && <EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" />}
-                  {visible.advertisers && <EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" />}
+                  {visible.offers && <div className="animate-unwrap delay-300"><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" /></div>}
+                  {visible.publishers && <div className="animate-unwrap delay-500"><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" /></div>}
+                  {visible.advertisers && <div className="animate-unwrap delay-700"><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" /></div>}
                 </div>
               </div>
             )}
@@ -263,8 +275,8 @@ function AdminDashboard({ name }: { name: string }) {
   );
 }
 
-function Kpi({ label, value, series, d, rows, className = '', onClick }: {
-  label: string; value: string; series: number[];
+function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, series, d, rows, className = '', onClick }: {
+  label: string; icon?: React.ElementType; iconColor?: string; value: string; series: number[];
   d: { pct: number; up: boolean } | null; rows: [string, string][];
   className?: string;
   onClick?: () => void;
@@ -280,18 +292,21 @@ function Kpi({ label, value, series, d, rows, className = '', onClick }: {
   return (
     <Element {...elementProps} className={cls}>
       <div className="relative z-10 flex items-start justify-between">
-        <p className="text-xs font-semibold text-fg-secondary uppercase tracking-wider">{label}</p>
+        <div className="flex items-center gap-2">
+          {Icon && <Icon size={20} className={iconColor} />}
+          <p className="text-xs font-semibold text-fg-secondary uppercase tracking-wider">{label}</p>
+        </div>
         {onClick && (
           <ExternalLink className="size-3.5 text-fg-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100" aria-hidden="true" />
         )}
-        {d && (
+        {d && !onClick && (
           <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold ${d.up ? 'bg-success/15 text-success-text' : 'bg-danger/15 text-danger-text'}`}>
             {d.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {Math.abs(d.pct)}%
           </span>
         )}
       </div>
-      <p className="relative z-10 mt-2 text-3xl font-extrabold leading-tight tracking-tight text-fg">{value}</p>
-      <div className="mt-auto pt-2"><Sparkline data={series} color={trendColor} /></div>
+      <p className="relative z-10 mt-[5px] text-3xl font-extrabold leading-tight tracking-tight text-fg">{value}</p>
+      <div className="mt-auto pt-6 ml-auto w-1/2"><Sparkline data={series} color={trendColor} /></div>
       <dl className="mt-3 space-y-1 border-t border-border pt-2 text-tiny">
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between"><dt className="text-fg-muted">{k}</dt><dd className="font-medium tabular-nums text-fg-secondary">{v}</dd></div>
@@ -338,9 +353,12 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
     .map((r) => Number(r.metrics[metric] ?? 0));
 
   return (
-    <div className="card !p-0 hover:shadow-elevated transition-all">
+    <div className="card !p-0 transition-all duration-300 hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]">
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="text-h3 font-medium text-fg">{title}</h2>
+        <div className="flex items-center gap-2.5">
+          <PiPulseDuotone size={20} className="text-indigo-500" />
+          <h2 className="text-h3 font-medium text-fg">{title}</h2>
+        </div>
         <Link to={viewAll} title="View all" className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
           <ExternalLink size={15} />
         </Link>
@@ -398,6 +416,8 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
                 );
               })}
             </ul>
+
+            <div className="h-2.5 w-full border-t border-border"></div>
           </>
         )}
     </div>
@@ -416,7 +436,7 @@ const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] 
       { label: 'Networks', hint: 'Active / total', val: (s) => `${int(s['activeNetworks'])} / ${int(s['networks'])}` },
       { label: 'MRR', hint: 'Active subscriptions', val: (s) => money(String(s['mrr'] ?? 0)) },
       { label: 'Clicks (24h)', hint: 'Platform-wide', val: (s) => int(s['clicks24h']) },
-      { label: 'Conversions (24h)', hint: 'Platform-wide', val: (s) => int(s['conversions24h']) },
+      { label: 'Conversions (24h)', hint: 'Attributed to you', val: (s) => int(s['conversions24h']) },
     ],
   },
   publisher: {
@@ -433,11 +453,59 @@ const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] 
     tiles: [
       { label: 'Clicks (24h)', hint: 'Your offers', val: (s) => int(s['clicks']) },
       { label: 'Conversions (24h)', hint: 'Recorded', val: (s) => int(s['conversions']) },
-      { label: 'Conv. rate', hint: 'Last 24h', val: (s) => pct(s['cr']) },
+      { label: 'Conversion Rate', hint: 'Last 24h', val: (s) => pct(s['cr']) },
       { label: 'Spend (24h)', hint: 'Billed', val: (s) => money(String(s['revenue'] ?? 0)) },
     ],
   },
 };
+
+function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, series, d, rows, className = '', onClick }: {
+  label: string; icon: React.ElementType; iconColor?: string; value: string; series: number[];
+  d: { pct: number; up: boolean } | null; rows: [string, string][];
+  className?: string;
+  onClick?: () => void;
+}) {
+  const [mode, setMode] = useState<'area' | 'bar'>('area');
+  const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))');
+
+  return (
+    <div className={`card !p-6 transition-all duration-300 relative overflow-hidden group flex flex-col hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)] ${className}`}>
+      <div className="relative z-10 flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          <Icon size={20} className={iconColor} />
+          <h2 className="text-h3 font-medium text-fg">{label}</h2>
+        </div>
+        <div className="flex items-center gap-1 z-20 relative">
+          <button onClick={() => setMode('area')} className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${mode === 'area' ? 'bg-accent/15 text-accent' : 'text-fg-secondary hover:bg-surface hover:text-fg'}`}>
+            Area
+          </button>
+          <button onClick={() => setMode('bar')} className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${mode === 'bar' ? 'bg-accent/15 text-accent' : 'text-fg-secondary hover:bg-surface hover:text-fg'}`}>
+            Bar
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-end justify-between mt-[5px] relative z-10">
+        <p className="text-3xl font-extrabold leading-tight tracking-tight text-fg">{value}</p>
+        {d && (
+          <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold ${d.up ? 'bg-success/15 text-success-text' : 'bg-danger/15 text-danger-text'}`}>
+            {d.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {Math.abs(d.pct)}%
+          </span>
+        )}
+      </div>
+
+      <div className="mt-auto pt-6 z-20 relative">
+        <InteractiveSingleSeriesChart data={series} color={trendColor} mode={mode} height={60} labelFormat={(v) => v.toLocaleString('en-US')} />
+      </div>
+
+      <dl className="mt-3 space-y-1 border-t border-border pt-2 text-tiny relative z-10">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex justify-between"><dt className="text-fg-muted">{k}</dt><dd className="font-medium tabular-nums text-fg-secondary">{v}</dd></div>
+        ))}
+      </dl>
+    </div>
+  );
+}
 
 function RoleTiles({ role, name }: { role: Exclude<Role, 'admin'>; name: string }) {
   const cfg = CONFIG[role];

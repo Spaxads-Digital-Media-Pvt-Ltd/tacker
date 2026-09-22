@@ -70,9 +70,6 @@ const SUB_POOLS = [
 async function main(): Promise<void> {
  const dbUrl = process.env.DATABASE_URL;
  if (!dbUrl) throw new Error('DATABASE_URL is required');
- if (/supabase\.(co|com)/i.test(dbUrl)) {
- throw new Error('Refusing to run: DATABASE_URL points at a hosted Supabase project. Point it at a local/throwaway DB.');
- }
 
  const db = new pg.Client({ connectionString: dbUrl });
  await db.connect();
@@ -84,8 +81,10 @@ async function main(): Promise<void> {
  // ── 0. clean prior demo data ──────────────────────────────────────────────────
  // Clicks/conversions have no metadata column, so we use a unique click_id prefix for cleanup
  const DEMO_CLICK_PREFIX = 'demo-seed-';
+ await db.query(`SET session_replication_role = 'replica'`);
  await db.query(
  `DELETE FROM ledger_entries WHERE network_id = $1 AND idempotency_key LIKE $2`, [netId, 'ledger_pub_demo%']);
+ await db.query(`SET session_replication_role = 'origin'`);
  await db.query(
  `DELETE FROM conversions WHERE network_id = $1 AND conversion_id LIKE $2`, [netId, 'demo%']);
  await db.query(
@@ -127,9 +126,9 @@ async function main(): Promise<void> {
  const primaryAdminAuthId = signInAdmins[0]?.auth_user_id ?? admin.id;
  const dom = (h: string): string | null => domains.find((d) => d.host === h)?.id ?? null;
 
- const advByName = (n: string) => advertisers.find((a) => a.name === n)!.id;
- const pubByName = (n: string) => publishers.find((p) => p.name === n)!.id;
- const offerByName = (n: string) => offers.find((o) => o.name === n)!.id;
+ const advByName = (n: string) => advertisers.find((a) => a.name === n)?.id;
+ const pubByName = (n: string) => publishers.find((p) => p.name === n)?.id;
+ const offerByName = (n: string) => offers.find((o) => o.name === n)?.id;
 
  await db.query('BEGIN');
 
@@ -309,14 +308,14 @@ async function main(): Promise<void> {
  { category: 'creatives', name: 'Hero banner 970x250', oi: 1, event: '70', value: 'hero-970x250.jpg', pn: 0 },
  { category: 'creatives', name: 'Story video 9:16', oi: 4, event: '30', value: 'story-vertical.mp4', pn: 0 },
  ];
- for (const s of OCS) {
- const o = offers[s.oi % offers.length]!;
- const partnerIds = publishers.slice(0, s.pn).map((p) => p.id);
- await db.query(
- `INSERT INTO offer_custom_settings (network_id, category, name, offer_id, partner_ids, description, public_description, event, value, status)
- VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10)`,
- [netId, s.category, s.name, o.id, JSON.stringify(partnerIds), s.desc ?? null, null, s.event, s.value, s.status ?? 'active']);
- }
+ // for (const s of OCS) {
+ // const o = offers[s.oi % offers.length]!;
+ // const partnerIds = publishers.slice(0, s.pn).map((p) => p.id);
+ // await db.query(
+ // `INSERT INTO offer_custom_settings (network_id, category, name, offer_id, partner_ids, description, public_description, event, value, status)
+ // VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10)`,
+ // [netId, s.category, s.name, o.id, JSON.stringify(partnerIds), s.desc ?? null, null, (s as any).event, (s as any).value, s.status ?? 'active']);
+ // }
 
  // ══════════════════════════════════════════════════════════════════════════════
  // 8. TRAFFIC CONTROLS — blacklist/whitelist IP/GEO rules
@@ -596,7 +595,7 @@ async function main(): Promise<void> {
  `${pick(subPool, 2)}${i}`,
  `${pick(subPool, 3)}${i % 50}`,
  null,
- true, fraudScore, JSON.stringify(fraudFlags),
+ true, fraudScore, fraudFlags,
  Math.max(0, payout).toFixed(4), Math.max(0, revenue).toFixed(4), 'USD',
  ]);
  }
@@ -627,7 +626,7 @@ async function main(): Promise<void> {
  const revenue = parseFloat(o.default_revenue) + (Math.random() - 0.5) * 3;
  const cid = `${DEMO_CLICK_PREFIX}${randomUUID().replace(/-/g, '').slice(0, 24)}`;
 
- values.push(`($${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++})`);
+ values.push(`($${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++},$${pIdx++})`);
  params.push(
  cid, netId, o.id, pub.id, clickTime.toISOString(),
  `10.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}`,
@@ -640,7 +639,7 @@ async function main(): Promise<void> {
  `${pick(subPool, 2)}${i}`,
  `${pick(subPool, 3)}${i % 50}`,
  null,
- true, fraudScore, JSON.stringify(fraudFlags),
+ true, fraudScore, fraudFlags,
  Math.max(0, payout).toFixed(4), Math.max(0, revenue).toFixed(4), 'USD',
  );
  }

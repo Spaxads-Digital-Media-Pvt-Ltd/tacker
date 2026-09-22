@@ -64,8 +64,12 @@ export function Sparkline({ data, color = 'rgb(var(--accent))', height = 40 }: {
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      {area && <path d={area} fill={`url(#${id})`} />}
-      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      {area && <path d={area} fill={`url(#${id})`} className="animate-fade-in [animation-delay:800ms] [animation-fill-mode:both]" />}
+      <path 
+        d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" 
+        pathLength="100" strokeDasharray="100" strokeDashoffset="100" 
+        className="animate-draw-line [animation-delay:800ms] [animation-fill-mode:both]" 
+      />
     </svg>
   );
 }
