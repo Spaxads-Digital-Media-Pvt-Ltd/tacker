@@ -264,9 +264,9 @@ function AdminDashboard({ name }: { name: string }) {
                   <p className="mt-1 text-sm text-fg-muted">Overview of your highest grossing offers, partners, and advertisers</p>
                 </div>
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                  {visible.offers && <ScrollReveal animation="animate-unwrap" delay={300}><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" /></ScrollReveal>}
-                  {visible.publishers && <ScrollReveal animation="animate-unwrap" delay={500}><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" /></ScrollReveal>}
-                  {visible.advertisers && <ScrollReveal animation="animate-unwrap" delay={700}><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" /></ScrollReveal>}
+                  {visible.offers && <ScrollReveal animation="animate-slide-in-left" delay={300}><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" /></ScrollReveal>}
+                  {visible.publishers && <ScrollReveal animation="animate-slide-in-left" delay={410}><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" /></ScrollReveal>}
+                  {visible.advertisers && <ScrollReveal animation="animate-slide-in-left" delay={520}><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" /></ScrollReveal>}
                 </div>
               </ScrollReveal>
             )}
@@ -414,7 +414,7 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
                 const metricValue = Number(r.metrics[metric] ?? 0);
                 const display = metric === 'revenue' ? money(metricValue) : compact(metricValue);
                 return (
-                  <li key={rid || i} className="flex items-center gap-3 px-4 py-2.5">
+                  <li key={rid || i} className="flex items-center gap-3 px-4 py-2.5 animate-fade-in-up" style={{ animationDelay: `${i * 80}ms` }}>
                     <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-accent-subtle text-tiny font-semibold text-accent-text">{i + 1}</span>
                     <span className="min-w-0 flex-1 truncate text-small font-medium text-fg">{label}</span>
                     <span className="shrink-0 text-small font-semibold tabular-nums text-fg">{display}</span>
