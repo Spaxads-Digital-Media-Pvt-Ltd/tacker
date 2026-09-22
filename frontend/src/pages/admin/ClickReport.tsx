@@ -24,7 +24,7 @@ import { Link } from 'react-router-dom';
 import { Search, MoreVertical, ChevronLeft, ChevronRight, Check, SlidersHorizontal } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
-import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
+import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { daysAgo, todayStr, toIso, DASH, DEVICES } from '../../shared-components/primitives/ReportPageKit';

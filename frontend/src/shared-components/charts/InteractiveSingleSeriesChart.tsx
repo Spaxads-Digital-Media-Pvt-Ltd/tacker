@@ -73,7 +73,7 @@ export function InteractiveSingleSeriesChart({
   };
   const handleLeave = () => setHoverIdx(null);
 
-  const hoverVal = hoverIdx != null ? data[hoverIdx] : 0;
+  const hoverVal = hoverIdx != null ? data[hoverIdx]! : 0;
   const hoverX = hoverIdx != null ? x(hoverIdx) : 0;
   const hoverY = hoverIdx != null ? yPos(hoverVal) : 0;
   const leftPct = hoverIdx != null ? (hoverX / w) * 100 : 0;

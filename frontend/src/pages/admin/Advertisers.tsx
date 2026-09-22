@@ -182,6 +182,15 @@ export default function Advertisers() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  const tabbed = useMemo<Advertiser[]>(() => {
+    const rows = data ?? [];
+    if (tab === 'pending') return rows.filter((a) => a.status === 'pending');
+    if (tab === 'unverified') return rows.filter((a) => a.status !== 'pending' && !a.hasPortalAccount);
+    return rows.filter((a) => a.status !== 'pending' && a.hasPortalAccount);
+  }, [data, tab]);
+  const pendingCount = useMemo(() => (data ?? []).filter((a) => a.status === 'pending').length, [data]);
+  const unverifiedCount = useMemo(() => (data ?? []).filter((a) => a.status !== 'pending' && !a.hasPortalAccount).length, [data]);
+
   const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
 
   const FILTER_CATEGORIES = useMemo(() => [
@@ -193,16 +202,16 @@ export default function Advertisers() {
 
   const filtered = useMemo(() => {
     let rows = tabbed;
-    if (status) rows = rows.filter((a) => a.status === status);
+    if (status) rows = rows.filter((a: Advertiser) => a.status === status);
     if (nameQ.trim()) {
       const q = nameQ.trim().toLowerCase();
-      rows = rows.filter((a) => a.name.toLowerCase().includes(q));
+      rows = rows.filter((a: Advertiser) => a.name.toLowerCase().includes(q));
     }
     const has = (key: string) => (filters[key]?.length ?? 0) > 0;
-    if (has('accountManager')) rows = rows.filter((a) => a.accountManagerId && filters['accountManager']!.includes(a.accountManagerId));
-    if (has('salesManager')) rows = rows.filter((a) => a.salesManagerId && filters['salesManager']!.includes(a.salesManagerId));
-    if (has('billingFrequency')) rows = rows.filter((a) => a.billingFrequency && filters['billingFrequency']!.includes(a.billingFrequency));
-    if (has('label')) rows = rows.filter((a) => (tagIdsByAdv.get(a.id) ?? []).some((t) => filters['label']!.includes(t)));
+    if (has('accountManager')) rows = rows.filter((a: Advertiser) => a.accountManagerId && filters['accountManager']!.includes(a.accountManagerId));
+    if (has('salesManager')) rows = rows.filter((a: Advertiser) => a.salesManagerId && filters['salesManager']!.includes(a.salesManagerId));
+    if (has('billingFrequency')) rows = rows.filter((a: Advertiser) => a.billingFrequency && filters['billingFrequency']!.includes(a.billingFrequency));
+    if (has('label')) rows = rows.filter((a: Advertiser) => (tagIdsByAdv.get(a.id) ?? []).some((t) => filters['label']!.includes(t)));
     return rows;
   }, [tabbed, status, nameQ, filters, tagIdsByAdv]);
 
