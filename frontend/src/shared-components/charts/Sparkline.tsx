@@ -40,7 +40,7 @@ function smoothPath(
   return out.join(' ');
 }
 
-export function Sparkline({ data, color = 'rgb(var(--accent))', height = 40 }: { data: number[]; color?: string; height?: number }) {
+export function Sparkline({ data, color = 'rgb(var(--accent))', height = 40, className = 'w-full' }: { data: number[]; color?: string; height?: number; className?: string }) {
   const w = 100;
   const max = Math.max(1, ...data);
   const n = data.length;
@@ -57,7 +57,7 @@ export function Sparkline({ data, color = 'rgb(var(--accent))', height = 40 }: {
   // "rgb(var(--accent))", and `url(#id)` breaks if the id contains parens/spaces.
   const id = `sg-${color.replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
-    <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className="h-10 w-full" aria-hidden>
+    <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className={className} style={{ height }} aria-hidden>
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.25" />
@@ -67,8 +67,7 @@ export function Sparkline({ data, color = 'rgb(var(--accent))', height = 40 }: {
       {area && <path d={area} fill={`url(#${id})`} className="animate-fade-in [animation-delay:800ms] [animation-fill-mode:both]" />}
       <path 
         d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" 
-        pathLength="100" strokeDasharray="100" strokeDashoffset="100" 
-        className="animate-draw-line [animation-delay:800ms] [animation-fill-mode:both]" 
+        className="animate-fade-in [animation-delay:800ms] [animation-fill-mode:both]" 
       />
     </svg>
   );

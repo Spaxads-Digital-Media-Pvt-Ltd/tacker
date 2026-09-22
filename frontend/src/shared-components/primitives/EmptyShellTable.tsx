@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, X, Info } from 'lucide-react';
-import { Field, Overlay } from './ui';
+import { Field, Overlay, ScrollReveal } from './ui';
 import { Pagination } from './ReportPageKit';
 
 /**
@@ -240,7 +240,7 @@ export function EmptyShellTable({
   });
 
   return (
-    <div>
+    <ScrollReveal>
       {adding && (
         <AddEntityForm
           title={`Add ${entityName ?? addLabel}`}
@@ -299,6 +299,6 @@ export function EmptyShellTable({
       <div className="mt-2 flex justify-end">
         <Pagination total={wired ? filtered.length : 0} page={1} pageSize={25} onPageChange={() => {}} />
       </div>
-    </div>
+    </ScrollReveal>
   );
 }

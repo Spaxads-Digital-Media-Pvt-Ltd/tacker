@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useIntersectionObserver } from '../../lib/useIntersectionObserver';
 import { usePageTitle } from './PageTitle';
 import { HelpHint } from '../panels/HelpHint';
 
@@ -17,17 +18,17 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
 
 export function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="card">
+    <ScrollReveal className="card transition-all duration-300 hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]">
       <p className="text-small font-medium text-fg-secondary">{label}</p>
       <p className="mt-2 text-3xl font-semibold tracking-tight text-fg">{value}</p>
       {hint && <p className="mt-1 text-tiny text-fg-muted">{hint}</p>}
-    </div>
+    </ScrollReveal>
   );
 }
 
 export function PhaseNotice({ phase, children }: { phase: string; children: ReactNode }) {
   return (
-    <div className="card border-dashed">
+    <ScrollReveal className="card border-dashed">
       <div className="flex items-center gap-2">
         <span className="rounded-full bg-accent-subtle px-2.5 py-0.5 text-tiny font-semibold text-accent-text">
           {phase}
@@ -35,7 +36,7 @@ export function PhaseNotice({ phase, children }: { phase: string; children: Reac
         <span className="text-small font-medium text-fg">Coming in this phase</span>
       </div>
       <p className="mt-2 text-small text-fg-secondary">{children}</p>
-    </div>
+    </ScrollReveal>
   );
 }
 
@@ -507,6 +508,60 @@ export function Tabs({ tabs, active, onChange }: { tabs: string[]; active: strin
           </button>
         );
       })}
+    </div>
+  );
+}
+
+export function AnimatedNumber({ value, formatFn = String, animate = true, duration = 1500 }: { value: number; formatFn?: (val: number) => string; animate?: boolean; duration?: number }) {
+  const [displayValue, setDisplayValue] = useState(0);
+  const prevValue = useRef(0);
+
+  useEffect(() => {
+    if (!animate) {
+      setDisplayValue(0);
+      prevValue.current = 0;
+      return;
+    }
+    
+    const startValue = prevValue.current;
+    const endValue = value;
+    if (startValue === endValue) return;
+
+    let startTime: number | null = null;
+    let rAF: number;
+
+    const step = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / duration, 1);
+      
+      // easeOutExpo
+      const easeProgress = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+      
+      const current = startValue + (endValue - startValue) * easeProgress;
+      setDisplayValue(current);
+
+      if (progress < 1) {
+        rAF = requestAnimationFrame(step);
+      } else {
+        prevValue.current = endValue;
+      }
+    };
+
+    rAF = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rAF);
+  }, [value, animate, duration]);
+
+  return <>{formatFn(displayValue)}</>;
+}
+
+
+
+export function ScrollReveal({ children, animation = 'animate-fade-in', delay = 0, className = '', rootMargin = '50px' }: { children: ReactNode; animation?: string; delay?: number; className?: string; rootMargin?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useIntersectionObserver(ref, { threshold: 0.1, rootMargin });
+  return (
+    <div ref={ref} className={`${className} ${inView ? animation : 'opacity-0'}`} style={{ animationDelay: `${delay}ms` }}>
+      {children}
     </div>
   );
 }

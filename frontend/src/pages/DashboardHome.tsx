@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowUpRight, ArrowDownRight, ExternalLink, SlidersHorizontal, Link2 } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, ExternalLink, SlidersHorizontal, Link2, TrendingUp, BarChart3 } from 'lucide-react';
 import { PiCoinsDuotone, PiCreditCardDuotone, PiChartPieSliceDuotone, PiCursorClickDuotone, PiTrendUpDuotone, PiChartLineUpDuotone, PiPulseDuotone } from 'react-icons/pi';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABELS, type Role } from '../auth/roles';
 import { useQuery } from '../lib/useApi';
 import { useClickOutside } from '../lib/useClickOutside';
-import { PageHeader, StatCard, Spinner, StateBlock } from '../shared-components/primitives/ui';
+import { PageHeader, StatCard, Spinner, StateBlock, AnimatedNumber, ScrollReveal } from '../shared-components/primitives/ui';
+import { useIntersectionObserver } from '../lib/useIntersectionObserver';
 import { InteractiveSingleSeriesChart } from '../shared-components/charts/InteractiveSingleSeriesChart';
 import { Sparkline } from '../shared-components/charts/Sparkline';
 import { PerformanceChart } from '../shared-components/charts/PerformanceChart';
@@ -197,38 +198,38 @@ function AdminDashboard({ name }: { name: string }) {
             {(visible.kpi || visible.performance) && (
               <>
                 {visible.kpi && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-6 animate-fade-in">
+                  <ScrollReveal className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '0ms' }}>
-                      <Kpi label="Revenue" icon={PiCoinsDuotone} iconColor="text-emerald-500" value={money(data.revenue.today)} series={data.series.revenue}
+                      <Kpi label="Revenue" icon={PiCoinsDuotone} iconColor="text-emerald-500" value={Number(data.revenue.today)} formatFn={money} series={data.series.revenue}
                         d={delta(Number(data.revenue.today), Number(data.revenue.yesterday))}
                         rows={[['Yesterday', money(data.revenue.yesterday)], ['This month', money(data.revenue.month)], ['Last month', money(data.revenue.lastMonth)]]}
                         onClick={() => goToReport('revenue')} />
                     </div>
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '110ms' }}>
-                      <Kpi label="Payout" icon={PiCreditCardDuotone} iconColor="text-blue-500" value={money(data.payout.today)} series={data.series.payout}
+                      <Kpi label="Payout" icon={PiCreditCardDuotone} iconColor="text-blue-500" value={Number(data.payout.today)} formatFn={money} series={data.series.payout}
                         d={delta(Number(data.payout.today), Number(data.payout.yesterday))}
                         rows={[['Yesterday', money(data.payout.yesterday)], ['This month', money(data.payout.month)], ['Last month', money(data.payout.lastMonth)]]}
                         onClick={() => goToReport('payout')} />
                     </div>
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '220ms' }}>
-                      <Kpi label="Margin" icon={PiChartPieSliceDuotone} iconColor="text-purple-500" value={money(data.margin.today)} series={seriesMargin}
+                      <Kpi label="Margin" icon={PiChartPieSliceDuotone} iconColor="text-purple-500" value={Number(data.margin.today)} formatFn={money} series={seriesMargin}
                         d={delta(Number(data.margin.today), Number(data.margin.yesterday))}
                         rows={[['Yesterday', money(data.margin.yesterday)], ['This month', money(data.margin.month)], ['Last month', money(data.margin.lastMonth)]]}
                         onClick={() => goToReport('margin')} />
                     </div>
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '330ms' }}>
-                      <Kpi label="Clicks" icon={PiCursorClickDuotone} iconColor="text-orange-500" value={compact(data.clicks.today)} series={data.series.clicks}
+                      <Kpi label="Clicks" icon={PiCursorClickDuotone} iconColor="text-orange-500" value={data.clicks.today} formatFn={compact} series={data.series.clicks}
                         d={delta(data.clicks.today, data.clicks.yesterday)}
                         rows={[['Yesterday', compact(data.clicks.yesterday)], ['This month', compact(data.clicks.month)], ['Last month', compact(data.clicks.lastMonth)]]}
                         onClick={() => goToReport('clicks')} />
                     </div>
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '440ms' }}>
-                      <Kpi label="Conversions" icon={PiTrendUpDuotone} iconColor="text-teal-500" value={compact(data.conversions.today)} series={data.series.conversions}
+                      <Kpi label="Conversions" icon={PiTrendUpDuotone} iconColor="text-teal-500" value={data.conversions.today} formatFn={compact} series={data.series.conversions}
                         d={delta(data.conversions.today, data.conversions.yesterday)}
                         rows={[['Yesterday', compact(data.conversions.yesterday)], ['This month', compact(data.conversions.month)], ['Last month', compact(data.conversions.lastMonth)]]}
                         onClick={() => goToReport('conversions')} />
                     </div>
-                  </div>
+                  </ScrollReveal>
                 )}
 
                 {(visible.kpi || visible.performance) && (
@@ -243,7 +244,7 @@ function AdminDashboard({ name }: { name: string }) {
                     )}
                     {visible.kpi && (
                       <div className="lg:col-span-2 h-full animate-fade-in-up" style={{ animationDelay: '850ms' }}>
-                        <InteractiveKpi label="Conversion Rate" icon={PiChartLineUpDuotone} iconColor="text-pink-500" value={`${data.cr.today}%`} series={data.series.conversions}
+                        <InteractiveKpi label="Conversion Rate" icon={PiChartLineUpDuotone} iconColor="text-pink-500" value={Number(data.cr.today)} formatFn={(v) => `${v.toFixed(1)}%`} series={data.series.conversions} secondarySeries={data.series.clicks}
                           d={delta(data.cr.today, data.cr.yesterday)}
                           rows={[['Yesterday', `${data.cr.yesterday}%`], ['This month', `${data.cr.month}%`], ['Last month', `${data.cr.lastMonth}%`]]}
                           className="h-full"
@@ -257,17 +258,17 @@ function AdminDashboard({ name }: { name: string }) {
 
             {/* Top Performers Section */}
             {(visible.offers || visible.publishers || visible.advertisers) && (
-              <div className="mt-12 pt-8 border-t border-border/60 animate-fade-in delay-200">
+              <ScrollReveal className="mt-12 pt-8 border-t border-border/60" delay={200}>
                 <div className="mb-6">
                   <h2 className="text-xl font-bold tracking-tight text-fg">Performance Reports</h2>
                   <p className="mt-1 text-sm text-fg-muted">Overview of your highest grossing offers, partners, and advertisers</p>
                 </div>
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                  {visible.offers && <div className="animate-unwrap delay-300"><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" /></div>}
-                  {visible.publishers && <div className="animate-unwrap delay-500"><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" /></div>}
-                  {visible.advertisers && <div className="animate-unwrap delay-700"><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" /></div>}
+                  {visible.offers && <ScrollReveal animation="animate-unwrap" delay={300}><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" /></ScrollReveal>}
+                  {visible.publishers && <ScrollReveal animation="animate-unwrap" delay={500}><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" /></ScrollReveal>}
+                  {visible.advertisers && <ScrollReveal animation="animate-unwrap" delay={700}><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" /></ScrollReveal>}
                 </div>
-              </div>
+              </ScrollReveal>
             )}
           </>
         )}
@@ -275,22 +276,24 @@ function AdminDashboard({ name }: { name: string }) {
   );
 }
 
-function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, series, d, rows, className = '', onClick }: {
-  label: string; icon?: React.ElementType; iconColor?: string; value: string; series: number[];
+function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, formatFn, series, d, rows, className = '', onClick }: {
+  label: string; icon?: React.ElementType; iconColor?: string; value: number; formatFn: (v: number) => string; series: number[];
   d: { pct: number; up: boolean } | null; rows: [string, string][];
   className?: string;
   onClick?: () => void;
 }) {
   const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
-  const baseCls = 'card !p-6 hover:shadow-elevated transition-all relative overflow-hidden group flex flex-col';
+  const baseCls = 'card !p-6 transition-all duration-300 relative overflow-hidden group flex flex-col hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]';
   const interactiveCls = 'text-left w-full cursor-pointer';
   const cls = onClick
     ? `${baseCls} ${interactiveCls} ${className}`
     : `${baseCls} ${className}`;
   const Element: React.ElementType = onClick ? 'button' : 'div';
   const elementProps = onClick ? { type: 'button' as const, onClick } : {};
+  const ref = useRef<HTMLElement>(null);
+  const inView = useIntersectionObserver(ref as any, { threshold: 0.1 });
   return (
-    <Element {...elementProps} className={cls}>
+    <Element ref={ref as any} {...elementProps} className={cls}>
       <div className="relative z-10 flex items-start justify-between">
         <div className="flex items-center gap-2">
           {Icon && <Icon size={20} className={iconColor} />}
@@ -307,7 +310,7 @@ function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, series, d, r
           )}
         </div>
       </div>
-      <p className="relative z-10 mt-[5px] text-3xl font-extrabold leading-tight tracking-tight text-fg">{value}</p>
+      <p className="relative z-10 mt-3 text-3xl font-extrabold leading-tight tracking-tight text-fg"><AnimatedNumber value={value} formatFn={formatFn} animate={inView} /></p>
       <div className="mt-auto pt-6 ml-auto w-1/2"><Sparkline data={series} color={trendColor} /></div>
       <dl className="mt-3 space-y-1 border-t border-border pt-2 text-tiny">
         {rows.map(([k, v]) => (
@@ -370,24 +373,26 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
         : rows.length === 0 ? <p className="px-4 py-8 text-center text-small text-fg-muted">No data yet.</p>
         : (
           <>
-            <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
-              <select
-                value={id}
-                onChange={(e) => setSelectedId(e.target.value)}
-                className="input !w-auto !rounded-[var(--radius)] !py-1.5 text-tiny"
-              >
-                {rows.map((r, i) => {
-                  const rid = r.dimensions[dimKey] ?? '';
-                  const label = (rid && nameMap.get(rid)) || (rid ? rid.slice(0, 8) + '…' : '—');
-                  return <option key={rid || i} value={rid}>{label}</option>;
-                })}
-              </select>
-              <div className="ml-auto flex gap-1">
+            <div className="flex items-center justify-between gap-2 px-4 pt-3 overflow-hidden">
+              <div className="min-w-0 flex-1">
+                <select
+                  value={id}
+                  onChange={(e) => setSelectedId(e.target.value)}
+                  className="input w-full !h-7 !py-0 !px-2 !rounded-[var(--radius)] text-tiny bg-surface truncate"
+                >
+                  {rows.map((r, i) => {
+                    const rid = r.dimensions[dimKey] ?? '';
+                    const label = (rid && nameMap.get(rid)) || (rid ? rid.slice(0, 8) + '…' : '—');
+                    return <option key={rid || i} value={rid}>{label}</option>;
+                  })}
+                </select>
+              </div>
+              <div className="flex shrink-0 gap-1">
                 {METRICS.map((m) => (
                   <button
                     key={m.key}
                     onClick={() => setMetric(m.key)}
-                    className={`rounded-[var(--radius)] px-2.5 py-1 text-tiny font-medium transition-colors ${metric === m.key ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-accent-subtle hover:text-fg'}`}
+                    className={`rounded-[var(--radius)] h-7 px-2.5 text-[10px] sm:text-tiny font-medium transition-colors ${metric === m.key ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-accent-subtle hover:text-fg'}`}
                   >
                     {m.label}
                   </button>
@@ -461,35 +466,45 @@ const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] 
   },
 };
 
-function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, series, d, rows, className = '', onClick }: {
-  label: string; icon: React.ElementType; iconColor?: string; value: string; series: number[];
+function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, formatFn, series, secondarySeries, d, rows, className = '', onClick }: {
+  label: string; icon: React.ElementType; iconColor?: string; value: number; formatFn: (v: number) => string; series: number[]; secondarySeries?: number[];
   d: { pct: number; up: boolean } | null; rows: [string, string][];
   className?: string;
   onClick?: () => void;
 }) {
   const [mode, setMode] = useState<'area' | 'bar'>('area');
   const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useIntersectionObserver(ref as any, { threshold: 0.1 });
   void onClick;
 
   return (
-    <div className={`card !p-6 transition-all duration-300 relative overflow-hidden group flex flex-col hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)] ${className}`}>
+    <div ref={ref} className={`card !p-6 transition-all duration-300 relative overflow-hidden group flex flex-col hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)] ${className}`}>
       <div className="relative z-10 flex items-start justify-between">
         <div className="flex items-center gap-2">
           <Icon size={20} className={iconColor} />
           <h2 className="text-h3 font-medium text-fg">{label}</h2>
         </div>
         <div className="flex items-center gap-1 z-20 relative">
-          <button onClick={() => setMode('area')} className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${mode === 'area' ? 'bg-accent/15 text-accent' : 'text-fg-secondary hover:bg-surface hover:text-fg'}`}>
-            Area
+          <button
+            aria-label="Area view" title="Area view"
+            onClick={() => setMode('area')}
+            className={`grid h-7 w-7 place-items-center rounded-[var(--radius)] transition-colors ${mode === 'area' ? 'bg-accent/15 text-accent' : 'text-fg-secondary hover:bg-surface hover:text-fg'}`}
+          >
+            <TrendingUp size={15} />
           </button>
-          <button onClick={() => setMode('bar')} className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${mode === 'bar' ? 'bg-accent/15 text-accent' : 'text-fg-secondary hover:bg-surface hover:text-fg'}`}>
-            Bar
+          <button
+            aria-label="Bar view" title="Bar view"
+            onClick={() => setMode('bar')}
+            className={`grid h-7 w-7 place-items-center rounded-[var(--radius)] transition-colors ${mode === 'bar' ? 'bg-accent/15 text-accent' : 'text-fg-secondary hover:bg-surface hover:text-fg'}`}
+          >
+            <BarChart3 size={15} />
           </button>
         </div>
       </div>
 
-      <div className="flex items-end justify-between mt-[5px] relative z-10">
-        <p className="text-3xl font-extrabold leading-tight tracking-tight text-fg">{value}</p>
+      <div className="flex items-end justify-between mt-3 relative z-10">
+        <p className="text-3xl font-extrabold leading-tight tracking-tight text-fg"><AnimatedNumber value={value} formatFn={formatFn} animate={inView} /></p>
         {d && (
           <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold ${d.up ? 'bg-success/15 text-success-text' : 'bg-danger/15 text-danger-text'}`}>
             {d.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {Math.abs(d.pct)}%
@@ -497,8 +512,8 @@ function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, s
         )}
       </div>
 
-      <div className="mt-auto pt-6 z-20 relative">
-        <InteractiveSingleSeriesChart data={series} color={trendColor} mode={mode} height={60} labelFormat={(v) => v.toLocaleString('en-US')} />
+      <div className="mt-auto pt-6 z-20 relative flex-1 min-h-[200px] flex flex-col justify-end">
+        <InteractiveSingleSeriesChart data={series} secondaryData={secondarySeries} showGrid={!!secondarySeries} primaryName="Conversions" secondaryName="Clicks" color={trendColor} mode={mode} height={200} labelFormat={(v) => v.toLocaleString('en-US')} />
       </div>
 
       <dl className="mt-3 space-y-1 border-t border-border pt-2 text-tiny relative z-10">
@@ -516,11 +531,11 @@ function RoleTiles({ role, name }: { role: Exclude<Role, 'admin'>; name: string 
   return (
     <>
       <PageHeader title={`Welcome, ${name}`} subtitle={`${ROLE_LABELS[role]} · last 24 hours`} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 animate-fade-in delay-100">
+      <ScrollReveal className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" delay={100}>
         {cfg.tiles.map((t) => (
           <StatCard key={t.label} label={t.label} hint={t.hint} value={loading ? '…' : data ? t.val(data) : '—'} />
         ))}
-      </div>
+      </ScrollReveal>
     </>
   );
 }

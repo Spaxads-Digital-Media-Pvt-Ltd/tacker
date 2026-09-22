@@ -125,7 +125,7 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
   entry: NavEntry; pathname: string; expanded: boolean; openLabel: string | null;
   onToggle: (label: string, top: number) => void;
   /** Hover-swap: mouse-enter a different flyout icon while one is already open → switch to it. */
-  onSwap: (label: string, top: number) => void;
+  onSwap: (label: string | null, top: number) => void;
 }) {
   const Ic = Icon[entry.icon];
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -190,7 +190,13 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
 
   return (
     <div className={expanded ? 'w-full px-2' : 'w-full flex justify-center'}>
-      <Link to={entry.to ?? '#'} className={`group relative ${rowClass}`}>
+      <Link
+        to={entry.to ?? '#'}
+        onPointerEnter={(e) => {
+          if (e.pointerType === 'mouse') onSwap(null, 12);
+        }}
+        className={`group relative ${rowClass}`}
+      >
         {content}
       </Link>
     </div>
@@ -237,7 +243,7 @@ export function AppShell() {
       setOpenFlyout((cur) => (cur === label ? null : label));
       setFlyoutTop(top);
     },
-    onSwap: (label: string, top: number) => {
+    onSwap: (label: string | null, top: number) => {
       setOpenFlyout(label);
       setFlyoutTop(top);
     },

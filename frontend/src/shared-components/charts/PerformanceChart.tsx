@@ -145,10 +145,6 @@ export function PerformanceChart({
               <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.25" />
               <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0.02" />
             </linearGradient>
-            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="4" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
           </defs>
 
           {yAxis.map(({ y }, i) => (
@@ -161,7 +157,7 @@ export function PerformanceChart({
           {mode === 'area' ? (
             <>
               <path d={revArea} fill="url(#perf-rev)" className="animate-fade-in" />
-              <path d={revLine} fill="none" stroke="rgb(var(--accent))" strokeWidth="2.5" filter="url(#glow)" className="animate-draw-line" style={{ strokeDasharray: 3000, strokeDashoffset: 3000 }} vectorEffect="non-scaling-stroke" />
+              <path d={revLine} fill="none" stroke="rgb(var(--accent))" strokeWidth="1.5" className="animate-draw-line" style={{ strokeDasharray: 3000, strokeDashoffset: 3000 }} vectorEffect="non-scaling-stroke" />
             </>
           ) : (
             revenue.map((v, i) => (
