@@ -15,6 +15,7 @@
  * DATABASE_URL='postgresql://tracker:tracker_local_dev@localhost:5433/tracker_test' \
  * npm --prefix api-backend run seed:demo-data
  */
+import 'dotenv/config';
 import pg from 'pg';
 
 const NET_SLUG = 'demo';
@@ -559,8 +560,10 @@ async function main(): Promise<void> {
  // ══════════════════════════════════════════════════════════════════════════════
  // 20-A. RECENT CLICKS — guaranteed data in last 24h for chart visibility
  // ══════════════════════════════════════════════════════════════════════════════
- const RECENT_CLICKS = 120;
- const HOURS_BACK = 24;
+ const RECENT_CLICKS = 80;
+ // Clamp to current UTC hour-of-day so every "recent" click lands in today's bucket
+ // (dashboard KPI uses date_trunc('day', now()) — clicks > current UTC hour land in yesterday).
+ const HOURS_BACK = Math.max(1, new Date().getUTCHours());
  for (let i = 0; i < RECENT_CLICKS; i++) {
  const o = pick(offers, i);
  const pub = pick(publishers, i + 1);

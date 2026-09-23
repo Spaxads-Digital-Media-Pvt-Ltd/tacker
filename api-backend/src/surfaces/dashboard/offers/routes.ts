@@ -28,10 +28,12 @@ import {
  createOfferSchema,
  updateOfferSchema,
  createGeoRuleSchema,
+ updateGeoRuleSchema,
  createAccessSchema,
  type CreateOffer,
  type UpdateOffer,
  type CreateGeoRule,
+ type UpdateGeoRule,
  type CreateAccess,
 } from './schemas.js';
 import { requestAccessSchema } from './schemas.js';
@@ -469,6 +471,30 @@ export function offersAdminRoutes(): Router {
  await writeAudit(req, { action: 'offer.geo_rule.delete', entityType: 'offer_geo_rule', entityId: req.params.ruleId });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!);
  sendOk(res, { deleted: true });
+ }),
+ );
+
+ r.patch(
+ '/:id/geo-rules/:ruleId',
+ requireRole('admin', 'manager'),
+ validateBody(updateGeoRuleSchema),
+ asyncHandler(async (req, res) => {
+  const db = dbForRequest(req);
+  const before = await db.selectOne<OfferGeoRuleRow>(GEO, { id: req.params.ruleId, offer_id: req.params.id });
+  if (!before) throw notFound('Geo rule not found');
+  const b = req.body as UpdateGeoRule;
+  const patch: Record<string, unknown> = {};
+  if (b.country !== undefined) patch['country'] = b.country.toUpperCase();
+  if (b.region !== undefined) patch['region'] = b.region;
+  if (b.action !== undefined) patch['action'] = b.action;
+  if (b.payoutOverride !== undefined) patch['payout_override'] = b.payoutOverride;
+  if (b.revenueOverride !== undefined) patch['revenue_override'] = b.revenueOverride;
+  if (b.destinationOverride !== undefined) patch['destination_override'] = b.destinationOverride;
+  if (Object.keys(patch).length === 0) throw badRequest('No fields to update');
+  const [row] = await db.update<OfferGeoRuleRow>(GEO, patch, { id: req.params.ruleId, offer_id: req.params.id });
+  await writeAudit(req, { action: 'offer.geo_rule.update', entityType: 'offer_geo_rule', entityId: req.params.ruleId, before, after: row });
+  await invalidateOfferConfig(db.scope.networkId, req.params.id!);
+  sendOk(res, toGeoRuleDTO(row ?? before));
  }),
  );
 

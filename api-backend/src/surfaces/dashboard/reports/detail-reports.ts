@@ -221,11 +221,13 @@ export function mountDetailReports(r: Router): void {
     const margin = mk((k) => revenue[k] - payout[k]);
     const cr = mk((k) => (clicks[k] > 0 ? Number(((conversions[k] / clicks[k]) * 100).toFixed(2)) : 0));
 
-    const arr = (pick: (row: typeof ser.rows[number]) => number) => {
+    const mkSeries = (fn: (row: typeof ser.rows[number]) => number) => {
       const a = Array<number>(24).fill(0);
-      for (const row of ser.rows) a[row.h] = pick(row);
+      for (const row of ser.rows) a[row.h] = fn(row);
       return a;
     };
+    const clicksSeries = mkSeries((r) => r.clicks);
+    const crSeries = clicksSeries.map((clicks, h) => (clicks > 0 ? Number(((ser.rows[h]?.conversions ?? 0) / clicks) * 100).toFixed(2) : 0));
     sendOk(res, {
       clicks, conversions,
       revenue: { today: money(revenue.today), yesterday: money(revenue.yesterday), month: money(revenue.month), lastMonth: money(revenue.lastMonth) },
@@ -233,10 +235,12 @@ export function mountDetailReports(r: Router): void {
       margin: { today: money(margin.today), yesterday: money(margin.yesterday), month: money(margin.month), lastMonth: money(margin.lastMonth) },
       cr,
       series: {
-        clicks: arr((r) => r.clicks),
-        conversions: arr((r) => r.conversions),
-        revenue: arr((r) => Number(r.revenue)),
-        payout: arr((r) => Number(r.payout)),
+        clicks: clicksSeries,
+        conversions: mkSeries((r) => r.conversions),
+        revenue: mkSeries((r) => Number(r.revenue)),
+        payout: mkSeries((r) => Number(r.payout)),
+        margin: mkSeries((r) => Number(r.revenue) - Number(r.payout)),
+        cr: crSeries,
       },
     });
   }));

@@ -134,4 +134,141 @@ d('Dashboard API isolation (live DB)', () => {
       });
     expect(res.status).toBe(201);
   });
+
+  // --- Geo-rule PATCH (P0 regression) ---
+  let geoRuleSeq = 0;
+  async function createGeoRule(networkId: string, offerId: string, country?: string): Promise<string> {
+    geoRuleSeq++;
+    // Use a unique country per call so this helper is safe to call many times against the same
+    // offer — the (offer_id, country, COALESCE(region, '')) unique index forbids duplicates and
+    // sibling isolation tests may have already inserted a US rule on fx.offerA.
+    const c = country ?? `U${String(geoRuleSeq).padStart(2, '0')}`;
+    const res = await request(app)
+      .post(`/api/offers/${offerId}/geo-rules`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId, role: 'admin' })))
+      .send({ country: c, action: 'allow', payoutOverride: 5, revenueOverride: 10, destinationOverride: null });
+    expect(res.status).toBe(201);
+    return res.body.data.id;
+  }
+
+  it('admin can PATCH a geo rule (200)', async () => {
+    const ruleId = await createGeoRule(fx.networkA, fx.offerA);
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({ action: 'deny', payoutOverride: 15, revenueOverride: 20 });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.data.action).toBe('deny');
+    expect(res.body.data.payoutOverride).toBe('15.0000');
+    expect(res.body.data.revenueOverride).toBe('20.0000');
+  });
+
+  it('PATCH preserves fields not included in the payload', async () => {
+    // Explicit country so the test is not affected by the auto-increment counter.
+    const ruleId = await createGeoRule(fx.networkA, fx.offerA, 'US');
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch2', networkId: fx.networkA, role: 'admin' })))
+      .send({ action: 'deny' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.country).toBe('US');
+    expect(res.body.data.action).toBe('deny');
+  });
+
+  it('PATCH with invalid action returns 422', async () => {
+    const ruleId = await createGeoRule(fx.networkA, fx.offerA);
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({ action: 'invalid' });
+    expect(res.status).toBe(422);
+  });
+
+  it('PATCH with empty body returns 400', async () => {
+    const ruleId = await createGeoRule(fx.networkA, fx.offerA);
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('PATCH non-existent rule returns 404', async () => {
+    const fakeId = '00000000-0000-0000-0000-000000000000';
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${fakeId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({ action: 'deny' });
+    expect(res.status).toBe(404);
+  });
+
+  it('PATCH rule belonging to another offer in same network returns 404', async () => {
+    const offerB = await request(app)
+      .post('/api/offers')
+      .set(bearer(operatorToken({ userId: 'u-geo-patch2', networkId: fx.networkA, role: 'admin' })))
+      .send({ advertiserId: fx.advA, name: 'Offer B geo-patch', currency: 'USD', destinationUrl: 'https://b.com', trackingDomainId: null, defaultRevenue: 10, defaultPayout: 5 });
+    expect(offerB.status).toBe(201);
+    const ruleOnB = await createGeoRule(fx.networkA, offerB.body.data.id);
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleOnB}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({ action: 'deny' });
+    expect(res.status).toBe(404);
+  });
+
+  it('PATCH rule from a different network returns 404', async () => {
+    const advB = await request(app)
+      .post('/api/advertisers')
+      .set(bearer(operatorToken({ userId: 'u-geo-advb', networkId: fx.networkB, role: 'admin' })))
+      .send({ name: 'Adv B geo-patch' });
+    expect(advB.status).toBe(201);
+    const offerC = await request(app)
+      .post('/api/offers')
+      .set(bearer(operatorToken({ userId: 'u-geo-offerC', networkId: fx.networkB, role: 'admin' })))
+      .send({ advertiserId: advB.body.data.id, name: 'Offer C geo-patch', currency: 'USD', destinationUrl: 'https://c.com', trackingDomainId: null, defaultRevenue: 10, defaultPayout: 5 });
+    expect(offerC.status).toBe(201);
+    const ruleOnC = await createGeoRule(fx.networkB, offerC.body.data.id);
+    const res = await request(app)
+      .patch(`/api/offers/${offerC.body.data.id}/geo-rules/${ruleOnC}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({ action: 'deny' });
+    expect(res.status).toBe(404);
+  });
+
+  it('read_only role gets 403 on PATCH geo rule', async () => {
+    const ruleId = await createGeoRule(fx.networkA, fx.offerA);
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-readonly', networkId: fx.networkA, role: 'read_only' })))
+      .send({ action: 'deny' });
+    expect(res.status).toBe(403);
+  });
+
+  it('unauthenticated PATCH returns 401', async () => {
+    const res = await request(app).patch('/api/offers/some-offer/geo-rules/some-rule').send({ action: 'deny' });
+    expect(res.status).toBe(401);
+  });
+
+  it('PATCH sets country to uppercase (case normalisation)', async () => {
+    const ruleId = await createGeoRule(fx.networkA, fx.offerA);
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({ country: 'gb' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.country).toBe('GB');
+  });
+
+  it('PATCH clears payoutOverride/revenueOverride/destinationOverride when null', async () => {
+    const ruleId = await createGeoRule(fx.networkA, fx.offerA);
+    const res = await request(app)
+      .patch(`/api/offers/${fx.offerA}/geo-rules/${ruleId}`)
+      .set(bearer(operatorToken({ userId: 'u-geo-patch', networkId: fx.networkA, role: 'admin' })))
+      .send({ payoutOverride: null, revenueOverride: null, destinationOverride: null });
+    expect(res.status).toBe(200);
+    expect(res.body.data.payoutOverride).toBeNull();
+    expect(res.body.data.revenueOverride).toBeNull();
+    expect(res.body.data.destinationOverride).toBeNull();
+  });
 });

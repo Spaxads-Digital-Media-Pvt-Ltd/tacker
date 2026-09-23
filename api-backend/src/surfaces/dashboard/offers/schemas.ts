@@ -40,6 +40,8 @@ export const createGeoRuleSchema = z.object({
   destinationOverride: redirectUrlWithMax(2000).nullable().optional(),
 });
 
+export const updateGeoRuleSchema = createGeoRuleSchema.partial();
+
 export const createAccessSchema = z.object({
   publisherId: z.string().uuid(),
   access: z.enum(['allow', 'deny']).default('allow'),
@@ -57,4 +59,5 @@ export type RequestAccess = z.infer<typeof requestAccessSchema>;
 export type CreateOffer = z.infer<typeof createOfferSchema>;
 export type UpdateOffer = z.infer<typeof updateOfferSchema>;
 export type CreateGeoRule = z.infer<typeof createGeoRuleSchema>;
+export type UpdateGeoRule = z.infer<typeof updateGeoRuleSchema>;
 export type CreateAccess = z.infer<typeof createAccessSchema>;
