@@ -331,14 +331,14 @@ export function GroupedReport({ page, toolbarVariant = 'drawer' }: { page: strin
         : (
           <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-small">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
                     {apiGb.map((d) => <th key={d} className="px-4 py-3 font-semibold">{dimLabel(d)}</th>)}
                     {apiMs.map((m) => <th key={m} className="px-4 py-3 text-right font-semibold">{metricLabel(m)}</th>)}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r, i) => (
                     <tr key={i} className="hover:bg-accent-subtle/40">
                       {apiGb.map((d) => (

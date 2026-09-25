@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { TableActionsMenu } from './PublishersTableActions';
-import { useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { TableActionsMenu, ALL_COLUMNS } from './PublishersTableActions';
+import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { Publisher, DashboardUser } from '../../types';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
@@ -79,64 +80,34 @@ function StatusFilterSelect({ value, onChange }: { value: string; onChange: (v: 
  * Supabase magic-link for the partner's OWN linked portal account — partners without one show a
  * disabled state with an explanatory tooltip rather than faking a login. */
 function RowActionMenu({ publisher }: { publisher: Publisher }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const impersonate = useMutation(() => api.post<{ link: string }>(`/api/publishers/${publisher.id}/impersonate`, {}));
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const go = (to: string) => { setOpen(false); nav(to); };
-  const doImpersonate = async () => {
-    setOpen(false);
+  const go = (api: { close: () => void }, to: string) => { api.close(); nav(to); };
+  const doImpersonate = async (api: { close: () => void }) => {
+    if (!publisher.hasPortalAccount) return;
+    api.close();
     const res = await impersonate.run(undefined);
     if (res) window.open(res.link, '_blank', 'noopener');
   };
 
-  const item = (label: string, onClick: () => void, inert?: string) => (
-    <button role="menuitem" title={inert} onClick={onClick} disabled={Boolean(inert)}
-      className={`block w-full whitespace-nowrap px-3 py-1.5 text-left text-small hover:bg-accent-subtle disabled:cursor-not-allowed ${inert ? 'text-fg-muted' : 'text-fg'}`}>
-      {label}
-    </button>
-  );
-
   return (
-    <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-56 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => go(`/app/publishers/${publisher.id}/edit`))}
-          {item('View Partner Report', () => go(`/app/reports/partner?publisherId=${publisher.id}`))}
-          {item('View Conversion Report', () => go(`/app/reports/conversions?publisherId=${publisher.id}`))}
-          {item(impersonate.busy ? 'Impersonating…' : 'Impersonate', doImpersonate,
-            publisher.hasPortalAccount ? undefined : 'This partner has no linked portal account yet')}
-        </div>,
-        document.body,
+    <TableRowMenu>
+      {(api) => (
+        <>
+          <MenuItem icon={Pencil} onSelect={() => go(api, `/app/publishers/${publisher.id}/edit`)}>Edit</MenuItem>
+          <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/partner?publisherId=${publisher.id}`)}>View Partner Report</MenuItem>
+          <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/conversions?publisherId=${publisher.id}`)}>View Conversion Report</MenuItem>
+          {publisher.hasPortalAccount ? (
+            <MenuItem icon={User} onSelect={() => doImpersonate(api)}>{impersonate.busy ? 'Impersonating…' : 'Impersonate'}</MenuItem>
+          ) : (
+            <div title="This partner has no linked portal account yet" className="opacity-50 pointer-events-none">
+              <MenuItem icon={User} onSelect={() => {}}>Impersonate</MenuItem>
+            </div>
+          )}
+        </>
       )}
-    </>
+    </TableRowMenu>
   );
 }
 

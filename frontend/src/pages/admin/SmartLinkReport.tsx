@@ -474,42 +474,42 @@ export default function SmartLinkReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[2000px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">
+                    <th >
                       Smart Link<br /><span className="text-[10px] normal-case text-fg-muted">↳ Offer</span>
                     </th>
-                    {shown.has('Imp') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Imp</th>}
-                    {shown.has('RPM') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">RPM</th>}
-                    {shown.has('CPM') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CPM</th>}
+                    {shown.has('Imp') && <th className="text-right font-semibold">Imp</th>}
+                    {shown.has('RPM') && <th className="text-right font-semibold">RPM</th>}
+                    {shown.has('CPM') && <th className="text-right font-semibold">CPM</th>}
                     {shown.has('Gross Clicks') && sortableHeader('Gross Clicks', 'clicks')}
-                    {shown.has('Clicks') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Clicks</th>}
+                    {shown.has('Clicks') && <th className="text-right font-semibold">Clicks</th>}
                     {shown.has('Uniq. Clicks') && sortableHeader('Uniq. Clicks', 'unique_clicks')}
-                    {shown.has('Dup. Clicks') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Dup. Clicks</th>}
+                    {shown.has('Dup. Clicks') && <th className="text-right font-semibold">Dup. Clicks</th>}
                     {shown.has('Invalid Clicks') && sortableHeader('Invalid Clicks', 'invalid_clicks')}
                     {shown.has('Total CV') && sortableHeader('Total CV', 'total_conversions')}
                     {shown.has('CV') && sortableHeader('CV', 'conversions')}
-                    {shown.has('VT CV') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">VT CV</th>}
-                    {shown.has('CTR') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CTR</th>}
-                    {shown.has('Throttle') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Throttle</th>}
-                    {shown.has('CVR') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CVR</th>}
-                    {shown.has('CPC') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CPC</th>}
-                    {shown.has('CPA') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CPA</th>}
-                    {shown.has('RPC') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">RPC</th>}
-                    {shown.has('RPA') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">RPA</th>}
+                    {shown.has('VT CV') && <th className="text-right font-semibold">VT CV</th>}
+                    {shown.has('CTR') && <th className="text-right font-semibold">CTR</th>}
+                    {shown.has('Throttle') && <th className="text-right font-semibold">Throttle</th>}
+                    {shown.has('CVR') && <th className="text-right font-semibold">CVR</th>}
+                    {shown.has('CPC') && <th className="text-right font-semibold">CPC</th>}
+                    {shown.has('CPA') && <th className="text-right font-semibold">CPA</th>}
+                    {shown.has('RPC') && <th className="text-right font-semibold">RPC</th>}
+                    {shown.has('RPA') && <th className="text-right font-semibold">RPA</th>}
                     {shown.has('Revenue') && sortableHeader('Revenue', 'revenue')}
                     {shown.has('Payout') && sortableHeader('Payout', 'payout')}
                     {shown.has('Profit') && sortableHeader('Profit', 'margin')}
-                    {shown.has('Margin') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Margin</th>}
+                    {shown.has('Margin') && <th className="text-right font-semibold">Margin</th>}
                     <th className="w-9" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <Fragment key={r.smartLinkId}>
-                      <tr className="hover:bg-accent-subtle/40">
-                        <td className="whitespace-nowrap px-4 py-3">
+                      <tr>
+                        <td >
                           <button type="button" onClick={() => toggleExpand(r.smartLinkId)} className="inline-flex items-center gap-1.5 text-fg hover:text-accent-text">
                             <ChevronRight size={13} className={`transition-transform ${expanded.has(r.smartLinkId) ? 'rotate-90' : ''}`} />
                             <span className={`h-2 w-2 rounded-full ${r.smartLinkStatus === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />

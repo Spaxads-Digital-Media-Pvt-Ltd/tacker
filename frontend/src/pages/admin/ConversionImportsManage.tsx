@@ -153,20 +153,20 @@ export default function ConversionImportsManage() {
           : !data?.length ? <StateBlock>No conversion imports yet — import some above.</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Type</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Total Rows</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Total Processed</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Progress</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Conversion Errors</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Import Date</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Processed Date</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Created By</th>
+                    <th >Type</th>
+                    <th className="text-right font-semibold">Total Rows</th>
+                    <th className="text-right font-semibold">Total Processed</th>
+                    <th className="text-right font-semibold">Progress</th>
+                    <th className="text-right font-semibold">Conversion Errors</th>
+                    <th >Import Date</th>
+                    <th >Processed Date</th>
+                    <th >Created By</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {data.map((j) => {
                     const pct = j.row_count > 0 ? Math.round(((j.total_processed ?? 0) / j.row_count) * 100) : 0;
                     return (
@@ -176,9 +176,9 @@ export default function ConversionImportsManage() {
                         <td className="px-4 py-3 text-right">{j.total_processed ?? '—'}</td>
                         <td className="px-4 py-3 text-right">{pct}%</td>
                         <td className={`px-4 py-3 text-right ${j.error_count > 0 ? 'text-danger-text' : ''}`}>{j.error_count}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-small text-fg-secondary">{new Date(j.created_at).toLocaleString()}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-small text-fg-secondary">{j.processed_at ? new Date(j.processed_at).toLocaleString() : '—'}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-small text-fg-secondary">{j.created_by_name ?? j.created_by_email ?? '—'}</td>
+                        <td className="text-small text-fg-secondary">{new Date(j.created_at).toLocaleString()}</td>
+                        <td className="text-small text-fg-secondary">{j.processed_at ? new Date(j.processed_at).toLocaleString() : '—'}</td>
+                        <td className="text-small text-fg-secondary">{j.created_by_name ?? j.created_by_email ?? '—'}</td>
                       </tr>
                     );
                   })}

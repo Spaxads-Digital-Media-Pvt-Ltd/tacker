@@ -159,7 +159,13 @@
     @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius)] px-4 py-2 text-body font-medium
            transition-all duration-150 focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
   }
-  .btn-primary { @apply btn bg-slate-900 border border-black/80 shadow-[0_2px_10px_rgba(45,212,191,0.25),inset_0_1px_0_rgba(45,212,191,0.3)] text-white transition-all hover:bg-slate-800 hover:shadow-[0_4px_16px_rgba(45,212,191,0.4)]; }
+  .btn-primary { 
+    @apply btn border border-black/80 shadow-[0_2px_10px_rgba(45,212,191,0.25),inset_0_1px_0_rgba(45,212,191,0.3)] text-white transition-all hover:shadow-[0_4px_16px_rgba(45,212,191,0.4)]; 
+    background-color: rgb(27, 35, 53) !important;
+  }
+  .btn-primary:hover {
+    background-color: rgb(35, 45, 65) !important;
+  }
   .btn-ghost   { @apply btn border border-fg-muted/30 bg-surface text-fg shadow-sm hover:border-accent/50 hover:bg-accent-subtle hover:shadow; }
   /* Card: white surface, hairline border, 12px radius, ultra-subtle shadow.
    * Hover-lift + border emphasis kept from the Slate & Teal branch; colours token-driven
@@ -192,9 +198,57 @@
     background-color: rgb(var(--sidebar-active-bg));
     box-shadow: inset 3px 0 0 rgb(var(--sidebar-accent));
   }
-  /* Checkbox — accent-tinted on light theme. */
   .chk {
     @apply h-3.5 w-3.5 shrink-0 rounded border border-border bg-surface
            accent-accent focus:ring-2 focus:ring-accent/25;
+  }
+  
+  /* Centralized Premium Fintech Table System */
+  .premium-table {
+    @apply w-full text-left text-small text-fg-secondary;
+  }
+  .premium-table thead {
+    @apply sticky top-0 z-20 border-b border-slate-700 text-tiny uppercase tracking-wide text-slate-100 font-medium;
+    background-color: rgb(27, 35, 53) !important;
+  }
+  .premium-table thead th {
+    background-color: rgb(27, 35, 53) !important;
+  }
+  .premium-table thead tr {
+    @apply h-14;
+  }
+  .premium-table tbody tr {
+    @apply h-14 bg-surface text-fg transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50 animate-fade-in-up;
+  }
+  .premium-table tbody td {
+    @apply border-b border-solid border-accent/30 dark:border-accent/20;
+    /* subtle translucent glow at the bottom edge for the glass effect */
+    box-shadow: inset 0 -1px 0 rgba(13, 148, 136, 0.1);
+  }
+  .premium-table tbody tr:last-child td {
+    @apply border-b-0 shadow-none;
+  }
+  
+  /* Stagger the first 10 rows for a smooth cascade effect */
+  .premium-table tbody tr:nth-child(1) { animation-delay: 0.04s; }
+  .premium-table tbody tr:nth-child(2) { animation-delay: 0.08s; }
+  .premium-table tbody tr:nth-child(3) { animation-delay: 0.12s; }
+  .premium-table tbody tr:nth-child(4) { animation-delay: 0.16s; }
+  .premium-table tbody tr:nth-child(5) { animation-delay: 0.20s; }
+  .premium-table tbody tr:nth-child(6) { animation-delay: 0.24s; }
+  .premium-table tbody tr:nth-child(7) { animation-delay: 0.28s; }
+  .premium-table tbody tr:nth-child(8) { animation-delay: 0.32s; }
+  .premium-table tbody tr:nth-child(9) { animation-delay: 0.36s; }
+  .premium-table tbody tr:nth-child(10) { animation-delay: 0.40s; }
+  .premium-table tbody tr:nth-child(n+11) { animation-delay: 0.40s; }
+
+  .premium-table tbody tr:last-child {
+    border-bottom: none;
+  }
+  .premium-table td, .premium-table th {
+    @apply whitespace-nowrap px-4 py-3;
+  }
+  .premium-table td:first-child {
+    @apply font-medium text-fg;
   }
 }

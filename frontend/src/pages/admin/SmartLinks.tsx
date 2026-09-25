@@ -204,21 +204,21 @@ export default function SmartLinks() {
         : (
           <>
             <TableScroll>
-              <table className="w-full min-w-[1100px] text-left text-body">
+              <table className="premium-table">
                 <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-                  <tr className="divide-x divide-border">
+                  <tr>
                     <th className="px-4 py-3 font-semibold">ID</th>
                     <th className="px-4 py-3 font-semibold">Name</th>
                     <th className="px-4 py-3 font-semibold">Offers</th>
                     <th className="px-4 py-3 font-semibold">Catch-All Offer</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Show to Partners</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Today's Revenue</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Created</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Modified</th>
+                    <th >Show to Partners</th>
+                    <th >Today's Revenue</th>
+                    <th >Created</th>
+                    <th >Modified</th>
                     <th className="px-4 py-3 font-semibold" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {paged.map((r) => {
                     const items = itemsByLink[r.id];
                     return (
@@ -250,9 +250,9 @@ export default function SmartLinks() {
                         </td>
                         <td className="px-4 py-3 text-small text-fg-secondary">{offerName(r.catchAllOfferId)}</td>
                         <td className={`whitespace-nowrap px-4 py-3 text-small font-medium ${r.showToPartners ? 'text-success-text' : 'text-danger-text'}`}>{r.showToPartners ? 'YES' : 'NO'}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-small tabular-nums">{fmtMoney(r.todayRevenue)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.createdAt} /></td>
-                        <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.updatedAt} /></td>
+                        <td className="text-small tabular-nums">{fmtMoney(r.todayRevenue)}</td>
+                        <td className="text-small"><DateTimeCell iso={r.createdAt} /></td>
+                        <td className="text-small"><DateTimeCell iso={r.updatedAt} /></td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end">
                             <RowMenu onEdit={() => nav(`/app/smart-links/${r.id}/edit`)}

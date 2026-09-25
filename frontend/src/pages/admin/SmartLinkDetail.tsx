@@ -62,7 +62,7 @@ function StatsCard({ id }: { id: string }) {
       </div>
     }>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[480px] text-left text-small">
+        <table className="premium-table">
           <thead className="text-tiny uppercase tracking-wide text-fg-secondary">
             <tr><th className="pb-2 pr-4 font-semibold">Revenue</th><th className="pb-2 pr-4 font-semibold">Payout</th><th className="pb-2 pr-4 font-semibold">Margin</th><th className="pb-2 pr-4 font-semibold">Clicks</th><th className="pb-2 pr-4 font-semibold">CV</th><th className="pb-2 font-semibold">CVR</th></tr>
           </thead>
@@ -93,7 +93,7 @@ function OffersCard({ id, mechanism, items, offers, advertisers, nav }: { id: st
       </div>
       {rows.length === 0 ? <p className="text-small text-fg-muted">No offers configured.</p> : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full min-w-[720px] text-left text-small">
+          <table className="premium-table">
             <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
               <tr>
                 <th className="px-4 py-2">ID</th><th className="px-4 py-2">Name</th><th className="px-4 py-2">URL</th>
@@ -103,7 +103,7 @@ function OffersCard({ id, mechanism, items, offers, advertisers, nav }: { id: st
                 <th className="px-4 py-2">Geo</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {rows.map((it) => {
                 const o = offers.find((x) => x.id === it.offerId);
                 return (

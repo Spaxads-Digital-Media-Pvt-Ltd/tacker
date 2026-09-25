@@ -175,19 +175,19 @@ export default function ClickToConversionTimeReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[1400px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Offer</th>
-                    {BUCKET_LABELS.map((l) => <th key={l} className="whitespace-nowrap px-4 py-3 text-right font-semibold">{l}</th>)}
+                    <th >Offer</th>
+                    {BUCKET_LABELS.map((l) => <th key={l} className="text-right font-semibold">{l}</th>)}
                     <th className="w-9" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <Fragment key={r.key}>
-                      <tr className="hover:bg-accent-subtle/40">
-                        <td className="whitespace-nowrap px-4 py-3">
+                      <tr>
+                        <td >
                           <button type="button" onClick={() => toggleExpand(r.key)} className="inline-flex items-center gap-1.5 text-fg hover:text-accent-text">
                             <ChevronRight size={13} className={`transition-transform ${expanded.has(r.key) ? 'rotate-90' : ''}`} />
                             {offerMap.get(r.key) ?? r.key}

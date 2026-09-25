@@ -78,7 +78,7 @@ function AllActivityTab({ domainId }: { domainId: string }) {
           </div>
         ) : (
           <div className="overflow-x-auto rounded-card border border-border">
-            <table className="w-full text-small">
+            <table className="premium-table">
               <thead className="bg-page text-tiny text-fg-secondary">
                 <tr>
                   <th className="px-3 py-2 text-left">When</th>

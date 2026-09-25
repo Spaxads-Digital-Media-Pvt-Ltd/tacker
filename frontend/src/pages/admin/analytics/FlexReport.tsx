@@ -441,27 +441,27 @@ export default function FlexReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[1400px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    {appliedDims.map((d) => <th key={d} className="whitespace-nowrap px-4 py-3 font-semibold">{DIM_OPTIONS.find((o) => o.key === d)?.label}</th>)}
+                    {appliedDims.map((d) => <th key={d} >{DIM_OPTIONS.find((o) => o.key === d)?.label}</th>)}
                     {shownMetrics.has('Clicks') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('clicks')}>Clicks {orderBy === 'clicks' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
                     {shownMetrics.has('Total CV') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('total_conversions')}>Total CV {orderBy === 'total_conversions' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
-                    {shownMetrics.has('RPA') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">RPA</th>}
-                    {shownMetrics.has('CPA') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CPA</th>}
-                    {shownMetrics.has('CVR') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CVR</th>}
+                    {shownMetrics.has('RPA') && <th className="text-right font-semibold">RPA</th>}
+                    {shownMetrics.has('CPA') && <th className="text-right font-semibold">CPA</th>}
+                    {shownMetrics.has('CVR') && <th className="text-right font-semibold">CVR</th>}
                     {shownMetrics.has('Revenue') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('revenue')}>Revenue {orderBy === 'revenue' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
                     {shownMetrics.has('Payout') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('payout')}>Payout {orderBy === 'payout' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
                     {shownMetrics.has('Profit') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('margin')}>Profit {orderBy === 'margin' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
-                    {shownMetrics.has('Margin') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Margin</th>}
-                    {shownMetrics.has('EPC') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">EPC</th>}
+                    {shownMetrics.has('Margin') && <th className="text-right font-semibold">Margin</th>}
+                    {shownMetrics.has('EPC') && <th className="text-right font-semibold">EPC</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <tr key={r.key} className="hover:bg-accent-subtle/40">
                       {r.dims.map((d, i) => (
-                        <td key={i} className="whitespace-nowrap px-4 py-3">
+                        <td key={i} >
                           {d.raw != null && linkFor(d.dim, d.raw) ? <Link to={linkFor(d.dim, d.raw)!} className="text-accent-text hover:underline">{d.name}</Link> : d.name}
                         </td>
                       ))}

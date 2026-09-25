@@ -5,8 +5,8 @@
  * issues, honestly noting when filtering happens client-side rather than as query params).
  */
 import { useEffect, useRef, useState } from 'react';
-import { GripVertical, Search as SearchIcon } from 'lucide-react';
-import { Modal } from './ui';
+import { GripVertical, Search as SearchIcon, MoreVertical } from 'lucide-react';
+import { Modal, MenuPopover } from './ui';
 
 export function ColumnsModal({
   allColumns, order, hidden, onClose, onApply,
@@ -126,4 +126,20 @@ export function useDropdown() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
   return { open, setOpen, ref };
+}
+
+/**
+ * Standard 3-dot context menu for table rows. Wraps MenuPopover to enforce the uniform
+ * Premium Fintech styling and positioning mechanics.
+ */
+export function TableRowMenu({ children, ariaLabel = 'Row actions' }: { children: React.ReactNode | ((api: { close: () => void }) => React.ReactNode); ariaLabel?: string }) {
+  return (
+    <MenuPopover
+      button={<MoreVertical size={16} />}
+      ariaLabel={ariaLabel}
+      triggerClassName="p-1 rounded-[var(--radius)] text-fg-muted hover:bg-slate-100 hover:text-fg transition-colors dark:hover:bg-slate-700"
+    >
+      {typeof children === 'function' ? children : () => children}
+    </MenuPopover>
+  );
 }

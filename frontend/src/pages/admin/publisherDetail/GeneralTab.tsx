@@ -75,7 +75,7 @@ export function GeneralTab({ pub }: { pub: Publisher }) {
         <Card title="Stats (last 30 days)">
           {stats.loading ? <Spinner /> : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[480px] text-left text-small">
+              <table className="premium-table">
                 <thead className="text-tiny uppercase text-fg-muted"><tr>
                   <th className="py-2 pr-4">Revenue</th><th className="py-2 pr-4">Payout</th><th className="py-2 pr-4">Margin</th>
                   <th className="py-2 pr-4">Clicks</th><th className="py-2 pr-4">CV</th><th className="py-2">CVR</th>
@@ -105,9 +105,9 @@ export function GeneralTab({ pub }: { pub: Publisher }) {
 
         <Card title="Macro Parameters Visibility">
           <p className="mb-2 text-tiny text-fg-muted">Note: sub1–sub10 are always visible by default.</p>
-          <table className="w-full text-left text-small">
+          <table className="premium-table">
             <thead className="text-tiny uppercase text-fg-muted"><tr><th className="py-1.5">Parameter</th><th className="py-1.5">Visible?</th></tr></thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {MACRO_PARAMS.map((p) => (
                 <tr key={p}><td className="py-1.5">{p}</td><td className="py-1.5 text-success-text">YES</td></tr>
               ))}

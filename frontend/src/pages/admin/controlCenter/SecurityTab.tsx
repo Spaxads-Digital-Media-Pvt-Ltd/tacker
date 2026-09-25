@@ -294,21 +294,21 @@ function MfaSub() {
       </InfoCard>
       <p className="text-small font-semibold text-fg">MFA Employee Settings</p>
       <div className="overflow-x-auto rounded-card border border-border">
-        <table className="w-full min-w-[720px] text-left text-body">
-          <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-            <tr className="divide-x divide-border">
+        <table className="premium-table">
+          <thead>
+            <tr>
               {['Employee', 'Status', 'Method', 'User IP', 'Country', 'City', 'Platform', 'Device Type', 'OS Version', 'Completed'].map((h) => (
-                <th key={h} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>
+                <th key={h} >{h}</th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody>
             {(users ?? []).map((u) => {
               const st = emp[u.id] ?? { status: 'inactive', method: '', completed: false };
               const login = latestLogin(u);
               return (
                 <tr key={u.id}>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-fg">{u.name}</td>
+                  <td className="font-semibold text-fg">{u.name}</td>
                   <td className="px-4 py-3">
                     {editing ? (
                       <select className="input !w-28 !py-1" value={st.status} onChange={(e) => patchEmp(u.id, { status: e.target.value })}>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useIntersectionObserver } from '../../lib/useIntersectionObserver';
 import { usePageTitle } from './PageTitle';
 import { HelpHint } from '../panels/HelpHint';
 
@@ -17,17 +18,17 @@ export function PageHeader({ title, subtitle, action }: { title: string; subtitl
 
 export function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="card">
+    <ScrollReveal className="card transition-all duration-300 hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]">
       <p className="text-small font-medium text-fg-secondary">{label}</p>
       <p className="mt-2 text-3xl font-semibold tracking-tight text-fg">{value}</p>
       {hint && <p className="mt-1 text-tiny text-fg-muted">{hint}</p>}
-    </div>
+    </ScrollReveal>
   );
 }
 
 export function PhaseNotice({ phase, children }: { phase: string; children: ReactNode }) {
   return (
-    <div className="card border-dashed">
+    <ScrollReveal className="card border-dashed">
       <div className="flex items-center gap-2">
         <span className="rounded-full bg-accent-subtle px-2.5 py-0.5 text-tiny font-semibold text-accent-text">
           {phase}
@@ -35,7 +36,7 @@ export function PhaseNotice({ phase, children }: { phase: string; children: Reac
         <span className="text-small font-medium text-fg">Coming in this phase</span>
       </div>
       <p className="mt-2 text-small text-fg-secondary">{children}</p>
-    </div>
+    </ScrollReveal>
   );
 }
 
@@ -95,11 +96,11 @@ export function TableScroll({ children, className = '' }: { children: ReactNode;
   useEffect(update);  // recompute after any render (row/column count may have changed)
   return (
     <div className="relative">
-      <div ref={ref} className={`max-h-[70vh] overflow-auto rounded-card border border-border ${className}`}>
+      <div ref={ref} className={`max-h-[70vh] overflow-auto rounded-card border border-border bg-surface ${className}`}>
         {children}
       </div>
-      {edge.left && <div aria-hidden className="pointer-events-none absolute inset-y-px left-px w-9 rounded-l-card bg-gradient-to-r from-black/[0.13] to-transparent" />}
-      {edge.right && <div aria-hidden className="pointer-events-none absolute inset-y-px right-px w-9 rounded-r-card bg-gradient-to-l from-black/[0.13] to-transparent" />}
+      {edge.left && <div aria-hidden className="pointer-events-none absolute inset-y-px left-px w-12 rounded-l-card bg-gradient-to-r from-black/[0.04] dark:from-black/[0.15] to-transparent" />}
+      {edge.right && <div aria-hidden className="pointer-events-none absolute inset-y-px right-px w-12 rounded-r-card bg-gradient-to-l from-black/[0.04] dark:from-black/[0.15] to-transparent" />}
     </div>
   );
 }
@@ -117,19 +118,19 @@ export interface Column<T> {
 export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Column<T>[]; rows: T[]; rowKey: (row: T) => string; stickyCol?: number }) {
   return (
     <TableScroll>
-      <table className="w-full min-w-[560px] text-left text-body">
-        <thead className="sticky top-0 z-20 bg-page text-tiny uppercase tracking-wide text-fg-secondary [&_th]:border-b [&_th]:border-border">
-          <tr className="divide-x divide-border">
+      <table className="premium-table">
+        <thead>
+          <tr>
             {columns.map((c, i) => (
-              <th key={i} className={`whitespace-nowrap px-4 py-3 font-semibold ${i === stickyCol ? 'sticky left-0 z-30 bg-page' : ''} ${c.className ?? ''}`}>{c.header}</th>
+              <th key={i} className={i === stickyCol ? 'sticky left-0 z-30 bg-slate-900' : ''}>{c.header}</th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody>
           {rows.map((row) => (
-            <tr key={rowKey(row)} className="divide-x divide-border bg-surface text-fg transition-colors hover:bg-accent-subtle/40">
+            <tr key={rowKey(row)}>
               {columns.map((c, i) => (
-                <td key={i} className={`px-4 py-3 ${i === stickyCol ? 'sticky left-0 z-10 bg-inherit' : ''} ${c.className ?? ''}`}>{c.cell(row)}</td>
+                <td key={i} className={i === stickyCol ? 'sticky left-0 z-10 bg-inherit' : ''}>{c.cell(row)}</td>
               ))}
             </tr>
           ))}
@@ -324,7 +325,7 @@ export function DurationField({ value, onChange }: { value: string; onChange: (v
  * so switching menus silently required two clicks and left the previously-open menu showing.
  */
 export function MenuPopover({
-  button, ariaLabel, triggerClassName, align = 'end', width = 'w-44', onOpenChange, children,
+  button, ariaLabel, triggerClassName, align = 'end', width = 'w-max min-w-[11rem]', onOpenChange, children,
 }: {
   button: ReactNode;
   ariaLabel: string;
@@ -396,7 +397,7 @@ export function MenuPopover({
       </button>
       {open && createPortal(
         <div ref={menuRef} role="menu" style={style}
-          className={`fixed z-50 ${width} animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated`}>
+          className={`fixed z-50 ${width} animate-fade-in rounded-[10px] border border-border bg-surface p-1 shadow-elevated`}>
           {children({ close: () => setOpen(false) })}
         </div>,
         document.body,
@@ -406,12 +407,13 @@ export function MenuPopover({
 }
 
 /** A row inside <MenuPopover>. `tone="danger"` for destructive actions. */
-export function MenuItem({ children, onSelect, tone = 'default' }: { children: ReactNode; onSelect: () => void; tone?: 'default' | 'danger' }) {
+export function MenuItem({ children, onSelect, tone = 'default', disabled = false, icon: Icon }: { children: ReactNode; onSelect: () => void; tone?: 'default' | 'danger' | 'success'; disabled?: boolean; icon?: React.ElementType }) {
   return (
-    <button type="button" role="menuitem" onClick={onSelect}
-      className={`flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-small ${
-        tone === 'danger' ? 'text-danger-text hover:bg-danger-bg' : 'text-fg hover:bg-page'
+    <button type="button" role="menuitem" onClick={onSelect} disabled={disabled}
+      className={`group flex w-full items-center gap-2.5 whitespace-nowrap rounded-[var(--radius)] px-3 py-2 text-left text-small transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        tone === 'danger' ? 'text-danger-text hover:bg-danger-bg' : tone === 'success' ? 'text-success-text hover:bg-success-bg' : 'text-fg hover:bg-slate-50 dark:hover:bg-slate-700/50'
       }`}>
+      {Icon && <Icon size={14} className={`shrink-0 transition-colors ${tone === 'danger' ? 'text-danger/80 group-hover:text-danger-text' : tone === 'success' ? 'text-success/80 group-hover:text-success-text' : 'text-fg-secondary group-hover:text-fg'}`} />}
       {children}
     </button>
   );
@@ -507,6 +509,60 @@ export function Tabs({ tabs, active, onChange }: { tabs: string[]; active: strin
           </button>
         );
       })}
+    </div>
+  );
+}
+
+export function AnimatedNumber({ value, formatFn = String, animate = true, duration = 1500 }: { value: number; formatFn?: (val: number) => string; animate?: boolean; duration?: number }) {
+  const [displayValue, setDisplayValue] = useState(0);
+  const prevValue = useRef(0);
+
+  useEffect(() => {
+    if (!animate) {
+      setDisplayValue(0);
+      prevValue.current = 0;
+      return;
+    }
+    
+    const startValue = prevValue.current;
+    const endValue = value;
+    if (startValue === endValue) return;
+
+    let startTime: number | null = null;
+    let rAF: number;
+
+    const step = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / duration, 1);
+      
+      // easeOutExpo
+      const easeProgress = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+      
+      const current = startValue + (endValue - startValue) * easeProgress;
+      setDisplayValue(current);
+
+      if (progress < 1) {
+        rAF = requestAnimationFrame(step);
+      } else {
+        prevValue.current = endValue;
+      }
+    };
+
+    rAF = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rAF);
+  }, [value, animate, duration]);
+
+  return <>{formatFn(displayValue)}</>;
+}
+
+
+
+export function ScrollReveal({ children, animation = 'animate-fade-in', delay = 0, className = '', rootMargin = '50px' }: { children: ReactNode; animation?: string; delay?: number; className?: string; rootMargin?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useIntersectionObserver(ref, { threshold: 0.1, rootMargin });
+  return (
+    <div ref={ref} className={`${className} ${inView ? animation : 'opacity-0'}`} style={{ animationDelay: `${delay}ms` }}>
+      {children}
     </div>
   );
 }

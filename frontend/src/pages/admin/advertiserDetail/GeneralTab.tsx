@@ -66,7 +66,7 @@ export function GeneralTab({ adv, base }: { adv: Advertiser; base: string }) {
         <Card title="Stats (last 30 days)">
           {stats.loading ? <Spinner /> : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[480px] text-left text-small">
+              <table className="premium-table">
                 <thead className="text-tiny uppercase text-fg-muted"><tr>
                   <th className="py-2 pr-4">Revenue</th><th className="py-2 pr-4">Payout</th><th className="py-2 pr-4">Margin</th>
                   <th className="py-2 pr-4">Clicks</th><th className="py-2 pr-4">CV</th><th className="py-2">CVR</th>

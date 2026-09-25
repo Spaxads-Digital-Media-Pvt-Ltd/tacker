@@ -7,14 +7,14 @@
  * From/To input convention (Reports.tsx) rather than the reference's calendar-preset widget.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, Pencil, Trash2, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { ReportingAdjustment, Publisher, Offer, AdjustmentMetrics } from '../../types';
 
 const ALL_COLUMNS = ['Partner', 'Offer', 'Advertiser', 'Total Clicks', 'Conversions', 'Payout', 'Revenue', 'Gross Sales', 'Impressions', 'Created', 'Modified', 'Last Modified By'] as const;
@@ -32,58 +32,24 @@ function MetricCell({ original, adjusted, format }: { original: number; adjusted
 }
 
 function RowMenu({ adj, onDeleted }: { adj: ReportingAdjustment; onDeleted: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/reporting-adjustments/${adj.id}`));
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const doDelete = async () => {
-    setOpen(false);
-    if (!confirm('Delete this reporting adjustment?')) return;
+  const doDelete = async (api: { close: () => void }) => {
+    api.close();
+    if (!confirm('Delete this adjustment?')) return;
     if (await del.run(undefined)) onDeleted();
   };
 
-  const item = (label: string, onClick: () => void) => (
-    <button role="menuitem" onClick={onClick} className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-      {label}
-    </button>
-  );
-
   return (
-    <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-36 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => { setOpen(false); nav(`/app/aff-adjustments/${adj.id}/edit`); })}
-          {item('Delete', doDelete)}
-        </div>,
-        document.body,
+    <TableRowMenu>
+      {(api) => (
+        <>
+          <MenuItem icon={Pencil} onSelect={() => { api.close(); nav(`/app/aff-adjustments/${adj.id}/edit`); }}>Edit</MenuItem>
+          <MenuItem icon={Trash2} tone="danger" onSelect={() => doDelete(api)}>Delete</MenuItem>
+        </>
       )}
-    </>
+    </TableRowMenu>
   );
 }
 

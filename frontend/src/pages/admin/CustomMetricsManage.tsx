@@ -170,31 +170,31 @@ export default function CustomMetricsManage() {
           : !rows.length ? <StateBlock>{q.trim() ? 'No Record Found' : 'No custom metrics yet — add one above.'}</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">ID</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Name</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Formula</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Format</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Created</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Modified</th>
+                    <th >ID</th>
+                    <th >Name</th>
+                    <th >Formula</th>
+                    <th >Format</th>
+                    <th >Created</th>
+                    <th >Modified</th>
                     <th className="w-9" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((m) => (
                     <tr key={m.id} className="hover:bg-accent-subtle/40">
                       <td className="px-4 py-3 text-fg-secondary">{m.ref}</td>
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{m.name}</td>
+                      <td className="font-medium text-fg">{m.name}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-1">
                           {m.formula.map((t, i) => <TokenChip key={i} t={t} />)}
                         </div>
                       </td>
                       <td className="px-4 py-3">{FORMAT_LABELS[m.format]}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small text-fg-secondary">{new Date(m.createdAt).toLocaleString()}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small text-fg-secondary">{new Date(m.updatedAt).toLocaleString()}</td>
+                      <td className="text-small text-fg-secondary">{new Date(m.createdAt).toLocaleString()}</td>
+                      <td className="text-small text-fg-secondary">{new Date(m.updatedAt).toLocaleString()}</td>
                       <td className="text-right"><RowMenu metric={m} onEdit={() => setModal(m)} onDeleted={refetch} /></td>
                     </tr>
                   ))}

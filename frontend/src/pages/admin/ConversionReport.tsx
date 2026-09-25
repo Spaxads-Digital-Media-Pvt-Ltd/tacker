@@ -276,43 +276,43 @@ export default function ConversionReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[2400px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Date</th>
-                    {shown.has('Status') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Status</th>}
-                    {shown.has('Reason') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Reason</th>}
-                    {shown.has('Offer') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Offer</th>}
-                    {shown.has('Partner') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Partner</th>}
-                    {shown.has('Advertiser') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Advertiser</th>}
-                    {shown.has('Event Name') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Event Name</th>}
-                    {shown.has('Goal') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Goal</th>}
-                    {shown.has('Source') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Source</th>}
-                    {shown.has('Revenue') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Revenue</th>}
-                    {shown.has('Payout') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Payout</th>}
-                    {shown.has('Currency') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Currency</th>}
-                    {shown.has('Transaction ID') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Transaction ID</th>}
-                    {shown.has('Click Date') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Click Date</th>}
-                    {shown.has('Delta') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Delta</th>}
-                    {shown.has('Country') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Country</th>}
-                    {shown.has('Region') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Region</th>}
-                    {shown.has('City') && <th className="whitespace-nowrap px-4 py-3 font-semibold">City</th>}
-                    {shown.has('ISP') && <th className="whitespace-nowrap px-4 py-3 font-semibold">ISP</th>}
-                    {shown.has('Device') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Device</th>}
-                    {shown.has('OS') && <th className="whitespace-nowrap px-4 py-3 font-semibold">OS</th>}
-                    {shown.has('Browser') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Browser</th>}
-                    {shown.has('Fraud') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Fraud</th>}
-                    {shown.has('Sub1') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub1</th>}
-                    {shown.has('Sub2') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub2</th>}
-                    {shown.has('Sub3') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub3</th>}
-                    {shown.has('Sub4') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub4</th>}
-                    {shown.has('Sub5') && <th className="whitespace-nowrap px-4 py-3 font-semibold">Sub5</th>}
+                    <th >Date</th>
+                    {shown.has('Status') && <th >Status</th>}
+                    {shown.has('Reason') && <th >Reason</th>}
+                    {shown.has('Offer') && <th >Offer</th>}
+                    {shown.has('Partner') && <th >Partner</th>}
+                    {shown.has('Advertiser') && <th >Advertiser</th>}
+                    {shown.has('Event Name') && <th >Event Name</th>}
+                    {shown.has('Goal') && <th >Goal</th>}
+                    {shown.has('Source') && <th >Source</th>}
+                    {shown.has('Revenue') && <th className="text-right font-semibold">Revenue</th>}
+                    {shown.has('Payout') && <th className="text-right font-semibold">Payout</th>}
+                    {shown.has('Currency') && <th >Currency</th>}
+                    {shown.has('Transaction ID') && <th >Transaction ID</th>}
+                    {shown.has('Click Date') && <th >Click Date</th>}
+                    {shown.has('Delta') && <th >Delta</th>}
+                    {shown.has('Country') && <th >Country</th>}
+                    {shown.has('Region') && <th >Region</th>}
+                    {shown.has('City') && <th >City</th>}
+                    {shown.has('ISP') && <th >ISP</th>}
+                    {shown.has('Device') && <th >Device</th>}
+                    {shown.has('OS') && <th >OS</th>}
+                    {shown.has('Browser') && <th >Browser</th>}
+                    {shown.has('Fraud') && <th className="text-right font-semibold">Fraud</th>}
+                    {shown.has('Sub1') && <th >Sub1</th>}
+                    {shown.has('Sub2') && <th >Sub2</th>}
+                    {shown.has('Sub3') && <th >Sub3</th>}
+                    {shown.has('Sub4') && <th >Sub4</th>}
+                    {shown.has('Sub5') && <th >Sub5</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <tr key={r.conversion_id} className="hover:bg-accent-subtle/40">
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{formatDate(r.created_at)}</td>
+                      <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
                       {shown.has('Status') && <td className="px-4 py-3"><Badge value={r.status} /></td>}
                       {shown.has('Reason') && <td className="px-4 py-3">{r.reason ?? DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
@@ -324,9 +324,9 @@ export default function ConversionReport() {
                       {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(r.revenue)}</td>}
                       {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(r.payout)}</td>}
                       {shown.has('Currency') && <td className="px-4 py-3">{r.currency ?? DASH}</td>}
-                      {shown.has('Transaction ID') && <td className="whitespace-nowrap px-4 py-3 font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
-                      {shown.has('Click Date') && <td className="whitespace-nowrap px-4 py-3">{r.click_created_at ? formatDate(r.click_created_at) : DASH}</td>}
-                      {shown.has('Delta') && <td className="whitespace-nowrap px-4 py-3">{formatDelta(r.delta_seconds)}</td>}
+                      {shown.has('Transaction ID') && <td className="font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
+                      {shown.has('Click Date') && <td >{r.click_created_at ? formatDate(r.click_created_at) : DASH}</td>}
+                      {shown.has('Delta') && <td >{formatDelta(r.delta_seconds)}</td>}
                       {shown.has('Country') && <td className="px-4 py-3">{r.country ?? DASH}</td>}
                       {shown.has('Region') && <td className="px-4 py-3">{r.region ?? DASH}</td>}
                       {shown.has('City') && <td className="px-4 py-3">{r.city ?? DASH}</td>}

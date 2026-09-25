@@ -11,11 +11,11 @@ function PostbackTable({ rows, onDelete }: { rows: Postback[]; onDelete: (id: st
   if (rows.length === 0) return <p className="px-1 py-6 text-center text-small italic text-fg-muted">No Record Found</p>;
   return (
     <div className="overflow-x-auto rounded-card border border-border">
-      <table className="w-full min-w-[640px] text-left text-body">
+      <table className="premium-table">
         <thead className="bg-page text-tiny uppercase tracking-wide text-fg-secondary">
           <tr><th className="px-4 py-3 font-semibold">Postback URL</th><th className="px-4 py-3 font-semibold">Method</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Created</th><th /></tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody>
           {rows.map((r) => (
             <tr key={r.id}>
               <td className="max-w-md truncate px-4 py-2.5 font-mono text-tiny text-fg">{r.url}</td>

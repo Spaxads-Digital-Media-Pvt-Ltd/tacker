@@ -136,7 +136,7 @@ function DimensionCard({
         {loading ? <Spinner /> : error ? <p className="text-small text-danger-text">{error}</p>
           : rows.length === 0 ? <p className="text-small text-fg-muted">No Data Available</p>
           : (
-            <table className="w-full text-left text-small">
+            <table className="premium-table">
               <thead className="text-tiny uppercase text-fg-muted">
                 <tr>
                   <th className="w-5 py-1.5" />
@@ -148,7 +148,7 @@ function DimensionCard({
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody>
                 {rows.map((r, i) => {
                   const isSelected = r.raw != null && selected.has(r.raw);
                   const dimmed = selected.size > 0 && !isSelected;

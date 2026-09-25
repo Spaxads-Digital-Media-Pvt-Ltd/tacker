@@ -81,8 +81,8 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
               <p className="text-h3 font-medium text-fg">Link</p>
               <label className="flex items-center gap-2 text-small text-fg-secondary">
                 Encrypt Parameters
-                <button type="button" onClick={() => setEncrypt((v) => !v)} className={`relative h-5 w-9 rounded-full transition-colors ${encrypt ? 'bg-accent' : 'bg-border'}`}>
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${encrypt ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                <button type="button" onClick={() => setEncrypt((v) => !v)} className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${encrypt ? 'bg-accent' : 'bg-border'}`}>
+                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${encrypt ? 'translate-x-4' : 'translate-x-0'}`} />
                 </button>
               </label>
             </div>

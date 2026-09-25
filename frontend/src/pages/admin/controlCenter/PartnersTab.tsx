@@ -273,18 +273,18 @@ function PartnerDashboardCard() {
       <HeadsUpBanner>Any changes made here will be updated across all Partner Dashboards</HeadsUpBanner>
       <p className="mb-2 mt-4 text-small font-semibold text-fg">Partner Dashboard Cards</p>
       <div className="overflow-x-auto rounded-card border border-border">
-        <table className="w-full min-w-[520px] text-left text-body">
-          <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-            <tr className="divide-x divide-border">
-              <th className="whitespace-nowrap px-4 py-3 font-semibold">Card</th>
+        <table className="premium-table">
+          <thead>
+            <tr>
+              <th >Card</th>
               <th className="px-4 py-3 font-semibold">Description</th>
-              <th className="whitespace-nowrap px-4 py-3 font-semibold">Visible</th>
+              <th >Visible</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody>
             {DASHBOARD_CARDS.map((c) => (
               <tr key={c.card}>
-                <td className="whitespace-nowrap px-4 py-3 font-semibold text-fg">{c.card}</td>
+                <td className="font-semibold text-fg">{c.card}</td>
                 <td className="px-4 py-3 text-small text-fg-secondary">{c.desc}</td>
                 <td className="px-4 py-3">
                   {editing

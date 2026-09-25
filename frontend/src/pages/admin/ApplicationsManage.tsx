@@ -6,14 +6,14 @@
  * here, matching the reference; admins only decide.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Check, X, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Tabs, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, ApiRequestModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, ApiRequestModal, useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { OfferApplication, QuestionnaireListItem, Publisher, Offer, Advertiser, DashboardUser } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { approved: 'bg-success', pending: 'bg-warning', rejected: 'bg-danger' };
@@ -52,57 +52,22 @@ function StatusSelect<T extends string>({ value, onChange, options }: { value: T
 }
 
 function AppRowMenu({ app, onChanged }: { app: OfferApplication; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const decide = useMutation((status: 'approved' | 'rejected') => api.patch<OfferApplication>(`/api/offer-applications/${app.id}`, { status }));
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const decideAndClose = async (status: 'approved' | 'rejected') => {
-    setOpen(false);
+  const decideAndClose = async (api: { close: () => void }, status: 'approved' | 'rejected') => {
+    api.close();
     if (await decide.run(status)) onChanged();
   };
 
-  const item = (label: string, onClick: () => void, disabled?: boolean) => (
-    <button role="menuitem" onClick={onClick} disabled={disabled}
-      className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
-      {label}
-    </button>
-  );
-
   return (
-    <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-36 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Approve', () => decideAndClose('approved'), app.status === 'approved')}
-          {item('Reject', () => decideAndClose('rejected'), app.status === 'rejected')}
-        </div>,
-        document.body,
+    <TableRowMenu>
+      {(api) => (
+        <>
+          <MenuItem icon={Check} tone="success" disabled={app.status === 'approved'} onSelect={() => decideAndClose(api, 'approved')}>Approve</MenuItem>
+          <MenuItem icon={X} tone="danger" disabled={app.status === 'rejected'} onSelect={() => decideAndClose(api, 'rejected')}>Reject</MenuItem>
+        </>
       )}
-    </>
+    </TableRowMenu>
   );
 }
 

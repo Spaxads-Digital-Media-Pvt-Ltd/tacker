@@ -575,36 +575,36 @@ export default function OfferReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[1400px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">
+                    <th >
                       Offer<br /><span className="text-[10px] normal-case text-fg-muted">↳ Partner</span>
                     </th>
                     {shown.has('Clicks') && sortableHeader('Clicks', 'clicks')}
                     {shown.has('Uniq. Clicks') && sortableHeader('Uniq. Clicks', 'unique_clicks')}
-                    {shown.has('Dup. Clicks') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Dup. Clicks</th>}
+                    {shown.has('Dup. Clicks') && <th className="text-right font-semibold">Dup. Clicks</th>}
                     {shown.has('Invalid Clicks') && sortableHeader('Invalid Clicks', 'invalid_clicks')}
                     {shown.has('Total CV') && sortableHeader('Total CV', 'total_conversions')}
                     {shown.has('CV') && sortableHeader('CV', 'conversions')}
-                    {shown.has('Throttle') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Throttle</th>}
-                    {shown.has('Events') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Events</th>}
-                    {shown.has('CVR') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CVR</th>}
-                    {shown.has('CPC') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CPC</th>}
-                    {shown.has('CPA') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">CPA</th>}
+                    {shown.has('Throttle') && <th className="text-right font-semibold">Throttle</th>}
+                    {shown.has('Events') && <th className="text-right font-semibold">Events</th>}
+                    {shown.has('CVR') && <th className="text-right font-semibold">CVR</th>}
+                    {shown.has('CPC') && <th className="text-right font-semibold">CPC</th>}
+                    {shown.has('CPA') && <th className="text-right font-semibold">CPA</th>}
                     {shown.has('Revenue') && sortableHeader('Revenue', 'revenue')}
                     {shown.has('Payout') && sortableHeader('Payout', 'payout')}
                     {shown.has('Profit') && sortableHeader('Profit', 'margin')}
-                    {shown.has('Margin') && <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Margin</th>}
+                    {shown.has('Margin') && <th className="text-right font-semibold">Margin</th>}
                     {shown.has('Fraud') && sortableHeader('Fraud', 'avg_fraud_score')}
                     <th className="w-9" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <Fragment key={r.offerId}>
-                      <tr className="hover:bg-accent-subtle/40">
-                        <td className="whitespace-nowrap px-4 py-3">
+                      <tr>
+                        <td >
                           <button type="button" onClick={() => toggleExpand(r.offerId)} className="inline-flex items-center gap-1.5 text-fg hover:text-accent-text">
                             <ChevronRight size={13} className={`transition-transform ${expanded.has(r.offerId) ? 'rotate-90' : ''}`} />
                             <span className={`h-2 w-2 rounded-full ${r.offerStatus === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />

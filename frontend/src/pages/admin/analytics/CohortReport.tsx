@@ -209,20 +209,20 @@ export default function CohortReport() {
           : !data?.rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Date</th>
-                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">{topLevelLabel}</th>
-                    {dayHeaders.map((n) => <th key={n} className="whitespace-nowrap px-4 py-3 text-right font-semibold">Day {n}</th>)}
+                    <th >Date</th>
+                    <th className="text-right font-semibold">{topLevelLabel}</th>
+                    {dayHeaders.map((n) => <th key={n} className="text-right font-semibold">Day {n}</th>)}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {data.rows.map((r) => {
                     const max = rowMax(r);
                     return (
                       <tr key={r.date}>
-                        <td className="whitespace-nowrap px-4 py-3 font-medium text-fg">{new Date(r.date).toISOString().slice(0, 10)}</td>
+                        <td className="font-medium text-fg">{new Date(r.date).toISOString().slice(0, 10)}</td>
                         <td className="px-4 py-3 text-right text-fg-secondary">{r.topLevel.toLocaleString()}</td>
                         {dayHeaders.map((n, i) => {
                           const v = r.days[i] ?? null;

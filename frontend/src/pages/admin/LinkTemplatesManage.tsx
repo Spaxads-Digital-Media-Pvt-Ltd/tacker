@@ -5,14 +5,14 @@
  * page in the reference), and a row kebab (Edit/Delete/History).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, Pencil, Trash2, Clock } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { LinkTemplate, Advertiser } from '../../types';
 
 const ALL_COLUMNS = ['ID', 'Name', 'Advertiser', 'Destination URL', 'Created', 'Modified'] as const;
@@ -39,59 +39,27 @@ function HistoryModal({ templateId, onClose }: { templateId: string; onClose: ()
 }
 
 function RowMenu({ template, onChanged }: { template: LinkTemplate; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/link-templates/${template.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const doDelete = async () => {
-    setOpen(false);
+  const doDelete = async (api: { close: () => void }) => {
+    api.close();
     if (!confirm(`Delete link template "${template.name}"?`)) return;
     if (await del.run(undefined)) onChanged();
   };
 
-  const item = (label: string, onClick: () => void) => (
-    <button role="menuitem" onClick={onClick} className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-      {label}
-    </button>
-  );
-
   return (
     <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-36 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => { setOpen(false); nav(`/app/adv-link-templates/${template.id}/edit`); })}
-          {item('Delete', doDelete)}
-          {item('History', () => { setOpen(false); setHistoryOpen(true); })}
-        </div>,
-        document.body,
-      )}
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Pencil} onSelect={() => { api.close(); nav(`/app/adv-link-templates/${template.id}/edit`); }}>Edit</MenuItem>
+            <MenuItem icon={Trash2} tone="danger" onSelect={() => doDelete(api)}>Delete</MenuItem>
+            <MenuItem icon={Clock} onSelect={() => { api.close(); setHistoryOpen(true); }}>History</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
       {historyOpen && <HistoryModal templateId={template.id} onClose={() => setHistoryOpen(false)} />}
     </>
   );
@@ -177,7 +145,7 @@ export default function LinkTemplatesManage() {
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-              <MoreVertical size={15} />
+              
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { useNavigate, Link } from 'react-router-dom';
-import { Search, SlidersHorizontal, Image as ImageIcon, MoreVertical, ChevronDown } from 'lucide-react';
+import { Search, SlidersHorizontal, Image as ImageIcon, ChevronDown, Pencil, Copy, Settings, Link as LinkIcon, Eye, FileText } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { TableActionsMenu, ALL_COLUMNS } from './OffersTableActions';
-import { useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import { CopyOfferModal } from './CopyOfferModal';
 import { CopyOfferSettingsModal } from './CopyOfferSettingsModal';
 import { TrackingLinksModal } from './offerDetail/TrackingLinksModal';
@@ -23,91 +23,40 @@ import type { Offer, Advertiser, Publisher, TrackingDomain } from '../../types';
 function RowActionMenu({
   offer, onDuplicated, publishers, domains,
 }: { offer: Offer; onDuplicated: () => void; publishers: Publisher[]; domains: TrackingDomain[] }) {
-  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [copySettingsOpen, setCopySettingsOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', () => setOpen(false), true);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', () => setOpen(false), true);
-    };
-  }, [open]);
-
-  const go = (to: string) => { setOpen(false); nav(to); };
-  const copyUrl = async () => {
+  const go = (api: { close: () => void }, to: string) => { api.close(); nav(to); };
+  const copyUrl = async (api: { close: () => void }) => {
     await navigator.clipboard?.writeText(offer.destinationUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
-    setOpen(false);
+    api.close();
   };
-  const openCopyOffer = () => { setOpen(false); setCopyOpen(true); };
-  const openCopyOfferSettings = () => { setOpen(false); setCopySettingsOpen(true); };
-  const openTrackingLink = () => { setOpen(false); setLinksOpen(true); };
-
-  const item = (label: string, onClick: () => void, inert?: boolean) => (
-    <button
-      key={label}
-      role="menuitem"
-      title={inert ? 'Not available yet' : undefined}
-      onClick={onClick}
-      className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle"
-    >
-      {label}
-    </button>
-  );
+  const openCopyOffer = (api: { close: () => void }) => { api.close(); setCopyOpen(true); };
+  const openCopyOfferSettings = (api: { close: () => void }) => { api.close(); setCopySettingsOpen(true); };
+  const openTrackingLink = (api: { close: () => void }) => { api.close(); setLinksOpen(true); };
 
   return (
     <>
-      <button
-        ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg"
-      >
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div
-          ref={menuRef} role="menu"
-          style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-56 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated"
-        >
-          {item('Edit', () => go(`/app/offers/${offer.id}/edit`))}
-          {item('Copy Offer', openCopyOffer)}
-          {item('Copy Offer Settings', openCopyOfferSettings)}
-          {item(copied ? 'Copied!' : 'Copy Landing Page URL', copyUrl)}
-          {item('View Postbacks', () => go(`/app/offers/${offer.id}?tab=Postbacks`))}
-          {item('View Offer Applications', () => go(`/app/offers/${offer.id}?tab=${encodeURIComponent('Offer Applications')}`))}
-          {item('View Conversion Report', () => go(`/app/reports/conversions?offerId=${offer.id}`))}
-          {item('View Offer Report', () => go(`/app/reports/offer?offerId=${offer.id}`))}
-          {item('Get Tracking Link', openTrackingLink)}
-        </div>,
-        document.body,
-      )}
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Pencil} onSelect={() => go(api, `/app/offers/${offer.id}/edit`)}>Edit</MenuItem>
+            <MenuItem icon={Copy} onSelect={() => openCopyOffer(api)}>Copy Offer</MenuItem>
+            <MenuItem icon={Settings} onSelect={() => openCopyOfferSettings(api)}>Copy Offer Settings</MenuItem>
+            <MenuItem icon={LinkIcon} onSelect={() => copyUrl(api)}>{copied ? 'Copied!' : 'Copy Landing Page URL'}</MenuItem>
+            <MenuItem icon={Eye} onSelect={() => go(api, `/app/offers/${offer.id}?tab=Postbacks`)}>View Postbacks</MenuItem>
+            <MenuItem icon={Eye} onSelect={() => go(api, `/app/offers/${offer.id}?tab=${encodeURIComponent('Offer Applications')}`)}>View Offer Applications</MenuItem>
+            <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/conversions?offerId=${offer.id}`)}>View Conversion Report</MenuItem>
+            <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/offer?offerId=${offer.id}`)}>View Offer Report</MenuItem>
+            <MenuItem icon={LinkIcon} onSelect={() => openTrackingLink(api)}>Get Tracking Link</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
       {copyOpen && <CopyOfferModal offerId={offer.id} onClose={() => setCopyOpen(false)}
         onDone={(newId) => { setCopyOpen(false); onDuplicated(); nav(`/app/offers/${newId}`); }} />}
       {copySettingsOpen && <CopyOfferSettingsModal offerId={offer.id} onClose={() => setCopySettingsOpen(false)} />}

@@ -439,10 +439,10 @@ export default function VarianceReport() {
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[2200px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    <th rowSpan={2} className="whitespace-nowrap px-4 py-3 align-bottom font-semibold">{DIM_OPTIONS.find((o) => o.key === appliedParentDim)?.label}</th>
+                    <th rowSpan={2} className="align-bottom font-semibold">{DIM_OPTIONS.find((o) => o.key === appliedParentDim)?.label}</th>
                     {DETAIL_METRICS.map((m) => <th key={m.key} colSpan={3} className="whitespace-nowrap px-4 py-2 text-center font-semibold">{m.label}</th>)}
                   </tr>
                   <tr>
@@ -455,11 +455,11 @@ export default function VarianceReport() {
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {rows.map((r) => (
                     <Fragment key={r.raw}>
-                      <tr className="hover:bg-accent-subtle/40">
-                        <td className="whitespace-nowrap px-4 py-3">
+                      <tr>
+                        <td >
                           <span className="flex items-center gap-1.5">
                             {appliedChildDim && (
                               <button type="button" onClick={() => toggleExpand(r.raw)} className="text-fg-muted hover:text-fg">

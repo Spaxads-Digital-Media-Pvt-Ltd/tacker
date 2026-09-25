@@ -398,9 +398,9 @@ function FeedsTab() {
       </div>
 
       <div className="overflow-x-auto rounded-card border border-border">
-        <table className="w-full min-w-[900px] text-left text-body">
+        <table className="premium-table">
           <thead className="bg-page text-small font-semibold text-fg-secondary">
-            <tr>{FEEDS_COLUMNS.filter((c) => shown.has(c)).map((c) => <th key={c} className="whitespace-nowrap px-4 py-3">{c}</th>)}</tr>
+            <tr>{FEEDS_COLUMNS.filter((c) => shown.has(c)).map((c) => <th key={c} >{c}</th>)}</tr>
           </thead>
           <tbody>
             {!showRow ? (

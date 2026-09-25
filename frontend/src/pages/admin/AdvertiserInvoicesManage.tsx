@@ -6,14 +6,14 @@
  * billedAmount is computed once at creation from the real ledger (see advertiser-invoices/routes.ts).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, CreditCard, Trash2, Clock } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Modal, Tabs, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, ApiRequestModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { AdvertiserInvoice, AdvertiserInvoiceSummary, Advertiser, DashboardUser } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', deleted: 'bg-danger-text' };
@@ -130,62 +130,29 @@ function PayModal({ invoice, onClose, onDone }: { invoice: AdvertiserInvoice; on
 }
 
 function RowMenu({ invoice, onChanged }: { invoice: AdvertiserInvoice; onChanged: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/advertiser-invoices/${invoice.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
 
-  const toggle = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
-    }
-    setOpen((o) => !o);
-  };
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      if (btnRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const doDelete = async () => {
-    setOpen(false);
+  const doDelete = async (api: { close: () => void }) => {
+    api.close();
     if (!confirm(`Delete Invoice ID: ${invoice.ref}?`)) return;
     if (await del.run(undefined)) onChanged();
   };
 
-  const item = (label: string, onClick: () => void, disabled?: boolean) => (
-    <button role="menuitem" disabled={disabled} onClick={onClick}
-      className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
-      {label}
-    </button>
-  );
-
   return (
     <>
-      <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
-      </button>
-      {open && createPortal(
-        <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-40 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {item('Edit', () => { setOpen(false); nav(`/app/adv-invoices/${invoice.id}/edit`); }, invoice.status === 'deleted')}
-          {item('Pay', () => { setOpen(false); setPayOpen(true); }, invoice.status !== 'unpaid')}
-          {item('Delete', doDelete, invoice.status === 'deleted')}
-          {item('History', () => { setOpen(false); setHistoryOpen(true); })}
-        </div>,
-        document.body,
-      )}
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Pencil} disabled={invoice.status === 'deleted'} onSelect={() => { api.close(); nav(`/app/adv-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
+            <MenuItem icon={CreditCard} disabled={invoice.status !== 'unpaid'} onSelect={() => { api.close(); setPayOpen(true); }}>Pay</MenuItem>
+            <MenuItem icon={Trash2} tone="danger" disabled={invoice.status === 'deleted'} onSelect={() => doDelete(api)}>Delete</MenuItem>
+            <MenuItem icon={Clock} onSelect={() => { api.close(); setHistoryOpen(true); }}>History</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
       {historyOpen && <HistoryModal invoiceId={invoice.id} onClose={() => setHistoryOpen(false)} />}
       {payOpen && <PayModal invoice={invoice} onClose={() => setPayOpen(false)} onDone={onChanged} />}
     </>
@@ -313,14 +280,14 @@ export default function AdvertiserInvoicesManage() {
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-              <MoreVertical size={15} />
+              
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
                 <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
                 <div className="relative" onMouseEnter={() => setExportOpen(true)} onMouseLeave={() => setExportOpen(false)}>
                   <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                    Export <ChevronRight size={13} className="text-fg-muted" />
+                    Export 
                   </button>
                   {exportOpen && (
                     <div className="absolute right-full top-0 mr-1 w-28 rounded-card border border-border bg-elevated py-1 shadow-elevated">

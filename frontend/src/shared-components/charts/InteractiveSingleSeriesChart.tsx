@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
 function smoothPath(
   pts: ReadonlyArray<readonly [number, number]>,
   tension = 0.16,
@@ -35,19 +37,29 @@ export function InteractiveSingleSeriesChart({
   mode,
   height = 80,
   labelFormat = (v: number) => v.toString(),
+  secondaryData,
+  secondaryLabelFormat = (v: number) => v.toString(),
+  primaryName = 'Value',
+  secondaryName = 'Secondary',
+  showGrid = false,
 }: {
   data: number[];
   color?: string;
   mode: 'area' | 'bar';
   height?: number;
   labelFormat?: (v: number) => string;
+  secondaryData?: number[];
+  secondaryLabelFormat?: (v: number) => string;
+  primaryName?: string;
+  secondaryName?: string;
+  showGrid?: boolean;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   // Geometry
-  const w = 400;
+  const w = 800;
   const h = height;
-  const padL = 0, padR = 0, padT = 10, padB = 0;
+  const padL = 0, padR = 0, padT = 10, padB = showGrid ? 20 : 0;
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
 
@@ -60,7 +72,13 @@ export function InteractiveSingleSeriesChart({
 
   const pts = data.map((v, i) => [x(i), yPos(v)] as const);
   const linePath = smoothPath(pts, 0.16, [padT, padT + plotH]);
-  const areaPath = `${linePath} L${x(n - 1)},${padT + plotH} L${x(0)},${padT + plotH} Z`;
+  const areaPath = `${linePath} L${x(n - 1).toFixed(2)},${padT + plotH} L${x(0).toFixed(2)},${padT + plotH} Z`;
+
+  // Secondary Series Setup
+  const secMaxVal = secondaryData ? Math.max(1, ...secondaryData) * 1.1 : 1;
+  const ySec = (v: number) => padT + plotH - ((v - minVal) / (secMaxVal - minVal)) * plotH;
+  const secPts = secondaryData ? secondaryData.map((v, i) => [x(i), ySec(v)] as const) : [];
+  const secLinePath = secondaryData ? smoothPath(secPts, 0.16, [padT, padT + plotH]) : '';
 
   const barW = Math.max(2, (plotW / n) * 0.6);
 
@@ -74,8 +92,10 @@ export function InteractiveSingleSeriesChart({
   const handleLeave = () => setHoverIdx(null);
 
   const hoverVal = hoverIdx != null ? data[hoverIdx]! : 0;
+  const hoverSecVal = hoverIdx != null && secondaryData ? secondaryData[hoverIdx]! : 0;
   const hoverX = hoverIdx != null ? x(hoverIdx) : 0;
   const hoverY = hoverIdx != null ? yPos(hoverVal) : 0;
+  const hoverSecY = hoverIdx != null && secondaryData ? ySec(hoverSecVal) : 0;
   const leftPct = hoverIdx != null ? (hoverX / w) * 100 : 0;
 
   const hourLabel = hoverIdx != null ? `${String(hoverIdx).padStart(2, '0')}:00` : '';
@@ -84,6 +104,12 @@ export function InteractiveSingleSeriesChart({
   const tipStyle = { left: `calc(${leftPct}% + ${tipOffset}px)`, transform: `translateY(-50%) translateX(${tipX})` };
 
   const id = `chart-grad-${color.replace(/[^a-zA-Z0-9]/g, '')}`;
+
+  const tickDigits = maxVal >= 100 ? 0 : 1;
+  const yAxis = [0.25, 0.5, 0.75, 1].map((f) => ({
+    y: padT + plotH * f,
+    label: maxVal * (1 - f),
+  }));
 
   return (
     <div className="relative w-full" style={{ height: `${h}px` }}>
@@ -104,22 +130,41 @@ export function InteractiveSingleSeriesChart({
             <stop offset="0%" stopColor={color} stopOpacity="0.25" />
             <stop offset="100%" stopColor={color} stopOpacity="0" />
           </linearGradient>
-          <filter id="glow-filter" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feComposite in="SourceGraphic" in2="blur" operator="over" />
-          </filter>
         </defs>
+
+        {showGrid && yAxis.map(({ y }, i) => (
+          <line
+            key={i} x1={padL} y1={y} x2={w - padR} y2={y}
+            stroke="rgb(var(--border))" strokeOpacity="1" strokeWidth="1" vectorEffect="non-scaling-stroke"
+          />
+        ))}
 
         {mode === 'area' ? (
           <>
             <path d={areaPath} fill={`url(#${id})`} className="animate-fade-in" />
-            <path d={linePath} fill="none" stroke={color} strokeWidth="2.5" filter="url(#glow-filter)" className="animate-draw-line" style={{ strokeDasharray: 2000, strokeDashoffset: 2000 }} vectorEffect="non-scaling-stroke" />
+            <path d={linePath} fill="none" stroke={color} strokeWidth="1.5" className="animate-draw-line" style={{ strokeDasharray: 2000, strokeDashoffset: 2000 }} vectorEffect="non-scaling-stroke" />
           </>
         ) : (
           data.map((v, i) => (
             <rect key={i} x={x(i) - barW / 2} y={yPos(v)} width={barW} height={padT + plotH - yPos(v)} rx="1.5" fill={color} fillOpacity="0.6" className="animate-fade-in" style={{ animationDelay: `${i * 15}ms` }} />
           ))
         )}
+
+        {secondaryData && (
+          <path d={secLinePath} fill="none" stroke="rgb(var(--text-muted))" strokeWidth="1.5" strokeDasharray="4 3" className="animate-fade-in delay-200" vectorEffect="non-scaling-stroke" />
+        )}
+
+        {showGrid && yAxis.map(({ y, label }, i) => (
+          <text key={i} x={3} y={y - 4} fontSize="10" textAnchor="start" fill="rgb(var(--text-muted))">
+            {label.toFixed(tickDigits)}
+          </text>
+        ))}
+
+        {showGrid && HOURS.filter((h2) => h2 % 4 === 0).map((h2) => (
+          <text key={h2} x={x(h2)} y={h - 6} fontSize="10" textAnchor={h2 === 0 ? 'start' : 'middle'} fill="rgb(var(--text-muted))">
+            {String(h2).padStart(2, '0')}:00
+          </text>
+        ))}
 
         {hoverIdx != null && (
           <line
@@ -132,18 +177,30 @@ export function InteractiveSingleSeriesChart({
       {hoverIdx != null && (
         <>
           <span
-            className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-surface"
+            className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-surface z-20"
             style={{ left: `${leftPct}%`, top: `${(hoverY / h) * 100}%`, backgroundColor: color }}
           />
+          {secondaryData && (
+            <span
+              className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-surface bg-fg-muted z-20"
+              style={{ left: `${leftPct}%`, top: `${(hoverSecY / h) * 100}%` }}
+            />
+          )}
           <div
-            className="pointer-events-none absolute top-1/2 z-10 w-32 rounded-[var(--radius)] border border-border bg-elevated px-2.5 py-1.5 shadow-elevated transition-all"
+            className="pointer-events-none absolute top-1/2 z-30 min-w-[120px] rounded-[var(--radius)] border border-border bg-elevated px-2.5 py-1.5 shadow-elevated transition-all"
             style={tipStyle}
           >
             <div className="mb-1 text-tiny font-medium tabular-nums text-fg-secondary">{hourLabel}</div>
             <div className="flex items-center gap-1.5 text-tiny text-fg-secondary">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
-              <strong className="font-semibold tabular-nums text-fg">{labelFormat(hoverVal)}</strong>
+              <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />{primaryName}
+              <strong className="ml-auto font-semibold tabular-nums text-fg">{labelFormat(hoverVal)}</strong>
             </div>
+            {secondaryData && (
+              <div className="mt-0.5 flex items-center gap-1.5 text-tiny text-fg-secondary">
+                <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-fg-muted" />{secondaryName}
+                <strong className="ml-auto font-semibold tabular-nums text-fg">{secondaryLabelFormat(hoverSecVal)}</strong>
+              </div>
+            )}
           </div>
         </>
       )}

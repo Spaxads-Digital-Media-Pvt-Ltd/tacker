@@ -120,7 +120,7 @@ function OverviewTab({ goto }: { goto: (t: (typeof TOP_TABS)[number]) => void })
             <button className="text-small text-accent-text hover:underline" onClick={() => goto('Audiences')}>See All ({data.audiencesTotal})</button>
           </div>
           {data.topAudiences.length === 0 ? <p className="text-small text-fg-muted">No audiences yet.</p> : (
-            <table className="w-full text-small">
+            <table className="premium-table">
               <tbody>
                 {data.topAudiences.map((a) => (
                   <tr key={a.id} className="border-t border-border">
@@ -139,7 +139,7 @@ function OverviewTab({ goto }: { goto: (t: (typeof TOP_TABS)[number]) => void })
             <button className="text-small text-accent-text hover:underline" onClick={() => goto('Templates')}>See All ({data.templatesTotal})</button>
           </div>
           {data.templates.length === 0 ? <p className="text-small text-fg-muted">No templates yet.</p> : (
-            <table className="w-full text-small">
+            <table className="premium-table">
               <tbody>
                 {data.templates.map((t) => (
                   <tr key={t.id} className="border-t border-border">
@@ -172,7 +172,7 @@ function OverviewTab({ goto }: { goto: (t: (typeof TOP_TABS)[number]) => void })
             <button className="text-small text-accent-text hover:underline" onClick={() => goto('Emails')}>See All</button>
           </div>
           {data.recentEmails.length === 0 ? <p className="text-small text-fg-muted">No Record Found</p> : (
-            <table className="w-full text-small">
+            <table className="premium-table">
               <tbody>
                 {data.recentEmails.map((e) => (
                   <tr key={e.id} className="border-t border-border">
@@ -191,7 +191,7 @@ function OverviewTab({ goto }: { goto: (t: (typeof TOP_TABS)[number]) => void })
             <button className="text-small text-accent-text hover:underline" onClick={() => goto('Banners')}>See All</button>
           </div>
           {data.recentBanners.length === 0 ? <p className="text-small text-fg-muted">No Record Found</p> : (
-            <table className="w-full text-small">
+            <table className="premium-table">
               <tbody>
                 {data.recentBanners.map((b) => (
                   <tr key={b.id} className="border-t border-border">
@@ -328,7 +328,7 @@ function EmailsTab() {
         <StateBlock>No Record Found</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full text-small">
+          <table className="premium-table">
             <thead className="bg-page text-tiny text-fg-secondary">
               <tr>
                 <th className="px-3 py-2 text-left">Subject</th>
@@ -471,7 +471,7 @@ function BannersTab() {
         <StateBlock>No Record Found</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full text-small">
+          <table className="premium-table">
             <thead className="bg-page text-tiny text-fg-secondary">
               <tr>
                 <th className="px-3 py-2 text-left">Name</th>
@@ -586,7 +586,7 @@ function AudiencesTab() {
         <StateBlock>No Record Found</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full text-small">
+          <table className="premium-table">
             <thead className="bg-page text-tiny text-fg-secondary">
               <tr>
                 <th className="px-3 py-2 text-left">Name</th>
@@ -673,7 +673,7 @@ function TemplatesTab() {
         <StateBlock>No Record Found</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
-          <table className="w-full text-small">
+          <table className="premium-table">
             <thead className="bg-page text-tiny text-fg-secondary">
               <tr>
                 <th className="px-3 py-2 text-left">Name</th>

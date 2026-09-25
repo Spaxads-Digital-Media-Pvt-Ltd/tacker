@@ -83,10 +83,10 @@ export default function ImpressionReport() {
         {!hasRun ? <StateBlock>Set parameters and run report</StateBlock> : (
           <>
             <div className="overflow-x-auto rounded-card border border-border">
-              <table className="w-full min-w-[900px] text-left text-body">
-                <thead className="border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
+              <table className="premium-table">
+                <thead>
                   <tr>
-                    {COLUMNS.map((c) => <th key={c} className="whitespace-nowrap px-4 py-3 font-semibold">{c}</th>)}
+                    {COLUMNS.map((c) => <th key={c} >{c}</th>)}
                   </tr>
                 </thead>
                 <tbody>

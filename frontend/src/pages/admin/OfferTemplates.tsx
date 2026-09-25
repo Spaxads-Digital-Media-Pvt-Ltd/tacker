@@ -154,9 +154,9 @@ export default function OfferTemplates() {
         : (
           <>
             <TableScroll>
-              <table className="w-full min-w-[900px] text-left text-body">
+              <table className="premium-table">
                 <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
-                  <tr className="divide-x divide-border">
+                  <tr>
                     <th className="px-4 py-3 font-semibold">
                       <button type="button" onClick={() => setSortAsc((a) => !a)} className="flex items-center gap-1 hover:text-fg">
                         Default {sortAsc ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
@@ -165,12 +165,12 @@ export default function OfferTemplates() {
                     <th className="px-4 py-3 font-semibold">ID</th>
                     <th className="px-4 py-3 font-semibold">Name</th>
                     <th className="px-4 py-3 font-semibold">Offer Fields</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Created</th>
-                    <th className="whitespace-nowrap px-4 py-3 font-semibold">Modified</th>
+                    <th >Created</th>
+                    <th >Modified</th>
                     <th className="px-4 py-3 font-semibold" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody>
                   {paged.map((r) => (
                     <tr key={r.id}>
                       <td className="px-4 py-3 text-small text-fg-secondary">{r.isDefault ? 'YES' : '—'}</td>
@@ -197,8 +197,8 @@ export default function OfferTemplates() {
                           );
                         })()}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.createdAt} /></td>
-                      <td className="whitespace-nowrap px-4 py-3 text-small"><DateTimeCell iso={r.updatedAt} /></td>
+                      <td className="text-small"><DateTimeCell iso={r.createdAt} /></td>
+                      <td className="text-small"><DateTimeCell iso={r.updatedAt} /></td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           <button className="btn-primary !py-1.5 !px-3 text-tiny" onClick={() => applyTemplate(r)}>Use Template</button>

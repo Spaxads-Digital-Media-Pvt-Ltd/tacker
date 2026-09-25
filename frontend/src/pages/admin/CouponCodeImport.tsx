@@ -154,7 +154,7 @@ export default function CouponCodeImport() {
               <span className="text-tiny text-fg-secondary">{validRows.length} of {rows.length} rows valid</span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-small">
+              <table className="premium-table">
                 <thead>
                   <tr className="border-b border-border text-tiny uppercase text-fg-secondary">
                     <th className="py-2 pr-3">Coupon Code</th>
