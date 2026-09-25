@@ -106,19 +106,20 @@ export default function OfferCreate() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const normalizeUrl = (v: string) => (v && !/^https?:\/\//i.test(v) ? 'https://' + v : v);
     const body: Record<string, unknown> = {
-      advertiserId: form.advertiserId, name: form.name, destinationUrl: form.destinationUrl,
+      advertiserId: form.advertiserId, name: form.name, destinationUrl: normalizeUrl(form.destinationUrl),
       payoutModel: form.payoutModel, currency: form.currency,
       defaultRevenue: form.defaultRevenue || '0', defaultPayout: form.defaultPayout || '0',
       visibility: form.visibility, status: form.status, allowedTrafficTypes: form.allowedTrafficTypes,
     };
     if (form.category) body.category = form.category;
-    if (form.previewUrl) body.previewUrl = form.previewUrl;
+    if (form.previewUrl) body.previewUrl = normalizeUrl(form.previewUrl);
     if (form.trackingDomainId) body.trackingDomainId = form.trackingDomainId;
     if (form.description) body.description = form.description;
     if (form.attributionWindowS) body.attributionWindowS = Number(form.attributionWindowS);
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
-    if (failTrafficEnabled && form.fallbackUrl) body.fallbackUrl = form.fallbackUrl;
+    if (failTrafficEnabled && form.fallbackUrl) body.fallbackUrl = normalizeUrl(form.fallbackUrl);
     if (capsEnabled && dailyClickCap) body.dailyClickCap = Number(dailyClickCap);
     const res = await run(body);
     if (!res) return;

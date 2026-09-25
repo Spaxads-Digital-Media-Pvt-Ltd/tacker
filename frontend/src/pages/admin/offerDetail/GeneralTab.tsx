@@ -127,9 +127,21 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
       <div className="space-y-6">
         <Card title="Stats" action={
           <div className="flex items-center gap-2 text-tiny text-fg-secondary">
-            <input type="date" className="input !w-auto !py-1 text-tiny" value={range.from.slice(0, 10)} onChange={(e) => setRange((r) => ({ ...r, from: new Date(e.target.value).toISOString() }))} />
+            <input type="date" className="input !w-auto !py-1 text-tiny" value={range.from.slice(0, 10)} onChange={(e) => {
+              const v = e.target.value;
+              if (!v) return;
+              const d = new Date(v);
+              if (isNaN(d.getTime())) return;
+              setRange((r) => ({ ...r, from: d.toISOString() }));
+            }} />
             <span>to</span>
-            <input type="date" className="input !w-auto !py-1 text-tiny" value={range.to.slice(0, 10)} onChange={(e) => setRange((r) => ({ ...r, to: new Date(e.target.value).toISOString() }))} />
+            <input type="date" className="input !w-auto !py-1 text-tiny" value={range.to.slice(0, 10)} onChange={(e) => {
+              const v = e.target.value;
+              if (!v) return;
+              const d = new Date(v);
+              if (isNaN(d.getTime())) return;
+              setRange((r) => ({ ...r, to: d.toISOString() }));
+            }} />
           </div>
         }>
           {stats.loading ? <Spinner /> : (

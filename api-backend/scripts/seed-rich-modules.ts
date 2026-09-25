@@ -22,6 +22,7 @@
  *   DATABASE_URL='postgresql://tracker:tracker_local_dev@localhost:5433/tracker_test' \
  *     npm --prefix api-backend run seed:rich-modules
  */
+import 'dotenv/config';
 import pg from 'pg';
 
 const NET_SLUG = 'demo';

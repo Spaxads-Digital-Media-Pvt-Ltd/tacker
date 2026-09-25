@@ -27,7 +27,7 @@ export default function Invoices() {
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
         : !data?.advertiserBilling.length ? <StateBlock>No advertiser billing yet.</StateBlock>
-        : <Table columns={columns} rows={data.advertiserBilling} rowKey={(r) => r.id} />}
+        : <Table columns={columns} rows={data.advertiserBilling} rowKey={(r) => `${r.id}-${r.currency}`} />}
     </>
   );
 }

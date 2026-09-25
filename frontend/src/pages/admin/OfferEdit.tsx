@@ -264,17 +264,18 @@ export default function OfferEdit() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const normalizeUrl = (v: string) => (v && !/^https?:\/\//i.test(v) ? 'https://' + v : v);
     const body: Record<string, unknown> = {
       name: form.name, status: form.status, advertiserId: form.advertiserId, currency: form.currency,
-      visibility: form.visibility, destinationUrl: form.destinationUrl, payoutModel: form.payoutModel,
+      visibility: form.visibility, destinationUrl: normalizeUrl(form.destinationUrl), payoutModel: form.payoutModel,
       defaultPayout: form.defaultPayout || '0', defaultRevenue: form.defaultRevenue || '0',
       allowedTrafficTypes: form.allowedTrafficTypes,
     };
     if (form.category) body.category = form.category;
-    if (form.previewUrl) body.previewUrl = form.previewUrl;
+    if (form.previewUrl) body.previewUrl = normalizeUrl(form.previewUrl);
     if (form.description) body.description = form.description;
     if (form.trackingDomainId) body.trackingDomainId = form.trackingDomainId;
-    if (failTrafficEnabled && form.fallbackUrl) body.fallbackUrl = form.fallbackUrl;
+    if (failTrafficEnabled && form.fallbackUrl) body.fallbackUrl = normalizeUrl(form.fallbackUrl);
     if (capsEnabled) {
       if (form.dailyClickCap) body.dailyClickCap = Number(form.dailyClickCap);
       if (form.dailyConversionCap) body.dailyConversionCap = Number(form.dailyConversionCap);
