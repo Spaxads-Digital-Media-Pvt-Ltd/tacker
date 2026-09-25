@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef, type RefObject } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export function useIntersectionObserver(
-  ref: RefObject<Element>,
+  ref: { current: unknown },
   options: IntersectionObserverInit = { threshold: 0, rootMargin: '0px' },
   triggerOnce = true
 ): boolean {
@@ -10,7 +10,7 @@ export function useIntersectionObserver(
 
   useEffect(() => {
     const target = ref.current;
-    if (!target) return;
+    if (!(target instanceof Element)) return;
     if (triggerOnce && hasTriggered.current) return;
 
     const observer = new IntersectionObserver(([entry]) => {

@@ -284,16 +284,18 @@ function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, formatFn, se
 }) {
   const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
   const baseCls = 'card !p-6 transition-all duration-300 relative overflow-hidden group flex flex-col hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]';
-  const interactiveCls = 'text-left w-full cursor-pointer';
-  const cls = onClick
-    ? `${baseCls} ${interactiveCls} ${className}`
-    : `${baseCls} ${className}`;
-  const Element: React.ElementType = onClick ? 'button' : 'div';
-  const elementProps = onClick ? { type: 'button' as const, onClick } : {};
-  const ref = useRef<HTMLElement>(null);
-  const inView = useIntersectionObserver(ref as any, { threshold: 0.1 });
+  const interactiveCls = onClick ? 'cursor-pointer' : '';
+  const cls = `${baseCls} ${className} ${interactiveCls}`;
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useIntersectionObserver(ref, { threshold: 0.1 });
   return (
-    <Element ref={ref as any} {...elementProps} className={cls}>
+    <div
+      ref={ref}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      className={cls}>
       <div className="relative z-10 flex items-start justify-between">
         <div className="flex items-center gap-2">
           {Icon && <Icon size={20} className={iconColor} />}
@@ -317,7 +319,7 @@ function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, formatFn, se
           <div key={k} className="flex justify-between"><dt className="text-fg-muted">{k}</dt><dd className="font-medium tabular-nums text-fg-secondary">{v}</dd></div>
         ))}
       </dl>
-    </Element>
+    </div>
   );
 }
 
@@ -475,7 +477,7 @@ function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, f
   const [mode, setMode] = useState<'area' | 'bar'>('area');
   const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
   const ref = useRef<HTMLDivElement>(null);
-  const inView = useIntersectionObserver(ref as any, { threshold: 0.1 });
+  const inView = useIntersectionObserver(ref, { threshold: 0.1 });
   void onClick;
 
   return (
