@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, MoreVertical } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { TableActionsMenu, ALL_COLUMNS } from './PublishersTableActions';
+import { TableActionsMenu } from './PublishersTableActions';
 import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { Publisher, DashboardUser } from '../../types';
 

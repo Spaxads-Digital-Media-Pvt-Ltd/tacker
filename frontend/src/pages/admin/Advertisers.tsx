@@ -6,10 +6,10 @@
  * a real Supabase magic-link for the advertiser's OWN linked portal account, mirroring the same
  * pattern already shipped for Partners.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, MoreVertical, ChevronDown, Pencil, User, FileText, Clock, Trash2 } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, Clock, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';

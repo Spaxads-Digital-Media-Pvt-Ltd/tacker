@@ -15,7 +15,7 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, TableRowMenu, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { CouponCode, Publisher, Offer, TrackingDomain } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', expired: 'bg-fg-muted', disabled: 'bg-warning' };
