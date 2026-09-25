@@ -138,7 +138,6 @@ function AdminDashboard({ name }: { name: string }) {
   const offers = useQuery<Offer[]>('/api/offers');
   const pubs = useQuery<Publisher[]>('/api/publishers');
   const advs = useQuery<Advertiser[]>('/api/advertisers');
-
   const from = daysAgo(7);
   const to = todayStr();
 
