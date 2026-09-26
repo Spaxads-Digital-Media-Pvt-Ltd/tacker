@@ -66,7 +66,18 @@ export function createBaseApp(surface: string, corsOrigin?: CorsOrigin): Express
   });
 
   // Liveness/readiness — no auth (spec §13 Phase 0 health checks).
-  // Returns 200 for 'ok' and 'degraded' (still functional); 503 only for 'unready'.
+  // /healthz: always 200 (liveness probe — container is alive).
+  // /readyz: 200 ok/degraded, 503 unready (readiness probe — can accept traffic).
+  // /health: backward-compat alias for /readyz (preserves existing integrations).
+  app.get('/healthz', (_req, res) => res.sendStatus(200));
+  app.get('/readyz', async (_req, res) => {
+    try {
+      const report = await buildHealthReport(surface);
+      res.status(report.status === 'unready' ? 503 : 200).json(report);
+    } catch {
+      res.sendStatus(503);
+    }
+  });
   app.get('/health', async (_req, res) => {
     try {
       const report = await buildHealthReport(surface);

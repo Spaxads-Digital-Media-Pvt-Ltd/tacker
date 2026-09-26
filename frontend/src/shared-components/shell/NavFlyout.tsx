@@ -113,7 +113,7 @@ export function NavFlyout({ entry, expanded = false, topOffset, onClose }: {
           expanded ? 'md:left-[260px]' : 'md:left-[68px]'
         }`}
       >
-        <div className="sticky top-0 flex items-center gap-2.5 border-b border-[rgb(var(--sidebar-accent))]/20 bg-transparent px-5 py-4">
+        <div className="sticky top-0 flex items-center gap-2.5 border-b border-[rgb(var(--sidebar-accent))]/20 bg-[rgb(var(--sidebar-bg))] px-5 py-4 z-10">
           <span className="text-[rgb(var(--sidebar-accent))]"><Ic /></span>
           <h2 className="flex-1 text-h3 font-semibold tracking-tight text-[rgb(var(--sidebar-fg-strong))]">{entry.label}</h2>
           <button onClick={onClose} className="text-[rgb(var(--sidebar-fg))] hover:text-[rgb(var(--sidebar-fg-strong))]" aria-label="Close"><X size={17} /></button>

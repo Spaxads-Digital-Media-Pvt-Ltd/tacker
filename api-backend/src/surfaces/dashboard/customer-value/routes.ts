@@ -157,6 +157,61 @@ export function customerValueRoutes(): Router {
     const params: unknown[] = [networkId];
     let where = 'network_id = $1';
     if (statusParam !== 'all') { params.push(statusParam); where += ` AND status = $${params.length}`; }
+
+    // Client-side filters — build a boolean expression for each optional filter.
+    const has = (key: string): boolean => {
+      const v = req.query[key];
+      return typeof v === 'string' && v.length > 0;
+    };
+    if (has('advertiser')) {
+      const ids = String(req.query['advertiser']!).split(',').filter(Boolean);
+      const placeholders = ids.map((_, i) => `$${params.length + i + 1}`).join(',');
+      where += ` AND apply_advertisers_mode = 'specific' AND apply_advertiser_ids && ARRAY[${placeholders}]`;
+      params.push(...ids);
+    }
+    if (has('offer')) {
+      const ids = String(req.query['offer']!).split(',').filter(Boolean);
+      const placeholders = ids.map((_, i) => `$${params.length + i + 1}`).join(',');
+      where += ` AND apply_offers_mode = 'specific' AND apply_offer_ids && ARRAY[${placeholders}]`;
+      params.push(...ids);
+    }
+    if (has('partner')) {
+      const ids = String(req.query['partner']!).split(',').filter(Boolean);
+      const placeholders = ids.map((_, i) => `$${params.length + i + 1}`).join(',');
+      where += ` AND apply_partners_mode = 'specific' AND apply_partner_ids && ARRAY[${placeholders}]`;
+      params.push(...ids);
+    }
+    if (has('grouping')) {
+      const vals = String(req.query['grouping']!).split(',');
+      const placeholders = vals.map((_, i) => `$${params.length + i + 1}`).join(',');
+      where += ` AND conversion_event_grouping IN (${placeholders})`;
+      params.push(...vals);
+    }
+    if (has('dataPoint')) {
+      const dpIds = String(req.query['dataPoint']!).split(',').filter(Boolean);
+      const placeholders = dpIds.map((_, i) => `$${params.length + i + 1}`).join(',');
+      params.push(...dpIds);
+      where += ` AND EXISTS (SELECT 1 FROM jsonb_array_elements(conditions) AS cond
+                           WHERE cond->>'dataPointId' = ANY (ARRAY[${placeholders}]::uuid[]))`;
+    }
+    if (has('metricType')) {
+      const types = String(req.query['metricType']!).split(',');
+      const typePlaceholders = types.map((_, i) => `$${params.length + i + 1}`).join(',');
+      params.push(...types);
+      where += ` AND EXISTS (SELECT 1 FROM customer_data_points dp
+                           WHERE dp.network_id = customer_value_rules.network_id
+                             AND dp.data_type = ANY (ARRAY[${typePlaceholders}])
+                             AND EXISTS (SELECT 1 FROM jsonb_array_elements(customer_value_rules.conditions) AS cond
+                                         WHERE cond->>'dataPointId' = dp.id))`;
+    }
+    if (has('cycleDuration')) {
+      const vals = String(req.query['cycleDuration']!).split(',');
+      const parts = vals.map((v) => {
+        if (v === 'continuous') return "goal_cycle = 'continuous'";
+        return `goal_cycle = 'recurring' AND recurring_duration = '${v}'`;
+      }).join(' OR ');
+      where += ` AND (${parts})`;
+    }
     const { rows } = await query<RuleRow>(`SELECT * FROM ${RULES_TABLE} WHERE ${where} ORDER BY ref ASC LIMIT 1000`, params);
     sendOk(res, rows.map(ruleDto));
   }));

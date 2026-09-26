@@ -224,6 +224,7 @@ function EmailComposeForm({ audiences, templates, initial, onSaved, onCancel }: 
   const [body, setBody] = useState('');
   const [messageType, setMessageType] = useState('general');
   const [audienceId, setAudienceId] = useState('');
+  const [clientError, setClientError] = useState<string | null>(null);
   const { run, busy, error } = useMutation(async (args: { action: 'draft' | 'send' }) => {
     const payload = { subject, body, messageType, audienceId: audienceId || undefined };
     if (editId) {
@@ -250,11 +251,23 @@ function EmailComposeForm({ audiences, templates, initial, onSaved, onCancel }: 
     if (t) { setSubject(t.subject); setBody(t.body); setMessageType(t.messageType); }
   };
 
+  const validate = (action: 'draft' | 'send'): string | null => {
+    if (!subject.trim()) return 'Subject is required.';
+    if (!body.trim()) return 'Message body is required.';
+    if (action === 'send' && !audienceId) return 'Pick an audience before sending.';
+    return null;
+  };
+
   const submit = async (e: FormEvent, action: 'draft' | 'send') => {
     e.preventDefault();
+    const v = validate(action);
+    if (v) { setClientError(v); return; }
+    setClientError(null);
     const res = await run({ action });
     if (res) onSaved();
   };
+
+  const displayError = clientError ?? error;
 
   if (editId && loadingEmail && !loaded) {
     return <StateBlock><Spinner /></StateBlock>;
@@ -263,7 +276,7 @@ function EmailComposeForm({ audiences, templates, initial, onSaved, onCancel }: 
   return (
     <form onSubmit={(e) => submit(e, 'draft')} className="space-y-4">
       <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {displayError && <p className="text-small text-danger-text">{displayError}</p>}
       {!initial && templates.length > 0 && (
         <Field label="Start from Template">
           <select className="input" onChange={(e) => applyTemplate(e.target.value)} defaultValue="">
@@ -272,7 +285,7 @@ function EmailComposeForm({ audiences, templates, initial, onSaved, onCancel }: 
           </select>
         </Field>
       )}
-      <Field label="Subject *"><input className="input" required value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
+      <Field label="Subject *"><input className="input" value={subject} onChange={(e) => { setSubject(e.target.value); if (clientError) setClientError(null); }} /></Field>
       <Field label="Message Type">
         <select className="input" value={messageType} onChange={(e) => setMessageType(e.target.value)}>
           <option value="general">General</option>
@@ -280,17 +293,17 @@ function EmailComposeForm({ audiences, templates, initial, onSaved, onCancel }: 
         </select>
       </Field>
       <Field label="Audience *">
-        <select className="input" required value={audienceId} onChange={(e) => setAudienceId(e.target.value)}>
+        <select className="input" value={audienceId} onChange={(e) => { setAudienceId(e.target.value); if (clientError) setClientError(null); }}>
           <option value="">Select an audience…</option>
           {audiences.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.recipientCount} recipient{a.recipientCount === 1 ? '' : 's'})</option>)}
         </select>
         {audiences.length === 0 && <p className="mt-1 text-tiny text-fg-muted">No audiences yet — create one in the Audiences tab first.</p>}
       </Field>
-      <Field label="Message *"><textarea className="input min-h-40" required value={body} onChange={(e) => setBody(e.target.value)} /></Field>
+      <Field label="Message *"><textarea className="input min-h-40" value={body} onChange={(e) => { setBody(e.target.value); if (clientError) setClientError(null); }} /></Field>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
-        <button type="submit" className="btn-ghost" disabled={busy}>Save Draft</button>
-        <button type="button" className="btn-primary inline-flex items-center gap-1.5" disabled={busy || !audienceId}
+        <button type="submit" className="btn-ghost" disabled={busy}>{busy ? 'Saving…' : 'Save Draft'}</button>
+        <button type="button" className="btn-primary inline-flex items-center gap-1.5" disabled={busy}
           onClick={(e) => submit(e, 'send')}>
           <Send size={14} /> {busy ? 'Sending…' : 'Send Now'}
         </button>
@@ -405,6 +418,7 @@ function BannerForm({ initial, onSaved, onCancel }: { initial?: BannerRow; onSav
   const [priority, setPriority] = useState(initial?.priority ?? 'default');
   const [publishAt, setPublishAt] = useState(toLocalInput(initial?.publishAt ?? null));
   const [expireAt, setExpireAt] = useState(toLocalInput(initial?.expireAt ?? null));
+  const [clientError, setClientError] = useState<string | null>(null);
   const { run, busy, error } = useMutation((args: { saveAsDraft: boolean }) => {
     const body = {
       name, message, priority,
@@ -417,16 +431,26 @@ function BannerForm({ initial, onSaved, onCancel }: { initial?: BannerRow; onSav
       : api.post('/api/communication-hub/banners', body);
   });
 
+  const validate = (): string | null => {
+    if (!name.trim()) return 'Name is required.';
+    return null;
+  };
+
   const submit = async (e: FormEvent, saveAsDraft: boolean) => {
     e.preventDefault();
+    const v = validate();
+    if (v) { setClientError(v); return; }
+    setClientError(null);
     if (await run({ saveAsDraft })) onSaved();
   };
 
+  const displayError = clientError ?? error;
+
   return (
     <form onSubmit={(e) => submit(e, false)} className="space-y-4">
-      {error && <p className="text-small text-danger-text">{error}</p>}
-      <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="Message *"><textarea className="input min-h-28" required value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
+      {displayError && <p className="text-small text-danger-text">{displayError}</p>}
+      <Field label="Name *"><input className="input" value={name} onChange={(e) => { setName(e.target.value); if (clientError) setClientError(null); }} /></Field>
+      <Field label="Message"><textarea className="input min-h-28" value={message} onChange={(e) => setMessage(e.target.value)} /></Field>
       <Field label="Priority">
         <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
           {(['default', 'high'] as const).map((p) => (
@@ -518,21 +542,32 @@ function AudienceForm({ initial, onSaved, onCancel }: { initial?: AudienceRow; o
   const [groupType, setGroupType] = useState<'publishers' | 'advertisers'>(initial?.groupType ?? 'publishers');
   const [statusFilter, setStatusFilter] = useState<string[]>(initial?.statusFilter ?? []);
   const [tierId, setTierId] = useState(initial?.tierId ?? '');
+  const [clientError, setClientError] = useState<string | null>(null);
   const { data: tiers } = useQuery<Tier[]>(groupType === 'publishers' ? '/api/partner-tiers' : null);
   const { run, busy, error } = useMutation((body: Record<string, unknown>) =>
     initial ? api.put(`/api/communication-hub/audiences/${initial.id}`, body) : api.post('/api/communication-hub/audiences', body));
 
   const toggle = (s: string) => setStatusFilter((f) => f.includes(s) ? f.filter((x) => x !== s) : [...f, s]);
 
+  const validate = (): string | null => {
+    if (!name.trim()) return 'Audience name is required.';
+    return null;
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const v = validate();
+    if (v) { setClientError(v); return; }
+    setClientError(null);
     if (await run({ name, groupType, statusFilter, tierId: tierId || undefined })) onSaved();
   };
 
+  const displayError = clientError ?? error;
+
   return (
     <form onSubmit={submit} className="space-y-4">
-      {error && <p className="text-small text-danger-text">{error}</p>}
-      <Field label="Audience Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      {displayError && <p className="text-small text-danger-text">{displayError}</p>}
+      <Field label="Audience Name *"><input className="input" value={name} onChange={(e) => { setName(e.target.value); if (clientError) setClientError(null); }} /></Field>
       <Field label="Audience Group">
         <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
           {(['publishers', 'advertisers'] as const).map((g) => (
@@ -627,26 +662,39 @@ function TemplateForm({ initial, onSaved, onCancel }: { initial?: TemplateRow; o
   const [messageType, setMessageType] = useState(initial?.messageType ?? 'general');
   const [subject, setSubject] = useState(initial?.subject ?? '');
   const [body, setBody] = useState(initial?.body ?? '');
+  const [clientError, setClientError] = useState<string | null>(null);
   const { run, busy, error } = useMutation((b: Record<string, unknown>) =>
     initial ? api.put(`/api/communication-hub/templates/${initial.id}`, b) : api.post('/api/communication-hub/templates', b));
 
+  const validate = (): string | null => {
+    if (!name.trim()) return 'Template name is required.';
+    if (!subject.trim()) return 'Subject is required.';
+    if (!body.trim()) return 'Message body is required.';
+    return null;
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const v = validate();
+    if (v) { setClientError(v); return; }
+    setClientError(null);
     if (await run({ name, messageType, subject, body })) onSaved();
   };
 
+  const displayError = clientError ?? error;
+
   return (
     <form onSubmit={submit} className="space-y-4">
-      {error && <p className="text-small text-danger-text">{error}</p>}
-      <Field label="Template Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
+      {displayError && <p className="text-small text-danger-text">{displayError}</p>}
+      <Field label="Template Name *"><input className="input" value={name} onChange={(e) => { setName(e.target.value); if (clientError) setClientError(null); }} /></Field>
       <Field label="Message Type">
         <select className="input" value={messageType} onChange={(e) => setMessageType(e.target.value)}>
           <option value="general">General</option>
           <option value="offer_details">Offer Details</option>
         </select>
       </Field>
-      <Field label="Subject *"><input className="input" required value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
-      <Field label="Message *"><textarea className="input min-h-40" required value={body} onChange={(e) => setBody(e.target.value)} /></Field>
+      <Field label="Subject *"><input className="input" value={subject} onChange={(e) => { setSubject(e.target.value); if (clientError) setClientError(null); }} /></Field>
+      <Field label="Message *"><textarea className="input min-h-40" value={body} onChange={(e) => { setBody(e.target.value); if (clientError) setClientError(null); }} /></Field>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
         <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save Template'}</button>

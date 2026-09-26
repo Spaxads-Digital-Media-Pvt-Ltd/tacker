@@ -150,7 +150,7 @@ const MODAL_SIZE: Record<string, string> = { md: 'max-w-lg', xl: 'max-w-4xl' };
 export function Overlay({
   children,
   onClose,
-  className = 'grid place-items-center bg-[rgb(var(--flyout-scrim))] p-4 backdrop-blur-sm',
+  className = 'grid place-items-center bg-[rgb(var(--flyout-scrim))] p-4',
 }: {
   children: ReactNode;
   onClose?: () => void;

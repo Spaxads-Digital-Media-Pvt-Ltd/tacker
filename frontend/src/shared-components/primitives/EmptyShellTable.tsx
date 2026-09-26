@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, X, Info } from 'lucide-react';
-import { Field, Overlay, ScrollReveal, TableScroll } from './ui';
+import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, Info } from 'lucide-react';
+import { Field, MenuPopover, Modal, ScrollReveal, TableScroll } from './ui';
 import { Pagination } from './ReportPageKit';
 
 /**
@@ -30,30 +30,36 @@ function StatusFilter({
   const [internal, setInternal] = useState(initial);
   const selected = value ?? internal;
   const setSelected = onChange ?? setInternal;
-  const [open, setOpen] = useState(false);
+
   const options = (STANDARD_STATUS_OPTIONS as readonly string[]).includes(initial)
     ? [...STANDARD_STATUS_OPTIONS]
     : Array.from(new Set([...STANDARD_STATUS_OPTIONS, initial]));
+
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="input flex !w-auto items-center gap-2 !py-1.5">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[selected] ?? 'bg-fg-muted'}`} />{selected}<ChevronDown size={14} className="text-fg-muted" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-            {options.map((o) => (
-              <button key={o} type="button" onClick={() => { setSelected(o); setOpen(false); }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-page">
-                <span className="w-3.5">{selected === o && <Check size={13} />}</span>
-                <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[o] ?? 'bg-fg-muted'}`} />{o}
-              </button>
-            ))}
-          </div>
-        </>
+    <MenuPopover
+      ariaLabel="Status filter"
+      width="w-40"
+      align="start"
+      triggerClassName=""
+      button={
+        <span className="input flex !w-auto items-center gap-2 !py-1.5">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[selected] ?? 'bg-fg-muted'}`} />
+          {selected}<ChevronDown size={14} className="text-fg-muted" />
+        </span>
+      }
+    >
+      {({ close }) => (
+        <div className="py-1">
+          {options.map((o) => (
+            <button key={o} type="button" onClick={() => { setSelected(o); close(); }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-page">
+              <span className="w-3.5">{selected === o && <Check size={13} />}</span>
+              <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOTS[o] ?? 'bg-fg-muted'}`} />{o}
+            </button>
+          ))}
+        </div>
       )}
-    </div>
+    </MenuPopover>
   );
 }
 
@@ -63,36 +69,33 @@ function ColumnsCustomizationPanel({ columns, visible, onApply, onClose }: { col
   const filtered = columns.filter((c) => c.toLowerCase().includes(q.toLowerCase()));
   const toggle = (c: string) => setPending((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
   return (
-    <Overlay onClose={onClose}>
-      <div className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-card border border-border bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h3 className="text-h3 font-medium text-fg">Table Columns</h3>
-          <button type="button" onClick={() => setPending(columns)} className="text-tiny font-medium text-accent-text">Reset to default</button>
-        </div>
-        <div className="border-b border-border p-3">
+    <Modal open onClose={onClose} title="Table Columns" size="md">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="input !pl-8" />
+            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input className="input !pl-7" placeholder="Search columns…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
+          <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setPending(columns)}>Reset to default</button>
         </div>
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className="max-h-72 space-y-1.5 overflow-y-auto rounded-card border border-border p-2">
           {filtered.map((c) => (
-            <div key={c} className="flex items-center gap-2 rounded-[var(--radius)] px-2 py-2 hover:bg-page">
+            <div key={c} className="flex items-center gap-2 rounded-[var(--radius)] border border-border bg-surface px-2.5 py-2 text-small text-fg">
               <GripVertical size={14} className="shrink-0 cursor-grab text-fg-muted" />
-              <span className="flex-1 text-small text-fg">{c}</span>
+              <span className="flex-1">{c}</span>
               <button type="button" onClick={() => toggle(c)}
-                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${pending.includes(c) ? 'bg-success' : 'bg-border'}`}>
-                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${pending.includes(c) ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${pending.includes(c) ? 'bg-success' : 'bg-border'}`}>
+                <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${pending.includes(c) ? 'translate-x-[18px]' : 'translate-x-0'}`} />
               </button>
             </div>
           ))}
         </div>
-        <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+        <div className="flex justify-end gap-2 border-t border-border pt-3">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
           <button type="button" className="btn-primary" onClick={() => { onApply(pending); onClose(); }}>Apply</button>
         </div>
       </div>
-    </Overlay>
+    </Modal>
   );
 }
 
@@ -111,55 +114,52 @@ function ApiRequestModal({ title, onClose }: { title: string; onClose: () => voi
   const path = `/api/v1/network/${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   const url = `${origin}${path}`;
   return (
-    <Overlay onClose={onClose}>
-      <div className="w-full max-w-2xl rounded-card border border-border bg-surface shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h3 className="text-h3 font-medium text-fg">Table Request</h3>
-          <button type="button" onClick={onClose} className="text-fg-secondary hover:text-fg"><X size={18} /></button>
-        </div>
-        <div className="space-y-3 p-5">
-          <select value={lang} onChange={(e) => setLang(e.target.value as RequestLang)} className="input !w-40">
-            {REQUEST_LANGS.map((l) => <option key={l}>{l}</option>)}
-          </select>
-          <pre className="overflow-x-auto rounded-card border border-border bg-page p-4 text-tiny text-fg"><code>{requestSnippet(lang, url)}</code></pre>
-          <p className="flex items-start gap-1.5 text-tiny text-fg-secondary">
-            <Info size={13} className="mt-0.5 shrink-0" />
-            Illustrative — this list has no backing table in this app yet, so this endpoint isn't live.
-          </p>
-        </div>
-        <div className="border-t border-border px-5 py-3">
-          <a href={`${origin}/api/v1/openapi.json`} target="_blank" rel="noreferrer" className="text-tiny font-medium text-accent-text">View API Docs →</a>
-        </div>
+    <Modal open onClose={onClose} title="Table Request" size="xl">
+      <div className="space-y-3">
+        <select value={lang} onChange={(e) => setLang(e.target.value as RequestLang)} className="input !w-40">
+          {REQUEST_LANGS.map((l) => <option key={l}>{l}</option>)}
+        </select>
+        <pre className="overflow-x-auto rounded-card border border-border bg-page p-4 text-tiny text-fg"><code>{requestSnippet(lang, url)}</code></pre>
+        <p className="flex items-start gap-1.5 text-tiny text-fg-secondary">
+          <Info size={13} className="mt-0.5 shrink-0" />
+          Illustrative — this list has no backing table in this app yet, so this endpoint isn't live.
+        </p>
       </div>
-    </Overlay>
+      <div className="border-t border-border px-5 py-3">
+        <a href={`${origin}/api/v1/openapi.json`} target="_blank" rel="noreferrer" className="text-tiny font-medium text-accent-text">View API Docs →</a>
+      </div>
+    </Modal>
   );
 }
 
 function TableActionsMenu({ columns, visibleColumns, onColumnsChange, resourceName }: { columns: string[]; visibleColumns: string[]; onColumnsChange: (v: string[]) => void; resourceName: string }) {
-  const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<'columns' | 'api' | null>(null);
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-52 rounded-card border border-border bg-elevated p-1 shadow-elevated">
+    <>
+      <MenuPopover
+        ariaLabel="Table actions"
+        width="w-52"
+        align="end"
+        triggerClassName="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"
+        button={<MoreVertical size={15} />}
+      >
+        {({ close }) => (
+          <div className="p-1">
             <p className="px-2 py-1.5 text-small font-semibold text-fg">Table Actions</p>
-            <button type="button" onClick={() => { setPanel('columns'); setOpen(false); }}
+            <button type="button" onClick={() => { setPanel('columns'); close(); }}
               className="flex w-full items-center justify-between rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">
               Columns Customization <ChevronRight size={13} />
             </button>
-            <button type="button" onClick={() => { setPanel('api'); setOpen(false); }}
+            <button type="button" onClick={() => { setPanel('api'); close(); }}
               className="flex w-full items-center rounded-[var(--radius)] px-2 py-1.5 text-left text-small text-fg-secondary hover:bg-page hover:text-fg">
               Show API Request
             </button>
           </div>
-        </>
-      )}
+        )}
+      </MenuPopover>
       {panel === 'columns' && <ColumnsCustomizationPanel columns={columns} visible={visibleColumns} onApply={onColumnsChange} onClose={() => setPanel(null)} />}
       {panel === 'api' && <ApiRequestModal title={resourceName} onClose={() => setPanel(null)} />}
-    </div>
+    </>
   );
 }
 
@@ -167,7 +167,7 @@ function AddEntityForm({
   title, columns, onCancel, onSubmit,
 }: {
   title: string; columns: string[]; onCancel: () => void;
-  onSubmit?: (values: Record<string, string>) => Promise<boolean>;
+  onSubmit?: (values: Record<string, string>) => Promise<boolean | string>;
 }) {
   const fields = columns.filter((c) => !SYSTEM_COLUMNS.has(c));
   const [v, setV] = useState<Record<string, string>>({});
@@ -179,7 +179,13 @@ function AddEntityForm({
     setBusy(true);
     setError(null);
     try {
-      if (await onSubmit(v)) onCancel();
+      const result = await onSubmit(v);
+      if (result !== true) {
+        const msg = typeof result === 'string' ? result : 'Please fill in all required fields.';
+        setError(msg);
+        return;
+      }
+      onCancel();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -224,7 +230,7 @@ export function EmptyShellTable({
   /** When set, table shows live data and add form saves via API. */
   rows?: ShellRow[];
   loading?: boolean;
-  onAddSubmit?: (values: Record<string, string>) => Promise<boolean>;
+  onAddSubmit?: (values: Record<string, string>) => Promise<boolean | string>;
   onDelete?: (id: string) => Promise<void>;
 }) {
   const [q, setQ] = useState('');
