@@ -76,7 +76,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Overlay onClose={onClose} className="grid place-items-start justify-items-center bg-[rgb(var(--flyout-scrim))] p-4 pt-[8vh] backdrop-blur-sm">
+    <Overlay onClose={onClose} className="grid place-items-start justify-items-center bg-[rgb(var(--flyout-scrim))] p-4 pt-[8vh]">
       <div className="max-h-[75vh] w-full max-w-2xl animate-fade-in overflow-hidden rounded-card border border-border bg-elevated shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-h2 font-semibold tracking-tight text-fg">Search</h2>

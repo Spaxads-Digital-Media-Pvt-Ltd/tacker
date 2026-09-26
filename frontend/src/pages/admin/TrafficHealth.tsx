@@ -15,10 +15,10 @@
  */
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Search, Filter, MoreVertical, CheckCircle2, AlertCircle, ShieldAlert } from 'lucide-react';
+import { Bell, Search, Filter, MoreVertical, CheckCircle2, AlertCircle, ShieldAlert, ChevronDown } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column, MenuPopover } from '../../shared-components/primitives/ui';
 import { Accordion } from '../../shared-components/panels/Accordion';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 import { daysAgo, todayStr, toIso } from '../../shared-components/primitives/ReportPageKit';
@@ -78,19 +78,48 @@ function TabBar({ tabs, active, onChange, badges, right }: { tabs: readonly stri
 }
 
 /** Small toolbar shared by the Configurations accordions: search + status/filter + 3-dot menu. */
-function AccordionToolbar({ addLabel, onAdd }: { addLabel?: string; onAdd?: () => void }) {
+function AccordionToolbar({ addLabel, onAdd, filterOptions, onFilter }: {
+  addLabel?: string; onAdd?: () => void;
+  filterOptions?: { value: string; label: string }[];
+  onFilter?: (value: string) => void;
+}) {
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       {addLabel ? (
         <button onClick={onAdd} className="btn-primary !py-1.5 !px-3 text-tiny">+ {addLabel}</button>
       ) : <span />}
       <div className="flex items-center gap-2">
-        <div className="relative">
-          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-          <input title="Not available yet" placeholder="Search…" className="input !w-56 !pl-8" />
-        </div>
-        <button title="Not available yet" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Filter size={15} /></button>
-        <button title="Not available yet" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
+        {filterOptions && onFilter ? (
+          <MenuPopover
+            ariaLabel="Filter"
+            align="end"
+            width="w-36"
+            button={
+              <span className="input flex !w-auto items-center gap-2 !py-1.5">
+                <Filter size={14} className="text-fg-muted" /> All<ChevronDown size={14} className="text-fg-muted" />
+              </span>
+            }
+          >
+            {({ close }) => (
+              <div className="py-1">
+                {filterOptions.map((o) => (
+                  <button key={o.value} type="button" onClick={() => { onFilter(o.value); close(); }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-page">
+                    <span className="w-3.5" />{o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </MenuPopover>
+        ) : (
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input title="Not available yet" placeholder="Search…" className="input !w-56 !pl-8" />
+          </div>
+        )}
+        {filterOptions && (
+          <button title="Not available yet" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
+        )}
       </div>
     </div>
   );
@@ -279,7 +308,7 @@ function OverviewTab({ domains, loading, refetch }: { domains: TrackingDomain[];
                   <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
                   <input placeholder="Search…" className="input !pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
-                <button title="Not available yet" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Filter size={15} /></button>
+                <button className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Filter size={15} /></button>
               </div>
               <div className="space-y-1">
                 {filtered.map((d) => (
@@ -450,8 +479,10 @@ function SetPrimaryModal({ open, onClose, domains, onSaved }: { open: boolean; o
 function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDomain[]; loading: boolean; refetch: () => void }) {
   const [adding, setAdding] = useState(false);
   const [editPrimary, setEditPrimary] = useState(false);
+  const [domainFilter, setDomainFilter] = useState<string>('all');
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   const primary = domains.find((d) => d.isPrimary) ?? domains[0];
+  const filteredDomains = domainFilter === 'all' ? domains : domains.filter((d) => d.status === domainFilter);
   const domainColumns: Column<TrackingDomain>[] = [
     { header: 'Domain Name', cell: (d) => <span className="font-mono text-xs text-accent-text">{d.host}</span> },
     { header: 'ID', cell: (d) => <span className="tabular-nums text-fg-secondary">{d.ref}</span> },
@@ -464,11 +495,16 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
     { header: 'Created', cell: (d) => new Date(d.createdAt).toLocaleDateString() },
     { header: 'Modified', cell: (d) => new Date(d.updatedAt).toLocaleDateString() },
   ];
+  const filterOpts = [
+    { value: 'all', label: 'All' },
+    { value: 'active', label: 'Active' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'inactive', label: 'Inactive' },
+  ];
   return (
     <div className="space-y-4">
       <p className="text-small text-fg-secondary">
-        See your domains, IPs, and certificates at a glance, along with all the key details.{' '}
-        <button title="Not available yet" className="font-medium text-accent-text">Learn more</button>
+        See your domains, IPs, and certificates at a glance, along with all the key details.
       </p>
 
       <div className="grid grid-cols-1 gap-6 rounded-card border border-border bg-surface p-5 sm:grid-cols-4">
@@ -494,9 +530,9 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
         </div>
       </div>
 
-      <Accordion title="Domains" count={domains.length} defaultOpen>
-        <AccordionToolbar addLabel="Domain" onAdd={() => setAdding(true)} />
-        {domains.length === 0 ? <p className="text-small text-fg-muted">No tracking domains yet.</p> : <Table columns={domainColumns} rows={domains} rowKey={(d) => d.id} />}
+      <Accordion title="Domains" count={filteredDomains.length} defaultOpen>
+        <AccordionToolbar addLabel="Domain" onAdd={() => setAdding(true)} filterOptions={filterOpts} onFilter={setDomainFilter} />
+        {domains.length === 0 ? <p className="text-small text-fg-muted">No tracking domains yet.</p> : <Table columns={domainColumns} rows={filteredDomains} rowKey={(d) => d.id} />}
       </Accordion>
 
       <Accordion title="Hosting" defaultOpen>
@@ -504,7 +540,9 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
       </Accordion>
 
       <Accordion title="SSL Certificates" defaultOpen>
-        <EmptyShellTable columns={CERT_COLUMNS} />
+        <div className="!overflow-visible">
+          <EmptyShellTable columns={CERT_COLUMNS} />
+        </div>
       </Accordion>
 
       <AddDomainModal open={adding} onClose={() => setAdding(false)} onCreated={() => { setAdding(false); refetch(); }} />
@@ -515,6 +553,7 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
 
 // ── Page ─────────────────────────────────────────────────────────────────
 export default function TrafficHealth() {
+  const nav = useNavigate();
   const [tab, setTab] = useState<string>('Overview');
   const { data, loading, refetch } = useQuery<TrackingDomain[]>('/api/tracking-domains?limit=200');
   const domains = useMemo(() => data ?? [], [data]);
@@ -528,7 +567,7 @@ export default function TrafficHealth() {
         active={tab}
         onChange={setTab}
         badges={{ 'Uptime Incidents': 0, Tasks: 0 }}
-        right={<button title="Not available yet" className="btn-ghost flex items-center gap-2 !py-1.5"><Bell size={15} /> Manage External Notifications</button>}
+        right={<button onClick={() => nav('/app/profile/notifications')} className="btn-ghost flex items-center gap-2 !py-1.5"><Bell size={15} /> Manage External Notifications</button>}
       />
       {tab === 'Overview' && <OverviewTab domains={domains} loading={loading} refetch={refetch} />}
       {tab === 'Uptime Incidents' && <UptimeIncidentsTab allUp={allUp} />}

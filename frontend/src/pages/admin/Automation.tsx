@@ -4,7 +4,7 @@
  */
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, ApiError } from '../../lib/api';
+import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs } from '../../shared-components/primitives/ui';
 import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
@@ -106,8 +106,6 @@ function ScheduledActionsPanel() {
   );
   const { data: offers } = useQuery<Offer[]>('/api/offers?limit=200');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
-  const { run: runCreate } = useMutation((body: Record<string, unknown>) =>
-    api.post('/api/automation/scheduled-actions', body));
   const { run: runDelete } = useMutation((id: string) =>
     api.del(`/api/automation/scheduled-actions/${id}`));
 
@@ -142,12 +140,12 @@ function ScheduledActionsPanel() {
         const offerList = offers ?? [];
         const pubList = publishers ?? [];
         const offerId = resolveOfferId(v['Offers'] ?? '', offerList);
-        if (!offerId) return false;
+        if (!offerId) return 'Pick a valid offer (name or ref number).';
         const rawType = (v['Type']?.trim() || 'pause').toLowerCase().replace(/\s+/g, '_');
         const actionType = ACTION_TYPES.has(rawType) ? rawType : 'pause';
         const scheduledRaw = v['Scheduled Time']?.trim();
         const scheduledTime = scheduledRaw ? new Date(scheduledRaw).toISOString() : null;
-        const ok = await runCreate({
+        await api.post('/api/automation/scheduled-actions', {
           offerId,
           actionType,
           partnerIds: resolvePartnerIds(v['Partners'], pubList),
@@ -156,8 +154,8 @@ function ScheduledActionsPanel() {
           internalNotes: v['Internal Notes']?.trim() || null,
           status: 'pending',
         });
-        if (ok) refetch();
-        return !!ok;
+        refetch();
+        return true;
       }}
       onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
     />
@@ -169,8 +167,6 @@ function AlertsPanel() {
   const { data, loading, refetch } = useQuery<AlertRule[]>(
     `/api/automation/alert-rules?status=${ruleStatusParam(statusFilter)}`,
   );
-  const { run: runCreate } = useMutation((body: Record<string, unknown>) =>
-    api.post('/api/automation/alert-rules', body));
   const { run: runDelete } = useMutation((id: string) => api.del(`/api/automation/alert-rules/${id}`));
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
@@ -201,18 +197,21 @@ function AlertsPanel() {
         rows={rows}
         loading={loading}
         onAddSubmit={async (v) => {
-          if (!v['Name']?.trim() || !v['Conditions']?.trim()) return false;
+          const name = v['Name']?.trim();
+          const conditions = v['Conditions']?.trim();
+          if (!name) return 'Rule name is required.';
+          if (!conditions) return 'At least one condition is required.';
           const inApp = !v['In App'] || /yes|true|1/i.test(v['In App']);
           const email = /yes|true|1/i.test(v['Email'] ?? '');
-          const ok = await runCreate({
-            name: v['Name'].trim(),
-            conditions: v['Conditions'].trim(),
+          await api.post('/api/automation/alert-rules', {
+            name,
+            conditions,
             inApp,
             email,
             status: 'active',
           });
-          if (ok) refetch();
-          return !!ok;
+          refetch();
+          return true;
         }}
         onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
       />
@@ -251,22 +250,20 @@ function WebhooksPanel() {
         rows={rows}
         loading={loading}
         onAddSubmit={async (v) => {
-          if (!v['Name']?.trim()) throw new Error('Name is required');
-          if (!v['URL']?.trim()) throw new Error('URL is required');
-          const url = normalizeUrl(v['URL']);
+          const name = v['Name']?.trim();
+          const urlRaw = v['URL']?.trim();
+          if (!name) return 'Webhook name is required.';
+          if (!urlRaw) return 'Webhook URL is required.';
+          const url = normalizeUrl(urlRaw);
           const rawMethod = (v['HTTP Method']?.trim() || 'POST').toUpperCase();
           const httpMethod = HTTP_METHODS.has(rawMethod) ? rawMethod : 'POST';
-          try {
-            await api.post('/api/automation/webhooks', {
-              name: v['Name'].trim(),
-              events: v['Events']?.trim() || '',
-              httpMethod,
-              url,
-              status: 'active',
-            });
-          } catch (e) {
-            throw new Error(e instanceof ApiError ? e.message : 'Save failed');
-          }
+          await api.post('/api/automation/webhooks', {
+            name,
+            events: v['Events']?.trim() || '',
+            httpMethod,
+            url,
+            status: 'active',
+          });
           refetch();
           return true;
         }}
