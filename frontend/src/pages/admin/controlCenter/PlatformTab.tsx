@@ -197,13 +197,18 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setBusy(true);
     setSaveError(null);
     try {
+      if (!name.trim()) throw new Error('Network Displayed Name is required.');
+      if (!currency.trim()) throw new Error('Currency is required.');
+      if (supportEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail.trim())) {
+        throw new Error('Support Email must be a valid address.');
+      }
       await api.put('/api/settings/general', {
-        name,
-        supportEmail: supportEmail || undefined,
+        name: name.trim(),
+        supportEmail: supportEmail.trim() || undefined,
         defaultCurrency: currency,
         timezone,
       });
-      await cc.putConfig('platform', {
+      await api.put('/api/control-center/config/platform', {
         branding: { logoUrl: logoUrl || null, faviconUrl: faviconUrl || null },
       });
       onSaved();
@@ -286,7 +291,8 @@ function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?:
     for (const g of GLOBAL_TOGGLES) out[g] = t[g] ?? defaults.has(g);
     return out;
   });
-  const { run, busy, error } = useMutation((body: Record<string, unknown>) => cc.putConfig('platform', body));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const g = (config?.global as Record<string, unknown> | undefined) ?? {};
@@ -326,24 +332,23 @@ function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?:
   ];
 
   const save = async () => {
-    const ok = await run({
-      global: {
-        offerCapThreshold: threshold,
-        cpcBasis,
-        macroVisibility,
-        adv110Visible,
-        saleAmountVisible,
-        onHoldVisibility,
-        toggles,
-      },
-    });
-    if (ok) { onSaved?.(); onCancel(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await api.put('/api/control-center/config/platform', { global: { offerCapThreshold: threshold, cpcBasis, macroVisibility, adv110Visible, saleAmountVisible, onHoldVisibility, toggles } });
+      onSaved?.();
+      onCancel();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="max-w-2xl mx-auto card space-y-4">
       <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       {leading.map((g) => (
         <label key={g} className="flex items-center gap-2 text-small text-fg">
           <input type="checkbox" checked={!!toggles[g]} onChange={(e) => setToggles((t) => ({ ...t, [g]: e.target.checked }))} className="h-4 w-4 rounded border-border" />
@@ -660,8 +665,9 @@ function DomainsSub() {
 function EditIpsBlacklistForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?: () => void }) {
   const [rows, setRows] = useState<{ id: number; from: string; to: string }[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const nextId = useRef(1);
-  const { run, busy, error } = useMutation((ranges: { from: string; to?: string }[]) => cc.ipBlacklist.put(ranges));
 
   useEffect(() => {
     cc.ipBlacklist.get().then((data) => {
@@ -675,9 +681,20 @@ function EditIpsBlacklistForm({ onCancel, onSaved }: { onCancel: () => void; onS
   const setField = (id: number, k: 'from' | 'to', v: string) => setRows((r) => r.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
 
   const save = async () => {
-    const ranges = rows.filter((r) => r.from.trim()).map((r) => ({ from: r.from.trim(), to: r.to.trim() || undefined }));
-    const ok = await run(ranges);
-    if (ok) { onSaved?.(); onCancel(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const empty = rows.filter((r) => !r.from.trim());
+      if (empty.length) throw new Error('All ranges must have a "From" IP.');
+      const ranges = rows.map((r) => ({ from: r.from.trim(), to: r.to.trim() || undefined }));
+      await cc.ipBlacklist.put(ranges);
+      onSaved?.();
+      onCancel();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!loaded) return <StateBlock><Spinner /></StateBlock>;
@@ -685,7 +702,7 @@ function EditIpsBlacklistForm({ onCancel, onSaved }: { onCancel: () => void; onS
   return (
     <div className="card space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       <div className="flex items-center gap-2">
         <label className="text-small font-semibold text-fg">IP Blacklist</label>
         <button type="button" onClick={addRow} title="Add a range" className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Plus size={14} /></button>
