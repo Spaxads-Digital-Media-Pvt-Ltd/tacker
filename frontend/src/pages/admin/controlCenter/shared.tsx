@@ -6,7 +6,6 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, HelpCircle, Pencil, Check, Info } from 'lucide-react';
-import { Field } from '../../../shared-components/primitives/ui';
 
 /** Wraps a lucide icon in a `title`-bearing span — Lucide icon components don't accept `title`
  * directly (TS: "Property 'title' does not exist on type LucideProps"). */
@@ -228,17 +227,69 @@ export function NotificationCard({ title, notifs, saved, onSave }: {
 
 export interface EditField { label: string; type?: 'boolean' | 'text' }
 
-/** Real editable field grid — booleans render as checkboxes, everything else as a text input.
- * Reusable across any Control Center card built from an InfoGrid of InfoRows. */
-function InfoRowsEditForm({ fields, onCancel, onSave, busy: busyProp }: { fields: EditField[]; onCancel: () => void; onSave?: () => Promise<boolean>; busy?: boolean }) {
+type FieldValue = boolean | string;
+
+function validateField(label: string, value: FieldValue): string | null {
+  if (typeof value === 'boolean') return null;
+  const v = value.trim();
+  const l = label.toLowerCase();
+  if (!v) return `${label} is required.`;
+  if (l.includes('vat percentage') || l.includes('vat')) {
+    if (isNaN(Number(v)) || Number(v) < 0 || Number(v) > 100) return 'Enter a number between 0 and 100.';
+  }
+  if (l.includes('days delay') || l.includes('delay')) {
+    if (!/^\d+$/.test(v) || Number(v) < 0) return 'Enter a non-negative whole number.';
+  }
+  if (l.includes('date') || l.includes('start date')) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return 'Use YYYY-MM-DD format.';
+  }
+  if (l.includes('percentage') || l.includes('amount') || l.includes('threshold')) {
+    if (isNaN(Number(v))) return 'Enter a valid number.';
+  }
+  return null;
+}
+
+/** Real editable field grid — booleans render as checkboxes, text fields as inputs.
+ * State lives here; validation runs on Save before calling onSave(data). */
+function InfoRowsEditForm({
+  fields, onCancel, onSave, busy: busyProp, initialValues,
+}: {
+  fields: EditField[];
+  onCancel: () => void;
+  onSave?: (data: Record<string, FieldValue>) => Promise<boolean>;
+  busy?: boolean;
+  initialValues?: Record<string, FieldValue>;
+}) {
   const [saving, setSaving] = useState(false);
   const busy = busyProp ?? saving;
+  const [values, setValues] = useState<Record<string, FieldValue>>(() => {
+    const init: Record<string, FieldValue> = {};
+    for (const f of fields) {
+      init[f.label] = initialValues?.[f.label] ?? (f.type === 'boolean' ? false : '');
+    }
+    return init;
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const setField = (label: string, value: FieldValue) => {
+    setValues((prev) => ({ ...prev, [label]: value }));
+    if (errors[label]) setErrors((prev) => { const n = { ...prev }; delete n[label]; return n; });
+  };
 
   const handleSave = async () => {
+    const fieldErrors: Record<string, string> = {};
+    for (const f of fields) {
+      const val = values[f.label];
+      if (val === undefined) continue;
+      const err = validateField(f.label, val);
+      if (err) fieldErrors[f.label] = err;
+    }
+    setErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length > 0) return;
     if (onSave) {
       setSaving(true);
       try {
-        if (await onSave()) onCancel();
+        if (await onSave(values)) onCancel();
       } finally {
         setSaving(false);
       }
@@ -251,14 +302,39 @@ function InfoRowsEditForm({ fields, onCancel, onSave, busy: busyProp }: { fields
     <div className="space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {fields.map((f) => f.type === 'text' ? (
-          <Field key={f.label} label={f.label}><input className="input" /></Field>
-        ) : (
-          <label key={f.label} className="flex items-center gap-2 text-small text-fg">
-            <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-border" />
-            {f.label}
-          </label>
-        ))}
+        {fields.map((f) => {
+          const err = errors[f.label];
+          if (f.type === 'text') {
+            const isDate = f.label.toLowerCase().includes('date') || f.label.toLowerCase().includes('start date');
+            const rawVal = values[f.label];
+            const strVal = typeof rawVal === 'string' ? rawVal : '';
+            return (
+              <div key={f.label}>
+                <p className="label mb-1 block">{f.label}</p>
+                <input
+                  className={`input ${err ? '!border-danger-text' : ''}`}
+                  value={strVal}
+                  onChange={(e) => setField(f.label, e.target.value)}
+                  placeholder={isDate ? 'YYYY-MM-DD' : undefined}
+                  disabled={busy}
+                />
+                {err && <p className="mt-1 text-tiny text-danger-text">{err}</p>}
+              </div>
+            );
+          }
+          return (
+            <label key={f.label} className="flex items-center gap-2 text-small text-fg">
+              <input
+                type="checkbox"
+                checked={!!values[f.label]}
+                onChange={(e) => setField(f.label, e.target.checked)}
+                className="h-4 w-4 rounded border-border"
+                disabled={busy}
+              />
+              {f.label}
+            </label>
+          );
+        })}
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
@@ -271,15 +347,26 @@ function InfoRowsEditForm({ fields, onCancel, onSave, busy: busyProp }: { fields
 /** A settings card built from an InfoGrid of read-only InfoRows — real "Edit" swaps it for a real,
  * interactive field grid (InfoRowsEditForm); Save stays honest (no backing table for any of these
  * network-config fields) but the toggle/edit interaction itself is real. */
-export function EditableInfoCard({ title, fields, action, children, onSave, busy, error }: { title: string; fields: EditField[]; action?: ReactNode; children?: ReactNode; onSave?: () => Promise<boolean>; busy?: boolean; error?: string | null }) {
+export function EditableInfoCard({
+  title, fields, action, children, onSave, busy, error, initialValues,
+}: {
+  title: string;
+  fields: EditField[];
+  action?: ReactNode;
+  children?: ReactNode;
+  onSave?: (data: Record<string, boolean | string>) => Promise<boolean>;
+  busy?: boolean;
+  error?: string | null;
+  initialValues?: Record<string, boolean | string>;
+}) {
   const [editing, setEditing] = useState(false);
   return (
     <InfoCard title={title} action={action ?? (editing
-      ? <EditHeaderAction editing saving={busy} onEdit={() => {}} onCancel={() => setEditing(false)} onSave={onSave} />
+      ? <EditHeaderAction editing saving={busy} onEdit={() => {}} onCancel={() => setEditing(false)} onSave={() => {}} />
       : <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>)}>
       {error && <p className="text-small text-danger-text">{error}</p>}
       {editing ? (
-        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} onSave={onSave} busy={busy} />
+        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} onSave={onSave} busy={busy} initialValues={initialValues} />
       ) : (
         <InfoGrid>{fields.map((f) => <InfoRow key={f.label} label={f.label} />)}</InfoGrid>
       )}

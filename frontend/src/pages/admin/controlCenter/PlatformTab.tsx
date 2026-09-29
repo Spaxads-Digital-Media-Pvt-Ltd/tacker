@@ -811,17 +811,40 @@ const ADVERTISER_BILLING_FIELDS: EditField[] = [
 
 function BillingSub() {
   const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
-  const billing = (config?.billing as Record<string, unknown> | undefined) ?? {};
+  const billing = (config?.billing as Record<string, Record<string, unknown>> | undefined) ?? {};
+
+  const generalSection = billing['general'] ?? {};
+  const partnerSection = billing['partner'] ?? {};
+  const partnerRestrictedSection = billing['partnerRestricted'] ?? {};
+  const advertiserSection = billing['advertiser'] ?? {};
+
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const saveSection = async (key: string) => {
+  const sectionKeys: Record<string, string> = { general: 'general', 'Partner Billing Settings': 'partner', 'Partner Restricted Payments Settings': 'partnerRestricted', 'Advertiser Billing Settings': 'advertiser' };
+  const sectionConfigs: Record<string, Record<string, unknown>> = { general: generalSection, partner: partnerSection, 'Partner Billing Settings': partnerSection, 'Partner Restricted Payments Settings': partnerRestrictedSection, 'Advertiser Billing Settings': advertiserSection };
+
+  const mkInitialValues = (sectionKey: string) => {
+    const cfg = sectionConfigs[sectionKey] ?? {};
+    const init: Record<string, boolean | string> = {};
+    const relevantFields = (sectionKey === 'general' ? BILLING_GENERAL_FIELDS : sectionKey === 'partner' || sectionKey === 'Partner Billing Settings' ? PARTNER_BILLING_FIELDS : sectionKey === 'Partner Restricted Payments Settings' ? PARTNER_RESTRICTED_PAYMENTS_FIELDS : ADVERTISER_BILLING_FIELDS);
+    for (const f of relevantFields) {
+      init[f.label] = (cfg[f.label] ?? (f.type === 'boolean' ? false : '')) as boolean | string;
+    }
+    return init;
+  };
+
+  const saveSection = async (sectionTitle: string, values: Record<string, boolean | string>) => {
+    const key = sectionKeys[sectionTitle] ?? sectionTitle.toLowerCase();
+    const prev = billing[key] ?? {};
     setBusy(true);
     setSaveError(null);
     try {
-      const res = await cc.putConfig('platform', { billing: { ...billing, [key]: billing[key] ?? {} } });
-      if (res) refetch();
-      return !!res;
+      const body: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) body[k] = v;
+      await cc.putConfig('platform', { billing: { ...billing, [key]: { ...prev, ...body } } });
+      refetch();
+      return true;
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Save failed');
       return false;
@@ -832,10 +855,10 @@ function BillingSub() {
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('general'))} />
-      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('partner'))} />
-      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('partnerRestricted'))} />
-      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('advertiser'))} />
+      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('general')} onSave={(data) => saveSection('General', data)} />
+      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('Partner Billing Settings')} onSave={(data) => saveSection('Partner Billing Settings', data)} />
+      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('Partner Restricted Payments Settings')} onSave={(data) => saveSection('Partner Restricted Payments Settings', data)} />
+      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('Advertiser Billing Settings')} onSave={(data) => saveSection('Advertiser Billing Settings', data)} />
     </div>
   );
 }
