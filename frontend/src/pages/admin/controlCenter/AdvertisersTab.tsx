@@ -29,7 +29,8 @@ function GeneralSub() {
   const [externalSignUpUrl, setExternalSignUpUrl] = useState('');
   const [autoApprove, setAutoApprove] = useState(false);
   const [language, setLanguage] = useState('English');
-  const saveMut = useMutation((body: Record<string, unknown>) => cc.putConfig('advertisers', body));
+  const saveGeneralMut = useMutation((body: Record<string, unknown>) => cc.putConfig('advertisers', body));
+  const saveSignupMut = useMutation((body: Record<string, unknown>) => cc.putConfig('advertisers', body));
   const { data: fields, loading } = useQuery<Array<{ id: string; sortOrder: number; label: string; fieldType: string; required: boolean }>>('/api/custom-fields?entity=advertiser');
 
   const startGeneralEdit = () => {
@@ -52,12 +53,12 @@ function GeneralSub() {
   };
 
   const saveGeneral = async () => {
-    const ok = await saveMut.run({ general: { htmlCustomHeader: headerHtml, htmlCustomFooter: footerHtml, hideTotalClick } });
+    const ok = await saveGeneralMut.run({ general: { htmlCustomHeader: headerHtml, htmlCustomFooter: footerHtml, hideTotalClick } });
     if (ok) { setEditingGeneral(false); refetch(); }
   };
 
   const saveSignup = async () => {
-    const ok = await saveMut.run({
+    const ok = await saveSignupMut.run({
       signup: {
         customSignUpHeader: signupHeader,
         customSignUpConfirmation: signupConfirm,
@@ -86,12 +87,12 @@ function GeneralSub() {
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <InfoCard
         title="General"
-        action={<EditHeaderAction editing={editingGeneral} saving={saveMut.busy} onEdit={startGeneralEdit} onCancel={() => setEditingGeneral(false)} />}
+        action={<EditHeaderAction editing={editingGeneral} saving={saveGeneralMut.busy} onEdit={startGeneralEdit} onCancel={() => setEditingGeneral(false)} />}
       >
         {editingGeneral ? (
           <div className="space-y-4">
             <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
-            {saveMut.error && <p className="text-small text-danger-text">{saveMut.error}</p>}
+            {saveGeneralMut.error && <p className="text-small text-danger-text">{saveGeneralMut.error}</p>}
             <Field label="HTML Custom Header (Left menu)">
               <textarea className="input w-full" rows={3} value={headerHtml} onChange={(e) => setHeaderHtml(e.target.value)} />
             </Field>
@@ -103,8 +104,8 @@ function GeneralSub() {
               <YesNoToggle value={hideTotalClick} onChange={setHideTotalClick} />
             </div>
             <div className="flex justify-end gap-2 border-t border-border pt-4">
-              <button type="button" className="btn-ghost" onClick={() => setEditingGeneral(false)} disabled={saveMut.busy}>Cancel</button>
-              <button type="button" className="btn-primary" onClick={saveGeneral} disabled={saveMut.busy}>{saveMut.busy ? 'Saving…' : 'Save'}</button>
+              <button type="button" className="btn-ghost" onClick={() => setEditingGeneral(false)} disabled={saveGeneralMut.busy}>Cancel</button>
+              <button type="button" className="btn-primary" onClick={saveGeneral} disabled={saveGeneralMut.busy}>{saveGeneralMut.busy ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         ) : (
@@ -117,12 +118,12 @@ function GeneralSub() {
       </InfoCard>
       <InfoCard
         title="Advertiser Sign Up Form Customization"
-        action={<EditHeaderAction editing={editingSignup} saving={saveMut.busy} onEdit={startSignupEdit} onCancel={() => setEditingSignup(false)} />}
+        action={<EditHeaderAction editing={editingSignup} saving={saveSignupMut.busy} onEdit={startSignupEdit} onCancel={() => setEditingSignup(false)} />}
       >
         {editingSignup ? (
           <div className="space-y-4">
             <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
-            {saveMut.error && <p className="text-small text-danger-text">{saveMut.error}</p>}
+            {saveSignupMut.error && <p className="text-small text-danger-text">{saveSignupMut.error}</p>}
             <div>
               <label className="label mb-2 block">Use External Sign Up URL</label>
               <YesNoToggle value={externalUrl} onChange={setExternalUrl} />
@@ -164,8 +165,8 @@ function GeneralSub() {
               </select>
             </Field>
             <div className="flex justify-end gap-2 border-t border-border pt-4">
-              <button type="button" className="btn-ghost" onClick={() => setEditingSignup(false)} disabled={saveMut.busy}>Cancel</button>
-              <button type="button" className="btn-primary" onClick={saveSignup} disabled={saveMut.busy}>{saveMut.busy ? 'Saving…' : 'Save'}</button>
+              <button type="button" className="btn-ghost" onClick={() => setEditingSignup(false)} disabled={saveSignupMut.busy}>Cancel</button>
+              <button type="button" className="btn-primary" onClick={saveSignup} disabled={saveSignupMut.busy}>{saveSignupMut.busy ? 'Saving…' : 'Save'}</button>
             </div>
           </div>
         ) : (

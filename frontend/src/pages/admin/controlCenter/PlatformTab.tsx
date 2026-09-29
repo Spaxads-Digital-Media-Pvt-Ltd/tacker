@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Info, Search, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { cc } from '../../../lib/controlCenter';
-import { useQuery, useMutation } from '../../../lib/useApi';
+import { useQuery } from '../../../lib/useApi';
 import { Tabs, Table, Badge, Field, Spinner, StateBlock, type Column, Segmented } from '../../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import { Pagination } from '../../../shared-components/primitives/ReportPageKit';
@@ -812,18 +812,30 @@ const ADVERTISER_BILLING_FIELDS: EditField[] = [
 function BillingSub() {
   const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
   const billing = (config?.billing as Record<string, unknown> | undefined) ?? {};
-  const saveSection = useMutation(async (key: string) => {
-    const res = await cc.putConfig('platform', { billing: { ...billing, [key]: billing[key] ?? {} } });
-    if (res) refetch();
-    return !!res;
-  });
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const saveSection = async (key: string) => {
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const res = await cc.putConfig('platform', { billing: { ...billing, [key]: billing[key] ?? {} } });
+      if (res) refetch();
+      return !!res;
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} onSave={async () => !!(await saveSection.run('general'))} />
-      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} onSave={async () => !!(await saveSection.run('partner'))} />
-      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} onSave={async () => !!(await saveSection.run('partnerRestricted'))} />
-      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} onSave={async () => !!(await saveSection.run('advertiser'))} />
+      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('general'))} />
+      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('partner'))} />
+      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('partnerRestricted'))} />
+      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} busy={busy} error={saveError} onSave={async () => !!(await saveSection('advertiser'))} />
     </div>
   );
 }

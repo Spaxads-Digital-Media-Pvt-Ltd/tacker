@@ -230,8 +230,9 @@ export interface EditField { label: string; type?: 'boolean' | 'text' }
 
 /** Real editable field grid — booleans render as checkboxes, everything else as a text input.
  * Reusable across any Control Center card built from an InfoGrid of InfoRows. */
-function InfoRowsEditForm({ fields, onCancel, onSave }: { fields: EditField[]; onCancel: () => void; onSave?: () => Promise<boolean> }) {
+function InfoRowsEditForm({ fields, onCancel, onSave, busy: busyProp }: { fields: EditField[]; onCancel: () => void; onSave?: () => Promise<boolean>; busy?: boolean }) {
   const [saving, setSaving] = useState(false);
+  const busy = busyProp ?? saving;
 
   const handleSave = async () => {
     if (onSave) {
@@ -260,8 +261,8 @@ function InfoRowsEditForm({ fields, onCancel, onSave }: { fields: EditField[]; o
         ))}
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
-        <button type="button" className="btn-ghost" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="btn-primary" onClick={handleSave} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );
@@ -270,12 +271,15 @@ function InfoRowsEditForm({ fields, onCancel, onSave }: { fields: EditField[]; o
 /** A settings card built from an InfoGrid of read-only InfoRows — real "Edit" swaps it for a real,
  * interactive field grid (InfoRowsEditForm); Save stays honest (no backing table for any of these
  * network-config fields) but the toggle/edit interaction itself is real. */
-export function EditableInfoCard({ title, fields, action, children, onSave }: { title: string; fields: EditField[]; action?: ReactNode; children?: ReactNode; onSave?: () => Promise<boolean> }) {
+export function EditableInfoCard({ title, fields, action, children, onSave, busy, error }: { title: string; fields: EditField[]; action?: ReactNode; children?: ReactNode; onSave?: () => Promise<boolean>; busy?: boolean; error?: string | null }) {
   const [editing, setEditing] = useState(false);
   return (
-    <InfoCard title={title} action={action ?? (editing ? <span /> : <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>)}>
+    <InfoCard title={title} action={action ?? (editing
+      ? <EditHeaderAction editing saving={busy} onEdit={() => {}} onCancel={() => setEditing(false)} onSave={onSave} />
+      : <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => setEditing(true)}><Pencil size={12} />Edit</button>)}>
+      {error && <p className="text-small text-danger-text">{error}</p>}
       {editing ? (
-        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} onSave={onSave} />
+        <InfoRowsEditForm fields={fields} onCancel={() => setEditing(false)} onSave={onSave} busy={busy} />
       ) : (
         <InfoGrid>{fields.map((f) => <InfoRow key={f.label} label={f.label} />)}</InfoGrid>
       )}
