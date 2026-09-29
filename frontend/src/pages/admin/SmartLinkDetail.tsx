@@ -137,6 +137,7 @@ export default function SmartLinkDetail() {
   const [tab, setTab] = useState('General');
   const [linksOpen, setLinksOpen] = useState(false);
   const copy = useMutation((lid: string) => api.post<SmartLink>(`/api/smart-links/${lid}/copy`, {}));
+  const [copyErr, setCopyErr] = useState<string | null>(null);
 
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   if (error || !data) return <StateBlock>{error ?? 'Smart link not found'}</StateBlock>;
@@ -148,6 +149,7 @@ export default function SmartLinkDetail() {
     <>
       <PageHeader title={`Smart Link Details: ${data.name}`} subtitle={`Offers › Smart Links › ${data.name} › Details`}
         action={<button className="btn-primary" onClick={() => setLinksOpen(true)}><Link2 size={14} /> Smart Link Tracking Links</button>} />
+      {copyErr && <p className="mb-3 text-small text-danger-text">{copyErr}</p>}
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === 'History' ? <HistoryTab id={id} />
@@ -158,7 +160,7 @@ export default function SmartLinkDetail() {
               <InfoCard title="General" action={
                 <div className="flex items-center gap-3">
                   <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => nav(`/app/smart-links/${id}/edit`)}><Pencil size={12} />Edit</button>
-                  <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={async () => { const res = await copy.run(id); if (res) nav(`/app/smart-links/${res.id}`); }}><Copy size={12} />Copy</button>
+                  <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={async () => { setCopyErr(null); try { const res = await copy.run(id); if (res) nav(`/app/smart-links/${res.id}`); } catch { setCopyErr(copy.error ?? 'Failed to copy smart link.'); } }}><Copy size={12} />Copy</button>
                 </div>
               }>
                 <InfoGrid>

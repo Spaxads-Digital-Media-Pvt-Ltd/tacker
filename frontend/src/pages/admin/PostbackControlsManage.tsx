@@ -102,6 +102,7 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/postback-controls/${control.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [delErr, setDelErr] = useState<string | null>(null);
 
   const toggle = () => {
     if (!open && btnRef.current) {
@@ -123,8 +124,10 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
 
   const doDelete = async () => {
     setOpen(false);
+    setDelErr(null);
     if (!confirm(`Delete postback control "${control.name}"?`)) return;
-    if (await del.run(undefined)) onChanged();
+    try { const ok = await del.run(undefined); if (ok) onChanged(); }
+    catch { setDelErr('Failed to delete postback control.'); }
   };
 
   const item = (label: string, onClick: () => void) => (
@@ -135,6 +138,10 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
 
   return (
     <>
+      {delErr && createPortal(
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">{delErr}</div>,
+        document.body,
+      )}
       <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
         className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
         <MoreVertical size={15} />

@@ -105,6 +105,7 @@ function HistoryModal({ postbackId, onClose }: { postbackId: string; onClose: ()
 function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted: () => void }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const nav = useNavigate();
   const test = useMutation(() => api.post<{ success: boolean; statusCode?: number }>(`/api/postbacks/${postback.id}/test`, {}));
   const del = useMutation(() => api.del(`/api/postbacks/${postback.id}`));
@@ -118,13 +119,18 @@ function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted:
   const doTest = async (api: { close: () => void }) => {
     if (!postback.url) return;
     api.close();
-    const res = await test.run(undefined);
-    if (res) setToast(res.success ? `Test fired successfully (HTTP ${res.statusCode ?? '—'}).` : 'Test fired but the endpoint returned an error.');
+    setErr(null);
+    try {
+      const res = await test.run(undefined);
+      if (res) setToast(res.success ? `Test fired successfully (HTTP ${res.statusCode ?? '—'}).` : 'Test fired but the endpoint returned an error.');
+    } catch { setErr(test.error ?? 'Test failed.'); }
   };
   const doDelete = async (api: { close: () => void }) => {
     api.close();
+    setErr(null);
     if (!confirm('Delete this postback?')) return;
-    if (await del.run(undefined)) onDeleted();
+    try { const ok = await del.run(undefined); if (ok) onDeleted(); }
+    catch { setErr(del.error ?? 'Failed to delete postback.'); }
   };
 
   return (
@@ -146,8 +152,11 @@ function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted:
         )}
       </TableRowMenu>
       {historyOpen && <HistoryModal postbackId={postback.id} onClose={() => setHistoryOpen(false)} />}
-      {toast && createPortal(
-        <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-border bg-elevated px-4 py-3 text-small text-fg shadow-elevated">{toast}</div>,
+      {(toast || err) && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm space-y-2">
+          {toast && <div className="rounded-card border border-border bg-elevated px-4 py-3 text-small text-fg shadow-elevated">{toast}</div>}
+          {err && <div className="rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">{err}</div>}
+        </div>,
         document.body,
       )}
     </>

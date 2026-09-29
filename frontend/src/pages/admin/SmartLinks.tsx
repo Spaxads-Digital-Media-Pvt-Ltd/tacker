@@ -110,6 +110,15 @@ export default function SmartLinks() {
   const [status, setStatus] = useState<'all' | (typeof STATUSES)[number]>('active');
   const [page, setPage] = useState(1);
   const copy = useMutation((id: string) => api.post(`/api/smart-links/${id}/copy`, {}));
+  const [copyErr, setCopyErr] = useState<string | null>(null);
+  const [copyErrRowId, setCopyErrRowId] = useState<string | null>(null);
+
+  // Clear row-level copy error after 6s
+  useEffect(() => {
+    if (!copyErrRowId) return;
+    const t = setTimeout(() => { setCopyErr(null); setCopyErrRowId(null); }, 6000);
+    return () => clearTimeout(t);
+  }, [copyErrRowId]);
 
   // ── Filter drawer (client-side, over the fetched list — same pattern as Manage Offers).
   //    Status + Search stay as quick-filters in the toolbar; the drawer covers the rest. ──
@@ -203,6 +212,11 @@ export default function SmartLinks() {
         : rows.length === 0 ? <StateBlock>No smart links match your filters.</StateBlock>
         : (
           <>
+            {copyErr && (
+              <div className="mb-3 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">
+                {copyErr}
+              </div>
+            )}
             <TableScroll>
               <table className="premium-table">
                 <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
@@ -256,7 +270,7 @@ export default function SmartLinks() {
                         <td className="px-4 py-3">
                           <div className="flex justify-end">
                             <RowMenu onEdit={() => nav(`/app/smart-links/${r.id}/edit`)}
-                              onCopy={async () => { await copy.run(r.id); refetch(); }}
+                              onCopy={async () => { setCopyErr(null); setCopyErrRowId(null); try { await copy.run(r.id); refetch(); } catch { setCopyErr(copy.error ?? 'Failed to copy smart link.'); setCopyErrRowId(r.id); } }}
                               onReport={() => nav(`/app/reports/smartlink?smartLinkId=${r.id}`)} />
                           </div>
                         </td>
