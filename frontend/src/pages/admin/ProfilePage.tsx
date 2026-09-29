@@ -161,6 +161,7 @@ export default function ProfilePage() {
 
       {tab === 'General' && (
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {account.error && <div className="xl:col-span-2"><p className="text-small text-danger-text">{account.error}</p></div>}
           <section className="card !p-0">
             <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
               <h2 className="text-h3 font-medium text-fg">{name}</h2>
@@ -240,6 +241,7 @@ export default function ProfilePage() {
             columns={['Login Time', 'IP', 'Location', 'Device Type', 'Browser']}
             rows={loginRows}
             loading={logins.loading}
+            error={logins.error}
           />
         </div>
       )}
@@ -338,6 +340,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
   onSaved: (next: ProfileForm) => void;
 }) {
   const [form, setForm] = useState(initial);
+  const [editError, setEditError] = useState<string | null>(null);
   const { run, busy, error } = useMutation((body: Record<string, unknown>) =>
     api.patch('/api/me/profile', body));
 
@@ -348,7 +351,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2_000_000) {
-      alert('Photo must be under 2 MB');
+      setEditError('Photo must be under 2 MB');
       return;
     }
     const reader = new FileReader();
@@ -358,6 +361,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    setEditError(null);
     if (!form.name.trim()) return;
     const r = await run({
       name: form.name.trim(),
@@ -380,7 +384,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
   return (
     <Modal open onClose={onClose} title="Edit profile">
       <form onSubmit={submit} className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
-        {error && <p className="text-small text-danger-text">{error}</p>}
+        {(editError || error) && <p className="text-small text-danger-text">{editError || error}</p>}
         <Field label="Full name"><input className="input" value={form.name} onChange={(e) => set('name', e.target.value)} required /></Field>
         <Field label="Title"><input className="input" value={form.title} onChange={(e) => set('title', e.target.value)} /></Field>
         <Field label="Business Unit"><input className="input" value={form.businessUnit} onChange={(e) => set('businessUnit', e.target.value)} /></Field>
@@ -434,19 +438,23 @@ function ChangeEmailModal({ current, onClose, onSaved }: {
   current: string; onClose: () => void; onSaved: (email: string) => void;
 }) {
   const [value, setValue] = useState(current);
+  const [fieldError, setFieldError] = useState('');
   const { run, busy, error } = useMutation((email: string) =>
     api.patch<{ ok: boolean; email: string }>('/api/me/email', { email }));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    setFieldError('');
     const next = value.trim().toLowerCase();
-    if (!next || next === current.toLowerCase()) return;
+    if (!next) { setFieldError('Email is required.'); return; }
+    if (!next.includes('@')) { setFieldError('Enter a valid email address.'); return; }
+    if (next === current.toLowerCase()) return;
     const r = await run(next);
     if (r?.ok) onSaved(r.email);
   };
   return (
     <Modal open onClose={onClose} title="Change email">
       <form onSubmit={submit} className="space-y-4">
-        {error && <p className="text-small text-danger-text">{error}</p>}
+        {(fieldError || error) && <p className="text-small text-danger-text">{fieldError || error}</p>}
         <Field label="New email address">
           <input type="email" className="input" value={value} onChange={(e) => setValue(e.target.value)} required />
         </Field>
