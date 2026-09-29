@@ -79,6 +79,7 @@ function CategoryPicker({ categories, panel }: { categories: string[]; panel: (c
 // genuine local state (real clicks, real visual feedback) instead of dead onChange={() => {}}. ────
 
 function TrackingExtras({ domains, value, onChange }: { domains: TrackingDomain[]; value: string; onChange: (v: string) => void }) {
+  const [deepLinks, setDeepLinks] = useState(true);
   return (
     <>
       <p className="text-small font-semibold text-fg">Tracking Domain</p>
@@ -102,7 +103,7 @@ function TrackingExtras({ domains, value, onChange }: { domains: TrackingDomain[
 
       <div>
         <label className="flex items-start gap-2 text-small text-fg">
-          <input type="checkbox" defaultChecked className="mt-0.5 h-4 w-4 rounded border-border" />
+          <input type="checkbox" checked={deepLinks} onChange={(e) => setDeepLinks(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border" />
           <span><strong>Support Deep Links</strong> — Allow Partners to direct traffic to alternate landing pages without additional Offer URLs.</span>
         </label>
       </div>
@@ -228,6 +229,9 @@ export default function OfferEdit() {
   const [assignGroup, setAssignGroup] = useState(false);
   const [groupId, setGroupId] = useState('');
   const [catNew, setCatNew] = useState(false);
+  const [firePartnerPostback, setFirePartnerPostback] = useState(true);
+  const [manuallyApprove, setManuallyApprove] = useState(false);
+  const [allowDuplicate, setAllowDuplicate] = useState(true);
   const { run, busy, error: saveError } = useMutation((body: Record<string, unknown>) => api.patch(base, body));
 
   useEffect(() => {
@@ -419,9 +423,9 @@ export default function OfferEdit() {
               <p className="text-tiny text-fg-muted">Default name is set as Base, but you can change it.</p>
               <Field label="Base Conversion Event Name"><input className="input" defaultValue="Base" /></Field>
               <div className="space-y-2">
-                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" defaultChecked className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Fire Partner Postback</strong> — fire Partner Postbacks when a conversion or Event is approved.</span></label>
-                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Manually Approve Conversions</strong> — require manual approval for Partner conversions.</span></label>
-                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" defaultChecked className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Allow Duplicate Conversions</strong> — allow duplicate conversions triggered by the same click ID.</span></label>
+                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" checked={firePartnerPostback} onChange={(e) => setFirePartnerPostback(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Fire Partner Postback</strong> — fire Partner Postbacks when a conversion or Event is approved.</span></label>
+                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" checked={manuallyApprove} onChange={(e) => setManuallyApprove(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Manually Approve Conversions</strong> — require manual approval for Partner conversions.</span></label>
+                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Allow Duplicate Conversions</strong> — allow duplicate conversions triggered by the same click ID.</span></label>
               </div>
             </div>
 
