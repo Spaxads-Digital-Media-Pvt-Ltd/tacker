@@ -108,6 +108,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   const available = scopeInfo?.available ?? [];
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>([]);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const { run, busy, error } = useMutation((body: { name?: string; scopes?: string[] }) => api.post<{ key: string }>('/api/keys', body));
 
   useEffect(() => {
@@ -118,7 +119,8 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!scopes.length) { alert('Select at least one permission.'); return; }
+    setSubmitError(null);
+    if (!scopes.length) { setSubmitError('Select at least one permission.'); return; }
     const res = await run({ name: name.trim() || undefined, scopes: scopes.length ? scopes : undefined });
     if (res) onCreated(res.key);
   };
@@ -126,6 +128,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   return (
     <form onSubmit={submit} className="space-y-4">
       {error && <p className="text-small text-danger-text">{error}</p>}
+      {submitError && <p className="text-small text-danger-text">{submitError}</p>}
       <Field label="Name (optional)"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. production integration" /></Field>
       <div>
         <p className="label mb-2 block">Permissions</p>

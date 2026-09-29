@@ -264,11 +264,18 @@ export default function Marketplace() {
   const handleApply = async (a: MarketplaceAdvertiser) => {
     if (a.status !== 'inactive') return;
     setApplyingId(a.id);
-    const ok = await patchAdvertiser(a.id);
-    setApplyingId(null);
-    if (ok !== null) {
-      setToast(`Connection request sent for ${a.name}. View it under Manage Connections.`);
-      refetch();
+    try {
+      const ok = await patchAdvertiser(a.id);
+      if (ok) {
+        setToast(`Connection request sent for ${a.name}. View it under Manage Connections.`);
+        refetch();
+      } else {
+        setToast(`Could not apply to ${a.name}. Try again.`);
+      }
+    } catch {
+      setToast(`Could not apply to ${a.name}. Try again.`);
+    } finally {
+      setApplyingId(null);
     }
   };
 

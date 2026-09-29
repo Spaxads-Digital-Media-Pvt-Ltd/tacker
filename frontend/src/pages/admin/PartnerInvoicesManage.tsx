@@ -180,15 +180,20 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
   const toggleVisible = useMutation((body: Record<string, unknown>) => api.patch(`/api/partner-invoices/${invoice.id}`, body));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [rowErr, setRowErr] = useState<string | null>(null);
 
   const doDelete = async (menu: { close: () => void }) => {
     menu.close();
     if (!confirm(`Delete Invoice ID: ${invoice.ref}?`)) return;
-    if (await del.run(undefined)) onChanged();
+    setRowErr(null);
+    try { const ok = await del.run(undefined); if (ok) onChanged(); }
+    catch { setRowErr('Failed to delete invoice.'); }
   };
   const doToggleVisible = async (menu: { close: () => void }) => {
     menu.close();
-    if (await toggleVisible.run({ visibleToPartner: !invoice.visibleToPartner })) onChanged();
+    setRowErr(null);
+    try { const ok = await toggleVisible.run({ visibleToPartner: !invoice.visibleToPartner }); if (ok) onChanged(); }
+    catch { setRowErr('Failed to update visibility.'); }
   };
 
   return (
@@ -196,9 +201,10 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
       <TableRowMenu>
         {(menu) => (
           <>
+            {rowErr && <p className="px-3 py-1.5 text-small text-danger-text">{rowErr}</p>}
             <MenuItem icon={Pencil} disabled={invoice.status === 'deleted'} onSelect={() => { menu.close(); nav(`/app/aff-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
             <MenuItem icon={invoice.visibleToPartner ? EyeOff : Eye} disabled={invoice.status === 'deleted'} onSelect={() => doToggleVisible(menu)}>{invoice.visibleToPartner ? 'Hide from Partner' : 'Show to Partner'}</MenuItem>
-            <MenuItem icon={CheckCircle2} disabled={invoice.status !== 'unpaid'} onSelect={async () => { menu.close(); await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); }}>Mark Invoice as Paid</MenuItem>
+            <MenuItem icon={CheckCircle2} disabled={invoice.status !== 'unpaid'} onSelect={async () => { menu.close(); try { await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); } catch { setRowErr('Failed to mark as paid.'); } }}>Mark Invoice as Paid</MenuItem>
             <MenuItem icon={Trash2} tone="danger" disabled={invoice.status === 'deleted'} onSelect={() => doDelete(menu)}>Delete</MenuItem>
             <div className="relative" onMouseEnter={() => setExportOpen(true)} onMouseLeave={() => setExportOpen(false)}>
               <MenuItem icon={Download} onSelect={() => setExportOpen((s) => !s)}>

@@ -155,6 +155,7 @@ export default function OfferTrafficControls() {
   const [columnOrder, setColumnOrder] = useState<string[]>([...ALL_COLUMNS]);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [historyId, setHistoryId] = useState<string | null>(null);
+  const [setStatusErr, setSetStatusErr] = useState<string | null>(null);
   const setStatusMutation = useMutation(({ id, status: s }: { id: string; status: string }) => api.patch(`/api/traffic-controls/${id}`, { status: s }));
 
   const offerName = (id: string) => { const o = offers?.find((x) => x.id === id); return o ? (o.ref != null ? `${o.name} (${o.ref})` : o.name) : id.slice(0, 8) + '…'; };
@@ -261,6 +262,7 @@ export default function OfferTrafficControls() {
         : rows.length === 0 ? <StateBlock>No traffic controls match your filters.</StateBlock>
         : (
           <>
+            {setStatusErr && <p className="mb-3 text-small text-danger-text">{setStatusErr}</p>}
             <TableScroll>
               <table className="premium-table">
                 <thead className="sticky top-0 z-20 border-b border-border bg-page text-tiny uppercase tracking-wide text-fg-secondary">
@@ -284,7 +286,7 @@ export default function OfferTrafficControls() {
                       <td className="px-4 py-3">
                         <div className="flex justify-end">
                           <RowMenu onEdit={() => nav(`/app/offers-traffic-controls/${r.id}/edit`)}
-                            onSetDeleted={async () => { await setStatusMutation.run({ id: r.id, status: 'deleted' }); refetch(); }}
+                            onSetDeleted={async () => { setSetStatusErr(null); try { const ok = await setStatusMutation.run({ id: r.id, status: 'deleted' }); if (ok) refetch(); } catch { setSetStatusErr('Failed to set status.'); } }}
                             onHistory={() => setHistoryId(r.id)} />
                         </div>
                       </td>

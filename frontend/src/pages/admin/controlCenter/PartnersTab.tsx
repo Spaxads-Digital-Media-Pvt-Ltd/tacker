@@ -217,14 +217,18 @@ function SignupFormCard() {
   const [busy, setBusy] = useState(false);
   const { data: fields, loading } = useQuery<Array<{ id: string; sortOrder: number; label: string; fieldType: string; required: boolean }>>('/api/custom-fields?entity=publisher');
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const save = async (body: Record<string, unknown>) => {
     setBusy(true);
+    setSaveError(null);
     try {
       await api.put('/api/control-center/config/partners', { signup: body });
       setEditing(false);
       refetch();
       return true;
     } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
       return false;
     } finally {
       setBusy(false);
@@ -243,6 +247,7 @@ function SignupFormCard() {
 
   return (
     <InfoCard title="Partner Sign Up Form Customization" action={<EditHeaderAction editing={editing} saving={busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} />}>
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       {editing ? <EditSignupFormForm initial={signup} onCancel={() => setEditing(false)} onSave={save} /> : (
         <InfoGrid>
           <InfoRow label="Custom Sign Up Header" value={String(signup['customSignUpHeader'] ?? '')} />
@@ -490,8 +495,12 @@ function ReferralSub() {
         statusFilter={status === 'all' ? 'All' : status === 'active' ? 'Active' : status === 'inactive' ? 'Inactive' : 'Deleted'}
         onStatusFilterChange={(next) => setStatus(next === 'All' ? 'all' : next.toLowerCase())}
         onAddSubmit={async (v) => {
+          const partnerName = v['Partner']?.trim();
+          if (!partnerName) return 'Partner is required.';
+          const publisherId = findPublisherId(partnerName);
+          if (!publisherId) return `Partner "${partnerName}" not found.`;
           await cc.create('partner-referrals', {
-            publisherId: findPublisherId(v['Partner'] ?? ''),
+            publisherId,
             enabled: v['Enabled']?.toLowerCase() !== 'no',
             commissionStructure: v['Commission Structure'] ?? '',
             fixedAmountRate: v['Fixed Amount / Rate'] ?? '',
@@ -583,8 +592,11 @@ function TermsSub() {
         rows={rows}
         loading={loading}
         onAddSubmit={async (v) => {
+          const partnerName = v['Partner']?.trim();
+          if (!partnerName) return 'Partner is required.';
+          const publisherId = findPublisherId(partnerName);
+          if (!publisherId) return `Partner "${partnerName}" not found.`;
           await api.post('/api/control-center/terms-acceptances', {
-            publisherId: findPublisherId(v['Partner'] ?? ''),
             partnerUser: v['Partner User'] ?? '',
             userAgent: v['User Agent'] || undefined,
             ipAddress: v['IP Address'] || undefined,

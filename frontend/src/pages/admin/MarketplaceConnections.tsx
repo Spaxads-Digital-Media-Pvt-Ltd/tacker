@@ -88,14 +88,17 @@ export default function MarketplaceConnections() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<string | null>(null);
-  const { run: patchStatus, busy } = useMutation((args: { id: string; status: 'active' | 'inactive' }) =>
-    api.patch(`/api/advertisers/${args.id}`, { status: args.status }));
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const isBusy = (id: string) => applyingId === id;
 
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  const { run: patchStatus } = useMutation((args: { id: string; status: 'active' | 'inactive' }) =>
+    api.patch(`/api/advertisers/${args.id}`, { status: args.status }));
 
   const connected = useMemo(() => (data ?? []).filter((a) => a.status === 'active'), [data]);
   const awaiting = useMemo(() => (data ?? []).filter((a) => a.status === 'pending'), [data]);
@@ -119,12 +122,19 @@ export default function MarketplaceConnections() {
   const pagedRows = useMemo(() => rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [rows, page]);
 
   const decide = async (id: string, status: 'active' | 'inactive', name: string) => {
-    const r = await patchStatus({ id, status });
-    if (r) {
-      setToast(status === 'active' ? `Approved ${name}. Moved to Connected Advertisers.` : `Rejected ${name}.`);
-      refetch();
-    } else {
+    setApplyingId(id);
+    try {
+      const r = await patchStatus({ id, status });
+      if (r) {
+        setToast(status === 'active' ? `Approved ${name}. Moved to Connected Advertisers.` : `Rejected ${name}.`);
+      } else {
+        setToast(`Could not update ${name}. Try again.`);
+      }
+    } catch {
       setToast(`Could not update ${name}. Try again.`);
+    } finally {
+      setApplyingId(null);
+      refetch();
     }
   };
 
@@ -303,8 +313,8 @@ export default function MarketplaceConnections() {
                     <td className="px-4 py-3 text-fg-secondary">{fmtDate(a.createdAt)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex gap-2">
-                        <button type="button" disabled={busy} onClick={() => decide(a.id, 'active', a.name)} className="btn-primary !py-1.5 text-tiny disabled:opacity-50">Approve</button>
-                        <button type="button" disabled={busy} onClick={() => decide(a.id, 'inactive', a.name)} className="rounded-[var(--radius)] border border-border bg-surface px-3 py-1.5 text-tiny font-medium text-fg hover:bg-accent-subtle disabled:opacity-50">Reject</button>
+                        <button type="button" disabled={isBusy(a.id)} onClick={() => decide(a.id, 'active', a.name)} className="btn-primary !py-1.5 text-tiny disabled:opacity-50">Approve</button>
+                        <button type="button" disabled={isBusy(a.id)} onClick={() => decide(a.id, 'inactive', a.name)} className="rounded-[var(--radius)] border border-border bg-surface px-3 py-1.5 text-tiny font-medium text-fg hover:bg-accent-subtle disabled:opacity-50">Reject</button>
                       </div>
                     </td>
                   </tr>

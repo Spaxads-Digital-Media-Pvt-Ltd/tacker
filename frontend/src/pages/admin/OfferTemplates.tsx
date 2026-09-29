@@ -119,6 +119,9 @@ export default function OfferTemplates() {
   const del = useMutation((id: string) => api.del(`/api/offer-templates/${id}`));
   const setDefault = useMutation((id: string) => api.patch(`/api/offer-templates/${id}`, { isDefault: true }));
 
+  const [setDefaultErr, setSetDefaultErr] = useState<string | null>(null);
+  const [delErr, setDelErr] = useState<string | null>(null);
+
   const rows = useMemo(() => {
     let out = data ?? [];
     if (q.trim()) out = out.filter((r) => r.name.toLowerCase().includes(q.trim().toLowerCase()));
@@ -139,6 +142,12 @@ export default function OfferTemplates() {
       <PageHeader title="Manage Templates" subtitle="Offers › Offer Templates › Manage" />
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <button className="btn-primary max-sm:w-full" onClick={() => nav('/app/offers-templates/add')}><Plus size={15} /> Offer Template</button>
+        {(setDefaultErr || delErr) && (
+          <div className="space-y-1">
+            {setDefaultErr && <p className="text-small text-danger-text">{setDefaultErr}</p>}
+            {delErr && <p className="text-small text-danger-text">{delErr}</p>}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
           <div className="relative max-sm:w-full">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
@@ -203,8 +212,8 @@ export default function OfferTemplates() {
                         <div className="flex items-center justify-end gap-2">
                           <button className="btn-primary !py-1.5 !px-3 text-tiny" onClick={() => applyTemplate(r)}>Use Template</button>
                           <RowMenu isDefault={r.isDefault} onEdit={() => nav(`/app/offers-templates/${r.id}/edit`)}
-                            onSetDefault={async () => { await setDefault.run(r.id); refetch(); }}
-                            onDelete={async () => { if (confirm('Delete this template?')) { await del.run(r.id); refetch(); } }} />
+                            onSetDefault={async () => { setSetDefaultErr(null); try { const ok = await setDefault.run(r.id); if (ok) refetch(); } catch { setSetDefaultErr('Failed to set as default.'); } }}
+                            onDelete={async () => { if (confirm('Delete this template?')) { setDelErr(null); try { const ok = await del.run(r.id); if (ok) refetch(); } catch { setDelErr('Failed to delete template.'); } } }} />
                         </div>
                       </td>
                     </tr>
