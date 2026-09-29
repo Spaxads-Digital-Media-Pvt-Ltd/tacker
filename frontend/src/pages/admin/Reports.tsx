@@ -909,11 +909,13 @@ function ImportExportReport() {
   const run = async (entity: string, format: 'csv' | 'xlsx') => {
     const body: Record<string, unknown> = { entity };
     for (const k of EXPORT_KEYS) if (f[k]) body[k] = f[k];
-    const res = await exp.run(body);
-    if (res && res.rows.length) {
-      const name = `${entity}.${format}`;
-      if (format === 'csv') downloadCsv(name, res.rows); else await downloadXlsx(name, res.rows);
-    }
+    try {
+      const res = await exp.run(body);
+      if (res && res.rows.length) {
+        const name = `${entity}.${format}`;
+        if (format === 'csv') downloadCsv(name, res.rows); else await downloadXlsx(name, res.rows);
+      }
+    } catch { /* exp.error is rendered below */ }
     refetch();
   };
 
@@ -929,6 +931,7 @@ function ImportExportReport() {
 
   return (
     <>
+      {exp.error && <p className="mb-3 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{exp.error}</p>}
       <Toolbar>
         <div className="flex flex-wrap gap-2">
           <span className="self-center text-small text-fg-secondary">Export Conversions:</span>
