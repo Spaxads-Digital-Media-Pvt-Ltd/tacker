@@ -94,12 +94,9 @@ export function NavFlyout({ entry, expanded = false, topOffset, onClose }: {
   return createPortal(
     <>
       {/* Backdrop scrim — starts at the rail's right edge so the rail stays interactive (hovering
-          another nav icon swaps the flyout in place). The panel floats above it. A black wash
-          barely darkens an already-near-black page, so `backdrop-blur-sm` does the separating —
-          it reads the same in light and dark; the --flyout-scrim tint just adds a little depth
-          (0.20 light / 0.35 dark via the token). */}
+          another nav icon swaps the flyout in place). The panel floats above it. */}
       <div
-        className={`fixed inset-y-0 right-0 z-40 left-0 bg-[rgb(var(--flyout-scrim))] backdrop-blur-sm ${expanded ? 'md:left-[256px]' : 'md:left-[64px]'}`}
+        className={`fixed inset-y-0 right-0 z-40 left-0 bg-[rgb(var(--flyout-scrim))] ${expanded ? 'md:left-[256px]' : 'md:left-[64px]'}`}
         onClick={onClose}
         aria-hidden
       />
