@@ -15,7 +15,7 @@
  * infrastructure anywhere (checked — no multer/upload routes exist), so a real URL you paste in is
  * the honest equivalent rather than building new upload plumbing for one field.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
@@ -171,11 +171,20 @@ export default function MarketplaceProfileEdit() {
 
   const { run: save, busy, error } = useMutation((body: Record<string, unknown>) => api.put('/api/marketplace-profile', body));
 
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  const d = draft ?? (data ? fromProfile(data) : EMPTY_DRAFT);
-  if (!draft) setDraft(d);
+  const draftReadyRef = useRef(false);
 
-  const canSubmit = d.name.trim() && d.description.trim() && d.websiteUrl.trim()
+  useEffect(() => {
+    if (draftReadyRef.current || !data) return;
+    draftReadyRef.current = true;
+    setDraft(fromProfile(data));
+  }, [data]);
+
+  if (loading) return <StateBlock><Spinner /></StateBlock>;
+  if (!draft) draftReadyRef.current = false; // allow re-init if data becomes null
+
+  const d = draft ?? (data ? fromProfile(data) : EMPTY_DRAFT);
+
+  const canSubmit = d.name.trim() && d.description.trim()
     && (d.categoriesMode === 'all' || d.categories.length > 0)
     && d.promotionalMethods.length > 0 && d.payoutTypesAccepted.length > 0 && d.deviceTypesCovered.length > 0
     && (d.geolocationsMode === 'global' || d.geolocations.length > 0)
