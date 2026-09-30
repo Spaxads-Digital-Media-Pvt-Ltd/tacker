@@ -223,7 +223,7 @@ export function offersAdminRoutes(): Router {
  category: b.category ?? null,
  preview_url: b.previewUrl ?? null,
  tracking_domain_id: b.trackingDomainId ?? null,
- ...(b.description || b.kpi ? { metadata: { description: b.description ?? null, kpi: b.kpi ?? null } } : {}),
+ ...(b.description || b.kpi || b.appIdentifier ? { metadata: { description: b.description ?? null, kpi: b.kpi ?? null, appIdentifier: b.appIdentifier ?? null } } : {}),
  });
  await writeAudit(req, { action: 'offer.create', entityType: 'offer', entityId: row.id, after: row });
  sendOk(res, toAdminDTO(row), undefined, 201);
@@ -264,15 +264,19 @@ export function offersAdminRoutes(): Router {
  const val = (b as Record<string, unknown>)[k];
  if (val !== undefined) patch[col] = val;
  }
- // Notes/description live in metadata (merge, don't clobber other keys).
- const bx = b as { notes?: string[]; description?: string; kpi?: string };
- if (bx.notes !== undefined || bx.description !== undefined || bx.kpi !== undefined) {
- patch['metadata'] = {
- ...(before.metadata ?? {}),
- ...(bx.notes !== undefined ? { notes: bx.notes } : {}),
- ...(bx.description !== undefined ? { description: bx.description } : {}),
- ...(bx.kpi !== undefined ? { kpi: bx.kpi } : {}),
- };
+ // Notes/description/appIdentifier live in metadata (merge, don't clobber other keys).
+ const bx = b as { notes?: string[]; description?: string; kpi?: string; appIdentifier?: string; linkingType?: string; suppressionFileEnabled?: boolean; emailOptOutEnabled?: boolean };
+ if (bx.notes !== undefined || bx.description !== undefined || bx.kpi !== undefined || bx.appIdentifier !== undefined || bx.linkingType !== undefined || bx.suppressionFileEnabled !== undefined || bx.emailOptOutEnabled !== undefined) {
+   patch['metadata'] = {
+     ...(before.metadata ?? {}),
+     ...(bx.notes !== undefined ? { notes: bx.notes } : {}),
+     ...(bx.description !== undefined ? { description: bx.description } : {}),
+     ...(bx.kpi !== undefined ? { kpi: bx.kpi } : {}),
+     ...(bx.appIdentifier !== undefined ? { appIdentifier: bx.appIdentifier } : {}),
+     ...(bx.linkingType !== undefined ? { linkingType: bx.linkingType } : {}),
+     ...(bx.suppressionFileEnabled !== undefined ? { suppressionFileEnabled: bx.suppressionFileEnabled } : {}),
+     ...(bx.emailOptOutEnabled !== undefined ? { emailOptOutEnabled: bx.emailOptOutEnabled } : {}),
+   };
  }
  const [row] = await db.update<OfferRow>(OFFERS, patch, { id: req.params.id });
  await writeAudit(req, { action: 'offer.update', entityType: 'offer', entityId: req.params.id, before, after: row });

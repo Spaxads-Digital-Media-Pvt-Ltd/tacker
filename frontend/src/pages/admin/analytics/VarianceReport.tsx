@@ -127,7 +127,7 @@ function SingleSelectDropdown({ label, value, onChange, allowNone }: { label: st
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <label className="label mb-1 block">{label} {!allowNone && <span className="text-danger-text">*</span>}</label>
+      <label className="label">{label} {!allowNone && <span className="text-danger-text">*</span>}</label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
         {value ? DIM_OPTIONS.find((d) => d.key === value)?.label : 'None'} <ChevronDown size={13} className="text-fg-muted" />
       </button>
@@ -352,7 +352,7 @@ export default function VarianceReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">Current <span className="text-danger-text">*</span></label>
+            <label className="label">Current <span className="text-danger-text">*</span></label>
             <div className="flex items-center gap-1.5">
               <input type="date" className="input !w-40" value={currentFrom} max={currentTo} onChange={(e) => setCurrentFrom(e.target.value)} />
               <span className="text-fg-muted">–</span>
@@ -360,7 +360,7 @@ export default function VarianceReport() {
             </div>
           </div>
           <div>
-            <label className="label mb-1 block">Previous <span className="text-danger-text">*</span></label>
+            <label className="label">Previous <span className="text-danger-text">*</span></label>
             <div className="flex items-center gap-1.5">
               <input type="date" className="input !w-40" value={previousFrom} max={previousTo} onChange={(e) => setPreviousFrom(e.target.value)} />
               <span className="text-fg-muted">–</span>

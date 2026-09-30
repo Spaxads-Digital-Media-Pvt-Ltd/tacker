@@ -131,7 +131,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
       {submitError && <p className="text-small text-danger-text">{submitError}</p>}
       <Field label="Name (optional)"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. production integration" /></Field>
       <div>
-        <p className="label mb-2 block">Permissions</p>
+        <p className="label">Permissions</p>
         <div className="max-h-48 space-y-2 overflow-y-auto rounded-card border border-border p-3">
           {available.map((s) => (
             <label key={s} className="flex items-center gap-2 text-small text-fg">

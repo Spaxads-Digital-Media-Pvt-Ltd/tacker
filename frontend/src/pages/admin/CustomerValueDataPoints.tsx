@@ -71,7 +71,7 @@ function DataPointForm({ initial, onSaved, onCancel }: { initial?: DataPoint; on
       {error && <p className="text-small text-danger-text">{error}</p>}
       <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <div>
-        <label className="label mb-2 block">Data Type *</label>
+        <label className="label">Data Type *</label>
         <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
           {(['text', 'number'] as const).map((t) => (
             <button key={t} type="button" onClick={() => setDataType(t)}

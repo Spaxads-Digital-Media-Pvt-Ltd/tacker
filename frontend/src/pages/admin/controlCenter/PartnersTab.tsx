@@ -49,15 +49,15 @@ function EditGeneralPortalForm({ initial, onCancel, onSave }: {
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
       {formError && <p className="text-small text-danger-text">{formError}</p>}
       <div>
-        <label className="label mb-2 block">Hide Total Click</label>
+        <label className="label">Hide Total Click</label>
         <input type="checkbox" checked={hideTotalClick} onChange={(e) => setHideTotalClick(e.target.checked)} className="h-4 w-4 rounded border-border" />
       </div>
       <div>
-        <label className="label mb-2 block">Show Account Manager Details</label>
+        <label className="label">Show Account Manager Details</label>
         <YesNoToggle value={showAcctMgr} onChange={setShowAcctMgr} />
         {showAcctMgr && (
           <div className="mt-3 max-w-md rounded-card border border-border bg-page p-3">
-            <label className="label mb-2 block">Show Account Manager Custom Details</label>
+            <label className="label">Show Account Manager Custom Details</label>
             <YesNoToggle value={showAcctMgrCustom} onChange={setShowAcctMgrCustom} />
           </div>
         )}
@@ -163,7 +163,7 @@ function EditSignupFormForm({ initial, onCancel, onSave }: {
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
       {formError && <p className="text-small text-danger-text">{formError}</p>}
       <div>
-        <label className="label mb-2 block">Use External Sign Up URL</label>
+        <label className="label">Use External Sign Up URL</label>
         <YesNoToggle value={externalUrl} onChange={setExternalUrl} />
         {externalUrl && (
           <div className="mt-3 max-w-lg">
@@ -174,27 +174,27 @@ function EditSignupFormForm({ initial, onCancel, onSave }: {
         )}
       </div>
       <div>
-        <label className="label mb-2 block">Customize Header</label>
+        <label className="label">Customize Header</label>
         <YesNoToggle value={customizeHeader} onChange={setCustomizeHeader} />
         {customizeHeader && (
           <div className="mt-3 max-w-lg rounded-card border border-border bg-page p-3">
-            <label className="label mb-2 block">Custom Sign Up Header</label>
+            <label className="label">Custom Sign Up Header</label>
             <textarea rows={6} className="input w-full font-mono text-tiny" value={headerHtml} onChange={(e) => setHeaderHtml(e.target.value)} />
           </div>
         )}
       </div>
       <div>
-        <label className="label mb-2 block">Customize Confirmation</label>
+        <label className="label">Customize Confirmation</label>
         <YesNoToggle value={customizeConfirmation} onChange={setCustomizeConfirmation} />
         {customizeConfirmation && (
           <div className="mt-3 max-w-lg rounded-card border border-border bg-page p-3">
-            <label className="label mb-2 block">Custom Sign Up Confirmation</label>
+            <label className="label">Custom Sign Up Confirmation</label>
             <textarea rows={6} className="input w-full font-mono text-tiny" value={confirmHtml} onChange={(e) => setConfirmHtml(e.target.value)} />
           </div>
         )}
       </div>
       <div>
-        <label className="label mb-2 block">Auto Approve Partners</label>
+        <label className="label">Auto Approve Partners</label>
         <YesNoToggle value={autoApprove} onChange={setAutoApprove} />
       </div>
       <Field label="Language *">
@@ -465,7 +465,7 @@ function ReferralSub() {
         {editing ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="label mb-2 block">Enable Partner Referral</label>
+              <label className="label">Enable Partner Referral</label>
               <YesNoToggle value={enabled} onChange={setEnabled} />
             </div>
             <Field label="Method"><input className="input" value={method} onChange={(e) => setMethod(e.target.value)} placeholder="e.g. Tracking link" /></Field>
@@ -571,7 +571,7 @@ function TermsSub() {
         {editing ? (
           <div className="space-y-4">
             <div>
-              <label className="label mb-2 block">Enforce Terms and Conditions</label>
+              <label className="label">Enforce Terms and Conditions</label>
               <YesNoToggle value={enforce} onChange={setEnforce} />
             </div>
             <Field label="Terms and Conditions">

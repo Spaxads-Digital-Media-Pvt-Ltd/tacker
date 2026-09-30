@@ -78,7 +78,7 @@ function CategoryPicker({ categories, panel }: { categories: string[]; panel: (c
 // ── Tabs with no real backing fields at all — extracted so their toggles/segments can hold
 // genuine local state (real clicks, real visual feedback) instead of dead onChange={() => {}}. ────
 
-function TrackingExtras({ domains, value, onChange }: { domains: TrackingDomain[]; value: string; onChange: (v: string) => void }) {
+function TrackingExtras({ domains, value, onChange, linkingType, onLinkingTypeChange }: { domains: TrackingDomain[]; value: string; onChange: (v: string) => void; linkingType: string; onLinkingTypeChange: (v: string) => void }) {
   const [deepLinks, setDeepLinks] = useState(true);
   return (
     <>
@@ -91,13 +91,13 @@ function TrackingExtras({ domains, value, onChange }: { domains: TrackingDomain[
       </Field>
 
       <p className="text-small font-semibold text-fg">Click Tracking</p>
-      <UnavailableField label="Linking Type">
-        <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value="Redirect Linking" onChange={() => {}} />
-      </UnavailableField>
+      <Field label="Linking Type" hint="How the click is resolved. Direct Linking adds a server-side redirect to the destination URL.">
+        <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value={linkingType} onChange={onLinkingTypeChange} />
+      </Field>
 
       <p className="text-small font-semibold text-fg">Conversion Event Tracking</p>
       <div>
-        <label className="label mb-1 block">Conversion Tracking</label>
+        <label className="label">Conversion Tracking</label>
         <p className="text-small text-fg-secondary">Conversions are accepted via Server-to-Server postback, pixel, or iframe — the advertiser fires whichever they use. It isn't a per-offer setting.</p>
       </div>
 
@@ -118,11 +118,11 @@ function RevenueExtras({ revenue, onRevenueChange }: { revenue: string; onRevenu
   return (
     <>
       <div>
-        <label className="label mb-2 block">Revenue Action *</label>
+        <label className="label">Revenue Action *</label>
         <Segmented options={['Impression', 'Click', 'Base Conversion Event']} value={revenueAction} onChange={setRevenueAction} />
       </div>
       <div className="space-y-3 rounded-card border border-border bg-page p-4">
-        <label className="label mb-1 block">Revenue Type *</label>
+        <label className="label">Revenue Type *</label>
         <Segmented options={['Fixed Revenue', 'Percentage Revenue', 'Mixed Revenue']} value={revenueType} onChange={setRevenueType} />
         <Field label="Revenue Per Action (RPA) *"><input className="input" value={revenue} onChange={(e) => onRevenueChange(e.target.value)} /></Field>
         <label className="flex items-start gap-2 text-small text-fg">
@@ -145,22 +145,22 @@ function AttributionExtras() {
   return (
     <>
       <div>
-        <label className="label mb-2 block">24metrics Tracker</label>
+        <label className="label">24metrics Tracker</label>
         <div className="flex items-center gap-2">
           <YesNoToggle on={tracker24} onChange={setTracker24} />
           {tracker24 && <select className="input"><option>Not available yet</option></select>}
         </div>
       </div>
       <div>
-        <label className="label mb-2 block">Enable IPQualityScore Fraud Detection</label>
+        <label className="label">Enable IPQualityScore Fraud Detection</label>
         <YesNoToggle on={ipQuality} onChange={setIpQuality} />
       </div>
       <div>
-        <label className="label mb-2 block">Apply Throttle Rate</label>
+        <label className="label">Apply Throttle Rate</label>
         <YesNoToggle on={throttle} onChange={setThrottle} />
       </div>
       <div>
-        <label className="label mb-2 block">Enable Click to Conversion Time</label>
+        <label className="label">Enable Click to Conversion Time</label>
         <YesNoToggle on={clickToConv} onChange={setClickToConv} />
         {clickToConv && (
           <div className="mt-3 grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-2">
@@ -170,41 +170,50 @@ function AttributionExtras() {
         )}
       </div>
       <div>
-        <label className="label mb-2 block">Enable Email Ownership</label>
+        <label className="label">Enable Email Ownership</label>
         <YesNoToggle on={emailOwnership} onChange={setEmailOwnership} />
       </div>
       <div>
-        <label className="label mb-2 block">Enable View-Through</label>
+        <label className="label">Enable View-Through</label>
         <YesNoToggle on={viewThrough} onChange={setViewThrough} />
       </div>
       <div>
-        <label className="label mb-2 block">Enable Server-Side Click</label>
+        <label className="label">Enable Server-Side Click</label>
         <YesNoToggle on={serverSideClick} onChange={setServerSideClick} />
       </div>
     </>
   );
 }
 
-function EmailTab() {
+function EmailTab({ suppressionFile, setSuppressionFile, emailOptOut, setEmailOptOut }: {
+  suppressionFile: boolean; setSuppressionFile: (v: boolean) => void;
+  emailOptOut: boolean; setEmailOptOut: (v: boolean) => void;
+}) {
   const [ezepo, setEzepo] = useState(false);
   const [optizmo, setOptizmo] = useState(false);
   const [instructions, setInstructions] = useState(false);
   return (
     <div className="max-w-2xl space-y-4">
-      <UnavailableField label="Enable Suppression File"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
       <div>
-        <label className="label mb-2 block">Ezepo Enabled</label>
+        <label className="label">Enable Suppression File</label>
+        <YesNoToggle on={suppressionFile} onChange={setSuppressionFile} />
+      </div>
+      <div>
+        <label className="label">Ezepo Enabled</label>
         <input type="checkbox" checked={ezepo} onChange={(e) => setEzepo(e.target.checked)} className="h-4 w-4 rounded border-border" />
       </div>
       <div>
-        <label className="label mb-2 block">Optizmo Suppression List</label>
+        <label className="label">Optizmo Suppression List</label>
         <YesNoToggle on={optizmo} onChange={setOptizmo} />
       </div>
       <div>
-        <label className="label mb-2 block">Enable Email Instructions</label>
+        <label className="label">Enable Email Instructions</label>
         <YesNoToggle on={instructions} onChange={setInstructions} />
       </div>
-      <UnavailableField label="Enable Email Opt-out"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
+      <div>
+        <label className="label">Enable Email Opt-out</label>
+        <YesNoToggle on={emailOptOut} onChange={setEmailOptOut} />
+      </div>
     </div>
   );
 }
@@ -232,6 +241,9 @@ export default function OfferEdit() {
   const [firePartnerPostback, setFirePartnerPostback] = useState(true);
   const [manuallyApprove, setManuallyApprove] = useState(false);
   const [allowDuplicate, setAllowDuplicate] = useState(true);
+  const [suppressionFile, setSuppressionFile] = useState(false);
+  const [emailOptOut, setEmailOptOut] = useState(false);
+  const [linkingType, setLinkingType] = useState('Redirect Linking');
   const { run, busy, error: saveError } = useMutation((body: Record<string, unknown>) => api.patch(base, body));
 
   useEffect(() => {
@@ -251,6 +263,9 @@ export default function OfferEdit() {
     });
     setCapsEnabled(Boolean(offer.dailyClickCap || offer.dailyConversionCap || offer.totalConversionCap));
     setFailTrafficEnabled(Boolean(offer.fallbackUrl));
+    setSuppressionFile(Boolean(offer.suppressionFileEnabled));
+    setEmailOptOut(Boolean(offer.emailOptOutEnabled));
+    setLinkingType(offer.linkingType ?? 'Redirect Linking');
   }, [offer]);
 
   // Pre-select whichever offer group (if any) already lists this offer.
@@ -287,6 +302,9 @@ export default function OfferEdit() {
     }
     if (form.attributionWindowS) body.attributionWindowS = Number(form.attributionWindowS);
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
+    body.suppressionFileEnabled = suppressionFile;
+    body.emailOptOutEnabled = emailOptOut;
+    body.linkingType = linkingType;
     if (!(await run(body))) return;
 
     // Sync offer-group membership: drop this offer from any group it's currently in, then add it
@@ -320,11 +338,11 @@ export default function OfferEdit() {
               <input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} />
             </Field>
             <div>
-              <label className="label mb-2 block">Status *<HelpHint text="Pending = setup in progress (not live). Active = running. Paused = temporarily stopped. Deleted = archived, hidden from partners." /></label>
+              <label className="label">Status *<HelpHint text="Pending = setup in progress (not live). Active = running. Paused = temporarily stopped. Deleted = archived, hidden from partners." /></label>
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} labels={STATUS_LABEL} />
             </div>
             <div>
-              <label className="label mb-2 block">Visibility *<HelpHint text="Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval." /></label>
+              <label className="label">Visibility *<HelpHint text="Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval." /></label>
               <Segmented options={VISIBILITIES} value={form.visibility} onChange={(v) => set('visibility', v)} />
             </div>
             <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
@@ -365,7 +383,7 @@ export default function OfferEdit() {
               </datalist>
             </Field>
             <div>
-              <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
+              <label className="label">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
               <div className="flex flex-wrap items-center gap-2">
                 <YesNoToggle on={assignGroup} onChange={setAssignGroup} />
                 {assignGroup && (
@@ -396,13 +414,13 @@ export default function OfferEdit() {
               <p className="text-small font-semibold text-fg">Default Landing Page</p>
               <Field label="Default Landing Page URL *"><textarea className="input min-h-[80px] font-mono text-tiny" required value={form.destinationUrl} onChange={(e) => set('destinationUrl', e.target.value)} /></Field>
 
-              <TrackingExtras domains={domains ?? []} value={form.trackingDomainId} onChange={(v) => set('trackingDomainId', v)} />
+              <TrackingExtras domains={domains ?? []} value={form.trackingDomainId} onChange={(v) => set('trackingDomainId', v)} linkingType={linkingType} onLinkingTypeChange={setLinkingType} />
             </div>
 
             <div className="space-y-4 border-t border-border pt-4">
               <h3 className="text-h3 font-medium text-fg">Caps</h3>
               <div>
-                <label className="label mb-2 block">Enable Caps</label>
+                <label className="label">Enable Caps</label>
                 <YesNoToggle on={capsEnabled} onChange={setCapsEnabled} />
               </div>
               {capsEnabled && (
@@ -508,7 +526,7 @@ export default function OfferEdit() {
         {tab === 'Fail Traffic' && (
           <div className="max-w-2xl space-y-4">
             <div>
-              <label className="label mb-2 block">Enable Fail Traffic</label>
+              <label className="label">Enable Fail Traffic</label>
               <YesNoToggle on={failTrafficEnabled} onChange={setFailTrafficEnabled} />
             </div>
             {failTrafficEnabled && (
@@ -539,7 +557,7 @@ export default function OfferEdit() {
             ]} />
         )}
 
-        {tab === 'Email' && <EmailTab />}
+        {tab === 'Email' && <EmailTab suppressionFile={suppressionFile} setSuppressionFile={setSuppressionFile} emailOptOut={emailOptOut} setEmailOptOut={setEmailOptOut} />}
 
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <button type="button" className="btn-ghost" onClick={() => nav(`/app/offers/${id}`)}>Cancel</button>

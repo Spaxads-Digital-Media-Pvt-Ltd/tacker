@@ -100,7 +100,7 @@ function GeneralSub() {
               <textarea className="input w-full" rows={3} value={footerHtml} onChange={(e) => setFooterHtml(e.target.value)} />
             </Field>
             <div>
-              <label className="label mb-2 block">Hide Total Click</label>
+              <label className="label">Hide Total Click</label>
               <YesNoToggle value={hideTotalClick} onChange={setHideTotalClick} />
             </div>
             <div className="flex justify-end gap-2 border-t border-border pt-4">
@@ -125,7 +125,7 @@ function GeneralSub() {
             <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
             {saveSignupMut.error && <p className="text-small text-danger-text">{saveSignupMut.error}</p>}
             <div>
-              <label className="label mb-2 block">Use External Sign Up URL</label>
+              <label className="label">Use External Sign Up URL</label>
               <YesNoToggle value={externalUrl} onChange={setExternalUrl} />
               {externalUrl && (
                 <div className="mt-3">
@@ -136,27 +136,27 @@ function GeneralSub() {
               )}
             </div>
             <div>
-              <label className="label mb-2 block">Customize Header</label>
+              <label className="label">Customize Header</label>
               <YesNoToggle value={customizeHeader} onChange={setCustomizeHeader} />
               {customizeHeader && (
                 <div className="mt-3 rounded-card border border-border bg-page p-3">
-                  <label className="label mb-2 block">Custom Sign Up Header</label>
+                  <label className="label">Custom Sign Up Header</label>
                   <textarea rows={4} className="input w-full font-mono text-tiny" value={signupHeader} onChange={(e) => setSignupHeader(e.target.value)} />
                 </div>
               )}
             </div>
             <div>
-              <label className="label mb-2 block">Customize Confirmation</label>
+              <label className="label">Customize Confirmation</label>
               <YesNoToggle value={customizeConfirmation} onChange={setCustomizeConfirmation} />
               {customizeConfirmation && (
                 <div className="mt-3 rounded-card border border-border bg-page p-3">
-                  <label className="label mb-2 block">Custom Sign Up Confirmation</label>
+                  <label className="label">Custom Sign Up Confirmation</label>
                   <textarea rows={4} className="input w-full font-mono text-tiny" value={signupConfirm} onChange={(e) => setSignupConfirm(e.target.value)} />
                 </div>
               )}
             </div>
             <div>
-              <label className="label mb-2 block">Auto Approve Advertisers</label>
+              <label className="label">Auto Approve Advertisers</label>
               <YesNoToggle value={autoApprove} onChange={setAutoApprove} />
             </div>
             <Field label="Language *">

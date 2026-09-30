@@ -108,17 +108,17 @@ function GeneralExtras({
       <LabelsEditor base={base} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <label className="label mb-2 block">Allow partner to receive notifications</label>
+          <label className="label">Allow partner to receive notifications</label>
           <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="h-4 w-4 rounded border-border" />
         </div>
         <div>
-          <label className="label mb-2 block">Enable CPC/CPM Dynamic Payouts for Partner</label>
+          <label className="label">Enable CPC/CPM Dynamic Payouts for Partner</label>
           <input type="checkbox" checked={dynamicPayouts} onChange={(e) => setDynamicPayouts(e.target.checked)} className="h-4 w-4 rounded border-border" />
         </div>
       </div>
       <Field label="Internal Notes"><textarea className="input min-h-[80px]" value={form.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
       <div>
-        <label className="label mb-2 block">Set Macro Parameter Visibility</label>
+        <label className="label">Set Macro Parameter Visibility</label>
         <Segmented options={['None', 'Custom', 'Full access']} value={macroVisibility} onChange={setMacroVisibility} />
       </div>
     </div>
@@ -132,7 +132,7 @@ function AddressTab({ form, set }: { form: FormState; set: <K extends keyof Form
     <div className="space-y-4">
       <Field label="Country"><input className="input" value={form.country} onChange={(e) => set('country', e.target.value)} placeholder="United States" /></Field>
       <div>
-        <label className="label mb-2 block">Enable Address</label>
+        <label className="label">Enable Address</label>
         <YesNoToggle on={enabled} onChange={setEnabled} />
       </div>
       {enabled && (
@@ -181,7 +181,7 @@ function BillingTab({ form, set }: { form: FormState; set: <K extends keyof Form
       <Field label="Tax ID / VAT or SSN"><input className="input" value={form.taxId} onChange={(e) => set('taxId', e.target.value)} /></Field>
       <Field label="VAT Percentage"><input className="input" /></Field>
       <div>
-        <label className="label mb-2 block">Automatic Invoice Creation</label>
+        <label className="label">Automatic Invoice Creation</label>
         <YesNoToggle on={autoInvoice} onChange={setAutoInvoice} />
       </div>
       {autoInvoice && (
@@ -250,7 +250,7 @@ export default function PublisherEdit() {
           <div className="space-y-4">
             <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
             <div>
-              <label className="label mb-2 block">Status *</label>
+              <label className="label">Status *</label>
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

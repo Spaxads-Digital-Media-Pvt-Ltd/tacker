@@ -74,6 +74,10 @@ export interface Offer {
   fallbackUrl?: string | null;
   description?: string | null;
   notes?: string[];
+  appIdentifier?: string | null;
+  linkingType?: string | null;
+  suppressionFileEnabled?: boolean;
+  emailOptOutEnabled?: boolean;
   securityCode?: string | null;
   trackingDomainId?: string | null;
   createdAt: string;

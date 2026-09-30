@@ -19,7 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, UnavailableField, Segmented } from '../../shared-components/primitives/ui';
+import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
 import { Stepper } from '../../shared-components/panels/Stepper';
@@ -72,7 +72,7 @@ export default function OfferCreate() {
       payoutModel: 'CPA', currency: 'USD', defaultRevenue: '', defaultPayout: '',
       category: '', visibility: 'public', status: 'active',
       description: '', attributionWindowS: '2592000', dedupWindowS: '86400', fallbackUrl: '',
-      allowedTrafficTypes: [] as string[],
+      allowedTrafficTypes: [] as string[], appIdentifier: '',
     };
     // Offers › Templates "Use Template" hands off its fieldValues this way (same field keys).
     // Read-only here (no sessionStorage.removeItem) — a useState initializer can run twice under
@@ -102,6 +102,9 @@ export default function OfferCreate() {
   const [capsEnabled, setCapsEnabled] = useState(false);
   const [dailyClickCap, setDailyClickCap] = useState('');
   const [failTrafficEnabled, setFailTrafficEnabled] = useState(false);
+  const [linkingType, setLinkingType] = useState('Redirect Linking');
+  const [suppressionFile, setSuppressionFile] = useState(false);
+  const [emailOptOut, setEmailOptOut] = useState(false);
   const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.post<{ id: string }>('/api/offers', body));
 
   const submit = async (e: FormEvent) => {
@@ -117,6 +120,7 @@ export default function OfferCreate() {
     if (form.previewUrl) body.previewUrl = normalizeUrl(form.previewUrl);
     if (form.trackingDomainId) body.trackingDomainId = form.trackingDomainId;
     if (form.description) body.description = form.description;
+    if (form.appIdentifier) body.appIdentifier = form.appIdentifier;
     if (form.attributionWindowS) body.attributionWindowS = Number(form.attributionWindowS);
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
     if (failTrafficEnabled && form.fallbackUrl) body.fallbackUrl = normalizeUrl(form.fallbackUrl);
@@ -135,6 +139,11 @@ export default function OfferCreate() {
     for (const name of labels) {
       await api.post(`/api/offers/${res.id}/tags`, { name });
     }
+    // Linking Type isn't a top-level offer column — persist on metadata via a follow-up PATCH so the
+    // chosen value is preserved exactly as the user picked it (Redirect vs Redirect + Direct).
+    // Suppression File and Email Opt-out (Email step) also persist here since there's no dedicated
+    // column in the offers table for them.
+    await api.patch(`/api/offers/${res.id}`, { appIdentifier: form.appIdentifier, linkingType, suppressionFileEnabled: suppressionFile, emailOptOutEnabled: emailOptOut });
     nav(`/app/offers/${res.id}`);
   };
 
@@ -162,7 +171,7 @@ export default function OfferCreate() {
             </Field>
             {/* Status — segmented state control (Everflow "Add Offer" parity). */}
             <div>
-              <label className="label mb-2 block">Status *<HelpHint text="Active = running. Paused = temporarily stopped. Pending = setup in progress (not live)." /></label>
+              <label className="label">Status *<HelpHint text="Active = running. Paused = temporarily stopped. Pending = setup in progress (not live)." /></label>
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} labels={STATUS_LABEL} />
             </div>
             {/* Advertiser / Category / Currency stacked on the left, tall Thumbnail on the right — matches the Everflow "Add Offer" General layout. */}
@@ -203,15 +212,14 @@ export default function OfferCreate() {
                 </Field>
               </div>
               <div className="flex flex-col">
-                <label className="label mb-2 block text-fg-muted">Thumbnail</label>
-                <div className="flex flex-1 select-none items-center justify-center rounded-card border border-dashed border-border p-6 text-tiny text-fg-muted opacity-60 min-h-[140px]">
+                <label className="label text-fg-muted">Thumbnail</label>
+                <div className="flex flex-1 select-none items-center justify-center rounded-card border border-dashed border-border p-6 text-tiny text-fg-muted min-h-[140px]">
                   Drag and drop or Browse
                 </div>
-                <p className="mt-1 text-[11px] text-fg-muted">Not yet available in this app.</p>
               </div>
             </div>
             <div>
-              <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
+              <label className="label">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
               <div className="flex flex-wrap items-center gap-2">
                 <YesNoToggle on={assignGroup} onChange={setAssignGroup} />
                 {assignGroup && (
@@ -223,7 +231,9 @@ export default function OfferCreate() {
               </div>
             </div>
             <LabelsInput value={labels} onChange={setLabels} />
-            <UnavailableField label="App Identifier"><input className="input" disabled placeholder="e.g. com.acme.app" /></UnavailableField>
+            <Field label="App Identifier" hint="Optional iOS/Android package identifier used by mobile attribution. Stored on the offer for reference.">
+              <input className="input" value={form.appIdentifier} onChange={(e) => set('appIdentifier', e.target.value)} placeholder="e.g. com.acme.app" />
+            </Field>
             <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
               <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
             </Field>
@@ -233,7 +243,7 @@ export default function OfferCreate() {
             {/* Visibility lives below the fold — the Everflow "Add Offer" General step doesn't surface it
                 up top, but it's a real offer field so it stays settable here. */}
             <div>
-              <label className="label mb-2 block">Visibility *<HelpHint text="Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval." /></label>
+              <label className="label">Visibility *<HelpHint text="Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval." /></label>
               <Segmented options={VISIBILITIES} value={form.visibility} onChange={(v) => set('visibility', v)} />
             </div>
           </div>
@@ -250,18 +260,18 @@ export default function OfferCreate() {
                   {(domains ?? []).map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
                 </select>
               </Field>
-              <UnavailableField label="Linking Type">
-                <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value="Redirect Linking" onChange={() => {}} />
-              </UnavailableField>
+              <Field label="Linking Type" hint="Redirect = all traffic goes through the tracking server. Redirect + Direct = server decides whether to pass through or send straight to the landing page.">
+                <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value={linkingType} onChange={setLinkingType} />
+              </Field>
               <div>
-                <label className="label mb-1 block">Conversion Tracking</label>
+                <label className="label">Conversion Tracking</label>
                 <p className="text-small text-fg-secondary">Conversions are accepted via Server-to-Server postback, pixel, or iframe — the advertiser fires whichever they use. It isn't a per-offer setting.</p>
               </div>
             </div>
             <div className="space-y-4 border-t border-border pt-4">
               <h3 className="text-h3 font-medium text-fg">Caps</h3>
               <div>
-                <label className="label mb-2 block">Enable Caps</label>
+                <label className="label">Enable Caps</label>
                 <YesNoToggle on={capsEnabled} onChange={setCapsEnabled} />
               </div>
               {capsEnabled && <Field label="Daily Click Cap"><input type="number" min={0} className="input" value={dailyClickCap} onChange={(e) => setDailyClickCap(e.target.value)} placeholder="Unlimited" /></Field>}
@@ -296,7 +306,7 @@ export default function OfferCreate() {
 
         {step === 4 && (
           <div className="space-y-4">
-            <label className="label mb-2 block">Allowed Traffic Types</label>
+            <label className="label">Allowed Traffic Types</label>
             <div className="flex flex-wrap gap-2">
               {DEVICES.map((d) => (
                 <button key={d} type="button" onClick={() => toggleDevice(d)}
@@ -312,7 +322,7 @@ export default function OfferCreate() {
         {step === 5 && (
           <div className="space-y-4">
             <div>
-              <label className="label mb-2 block">Enable Fail Traffic</label>
+              <label className="label">Enable Fail Traffic</label>
               <YesNoToggle on={failTrafficEnabled} onChange={setFailTrafficEnabled} />
             </div>
             {failTrafficEnabled && <Field label="Fallback URL"><input className="input" value={form.fallbackUrl} onChange={(e) => set('fallbackUrl', e.target.value)} placeholder="https://…" /></Field>}
@@ -325,8 +335,14 @@ export default function OfferCreate() {
 
         {step === 7 && (
           <div className="space-y-4">
-            <UnavailableField label="Enable Suppression File"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
-            <UnavailableField label="Enable Email Opt-out"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
+            <div>
+              <label className="label">Enable Suppression File</label>
+              <YesNoToggle on={suppressionFile} onChange={setSuppressionFile} />
+            </div>
+            <div>
+              <label className="label">Enable Email Opt-out</label>
+              <YesNoToggle on={emailOptOut} onChange={setEmailOptOut} />
+            </div>
           </div>
         )}
 

@@ -100,7 +100,7 @@ function UploadBox({ label, value, error, onFile, onClear }: {
 
   return (
     <div>
-      <label className="label mb-2 block">{label}</label>
+      <label className="label">{label}</label>
       <div
         className={`rounded-card border border-dashed bg-page p-3 text-center transition-colors ${
           dragging ? 'border-accent bg-accent-subtle' : 'border-border'
@@ -357,7 +357,7 @@ function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?:
       ))}
       <Field label="Set Offer cap Threshold Percentage *"><input className="input" value={threshold} onChange={(e) => setThreshold(e.target.value)} /></Field>
       <div>
-        <label className="label mb-2 block">Set CPC Calculation Based On *</label>
+        <label className="label">Set CPC Calculation Based On *</label>
         <Segmented options={['Unique Clicks', 'Gross Clicks']} value={cpcBasis} onChange={setCpcBasis} />
       </div>
       <label className="flex items-center gap-2 text-small text-fg">

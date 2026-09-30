@@ -31,6 +31,10 @@ export interface OfferAdminDTO {
   previewUrl: string | null;
   description: string | null;
   notes: string[];
+  appIdentifier: string | null;
+  linkingType: string | null;
+  suppressionFileEnabled: boolean;
+  emailOptOutEnabled: boolean;
   securityCode: string | null;
   trackingDomainId: string | null;
   createdAt: string;
@@ -63,6 +67,10 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     previewUrl: row.preview_url,
     description: (meta['description'] as string | undefined) ?? null,
     notes: Array.isArray(meta['notes']) ? (meta['notes'] as string[]) : [],
+    appIdentifier: (meta['appIdentifier'] as string | undefined) ?? null,
+    linkingType: (meta['linkingType'] as string | undefined) ?? null,
+    suppressionFileEnabled: Boolean(meta['suppressionFileEnabled']),
+    emailOptOutEnabled: Boolean(meta['emailOptOutEnabled']),
     securityCode: row.security_code ?? null,
     trackingDomainId: row.tracking_domain_id,
     createdAt: row.created_at,

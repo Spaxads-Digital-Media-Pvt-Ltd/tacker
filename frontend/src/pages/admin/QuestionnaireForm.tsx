@@ -35,7 +35,7 @@ function OptionsEditor({ options, onChange }: { options: string[]; onChange: (v:
   };
   return (
     <div>
-      <label className="label mb-1 block">Options</label>
+      <label className="label">Options</label>
       <div className="input flex min-h-[42px] flex-wrap items-center gap-1.5 !py-1.5">
         {options.map((o) => (
           <span key={o} className="inline-flex items-center gap-1 rounded-full bg-accent-subtle px-2 py-0.5 text-tiny text-accent-text">
@@ -72,7 +72,7 @@ function FieldCard({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
             <Field label="Label *"><input className="input" required value={field.label} onChange={(e) => onChange({ ...field, label: e.target.value })} /></Field>
             <div>
-              <label className="label mb-1 block">Required</label>
+              <label className="label">Required</label>
               <button type="button" role="switch" aria-checked={field.required} onClick={() => onChange({ ...field, required: !field.required })}
                 className={`relative inline-block h-6 w-11 rounded-full transition-colors ${field.required ? 'bg-success' : 'bg-border'}`}>
                 <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${field.required ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -99,7 +99,7 @@ function PreviewModal({ name, fields, onClose }: { name: string; fields: DraftFi
         {fields.length === 0 && <p className="text-small text-fg-secondary">No fields defined.</p>}
         {fields.map((f, i) => (
           <div key={i}>
-            <label className="label mb-1 block">{f.label || `Field ${i + 1}`}{f.required && <span className="text-danger-text"> *</span>}</label>
+            <label className="label">{f.label || `Field ${i + 1}`}{f.required && <span className="text-danger-text"> *</span>}</label>
             {f.tooltip && <p className="mb-1 text-tiny text-fg-secondary">{f.tooltip}</p>}
             {f.dataField === 'textarea' ? <textarea className="input" disabled />
               : f.dataField === 'select' ? (
@@ -181,7 +181,7 @@ export default function QuestionnaireForm() {
           <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
 
           <div>
-            <label className="label mb-2 block">Status *</label>
+            <label className="label">Status *</label>
             <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
               {(['active', 'inactive'] as const).map((s) => (
                 <button key={s} type="button" onClick={() => setStatus(s)}
@@ -194,7 +194,7 @@ export default function QuestionnaireForm() {
           </div>
 
           <div>
-            <label className="label mb-2 block">Fields</label>
+            <label className="label">Fields</label>
             <button type="button" onClick={() => setFields((f) => [...f, emptyField()])}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg hover:bg-accent-subtle">+</button>
           </div>

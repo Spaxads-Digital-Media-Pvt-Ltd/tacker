@@ -284,11 +284,11 @@ export function DimensionalReport() {
       <div className="card space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={() => { setFrom(daysAgo(6)); setTo(todayStr()); }}>Last 7 Days</button>

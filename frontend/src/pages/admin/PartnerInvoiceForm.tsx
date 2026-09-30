@@ -103,7 +103,7 @@ export default function PartnerInvoiceForm() {
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
             <div>
-              <label className="label mb-2 block">Invoice Hidden From Partner</label>
+              <label className="label">Invoice Hidden From Partner</label>
               <YesNoToggle value={form.hidden} onChange={(v) => setForm((f) => ({ ...f, hidden: v }))} />
             </div>
             <Field label="Payment Terms">

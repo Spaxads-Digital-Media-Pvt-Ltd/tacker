@@ -37,19 +37,19 @@ export default function RedirectReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input title="Not available yet" type="date" className="input" defaultValue="" />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input title="Not available yet" type="date" className="input" defaultValue="" />
           </div>
           <div>
-            <label className="label mb-1 block">Parent <span className="text-danger-text">*</span></label>
+            <label className="label">Parent <span className="text-danger-text">*</span></label>
             <button title="Not available yet" className="input flex items-center justify-between !py-2 text-left text-fg-muted">Originating Offer</button>
           </div>
           <div>
-            <label className="label mb-1 block">Child <span className="text-danger-text">*</span></label>
+            <label className="label">Child <span className="text-danger-text">*</span></label>
             <button title="Not available yet" className="input flex items-center justify-between !py-2 text-left text-fg-muted">Fail Offer</button>
           </div>
           <button title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">

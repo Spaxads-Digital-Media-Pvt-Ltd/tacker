@@ -164,11 +164,11 @@ function DateRangeChip({ from, to, onApply }: { from: string; to: string; onAppl
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 w-72 space-y-3 rounded-card border border-border bg-elevated p-3 shadow-elevated">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={draftFrom} max={draftTo} onChange={(e) => setDraftFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={draftTo} min={draftFrom} max={todayStr()} onChange={(e) => setDraftTo(e.target.value)} />
           </div>
           <div className="flex justify-end gap-2">
@@ -217,7 +217,7 @@ function MoreFiltersButton({ portal, method, onApply }: { portal: string; method
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-64 space-y-3 rounded-card border border-border bg-elevated p-3 shadow-elevated">
           <div>
-            <label className="label mb-1 block">Portal</label>
+            <label className="label">Portal</label>
             <select className="input" value={draftPortal} onChange={(e) => setDraftPortal(e.target.value)}>
               <option value="">All</option>
               <option value="Dashboard">Dashboard</option>
@@ -227,7 +227,7 @@ function MoreFiltersButton({ portal, method, onApply }: { portal: string; method
             </select>
           </div>
           <div>
-            <label className="label mb-1 block">Method</label>
+            <label className="label">Method</label>
             <select className="input" value={draftMethod} onChange={(e) => setDraftMethod(e.target.value)}>
               <option value="">All</option>
               <option value="POST">POST</option>

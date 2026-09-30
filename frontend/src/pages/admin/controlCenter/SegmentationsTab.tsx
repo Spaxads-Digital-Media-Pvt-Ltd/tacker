@@ -99,7 +99,7 @@ function CrudSub({ resource, addLabel, columns, desc }: {
         <div className="card mb-3 flex flex-wrap items-end gap-2">
           {saveError && <p className="text-small text-danger-text">{saveError}</p>}
           <div className="flex-1">
-            <label className="label mb-1 block">Name *</label>
+            <label className="label">Name *</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <button className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
@@ -169,7 +169,7 @@ function LabelsSub() {
         <div className="card mb-3 flex flex-wrap items-end gap-2">
           {saveError && <p className="text-small text-danger-text">{saveError}</p>}
           <div className="flex-1">
-            <label className="label mb-1 block">Name *</label>
+            <label className="label">Name *</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <button className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>

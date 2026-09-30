@@ -310,7 +310,7 @@ function InfoRowsEditForm({
             const strVal = typeof rawVal === 'string' ? rawVal : '';
             return (
               <div key={f.label}>
-                <p className="label mb-1 block">{f.label}</p>
+                <p className="label">{f.label}</p>
                 <input
                   className={`input ${err ? '!border-danger-text' : ''}`}
                   value={strVal}

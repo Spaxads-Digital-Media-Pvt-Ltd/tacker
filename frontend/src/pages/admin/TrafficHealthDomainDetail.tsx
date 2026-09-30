@@ -44,11 +44,11 @@ function DateRangePicker({ from, to, onFrom, onTo }: { from: string; to: string;
   return (
     <div className="mb-6 flex flex-wrap items-end gap-3">
       <div>
-        <label className="label mb-1 flex items-center gap-1.5"><Calendar size={13} /> From</label>
+        <label className="label flex items-center gap-1.5"><Calendar size={13} /> From</label>
         <input type="date" className="input" value={from} max={to} onChange={(e) => onFrom(e.target.value)} />
       </div>
       <div>
-        <label className="label mb-1 block">To</label>
+        <label className="label">To</label>
         <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => onTo(e.target.value)} />
       </div>
     </div>
