@@ -40,4 +40,3 @@ export function targetingErrors(t: OfferTargeting): string[] {
   }
   return out;
 }
-
