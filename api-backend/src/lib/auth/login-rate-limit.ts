@@ -48,19 +48,19 @@ const ACCOUNT_LIMIT = env.LOGIN_RATE_LIMIT_ACCOUNT;
 // ---------------------------------------------------------------------------
 
 function sha256(value: string): string {
- return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+	return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
 function bucketIndex(now: Date): number {
- return Math.floor(now.getTime() / (BUCKET_MINUTES * 60_000));
+	return Math.floor(now.getTime() / (BUCKET_MINUTES * 60_000));
 }
 
 function ipKeys(ipHash: string, idx: number): string[] {
- return Array.from({ length: BUCKET_COUNT }, (_, i) => `lr:ip:${ipHash}:${idx - i}`);
+	return Array.from({ length: BUCKET_COUNT }, (_, i) => `lr:ip:${ipHash}:${idx - i}`);
 }
 
 function acctKeys(acctHash: string, idx: number): string[] {
- return Array.from({ length: BUCKET_COUNT }, (_, i) => `lr:acct:${acctHash}:${idx - i}`);
+	return Array.from({ length: BUCKET_COUNT }, (_, i) => `lr:acct:${acctHash}:${idx - i}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -68,16 +68,16 @@ function acctKeys(acctHash: string, idx: number): string[] {
 // ---------------------------------------------------------------------------
 
 export interface RateLimitResult {
- /** Whether the request is blocked. */
- limited: boolean;
- /** Which counter triggered the block (if limited). */
- reason?: 'ip' | 'account';
- /** Seconds the client should wait before retrying. */
- retryAfterSeconds: number;
- /** Current sliding-window total for the IP key (0 if Redis unavailable). */
- ipCount: number;
- /** Current sliding-window total for the account key (0 if Redis unavailable). */
- accountCount: number;
+	/** Whether the request is blocked. */
+	limited: boolean;
+	/** Which counter triggered the block (if limited). */
+	reason?: 'ip' | 'account';
+	/** Seconds the client should wait before retrying. */
+	retryAfterSeconds: number;
+	/** Current sliding-window total for the IP key (0 if Redis unavailable). */
+	ipCount: number;
+	/** Current sliding-window total for the account key (0 if Redis unavailable). */
+	accountCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,60 +88,51 @@ export interface RateLimitResult {
  * Checks whether the IP or account identifier is already over the rate limit.
  * Call at the START of a login handler, before doing any credential verification.
  *
- * Uses two separate pipelines: one for INCR (returns current count), one for EXPIRE.
- * This keeps results unambiguous for both production and testing.
+ * Read-only: does NOT modify Redis counters. Use recordLoginFailure() to actually
+ * increment counters after a failed authentication.
+ *
+ * Returns the current sliding-window totals for both IP and account so the caller
+ * can decide whether to proceed.
  */
 export async function checkLoginRateLimit(
- ip: string,
- normalizedIdentifier: string,
+	ip: string,
+	normalizedIdentifier: string,
 ): Promise<RateLimitResult> {
- const now = new Date();
- const idx = bucketIndex(now);
- const ipHash = sha256(ip);
- const acctHash = sha256(normalizedIdentifier);
+	const now = new Date();
+	const idx = bucketIndex(now);
+	const ipHash = sha256(ip);
+	const acctHash = sha256(normalizedIdentifier);
 
- const ipK = ipKeys(ipHash, idx);
- const acctK = acctKeys(acctHash, idx);
- const allKeys = [...ipK, ...acctK];
+	const ipK = ipKeys(ipHash, idx);
+	const acctK = acctKeys(acctHash, idx);
 
- try {
- const redis = getRedis();
+	try {
+		const redis = getRedis();
 
- // Pipeline 1: INCR all buckets (returns new count for each).
- const incrPipe = redis.pipeline();
- for (const k of allKeys) incrPipe.incr(k);
- const incrResults = (await incrPipe.exec()) as [Error | null, number][];
+		// Read-only: sum current counts across the sliding window buckets.
+		const pipe = redis.pipeline();
+		for (const k of [...ipK, ...acctK]) pipe.get(k);
+		const results = await pipe.exec();
 
- // Pipeline 2: EXPIRE all buckets (no-op for keys with existing TTL).
- const expPipe = redis.pipeline();
- for (const k of allKeys) expPipe.expire(k, WINDOW_MINUTES * 60);
- await expPipe.exec();
+		const values = (results as [Error | null, string | null][]).map(([, v]) => Number(v ?? 0));
+		const ipCounts = values.slice(0, BUCKET_COUNT);
+		const acctCounts = values.slice(BUCKET_COUNT);
 
- // INCR results come back in command order: ip[0..2], acct[0..2]
- const ipCounts: number[] = [];
- const acctCounts: number[] = [];
- for (let i = 0; i < BUCKET_COUNT; i++) {
- ipCounts.push(Number(incrResults[i]?.[1] ?? 0));
- }
- for (let i = 0; i < BUCKET_COUNT; i++) {
- acctCounts.push(Number(incrResults[BUCKET_COUNT + i]?.[1] ?? 0));
- }
+		const ipTotal = ipCounts.reduce((a, b) => a + b, 0);
+		const acctTotal = acctCounts.reduce((a, b) => a + b, 0);
 
- const ipTotal = ipCounts.reduce((a, b) => a + b, 0);
- const acctTotal = acctCounts.reduce((a, b) => a + b, 0);
+		if (ipTotal > IP_LIMIT) {
+			return { limited: true, reason: 'ip', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
+		}
+		if (acctTotal > ACCOUNT_LIMIT) {
+			return { limited: true, reason: 'account', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
+		}
 
- if (ipTotal > IP_LIMIT) {
- return { limited: true, reason: 'ip', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
- }
- if (acctTotal > ACCOUNT_LIMIT) {
- return { limited: true, reason: 'account', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
- }
-
- return { limited: false, ipCount: ipTotal, accountCount: acctTotal, retryAfterSeconds: 0 };
- } catch (err) {
- logger.warn({ err }, 'login rate limiter: Redis unavailable — failing open');
- return { limited: false, ipCount: 0, accountCount: 0, retryAfterSeconds: 0 };
- }
+		return { limited: false, ipCount: ipTotal, accountCount: acctTotal, retryAfterSeconds: 0 };
+	} catch (err) {
+		logger.warn({ err }, 'login rate limiter: Redis unavailable — failing open');
+		return { limited: false, ipCount: 0, accountCount: 0, retryAfterSeconds: 0 };
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -154,13 +145,49 @@ export async function checkLoginRateLimit(
  *
  * Call AFTER verifying credentials are wrong (wrong password, unknown account, disabled
  * account, etc.) so the failure is actually counted.
+ *
+ * Implements its own atomic INCR — does NOT call checkLoginRateLimit, so each failed
+ * attempt increments exactly once.
  */
 export async function recordLoginFailure(
- ip: string,
- normalizedIdentifier: string,
+	ip: string,
+	normalizedIdentifier: string,
 ): Promise<RateLimitResult> {
- // Reuse checkLoginRateLimit logic — it increments counters atomically.
- return checkLoginRateLimit(ip, normalizedIdentifier);
+	const now = new Date();
+	const idx = bucketIndex(now);
+	const ipHash = sha256(ip);
+	const acctHash = sha256(normalizedIdentifier);
+
+	const ipK = ipKeys(ipHash, idx);
+	const acctK = acctKeys(acctHash, idx);
+	const allKeys = [...ipK, ...acctK];
+
+	try {
+		const redis = getRedis();
+
+		// Pipeline 1: INCR all buckets (returns new count for each).
+		const incrPipe = redis.pipeline();
+		for (const k of allKeys) incrPipe.incr(k);
+		const incrResults = (await incrPipe.exec()) as [Error | null, number][];
+
+		// Pipeline 2: EXPIRE all buckets (no-op for keys with existing TTL).
+		const expPipe = redis.pipeline();
+		for (const k of allKeys) expPipe.expire(k, WINDOW_MINUTES * 60);
+		await expPipe.exec();
+
+		const ipCounts = Array.from({ length: BUCKET_COUNT }, (_, i) => Number(incrResults[i]?.[1] ?? 0));
+		const acctCounts = Array.from({ length: BUCKET_COUNT }, (_, i) => Number(incrResults[BUCKET_COUNT + i]?.[1] ?? 0));
+
+		return {
+			limited: false,
+			retryAfterSeconds: 0,
+			ipCount: ipCounts.reduce((a, b) => a + b, 0),
+			accountCount: acctCounts.reduce((a, b) => a + b, 0),
+		};
+	} catch (err) {
+		logger.warn({ err }, 'login rate limiter: Redis unavailable — failing open');
+		return { limited: false, ipCount: 0, accountCount: 0, retryAfterSeconds: 0 };
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -173,15 +200,15 @@ export async function recordLoginFailure(
  * and their TTL will naturally expire.
  */
 export async function resetLoginCounter(normalizedIdentifier: string): Promise<void> {
- const now = new Date();
- const idx = bucketIndex(now);
- const hash = sha256(normalizedIdentifier);
- const keys = acctKeys(hash, idx);
+	const now = new Date();
+	const idx = bucketIndex(now);
+	const hash = sha256(normalizedIdentifier);
+	const keys = acctKeys(hash, idx);
 
- try {
- const redis = getRedis();
- await redis.del(...keys);
- } catch (err) {
- logger.warn({ err }, 'login rate limiter: could not reset account counter');
- }
+	try {
+		const redis = getRedis();
+		await redis.del(...keys);
+	} catch (err) {
+		logger.warn({ err }, 'login rate limiter: could not reset account counter');
+	}
 }

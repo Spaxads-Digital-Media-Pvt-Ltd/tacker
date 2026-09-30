@@ -1,31 +1,34 @@
 /**
- * Add Offer (Everflow-style 8-step wizard, same step names as OfferEdit.tsx's tabs). Real fields
- * (name, status, advertiserId, category, currency, visibility, destinationUrl, previewUrl,
- * description, payoutModel, defaultRevenue, defaultPayout, allowedTrafficTypes, caps,
- * attribution/dedup windows, fallbackUrl, trackingDomainId) POST to the real /api/offers endpoint
- * on the final step. `category` is a free-text column (no reference table): the picker is a real
- * dropdown of the distinct values already in use, with a "＋ New category…" escape hatch so a
- * brand-new label can still be typed. `currency` stays a free-text ISO-4217 input (pattern-guarded)
- * because there is NO server-side currency list to validate against — a constraining dropdown would
- * imply a check the backend doesn't do (see the QA note). "Assign To Offer Group" isn't part of the
- * create payload — group membership
- * lives on offer_groups.offer_ids — so, like OfferEdit, it's applied as a follow-up PATCH to the
- * chosen group once the offer exists.
- * Creatives can't be attached until the offer exists, so that step just explains that and defers to
- * the Offer Detail page after creation. Email has no equivalent in this app at all.
+ * Add Offer (Everflow-style wizard, same step names as OfferEdit.tsx's tabs). Everything POSTs to
+ * /api/offers on the final step — column fields plus the metadata-backed ones (targeting,
+ * attribution / revenue-event / email settings, app identifier, internal notes, product ID,
+ * thumbnail URL). `category` is free text (no reference table): the picker lists values already in
+ * use, with a "＋ New category…" escape hatch. `currency` stays a pattern-guarded ISO-4217 input —
+ * there's no server-side currency list. Things that need the offer's id run as follow-ups once it
+ * exists: offer-group membership (lives on offer_groups.offer_ids), labels, and an uploaded
+ * thumbnail file. Creatives are added from the Offer Detail page after creation.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, UnavailableField, Segmented } from '../../shared-components/primitives/ui';
+import { groupTrackingDomains, resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
+import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { CopyBox } from '../../shared-components/panels/CopyBox';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
 import { Stepper } from '../../shared-components/panels/Stepper';
-import type { Advertiser, Offer, TrackingDomain } from '../../types';
+import { YesNoToggle } from './offerForm/controls';
+import { TargetingPanel } from './offerForm/TargetingPanel';
+import { targetingErrors } from './offerForm/targetingValidation';
+import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
+import { ThumbnailField } from './offerForm/ThumbnailField';
+import { DEFAULT_ATTRIBUTION, DEFAULT_EMAIL, DEFAULT_REVENUE, settingsErrors } from './offerForm/settings';
+import type { Advertiser, Offer, OfferTargeting, TrackingDomain } from '../../types';
 
-const STEPS = ['General', 'Tracking & Controls', 'Revenue & Payout', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'];
+const STEPS = ['General', 'Tracking & Controls', 'Postback Configuration', 'Revenue & Payout', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'];
+const TARGETING_STEP = STEPS.indexOf('Targeting');
 // Exactly the Everflow "Add Offer" reference: Active · Paused · Pending. `archived` is a lifecycle
 // state you reach later (via the Offers list), never one you pick at creation — so it's not offered
 // here. STATUS_DOT/STATUS_LABEL keep the `archived` key so existing rows still resolve elsewhere.
@@ -36,21 +39,9 @@ const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-s
 // API is still the raw enum member.
 const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
-const DEVICES = ['desktop', 'mobile', 'tablet'] as const;
+const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
 // Non-binding autocomplete for the free-text currency column (no server-side currency list exists).
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
-
-function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" onClick={() => onChange(!on)}
-      className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${on ? 'text-accent-text' : 'text-fg-secondary'}`}>
-      {on ? 'Yes' : 'No'}
-      <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${on ? 'bg-success' : 'bg-border'}`}>
-        <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0'}`} />
-      </span>
-    </button>
-  );
-}
 
 export default function OfferCreate() {
   const nav = useNavigate();
@@ -72,6 +63,7 @@ export default function OfferCreate() {
       payoutModel: 'CPA', currency: 'USD', defaultRevenue: '', defaultPayout: '',
       category: '', visibility: 'public', status: 'active',
       description: '', attributionWindowS: '2592000', dedupWindowS: '86400', fallbackUrl: '',
+      appIdentifier: '', internalNotes: '', productId: '', thumbnailUrl: '',
       allowedTrafficTypes: [] as string[],
     };
     // Offers › Templates "Use Template" hands off its fieldValues this way (same field keys).
@@ -92,7 +84,6 @@ export default function OfferCreate() {
   });
   useEffect(() => { sessionStorage.removeItem('offerTemplatePrefill'); }, []);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
-  const toggleDevice = (d: string) => set('allowedTrafficTypes', form.allowedTrafficTypes.includes(d) ? form.allowedTrafficTypes.filter((x) => x !== d) : [...form.allowedTrafficTypes, d]);
   const [assignGroup, setAssignGroup] = useState(false);
   const [groupId, setGroupId] = useState('');
   // Category picker: a dropdown of existing values by default; "＋ New category…" flips to a text input.
@@ -100,18 +91,52 @@ export default function OfferCreate() {
   // Labels (tags) — collected locally; assigned via POST /api/offers/:id/tags once the offer exists.
   const [labels, setLabels] = useState<string[]>([]);
   const [capsEnabled, setCapsEnabled] = useState(false);
-  const [dailyClickCap, setDailyClickCap] = useState('');
+  const [caps, setCaps] = useState({ dailyClickCap: '', dailyConversionCap: '', totalConversionCap: '' });
   const [failTrafficEnabled, setFailTrafficEnabled] = useState(false);
+  const [linkingType, setLinkingType] = useState('redirect');
+  const [deepLinkEnabled, setDeepLinkEnabled] = useState(false);
+  // On by default — the tracker fires partner postbacks unless this is explicitly turned off.
+  const [firePartnerPostback, setFirePartnerPostback] = useState(true);
+  const [targeting, setTargeting] = useState<OfferTargeting>({});
+  const [attribution, setAttribution] = useState(DEFAULT_ATTRIBUTION);
+  const [revenue, setRevenue] = useState(DEFAULT_REVENUE);
+  const [email, setEmail] = useState(DEFAULT_EMAIL);
+  const [pendingThumb, setPendingThumb] = useState<File | null>(null);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
   const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.post<{ id: string }>('/api/offers', body));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const tErrors = targetingErrors(targeting);
+    const sErrors = settingsErrors(attribution, revenue, email);
+    if (failTrafficEnabled && !form.fallbackUrl.trim()) sErrors.push('Fail Traffic: enter a Fallback URL or turn Fail Traffic off.');
+    if (tErrors.length || sErrors.length) {
+      setFormErrors([...tErrors.map((m) => `Targeting: ${m}`), ...sErrors]);
+      if (tErrors.length) setStep(TARGETING_STEP);
+      return;
+    }
+    setFormErrors([]);
     const normalizeUrl = (v: string) => (v && !/^https?:\/\//i.test(v) ? 'https://' + v : v);
+    const orNull = (v: string) => (v.trim() ? v.trim() : null);
+    const capOrNull = (v: string) => (capsEnabled && v !== '' ? Number(v) : null);
     const body: Record<string, unknown> = {
       advertiserId: form.advertiserId, name: form.name, destinationUrl: normalizeUrl(form.destinationUrl),
       payoutModel: form.payoutModel, currency: form.currency,
       defaultRevenue: form.defaultRevenue || '0', defaultPayout: form.defaultPayout || '0',
       visibility: form.visibility, status: form.status, allowedTrafficTypes: form.allowedTrafficTypes,
+      linkingType, deepLinkEnabled, firePartnerPostback,
+      fallbackUrl: failTrafficEnabled && form.fallbackUrl.trim() ? normalizeUrl(form.fallbackUrl.trim()) : null,
+      dailyClickCap: capOrNull(caps.dailyClickCap),
+      dailyConversionCap: capOrNull(caps.dailyConversionCap),
+      totalConversionCap: capOrNull(caps.totalConversionCap),
+      appIdentifier: orNull(form.appIdentifier),
+      internalNotes: orNull(form.internalNotes),
+      productId: orNull(form.productId),
+      thumbnailUrl: !pendingThumb && form.thumbnailUrl.trim() ? normalizeUrl(form.thumbnailUrl.trim()) : null,
+      targeting,
+      attributionSettings: attribution,
+      revenueSettings: revenue,
+      emailSettings: email,
     };
     if (form.category) body.category = form.category;
     if (form.previewUrl) body.previewUrl = normalizeUrl(form.previewUrl);
@@ -119,8 +144,6 @@ export default function OfferCreate() {
     if (form.description) body.description = form.description;
     if (form.attributionWindowS) body.attributionWindowS = Number(form.attributionWindowS);
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
-    if (failTrafficEnabled && form.fallbackUrl) body.fallbackUrl = normalizeUrl(form.fallbackUrl);
-    if (capsEnabled && dailyClickCap) body.dailyClickCap = Number(dailyClickCap);
     const res = await run(body);
     if (!res) return;
     // Offer-group membership lives on the group (offer_groups.offer_ids), not the offer create
@@ -135,6 +158,11 @@ export default function OfferCreate() {
     for (const name of labels) {
       await api.post(`/api/offers/${res.id}/tags`, { name });
     }
+    // A dropped/browsed thumbnail file needs the offer id, so it uploads now. A failed upload
+    // doesn't lose the offer — it can be re-uploaded from Edit.
+    if (pendingThumb) {
+      await api.upload(`/api/offers/${res.id}/thumbnail`, pendingThumb).catch(() => undefined);
+    }
     nav(`/app/offers/${res.id}`);
   };
 
@@ -144,6 +172,9 @@ export default function OfferCreate() {
     else submit(e);
   };
 
+  const trackHost = resolveTrackingHost(domains, form.trackingDomainId);
+  const domainGroups = groupTrackingDomains(domains);
+
   return (
     <>
       <PageHeader title="Add Offer" subtitle="Offers › Add" />
@@ -151,6 +182,11 @@ export default function OfferCreate() {
       <div className="max-w-2xl mx-auto">
       <form onSubmit={next} className="card space-y-6">
         {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
+        {formErrors.length > 0 && (
+          <ul className="space-y-0.5 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">
+            {formErrors.map((m) => <li key={m}>{m}</li>)}
+          </ul>
+        )}
         <p className="flex items-center gap-1.5 text-tiny text-fg-secondary">
           <Info size={13} className="shrink-0 text-fg-muted" /> Fields with an asterisk (*) are mandatory.
         </p>
@@ -165,8 +201,8 @@ export default function OfferCreate() {
               <label className="label mb-2 block">Status *<HelpHint text="Active = running. Paused = temporarily stopped. Pending = setup in progress (not live)." /></label>
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} labels={STATUS_LABEL} />
             </div>
-            {/* Advertiser / Category / Currency stacked on the left, tall Thumbnail on the right — matches the Everflow "Add Offer" General layout. */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-stretch">
+            {/* Advertiser / Category / Currency stacked on the left, Thumbnail on the right — matches the Everflow "Add Offer" General layout. */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-start">
               <div className="space-y-4">
                 <Field label="Advertiser *" hint="The company that owns this offer. Payout & revenue roll up to them for reporting and invoicing, and their account / sales managers apply to it. Every offer belongs to exactly one.">
                   <select className="input" required value={form.advertiserId} onChange={(e) => set('advertiserId', e.target.value)}>
@@ -202,13 +238,7 @@ export default function OfferCreate() {
                   </datalist>
                 </Field>
               </div>
-              <div className="flex flex-col">
-                <label className="label mb-2 block text-fg-muted">Thumbnail</label>
-                <div className="flex flex-1 select-none items-center justify-center rounded-card border border-dashed border-border p-6 text-tiny text-fg-muted opacity-60 min-h-[140px]">
-                  Drag and drop or Browse
-                </div>
-                <p className="mt-1 text-[11px] text-fg-muted">Not yet available in this app.</p>
-              </div>
+              <ThumbnailField url={form.thumbnailUrl} onUrlChange={(v) => set('thumbnailUrl', v)} onPendingFile={setPendingThumb} />
             </div>
             <div>
               <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
@@ -223,9 +253,17 @@ export default function OfferCreate() {
               </div>
             </div>
             <LabelsInput value={labels} onChange={setLabels} />
-            <UnavailableField label="App Identifier"><input className="input" disabled placeholder="e.g. com.acme.app" /></UnavailableField>
+            <Field label="App Identifier" hint="Store bundle / package ID for app offers (e.g. com.acme.app or id123456789).">
+              <input className="input" placeholder="e.g. com.acme.app" maxLength={255} value={form.appIdentifier} onChange={(e) => set('appIdentifier', e.target.value)} />
+            </Field>
             <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
               <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
+            </Field>
+            <Field label="Internal Notes" hint="Visible to your team only — never shown to partners or advertisers.">
+              <textarea className="input min-h-[80px]" value={form.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} />
+            </Field>
+            <Field label="Product ID" hint="Your own or the advertiser's product / SKU reference for this offer.">
+              <input className="input" maxLength={255} value={form.productId} onChange={(e) => set('productId', e.target.value)} />
             </Field>
             <Field label="Description" hint="Notes about the offer for your team and partners. Plain text.">
               <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Detailed description of your offer…" />
@@ -244,19 +282,32 @@ export default function OfferCreate() {
             <div className="space-y-4">
               <h3 className="text-h3 font-medium text-fg">Tracking</h3>
               <Field label="Default Landing Page URL *"><textarea className="input min-h-[80px] font-mono text-tiny" required value={form.destinationUrl} onChange={(e) => set('destinationUrl', e.target.value)} placeholder="https://xyz.domain.com/click/?click_id={click_id}" /></Field>
-              <Field label="Tracking Domain *">
+              <Field label="Tracking Domain *" hint="Tracking links and the S2S postback URL for this offer use this domain.">
                 <select className="input" required value={form.trackingDomainId} onChange={(e) => set('trackingDomainId', e.target.value)}>
                   <option value="" disabled>Select Tracking Domain…</option>
-                  {(domains ?? []).map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
+                  {domainGroups.production.length > 0 && (
+                    <optgroup label="Production">
+                      {domainGroups.production.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                    </optgroup>
+                  )}
+                  {domainGroups.devOnly.length > 0 && (
+                    <optgroup label="Local Testing">
+                      {domainGroups.devOnly.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                    </optgroup>
+                  )}
                 </select>
               </Field>
-              <UnavailableField label="Linking Type">
-                <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value="Redirect Linking" onChange={() => {}} />
-              </UnavailableField>
+              <Field label="Linking Type">
+                <Segmented options={LINKING_TYPES} value={linkingType} onChange={setLinkingType} />
+              </Field>
               <div>
                 <label className="label mb-1 block">Conversion Tracking</label>
                 <p className="text-small text-fg-secondary">Conversions are accepted via Server-to-Server postback, pixel, or iframe — the advertiser fires whichever they use. It isn't a per-offer setting.</p>
               </div>
+              <label className="flex items-start gap-2 text-small text-fg">
+                <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={deepLinkEnabled} onChange={(e) => setDeepLinkEnabled(e.target.checked)} />
+                <span><strong>Support Deep Links</strong> — Allow Partners to direct traffic to alternate landing pages without additional Offer URLs.</span>
+              </label>
             </div>
             <div className="space-y-4 border-t border-border pt-4">
               <h3 className="text-h3 font-medium text-fg">Caps</h3>
@@ -264,71 +315,104 @@ export default function OfferCreate() {
                 <label className="label mb-2 block">Enable Caps</label>
                 <YesNoToggle on={capsEnabled} onChange={setCapsEnabled} />
               </div>
-              {capsEnabled && <Field label="Daily Click Cap"><input type="number" min={0} className="input" value={dailyClickCap} onChange={(e) => setDailyClickCap(e.target.value)} placeholder="Unlimited" /></Field>}
+              {capsEnabled && (
+                <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-3">
+                  <Field label="Daily Click Cap"><input type="number" min={0} className="input" value={caps.dailyClickCap} onChange={(e) => setCaps((c) => ({ ...c, dailyClickCap: e.target.value }))} placeholder="Unlimited" /></Field>
+                  <Field label="Daily Conversion Cap"><input type="number" min={0} className="input" value={caps.dailyConversionCap} onChange={(e) => setCaps((c) => ({ ...c, dailyConversionCap: e.target.value }))} placeholder="Unlimited" /></Field>
+                  <Field label="Total Conversion Cap"><input type="number" min={0} className="input" value={caps.totalConversionCap} onChange={(e) => setCaps((c) => ({ ...c, totalConversionCap: e.target.value }))} placeholder="Unlimited" /></Field>
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {step === 2 && (
-          <div className="space-y-4">
-            <h3 className="text-h3 font-medium text-fg">Base Revenue &amp; Payout</h3>
-            <Field label="Model">
-              <select className="input" value={form.payoutModel} onChange={(e) => set('payoutModel', e.target.value)}>
-                {['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
-              </select>
-            </Field>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Revenue Per Action (RPA) *"><input className="input" required inputMode="decimal" pattern="-?\d{1,10}(\.\d{1,4})?" title="A number with up to 4 decimals" value={form.defaultRevenue} onChange={(e) => set('defaultRevenue', e.target.value)} placeholder="8.00" /></Field>
-              <Field label="Payout Per Action *"><input className="input" required inputMode="decimal" pattern="-?\d{1,10}(\.\d{1,4})?" title="A number with up to 4 decimals" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} placeholder="5.00" /></Field>
+          <div className="max-w-2xl space-y-6">
+            <p className="text-small text-fg-secondary">Give this URL to the advertiser. They should fire it from their server when a user converts. The {`{click_id}`} is passed automatically via the redirect.</p>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="label block">S2S Postback URL</label>
+                <CopyBox value={trackHost ? `${trackingBase(trackHost)}/postback?click_id={click_id}&txn_id={txn_id}&secure_code={secure_code}` : ''} placeholder="No active tracking domain — add one first." />
+                <p className="text-tiny text-fg-secondary">Advertiser fires this on conversion. Macros in {`{braces}`} are filled at conversion time.</p>
+              </div>
+              <div>
+                <p className="label mb-2 block">Available Macros</p>
+                <table className="premium-table w-full">
+                  <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Macro</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Description</th></tr></thead>
+                  <tbody>
+                    {[['{click_id}', 'The unique click identifier generated on each redirect'], ['{txn_id}', 'Your order/revenue transaction ID (passes through unchanged)'], ['{secure_code}', 'Per-offer security code — validates the postback is genuine'], ['{event}', 'Conversion event name (if multiple goals exist)'], ['{payout}', 'Resolved publisher payout amount'], ['{revenue}', 'Resolved advertiser revenue amount'], ['{currency}', 'Offer currency (e.g. USD)'], ['{sub1}–{sub5}', 'Sub-ID values carried from the click']].map(([m, d]) => (
+                      <tr key={String(m)}><td className="py-1 font-mono text-tiny text-accent-text">{m}</td><td className="py-1 text-small text-fg-secondary">{d}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-4 border-t border-border pt-4">
+              <h3 className="text-h3 font-medium text-fg">Publisher Postback</h3>
+              <label className="flex items-start gap-2 text-small text-fg">
+                <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={firePartnerPostback} onChange={(e) => setFirePartnerPostback(e.target.checked)} />
+                <span><strong>Fire Partner Postback</strong> — automatically notify publishers via their configured postback URL when a conversion is approved.</span>
+              </label>
             </div>
           </div>
         )}
 
         {step === 3 && (
-          <div className="space-y-4">
+          <div className="space-y-6">
+            <RevenueSettingsPanel value={revenue} onChange={setRevenue}
+              firePartnerPostback={firePartnerPostback} onFirePartnerPostbackChange={setFirePartnerPostback}
+              revenue={form.defaultRevenue} onRevenueChange={(v) => set('defaultRevenue', v)} />
+            <div className="space-y-4 border-t border-border pt-4">
+              <h3 className="text-h3 font-medium text-fg">Base Payout</h3>
+              <Field label="Model">
+                <select className="input" value={form.payoutModel} onChange={(e) => set('payoutModel', e.target.value)}>
+                  {['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
+                </select>
+              </Field>
+              <Field label="Payout Per Action *"><input className="input" required inputMode="decimal" pattern="-?\d{1,10}(\.\d{1,4})?" title="A number with up to 4 decimals" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} placeholder="5.00" /></Field>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="space-y-6">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Attribution Window (seconds)"><input type="number" min={0} className="input" value={form.attributionWindowS} onChange={(e) => set('attributionWindowS', e.target.value)} /></Field>
               <Field label="Dedup Window (seconds)"><input type="number" min={0} className="input" value={form.dedupWindowS} onChange={(e) => set('dedupWindowS', e.target.value)} /></Field>
             </div>
             <p className="text-tiny text-fg-muted">Attribution is click-referenced — a conversion names the exact click it belongs to, within the window above.</p>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="space-y-4">
-            <label className="label mb-2 block">Allowed Traffic Types</label>
-            <div className="flex flex-wrap gap-2">
-              {DEVICES.map((d) => (
-                <button key={d} type="button" onClick={() => toggleDevice(d)}
-                  className={`rounded-full border px-4 py-1.5 text-small font-medium capitalize transition-colors ${form.allowedTrafficTypes.includes(d) ? 'border-accent bg-accent-subtle text-accent-text' : 'border-border text-fg-secondary hover:bg-page'}`}>
-                  {d}
-                </button>
-              ))}
-            </div>
-            <p className="text-tiny text-fg-muted">Empty = all traffic types allowed. Country/device/IP targeting rules aren't available in this app yet.</p>
+            <AttributionSettingsPanel value={attribution} onChange={setAttribution} />
           </div>
         )}
 
         {step === 5 && (
+          <TargetingPanel targeting={targeting} onChange={setTargeting}
+            deviceTypes={form.allowedTrafficTypes} onDeviceTypesChange={(d) => set('allowedTrafficTypes', d)} />
+        )}
+
+        {step === 6 && (
           <div className="space-y-4">
             <div>
               <label className="label mb-2 block">Enable Fail Traffic</label>
               <YesNoToggle on={failTrafficEnabled} onChange={setFailTrafficEnabled} />
             </div>
-            {failTrafficEnabled && <Field label="Fallback URL"><input className="input" value={form.fallbackUrl} onChange={(e) => set('fallbackUrl', e.target.value)} placeholder="https://…" /></Field>}
+            {failTrafficEnabled ? (
+              <div className="rounded-card border border-border bg-page p-4">
+                <Field label="Fallback URL *"><input className="input" value={form.fallbackUrl} onChange={(e) => set('fallbackUrl', e.target.value)} placeholder="https://…" /></Field>
+                <p className="mt-2 text-tiny text-fg-muted">Clicks that fail targeting, geo, traffic-control, blocking or cap rules redirect here instead of the offer's destination URL.</p>
+              </div>
+            ) : (
+              <p className="text-tiny text-fg-muted">Off — clicks that fail a rule get an empty response (HTTP 204) instead of a redirect.</p>
+            )}
           </div>
-        )}
-
-        {step === 6 && (
-          <p className="rounded-card border border-dashed border-border py-10 text-center text-small text-fg-muted">Creatives can be added from the Offer Detail page once this offer is created.</p>
         )}
 
         {step === 7 && (
-          <div className="space-y-4">
-            <UnavailableField label="Enable Suppression File"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
-            <UnavailableField label="Enable Email Opt-out"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
-          </div>
+          <p className="rounded-card border border-dashed border-border py-10 text-center text-small text-fg-muted">Creatives can be added from the Offer Detail page once this offer is created.</p>
         )}
+
+        {step === 8 && <EmailSettingsPanel value={email} onChange={setEmail} />}
 
         <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
           <button type="button" className="text-small font-medium text-fg-muted hover:text-fg-secondary" onClick={() => nav('/app/offers')}>Cancel</button>

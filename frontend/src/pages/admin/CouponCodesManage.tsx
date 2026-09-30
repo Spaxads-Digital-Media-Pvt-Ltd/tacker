@@ -16,6 +16,7 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
 import type { CouponCode, Publisher, Offer, TrackingDomain } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', expired: 'bg-fg-muted', disabled: 'bg-warning' };
@@ -149,13 +150,14 @@ export default function CouponCodesManage() {
     return rows;
   }, [data, q, filters]);
 
-  const activeDomains = (domains ?? []).filter((d) => d.status === 'active');
-  const primaryDomain = activeDomains.find((d) => d.isPrimary) ?? activeDomains[0];
   const copyTrackingLink = async (c: CouponCode) => {
     if (!c.publisherId) return;
-    const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-    const trackBase = isLocal ? 'http://localhost:4002' : `https://${primaryDomain?.host ?? 'your-tracking-domain.com'}`;
-    const url = `${trackBase}/click?${new URLSearchParams({ offer_id: c.offerId, pub_id: c.publisherId, coupon: c.code }).toString()}`;
+    // The coupon's offer's own tracking domain (network primary only if the offer has none).
+    const offer = (offers ?? []).find((o) => o.id === c.offerId);
+    const host = resolveTrackingHost(domains, offer?.trackingDomainId);
+    if (!host) return;
+    const ids = { offer_id: c.offerRef != null ? String(c.offerRef) : c.offerId, pub_id: c.publisherRef != null ? String(c.publisherRef) : c.publisherId };
+    const url = `${trackingBase(host)}/click?${new URLSearchParams({ ...ids, coupon: c.code }).toString()}`;
     await navigator.clipboard.writeText(url).catch(() => {});
   };
 

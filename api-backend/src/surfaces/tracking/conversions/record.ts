@@ -68,6 +68,15 @@ function mapStatus(hint: string | null): 'approved' | 'pending' | 'rejected' {
  return 'pending';
 }
 
+function paramStr(params: Record<string, unknown>, keys: string[]): string | null {
+ for (const k of keys) {
+ const v = params[k];
+ const s = Array.isArray(v) ? v[0] : v;
+ if (typeof s === 'string' && s.trim()) return s.trim();
+ }
+ return null;
+}
+
 function safeMoney(v: string | null): string | null {
  if (v == null) return null;
  try {
@@ -127,6 +136,25 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  }
  }
 
+ const revCfg = offer?.revenue;
+ const attrCfg = offer?.attribution;
+
+ // "Allow Duplicate Conversions" off → at most one conversion per click, whatever the txn_id.
+ // Redis NX guards concurrent postbacks; the DB check covers conversions older than the lock.
+ let clickLockKey: string | null = null;
+ if (revCfg && revCfg.allowDuplicates === false) {
+ clickLockKey = `convclick:${input.networkId}:${input.clickId}`;
+ const locked = await redis.set(clickLockKey, '1', 'EX', 172800, 'NX');
+ const existing = locked === 'OK'
+ ? (await query(`SELECT 1 FROM conversions WHERE network_id = $1 AND click_id = $2 LIMIT 1`, [input.networkId, input.clickId])).rows.length > 0
+ : true;
+ if (existing) {
+ if (locked === 'OK') await redis.del(clickLockKey);
+ return { outcome: 'duplicate' };
+ }
+ }
+ const releaseClickLock = async () => { if (clickLockKey) await redis.del(clickLockKey); };
+
  // Attribution window (spec §6).
  const ageS = (Date.now() - new Date(click.created_at).getTime()) / 1000;
  const windowS = offer?.attributionWindowS ?? 2592000;
@@ -148,6 +176,17 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  const goal = await resolveGoal(input.networkId, click.offer_id, input.event);
  let payout = safeMoney(input.payoutParam) ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
  let revenue = safeMoney(input.revenueParam) ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
+ // Percentage / Mixed revenue: a share of the sale amount the advertiser reports (only when the
+ // postback didn't send an explicit revenue).
+ if (!safeMoney(input.revenueParam) && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
+ const sale = safeMoney(paramStr(input.rawParams, ['sale_amount', 'amount', 'order_amount']));
+ if (sale != null) {
+ const share = (Number(sale) * revCfg.revenuePct) / 100;
+ const base = revCfg.revenueType === 'mixed' ? Number(revenue ?? 0) : 0;
+ revenue = (base + share).toFixed(4);
+ }
+ }
+ const eventName = input.event ?? revCfg?.baseEventName ?? null;
  const currency = click.currency ?? goal?.currency ?? offer?.currency ?? null;
  const goalId = goal?.id ?? null;
  const conversionId = randomUUID().replace(/-/g, '');
@@ -163,6 +202,19 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  status = control.controlType === 'accept' ? 'approved' : control.controlType === 'reject' ? 'rejected' : 'pending';
  reason = `postback_control:${control.name}`;
  }
+ }
+
+ // Click-to-conversion time window (Attribution tab). Applied after postback controls so an
+ // "accept" control can't approve a conversion outside the allowed window.
+ const ctit = attrCfg?.clickToConversion;
+ if (ctit?.enabled && status !== 'rejected') {
+ if (ageS < ctit.minSeconds) { status = 'rejected'; reason = 'click_to_conversion_too_fast'; }
+ else if (ctit.maxSeconds != null && ageS > ctit.maxSeconds) { status = 'rejected'; reason = 'click_to_conversion_too_slow'; }
+ }
+ // "Manually Approve Conversions" → anything that would auto-approve waits in pending.
+ if (revCfg?.manualApproval && status === 'approved') {
+ status = 'pending';
+ reason = 'manual_approval_required';
  }
 
  if (status === 'approved' && (payout != null || revenue != null)) {
@@ -191,6 +243,16 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  }
  }
 
+ // Throttle rate (Attribution tab): this share of approved conversions still bills the advertiser
+ // but pays the partner nothing and fires no partner postback.
+ let throttled = false;
+ const throttle = attrCfg?.throttle;
+ if (status === 'approved' && throttle?.enabled && throttle.ratePct > 0 && Math.random() * 100 < throttle.ratePct) {
+ throttled = true;
+ payout = '0.0000';
+ reason = 'throttled';
+ }
+
  const client = await pool.connect();
  let insertedOk = false;
  try {
@@ -205,7 +267,7 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  RETURNING conversion_id`,
  [
  conversionId, input.networkId, input.clickId, click.offer_id, click.publisher_id,
- advertiserId, input.event, status, reason, payout, revenue, currency,
+ advertiserId, eventName, status, reason, payout, revenue, currency,
  input.txnId, input.source, JSON.stringify(input.rawParams),
  fraudScore, fraudFlags, goalId,
  ],
@@ -228,12 +290,16 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  await client.query('COMMIT');
  } catch (err) {
  await client.query('ROLLBACK');
+ await releaseClickLock();
  throw err;
  } finally {
  client.release();
  }
 
- if (!insertedOk) return { outcome: 'duplicate' };
+ if (!insertedOk) {
+ await releaseClickLock();
+ return { outcome: 'duplicate' };
+ }
 
  await getAnalyticsWriter().writeConversions([
  {
@@ -248,7 +314,7 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  status,
  reason,
  source: input.source,
- eventName: input.event,
+ eventName,
  country: null,
  region: null,
  city: null,
@@ -271,24 +337,30 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  ]);
 
  if (status === 'approved') {
+ // Offer-level "Fire Partner Postback" toggle (dashboard Postback Configuration tab). Unset/null
+ // defaults to true (backward compatible with offers created before this setting existed) — only
+ // an explicit false suppresses the outbound enqueue. Ledger/conversion creation above, and other
+ // integrations below, are unaffected either way.
+ if (!throttled && (offer?.firePartnerPostback ?? true)) {
  await enqueueOutboundPostback({
  networkId: input.networkId,
  conversionId,
  offerId: click.offer_id,
  publisherId: click.publisher_id,
  clickId: input.clickId,
- event: input.event,
+ event: eventName,
  payout, currency,
  txnId: input.txnId,
  subs: [click.sub1, click.sub2, click.sub3, click.sub4, click.sub5],
  });
+ }
 
  const integrations = await loadIntegrations(input.networkId);
  if (integrations.fbPixelId && integrations.fbAccessToken) {
  await enqueueFacebookCapi({
  networkId: input.networkId,
  conversionId,
- eventName: input.event,
+ eventName,
  payout,
  currency,
  clickId: input.clickId,

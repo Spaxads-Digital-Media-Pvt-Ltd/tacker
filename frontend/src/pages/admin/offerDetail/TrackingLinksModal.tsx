@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { Field, Overlay } from '../../../shared-components/primitives/ui';
 import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import { useQuery } from '../../../lib/useApi';
+import { linkId, resolveTrackingHost, trackingBase } from '../../../lib/trackingLinks';
 import type { Offer, Publisher, TrackingDomain, TrafficSource } from '../../../types';
 
 const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'] as const;
@@ -23,10 +24,9 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
 }) {
   const { data: creatives } = useQuery<Creative[]>(`/api/offers/${offer.id}/creatives`);
   const { data: trafficSources } = useQuery<TrafficSource[]>('/api/traffic-sources');
-  const activeDomains = domains.filter((d) => d.status === 'active');
-  const primary = activeDomains.find((d) => d.isPrimary) ?? activeDomains[0];
-  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  const trackBase = isLocal ? 'http://localhost:4002' : `https://${primary?.host ?? 'your-tracking-domain.com'}`;
+  // The offer's own selected tracking domain (network primary only if it has none).
+  const host = resolveTrackingHost(domains, offer.trackingDomainId);
+  const trackBase = trackingBase(host);
 
   const [type, setType] = useState<'Click' | 'Impression'>('Click');
   const [creativeId, setCreativeId] = useState('');
@@ -40,9 +40,10 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
   const source = (trafficSources ?? []).find((s) => s.id === sourceId);
 
   const link = useMemo(() => {
-    if (!pubId) return '';
+    if (!pubId || !trackBase) return '';
     const filled = Object.fromEntries(Object.entries(extras).filter(([, v]) => v.trim()));
-    const base: Record<string, string> = { offer_id: offer.id, pub_id: pubId, type: type.toLowerCase() };
+    const pub = publishers.find((p) => p.id === pubId);
+    const base: Record<string, string> = { offer_id: linkId(offer), pub_id: linkId(pub ?? { id: pubId }), type: type.toLowerCase() };
     if (creativeId) base.creative_id = creativeId;
     // Traffic Source preset params are appended raw (not URLSearchParams-encoded) so partner macros
     // like {campaign_id} survive; manual "Additional Parameters" come first so they win on collision.
@@ -50,7 +51,7 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
     if (!encrypt) return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}${preset}`;
     const packed = btoa(JSON.stringify(filled));
     return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}${preset}`;
-  }, [pubId, type, creativeId, extras, encrypt, trackBase, offer.id, source]);
+  }, [pubId, type, creativeId, extras, encrypt, trackBase, offer, publishers, source]);
 
   return (
     <Overlay onClose={onClose}>
@@ -103,7 +104,7 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
                 </p>
               )}
             </div>
-            {isLocal && <p className="mt-1 text-tiny text-warning">Local mode: link points at http://localhost:4002 so you can test clicks locally.</p>}
+            <p className="mt-1 text-tiny text-fg-muted">Tracking domain: <span className="font-mono text-fg">{host ?? 'none — set one on the offer'}</span></p>
 
             <button type="button" onClick={() => setShowExtra((s) => !s)} className="mt-4 flex items-center gap-1.5 text-small font-medium text-accent-text">
               {showExtra ? <ChevronDown size={15} /> : <ChevronRight size={15} />} Additional Parameters

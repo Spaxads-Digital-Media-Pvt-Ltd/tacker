@@ -33,6 +33,8 @@ export interface ClickJob {
   resolvedRevenue: string | null;
   currency: string | null;
   smartLinkId: string | null;
+  /** Offer has IPQualityScore enrichment on — the click-persist worker looks the IP up (async). */
+  ipqs?: boolean;
 }
 
 export async function enqueueClick(job: ClickJob): Promise<void> {

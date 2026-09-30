@@ -12,7 +12,7 @@
  */
 import { existsSync } from 'node:fs';
 import { env } from '../../config/env.js';
-import { open, type Reader, type CityResponse, type AsnResponse } from 'maxmind';
+import { open, type Reader, type CityResponse, type AsnResponse, type IspResponse } from 'maxmind';
 import { logger } from '../logger.js';
 
 export interface GeoResult {
@@ -21,13 +21,20 @@ export interface GeoResult {
   city: string | null;
   isp: string | null;
   isDatacenter: boolean;
+  postal: string | null;
+  /** US DMA (Nielsen metro) code, e.g. "501". */
+  dma: string | null;
+  /** Mobile carrier name — only when the (paid) GeoIP2-ISP db is present and the IP is mobile. */
+  carrier: string | null;
 }
 
 const CITY_PATHS = [env.MAXMIND_CITY_DB, 'data/geoip/GeoLite2-City.mmdb'].filter(Boolean) as string[];
 const ASN_PATHS = [env.MAXMIND_ASN_DB, 'data/geoip/GeoLite2-ASN.mmdb'].filter(Boolean) as string[];
+const ISP_PATHS = ['data/geoip/GeoIP2-ISP.mmdb'];
 
 let cityReader: Reader<CityResponse> | null = null;
 let asnReader: Reader<AsnResponse> | null = null;
+let ispReader: Reader<IspResponse> | null = null;
 let loaded = false;
 
 export async function initGeoIp(): Promise<void> {
@@ -45,11 +52,21 @@ export async function initGeoIp(): Promise<void> {
     asnReader = await open<AsnResponse>(asnPath);
     logger.info({ asnPath }, 'geoip asn db loaded');
   }
+  const ispPath = ISP_PATHS.find((p) => existsSync(p));
+  if (ispPath) {
+    ispReader = await open<IspResponse>(ispPath);
+    logger.info({ ispPath }, 'geoip isp db loaded');
+  }
 }
 
 /** Whether a geo database is loaded. When false, callers should fail-open on geo rules. */
 export function geoAvailable(): boolean {
   return cityReader !== null;
+}
+
+/** Whether mobile-carrier data is available (GeoIP2-ISP db). */
+export function carrierAvailable(): boolean {
+  return ispReader !== null;
 }
 
 export function lookupGeo(ip: string): GeoResult | null {
@@ -61,7 +78,9 @@ export function lookupGeo(ip: string): GeoResult | null {
     return null; // invalid/private IP
   }
   const asn = asnReader?.get(ip) ?? null;
-  const org = asn?.autonomous_system_organization ?? null;
+  let isp: IspResponse | null = null;
+  try { isp = ispReader?.get(ip) ?? null; } catch { isp = null; }
+  const org = isp?.isp ?? asn?.autonomous_system_organization ?? null;
   return {
     country: city?.country?.iso_code ?? null,
     region: city?.subdivisions?.[0]?.iso_code ?? null,
@@ -69,5 +88,8 @@ export function lookupGeo(ip: string): GeoResult | null {
     isp: org,
     // Cheap heuristic; a proper datacenter list is a Phase 6/10 refinement.
     isDatacenter: /hosting|cloud|amazon|google|microsoft|digitalocean|ovh|linode|hetzner/i.test(org ?? ''),
+    postal: city?.postal?.code ?? null,
+    dma: city?.location?.metro_code != null ? String(city.location.metro_code) : null,
+    carrier: isp?.mobile_network_code ? (isp.isp ?? null) : null,
   };
 }

@@ -76,8 +76,56 @@ export interface Offer {
   notes?: string[];
   securityCode?: string | null;
   trackingDomainId?: string | null;
+  linkingType?: 'redirect' | 'redirect_direct' | null;
+  deepLinkEnabled?: boolean | null;
+  firePartnerPostback?: boolean | null;
+  appIdentifier?: string | null;
+  internalNotes?: string | null;
+  productId?: string | null;
+  thumbnailUrl?: string | null;
+  targeting?: OfferTargeting;
+  attributionSettings?: OfferAttributionSettings;
+  revenueSettings?: OfferRevenueSettings;
+  emailSettings?: OfferEmailSettings;
   createdAt: string;
   updatedAt?: string;
+}
+
+export const TARGETING_KEYS = [
+  'platform', 'browser', 'deviceBrand', 'osVersion', 'language',
+  'country', 'region', 'city', 'dma', 'mobileCarrier', 'isp',
+  'zip', 'ipExact', 'ipRange',
+] as const;
+export type TargetingKey = (typeof TARGETING_KEYS)[number];
+export interface TargetingRule { mode: 'include' | 'exclude'; values: string[] }
+export type OfferTargeting = Partial<Record<TargetingKey, TargetingRule>>;
+
+export interface OfferAttributionSettings {
+  tracker24: { enabled: boolean; trackerId: string | null };
+  ipqs: { enabled: boolean };
+  throttle: { enabled: boolean; ratePct: number };
+  clickToConversion: { enabled: boolean; minSeconds: number; maxSeconds: number | null };
+  emailOwnership: boolean;
+  viewThrough: boolean;
+  serverSideClick: boolean;
+}
+
+export interface OfferRevenueSettings {
+  baseEventName: string | null;
+  manualApproval: boolean;
+  allowDuplicates: boolean;
+  revenueAction: 'impression' | 'click' | 'conversion';
+  revenueType: 'fixed' | 'percentage' | 'mixed';
+  revenuePct: number | null;
+  pricePerProduct: boolean;
+}
+
+export interface OfferEmailSettings {
+  suppression: { enabled: boolean; fileUrl: string | null };
+  ezepo: { enabled: boolean };
+  optizmo: { enabled: boolean; listId: string | null };
+  instructions: { enabled: boolean; text: string | null };
+  optOut: { enabled: boolean; url: string | null };
 }
 
 export interface Postback {

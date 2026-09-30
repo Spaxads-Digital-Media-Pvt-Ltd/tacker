@@ -6,6 +6,10 @@
  */
 import { query } from '../../lib/db/pool.js';
 import { getRedis } from '../../lib/redis.js';
+import {
+  readTargeting, readAttribution, readRevenue,
+  type OfferTargeting, type AttributionSettings, type RevenueSettings,
+} from '../../lib/offer-settings/index.js';
 
 export interface GeoRuleConfig {
   country: string;
@@ -63,6 +67,14 @@ export interface OfferConfig {
   trafficControls: TrafficControlConfig[];
   /** Active Traffic Blocking rules for this offer (Partners › Traffic Blocking), matched per publisher. */
   trafficBlockings: TrafficBlockingConfig[];
+  /** Whether an approved conversion should enqueue the outbound publisher postback (offer setting,
+   * dashboard "Fire Partner Postback" toggle). Unset/non-boolean metadata defaults to true so
+   * existing offers keep firing postbacks as they always have (backward compatible). */
+  firePartnerPostback: boolean;
+  /** Targeting rules (Edit Offer › Targeting) enforced at /click. */
+  targeting: OfferTargeting;
+  attribution: AttributionSettings;
+  revenue: RevenueSettings;
 }
 
 const TTL = 300;
@@ -103,6 +115,7 @@ interface Row {
   denied_publishers: string[] | null;
   security_code: string | null;
   network_security_code: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 async function loadFromDb(networkId: string, offerId: string): Promise<OfferConfig | null> {
@@ -167,5 +180,9 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
       effectiveFrom: t.effective_from, effectiveTo: t.effective_to,
     })),
     trafficBlockings: tbRes.rows.map((t) => ({ publisherId: t.publisher_id, filters: t.filters ?? {} })),
+    firePartnerPostback: r.metadata?.['fire_partner_postback'] !== false,
+    targeting: readTargeting(r.metadata),
+    attribution: readAttribution(r.metadata),
+    revenue: readRevenue(r.metadata),
   };
 }

@@ -4,8 +4,10 @@
  * advertiser_id / offer_id / publisher_id is verified to belong to the caller's network before
  * use (FKs don't enforce tenant boundaries).
  */
-import { Router } from 'express';
+import express, { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { uploadPublicObject } from '../../../lib/storage/supabase-storage.js';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
@@ -24,6 +26,7 @@ import type {
 import { requireRole } from '../auth.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
+import { mergeOfferMetadata } from '../../../lib/offer-settings/index.js';
 import {
  createOfferSchema,
  updateOfferSchema,
@@ -55,6 +58,7 @@ const OFFERS = 'offers';
 const GEO = 'offer_geo_rules';
 const ACCESS = 'offer_publisher_access';
 const SCHEDULED_ACTIONS = 'offer_scheduled_actions';
+const THUMBNAIL_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
 
 const shareDetailsSchema = z.object({
  offerIds: z.array(z.string().uuid()).min(1),
@@ -223,7 +227,10 @@ export function offersAdminRoutes(): Router {
  category: b.category ?? null,
  preview_url: b.previewUrl ?? null,
  tracking_domain_id: b.trackingDomainId ?? null,
- ...(b.description || b.kpi ? { metadata: { description: b.description ?? null, kpi: b.kpi ?? null } } : {}),
+ ...(() => {
+   const metadata = mergeOfferMetadata({}, b as Record<string, unknown>);
+   return metadata ? { metadata } : {};
+ })(),
  });
  await writeAudit(req, { action: 'offer.create', entityType: 'offer', entityId: row.id, after: row });
  sendOk(res, toAdminDTO(row), undefined, 201);
@@ -264,19 +271,39 @@ export function offersAdminRoutes(): Router {
  const val = (b as Record<string, unknown>)[k];
  if (val !== undefined) patch[col] = val;
  }
- // Notes/description live in metadata (merge, don't clobber other keys).
- const bx = b as { notes?: string[]; description?: string; kpi?: string };
- if (bx.notes !== undefined || bx.description !== undefined || bx.kpi !== undefined) {
- patch['metadata'] = {
- ...(before.metadata ?? {}),
- ...(bx.notes !== undefined ? { notes: bx.notes } : {}),
- ...(bx.description !== undefined ? { description: bx.description } : {}),
- ...(bx.kpi !== undefined ? { kpi: bx.kpi } : {}),
- };
- }
+ // Metadata-backed fields (notes, description, targeting, settings…) merge over existing keys.
+ const metadata = mergeOfferMetadata(before.metadata, b as Record<string, unknown>);
+ if (metadata) patch['metadata'] = metadata;
+ if (Object.keys(patch).length === 0) { sendOk(res, toAdminDTO(before)); return; }
  const [row] = await db.update<OfferRow>(OFFERS, patch, { id: req.params.id });
  await writeAudit(req, { action: 'offer.update', entityType: 'offer', entityId: req.params.id, before, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!);
+ sendOk(res, toAdminDTO(row ?? before));
+ }),
+ );
+
+ // Thumbnail upload — raw image body (≤2MB) → Supabase Storage (public bucket) → metadata.thumbnail_url.
+ r.post(
+ '/:id/thumbnail',
+ requireRole('admin', 'manager'),
+ express.raw({ type: Object.keys(THUMBNAIL_TYPES), limit: '2mb' }),
+ asyncHandler(async (req, res) => {
+ const db = dbForRequest(req);
+ const before = await db.selectOne<OfferRow>(OFFERS, { id: req.params.id });
+ if (!before) throw notFound('Offer not found');
+ const type = String(req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
+ const ext = THUMBNAIL_TYPES[type];
+ if (!ext || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+ throw badRequest('Upload a PNG, JPEG, WebP or GIF image up to 2 MB');
+ }
+ let url: string;
+ try {
+ url = await uploadPublicObject('offer-thumbnails', `${db.scope.networkId}/${before.id}/${randomUUID()}.${ext}`, req.body, type);
+ } catch (e) {
+ throw badRequest(e instanceof Error ? e.message : 'Upload failed');
+ }
+ const [row] = await db.update<OfferRow>(OFFERS, { metadata: { ...(before.metadata ?? {}), thumbnail_url: url } }, { id: before.id });
+ await writeAudit(req, { action: 'offer.update', entityType: 'offer', entityId: before.id, before, after: row });
  sendOk(res, toAdminDTO(row ?? before));
  }),
  );
@@ -783,7 +810,7 @@ export function offerPortalRoutes(): Router {
  ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
  [networkId],
  );
- sendOk(res, toAdvertiserDetailDTO(rows[0], dom.rows[0]?.host ?? null));
+ sendOk(res, toAdvertiserDetailDTO(rows[0], dom.rows[0]?.host ? `https://${dom.rows[0].host}/click?offer_id=${rows[0].id}` : null));
  return;
  }
 

@@ -12,7 +12,9 @@
  * Security (M-1): the inbound Host header is NOT trustworthy on its own. Cloudflare/nginx
  * MUST strip/overwrite the inbound host header before requests reach this process. In addition,
  * we apply format-level validation HERE as defense-in-depth:
- * - reject raw IP literals (v4 octets, v6 colons, IPv6 brackets)
+ * - reject raw IP literals (v4 octets, v6 colons, IPv6 brackets) — except the IPv4 loopback
+ *   literal (127.0.0.1), which can never be a real production tenant domain and is provisioned
+ *   for local dev the same way "localhost" is (see scripts/add-localhost-domain.ts)
  * - reject schemes, paths, query strings
  * - reject any string longer than the DNS max (253 chars per RFC)
  * - reject names that contain anything outside [a-z0-9.-] (after lowercasing)
@@ -57,7 +59,8 @@ const HOST_REGEX = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-
 
 /**
  * Tells whether the string is a valid DNS-style host name (no scheme, no path, no port, no
- * raw IP, no underscores). Returns false for anything that looks like an IP address.
+ * raw IP, no underscores). Returns false for anything that looks like an IP address, except the
+ * IPv4 loopback literal (127.0.0.1), which local dev provisions as a tracking domain.
  */
 export function isValidHostName(value: string): boolean {
  if (!value) return false;
@@ -68,9 +71,15 @@ export function isValidHostName(value: string): boolean {
  if (!bare) return false;
  // Reject any character not in the allowed DNS charset (after lowercasing).
  if (!/^[a-z0-9.-]+$/.test(bare)) return false;
- // Raw IPv4 — anything that is four pure-numeric labels.
+ // Raw IPv4 — anything that is four pure-numeric labels. The loopback address is the sole
+ // exception: it can never be a real provisioned tenant domain in production (nobody CNAMEs a
+ // custom domain to "127.0.0.1"), so letting it through this format gate doesn't create a spoofing
+ // vector — the actual tenant-authorization boundary is the tracking_domains row lookup in
+ // DbHostResolver.resolve() (status='active' AND verification_state='verified'), same as any other
+ // host. This just lets loopback reach that lookup, exactly like the "localhost" single-label
+ // branch below already does. Local dev provisions both (scripts/add-localhost-domain.ts).
  const labels = bare.split('.');
- if (labels.length === 4 && labels.every((l) => /^\d+$/.test(l))) return false;
+ if (labels.length === 4 && labels.every((l) => /^\d+$/.test(l)) && bare !== '127.0.0.1') return false;
  // Bracketed IPv6 already rejected by charset (no brackets allowed).
  // Disallow pure-numeric TLDs (full IPv4 case above; trivially safety check).
  if (HOST_REGEX.test(bare)) return true;

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { CopyBox } from './CopyBox';
 import { useQuery } from '../../lib/useApi';
 import { Overlay } from '../primitives/ui';
+import { linkId, resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
 import type { Offer, Publisher, TrackingDomain } from '../../types';
 
 const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5', 'sub6', 'sub7', 'sub8', 'sub9'] as const;
@@ -23,22 +24,23 @@ export function TrackingLinkGeneratorModal({ onClose }: { onClose: () => void })
   const [extras, setExtras] = useState<Record<string, string>>({});
   const [encrypt, setEncrypt] = useState(false);
 
-  const activeDomains = (domains ?? []).filter((d) => d.status === 'active');
-  const primary = activeDomains.find((d) => d.isPrimary) ?? activeDomains[0];
-  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  const trackBase = isLocal ? 'http://localhost:4002' : `https://${primary?.host ?? 'your-tracking-domain.com'}`;
+  const selectedOffer = (offers ?? []).find((o) => o.id === offerId);
+  const selectedPub = (publishers ?? []).find((p) => p.id === pubId);
+  const host = resolveTrackingHost(domains, selectedOffer?.trackingDomainId);
+  const trackBase = trackingBase(host);
 
   const link = useMemo(() => {
-    if (!offerId || !pubId) return '';
+    if (!selectedOffer || !pubId || !host) return '';
+    const ids = { offer_id: linkId(selectedOffer), pub_id: linkId(selectedPub ?? { id: pubId }) };
     const filled = Object.fromEntries(Object.entries(extras).filter(([, v]) => v.trim()));
     if (!encrypt) {
-      const p = new URLSearchParams({ offer_id: offerId, pub_id: pubId, ...filled });
+      const p = new URLSearchParams({ ...ids, ...filled });
       return `${trackBase}/click?${p.toString()}`;
     }
     const packed = btoa(JSON.stringify(filled));
-    const p = new URLSearchParams({ offer_id: offerId, pub_id: pubId, ...(Object.keys(filled).length ? { p: packed } : {}) });
+    const p = new URLSearchParams({ ...ids, ...(Object.keys(filled).length ? { p: packed } : {}) });
     return `${trackBase}/click?${p.toString()}`;
-  }, [offerId, pubId, extras, encrypt, trackBase]);
+  }, [selectedOffer, selectedPub, pubId, extras, encrypt, trackBase, host]);
 
   const setExtra = (k: string, v: string) => setExtras((s) => ({ ...s, [k]: v }));
 

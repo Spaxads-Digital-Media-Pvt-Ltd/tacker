@@ -35,7 +35,7 @@ async function doFetch(path: string, init: RequestInit, token: string | null): P
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
   try {
     const headers = new Headers(init.headers);
-    headers.set('Content-Type', 'application/json');
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     if (token) headers.set('Authorization', `Bearer ${token}`);
     return await fetch(`${BASE}${path}`, { ...init, headers, credentials: 'include', signal: controller.signal });
   } finally {
@@ -81,6 +81,9 @@ export const api = {
   put: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: 'PUT', body: data ? JSON.stringify(data) : undefined }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** POST a raw file body (e.g. an image) with its own Content-Type. */
+  upload: <T>(path: string, file: Blob) =>
+    request<T>(path, { method: 'POST', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } }),
 };
 
 /** Network-level error types so callers can distinguish them from HTTP errors. */

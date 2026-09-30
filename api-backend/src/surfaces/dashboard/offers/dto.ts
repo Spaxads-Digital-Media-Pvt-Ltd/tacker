@@ -6,6 +6,10 @@
  * The serializer decides — the caller never picks fields.
  */
 import type { OfferRow, OfferGeoRuleRow, OfferPublisherAccessRow } from '../../../domain/entities.js';
+import {
+  readTargeting, readAttribution, readRevenue, readEmail, readString,
+  type OfferTargeting, type AttributionSettings, type RevenueSettings, type EmailSettings,
+} from '../../../lib/offer-settings/index.js';
 
 export interface OfferAdminDTO {
   id: string;
@@ -33,6 +37,17 @@ export interface OfferAdminDTO {
   notes: string[];
   securityCode: string | null;
   trackingDomainId: string | null;
+  linkingType: string | null;
+  deepLinkEnabled: boolean | null;
+  firePartnerPostback: boolean | null;
+  appIdentifier: string | null;
+  internalNotes: string | null;
+  productId: string | null;
+  thumbnailUrl: string | null;
+  targeting: OfferTargeting;
+  attributionSettings: AttributionSettings;
+  revenueSettings: RevenueSettings;
+  emailSettings: EmailSettings;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +80,17 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     notes: Array.isArray(meta['notes']) ? (meta['notes'] as string[]) : [],
     securityCode: row.security_code ?? null,
     trackingDomainId: row.tracking_domain_id,
+    linkingType: typeof meta['linking_type'] === 'string' ? (meta['linking_type'] as string) : null,
+    deepLinkEnabled: typeof meta['deep_link_enabled'] === 'boolean' ? (meta['deep_link_enabled'] as boolean) : null,
+    firePartnerPostback: typeof meta['fire_partner_postback'] === 'boolean' ? (meta['fire_partner_postback'] as boolean) : null,
+    appIdentifier: readString(meta, 'app_identifier'),
+    internalNotes: readString(meta, 'internal_notes'),
+    productId: readString(meta, 'product_id'),
+    thumbnailUrl: readString(meta, 'thumbnail_url'),
+    targeting: readTargeting(meta),
+    attributionSettings: readAttribution(meta),
+    revenueSettings: readRevenue(meta),
+    emailSettings: readEmail(meta),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

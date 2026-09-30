@@ -136,8 +136,9 @@ Three isolated namespaces, API-key authenticated:
 | GET | `/iframe` | Iframe conversion | None (tenant by host) |
 
 ### Click Parameters
-- `offer_id` (required) — Offer to redirect for
-- `pub_id` / `aff_id` / `p` — Publisher ID
+- `offer_id` (required) — Offer UUID **or** its short numeric ref (e.g. `offer_id=190`); refs resolve via a Redis-cached ref→UUID lookup
+- `pub_id` / `aff_id` / `p` — Publisher UUID or short numeric ref (e.g. `pub_id=6`)
+- `format=json` — only when the offer has "Server-Side Click" on: returns `{ ok, data: { click_id, redirect_url } }` instead of a 302
 - `sub1`–`sub5` — Sub-IDs
 - `source_id` / `source` / `src` — Traffic source
 - `geo` / `test_geo` — Force country (dev/testing)

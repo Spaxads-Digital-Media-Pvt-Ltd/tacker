@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { moneySchema } from '../../../lib/money.js';
 import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
+import { offerSettingsFields } from '../../../lib/offer-settings/index.js';
 
 export const createOfferSchema = z.object({
   advertiserId: z.string().uuid(),
@@ -25,6 +26,10 @@ export const createOfferSchema = z.object({
   description: z.string().max(20_000).nullable().optional(),
   kpi: z.string().max(5000).nullable().optional(),
   trackingDomainId: z.string().uuid().nullable().optional(),
+  linkingType: z.enum(['redirect', 'redirect_direct']).nullable().optional(),
+  deepLinkEnabled: z.boolean().nullable().optional(),
+  firePartnerPostback: z.boolean().nullable().optional(),
+  ...offerSettingsFields,
 });
 
 export const updateOfferSchema = createOfferSchema.partial().extend({

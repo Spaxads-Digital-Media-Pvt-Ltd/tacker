@@ -8,24 +8,43 @@ import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
 import { Field } from '../../shared-components/primitives/ui';
 
+const EXAMPLE_HOST = 'example.com';
+const EXAMPLE_URL = `https://${EXAMPLE_HOST}/pb?cid={click_id}&payout={payout}&txn={txn_id}&geo={country}&device={device}`;
+
 interface TestResult { ok: boolean; status: number | null; ms: number; finalUrl: string; error: string | null; body: string | null }
 
 const COUNTRIES = ['US', 'GB', 'IN', 'CA', 'AU', 'DE', 'FR', 'BR', 'JP', 'SG'];
 const DEVICES = ['desktop', 'mobile', 'tablet'];
 
+function isExampleUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === EXAMPLE_HOST;
+  } catch { return false; }
+}
+
 export function PostbackTester({ testPath, hint }: { testPath: string; hint?: string }) {
-  const [url, setUrl] = useState('https://example.com/pb?cid={click_id}&payout={payout}&txn={txn_id}&geo={country}&device={device}');
+  const [url, setUrl] = useState(EXAMPLE_URL);
   const [method, setMethod] = useState('GET');
   const [country, setCountry] = useState('US');
   const [device, setDevice] = useState('desktop');
   const [result, setResult] = useState<TestResult | null>(null);
+  const [skipSend, setSkipSend] = useState(false);
   const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.post<TestResult>(testPath, body));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    setResult(null);
+    if (isExampleUrl(url)) {
+      setSkipSend(true);
+      return;
+    }
+    setSkipSend(false);
     const res = await run({ url, method, country, device });
     if (res) setResult(res);
   };
+
+  const clearPlaceholder = () => { setUrl(''); setSkipSend(false); };
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -35,7 +54,25 @@ export function PostbackTester({ testPath, hint }: { testPath: string; hint?: st
       <form onSubmit={submit} className="space-y-3">
         {error && <p className="text-small text-danger-text">{error}</p>}
         <Field label="Postback URL (with macros)">
-          <input className="input font-mono text-sm" value={url} onChange={(e) => setUrl(e.target.value)} required />
+          <div className="relative">
+            <input
+              className={`input font-mono text-sm ${skipSend ? '!border-warning' : ''}`}
+              value={url}
+              onChange={(e) => { setUrl(e.target.value); if (skipSend) setSkipSend(false); }}
+              required
+              placeholder="https://your-advertiser.com/pb?click_id={click_id}&payout={payout}"
+            />
+            {skipSend && (
+              <button type="button" onClick={clearPlaceholder} className="absolute right-2 top-1/2 -translate-y-1/2 text-tiny text-fg-muted hover:text-fg underline">
+                Clear
+              </button>
+            )}
+          </div>
+          {skipSend && (
+            <p className="mt-1.5 text-tiny text-warning flex items-start gap-1.5">
+              <span>This is a placeholder example URL (example.com). Replace it with your real advertiser postback endpoint before testing.</span>
+            </p>
+          )}
         </Field>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="Method">
@@ -56,6 +93,13 @@ export function PostbackTester({ testPath, hint }: { testPath: string; hint?: st
         </div>
         <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Firing…' : 'Send test'}</button>
       </form>
+
+      {skipSend && !result && (
+        <div className="card !border-warning">
+          <p className="text-small text-warning font-medium">Example URL — not tested</p>
+          <p className="mt-1 text-tiny text-fg-secondary">Paste a real advertiser postback URL above and click <strong>Send test</strong> to verify connectivity.</p>
+        </div>
+      )}
 
       {result && (
         <div className={`card border ${result.ok ? 'border-success' : 'border-danger'}`}>

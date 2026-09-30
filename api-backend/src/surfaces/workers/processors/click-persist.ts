@@ -10,11 +10,21 @@ import { query } from '../../../lib/db/pool.js';
 import { surfaceLogger } from '../../../lib/logger.js';
 import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 import { QUEUE } from '../queues.js';
+import { ipqsLookup } from '../../../lib/integrations/ipqs.js';
 import type { ClickJob } from '../../tracking/click-job.js';
 
 const log = surfaceLogger('workers');
 
 async function persist(job: ClickJob): Promise<void> {
+ let fraudScore = job.fraudScore;
+ let fraudFlags = job.fraudFlags;
+ if (job.ipqs && job.ip) {
+ const ipqs = await ipqsLookup(job.networkId, job.ip);
+ if (ipqs) {
+ fraudScore = Math.max(fraudScore, ipqs.score);
+ fraudFlags = Array.from(new Set([...fraudFlags, ...ipqs.flags]));
+ }
+ }
  await query(
  `INSERT INTO clicks (
  click_id, network_id, offer_id, publisher_id, created_at, ip,
@@ -29,7 +39,7 @@ async function persist(job: ClickJob): Promise<void> {
  [
  job.clickId, job.networkId, job.offerId, job.publisherId, job.ts, job.ip,
  job.country, job.region, job.city, job.isp, job.device, job.os, job.browser, job.referrer, job.userAgent,
- job.sub1, job.sub2, job.sub3, job.sub4, job.sub5, job.isUnique, job.fraudScore, job.fraudFlags,
+ job.sub1, job.sub2, job.sub3, job.sub4, job.sub5, job.isUnique, fraudScore, fraudFlags,
  job.resolvedPayout, job.resolvedRevenue, job.currency, job.smartLinkId,
  ],
  );
@@ -57,8 +67,8 @@ async function persist(job: ClickJob): Promise<void> {
  sub4: job.sub4,
  sub5: job.sub5,
  isUnique: job.isUnique,
- fraudScore: job.fraudScore,
- fraudFlags: job.fraudFlags,
+ fraudScore,
+ fraudFlags,
  payout: job.resolvedPayout,
  revenue: job.resolvedRevenue,
  currency: job.currency,

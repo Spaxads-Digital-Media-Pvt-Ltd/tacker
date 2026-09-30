@@ -3,6 +3,7 @@ import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
 import { Badge, Spinner } from '../../../shared-components/primitives/ui';
 import { CopyBox } from '../../../shared-components/panels/CopyBox';
+import { resolveTrackingHost, trackingBase } from '../../../lib/trackingLinks';
 import type { Offer, TrackingDomain } from '../../../types';
 
 type Row = { id: string; [k: string]: unknown };
@@ -45,8 +46,8 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
   offer: Offer; advName: string; domains: TrackingDomain[]; base: string; onSaved: () => void;
 }) {
   const goals = useQuery<Row[]>(`${base}/goals`);
-  const activeDomains = domains.filter((d) => d.status === 'active');
-  const primary = activeDomains.find((d) => d.isPrimary) ?? activeDomains[0];
+  // The domain assigned to THIS offer, falling back to the network primary.
+  const host = resolveTrackingHost(domains, offer.trackingDomainId);
 
   const [range, setRange] = useState({ from: todayIso(30), to: todayIso(0) });
   const statsPath = `/api/reports?offerId=${offer.id}&metrics=clicks,conversions,revenue,payout,margin,cr&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
@@ -60,9 +61,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
   const offerCode = codeOverride !== undefined ? codeOverride : (offer.securityCode ?? null);
   const regenerateCode = async () => { const r = await regenCode.run(undefined); if (r) setCodeOverride(r.securityCode); };
   const removeCode = async () => { if (await clearCode.run(undefined)) setCodeOverride(null); };
-  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  const trackBase = isLocal ? 'http://localhost:4002' : `https://${primary?.host ?? 'your-tracking-domain.com'}`;
-  const postbackUrl = `${trackBase}/postback?click_id={click_id}&txn_id={txn_id}&secure_code=${offerCode ?? '{secure_code}'}`;
+  const postbackUrl = host ? `${trackingBase(host)}/postback?click_id={click_id}&txn_id={txn_id}&secure_code=${offerCode ?? '{secure_code}'}` : '';
 
   const [note, setNote] = useState('');
   const saveNotes = useMutation((notes: string[]) => api.patch(base, { notes }));
@@ -91,7 +90,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
         <Card title="Tracking">
           <dl>
             <InfoRow label="Default Landing Page URL"><span className="break-all font-mono text-tiny text-accent-text">{offer.destinationUrl}</span></InfoRow>
-            <InfoRow label="Tracking Domain">{primary?.host ?? 'Default'}</InfoRow>
+            <InfoRow label="Tracking Domain">{host ?? 'Default'}</InfoRow>
             <InfoRow label="Click Tracking Type">Redirect Linking</InfoRow>
             <InfoRow label="Support Deep Links"><span className="text-success-text">YES</span></InfoRow>
           </dl>

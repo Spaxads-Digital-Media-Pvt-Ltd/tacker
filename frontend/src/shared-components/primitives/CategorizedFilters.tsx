@@ -5,6 +5,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, Filter as FilterIcon, Search as SearchIcon } from 'lucide-react';
+import { PromptModal } from './ui';
 
 export interface FilterCategory {
   key: string;
@@ -142,6 +143,7 @@ export function CategorizedFiltersFlyout({
   const [catSearch, setCatSearch] = useState('');
   const [presets, setPresets] = useState(() => (storageKey ? loadPresets(storageKey) : []));
   const [showPresetList, setShowPresetList] = useState(false);
+  const [savePresetModalOpen, setSavePresetModalOpen] = useState(false);
   const presetsEnabled = showPresets ?? Boolean(storageKey);
 
   useEffect(() => {
@@ -157,10 +159,8 @@ export function CategorizedFiltersFlyout({
   const clearAll = () => setDraft({});
   const apply = () => { onApply(draft); onClose(); };
 
-  const saveAsPreset = () => {
+  const saveAsPreset = (name: string) => {
     if (!storageKey) return;
-    const name = window.prompt('Name this filter preset:');
-    if (!name) return;
     const next = [...presets.filter((p) => p.name !== name), { name, values: draft }];
     setPresets(next);
     savePresets(storageKey, next);
@@ -240,7 +240,7 @@ export function CategorizedFiltersFlyout({
         </div>
         {presetsEnabled && (
           <div className="border-t border-border px-3 py-2">
-            <button type="button" className="block w-full text-left text-small text-fg hover:text-accent-text" onClick={saveAsPreset}>
+            <button type="button" className="block w-full text-left text-small text-fg hover:text-accent-text" onClick={() => { setShowPresetList(false); setSavePresetModalOpen(true); }}>
               Save selection as Preset
             </button>
             <button
@@ -278,6 +278,7 @@ export function CategorizedFiltersFlyout({
           singleSelect={singleSelectKeys.includes(activeCategory.key)}
         />
       )}
+      <PromptModal open={savePresetModalOpen} onClose={() => setSavePresetModalOpen(false)} title="Save Preset" message="Name this filter preset:" placeholder="e.g. High Value" onConfirm={saveAsPreset} />
     </div>
   );
 }

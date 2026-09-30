@@ -10,6 +10,7 @@ import { useDropdown, TableRowMenu } from '../../shared-components/primitives/Ta
 import { CopyOfferModal } from './CopyOfferModal';
 import { CopyOfferSettingsModal } from './CopyOfferSettingsModal';
 import { TrackingLinksModal } from './offerDetail/TrackingLinksModal';
+import { groupTrackingDomains } from '../../lib/trackingLinks';
 import type { Offer, Advertiser, Publisher, TrackingDomain } from '../../types';
 
 /** Row action menu (Everflow-style), verified item-by-item against the live reference: Edit, Copy
@@ -199,6 +200,7 @@ export default function Offers() {
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
+  const domainGroups = groupTrackingDomains(domains);
   const { data: users } = useQuery<{ id: string; name: string; email: string }[]>('/api/users');
   const { data: tags } = useQuery<Tag[]>('/api/tags');
   const { data: tagAssignments } = useQuery<TagAssignment[]>('/api/tags/assignments?entityType=offer');
@@ -625,7 +627,16 @@ export default function Offers() {
           <FieldBlock label="Tracking Domain">
             <select className="input" value={dDomain} onChange={(e) => setDDomain(e.target.value)}>
               <option value="">All Tracking Domains</option>
-              {(domains ?? []).map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
+              {domainGroups.production.length > 0 && (
+                <optgroup label="Production">
+                  {domainGroups.production.map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
+                </optgroup>
+              )}
+              {domainGroups.devOnly.length > 0 && (
+                <optgroup label="Local Testing">
+                  {domainGroups.devOnly.map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
+                </optgroup>
+              )}
             </select>
           </FieldBlock>
 

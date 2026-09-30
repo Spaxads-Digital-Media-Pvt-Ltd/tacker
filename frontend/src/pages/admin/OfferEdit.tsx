@@ -1,28 +1,35 @@
 /**
- * Edit Offer (Everflow-style multi-tab edit form). Real Offer columns (name, status, advertiserId,
- * category, currency, visibility, destinationUrl, previewUrl, description, caps, attribution/dedup
- * windows, fallbackUrl, allowedTrafficTypes, payoutModel, defaultRevenue, defaultPayout,
- * trackingDomainId) are wired to the actual PATCH /api/offers/:id endpoint. Tracking Domain pulls
- * from /api/tracking-domains; Assign to Offer Group reads/writes membership on /api/offer-groups
- * (that table has no offer→group column, only group→offerIds, so submit diffs group membership
- * separately from the main PATCH). Every other field in the reference (Thumbnail, fraud/attribution
- * toggles, geo/device targeting rules, email suppression…) has no equivalent in this app's schema,
- * so those render as real, full-color, interactive controls that simply aren't wired to persist —
- * never a disabled/greyed-out fake. Creatives reuses the same real CollectionTab already on the
- * Offer Detail page.
+ * Edit Offer (Everflow-style multi-tab edit form), wired to PATCH /api/offers/:id. Column-backed
+ * fields (name, status, caps, windows, fallbackUrl, trackingDomainId…) and metadata-backed ones
+ * (targeting, attribution / revenue-event / email settings, app identifier, notes, product ID,
+ * thumbnail) all persist. Every PATCH resends the full form, so cleared or disabled fields are sent
+ * as null — that's what makes turning Fail Traffic / Caps off actually stick. Targeting and the
+ * conversion settings are enforced by the tracking server. Offer-group membership lives on
+ * offer_groups, so it's diffed separately after the main PATCH.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Tabs, Spinner, StateBlock, UnavailableField, type Column, Segmented } from '../../shared-components/primitives/ui';
+import { groupTrackingDomains, resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
+import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column, Segmented } from '../../shared-components/primitives/ui';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
 import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
-import type { Offer, Advertiser, TrackingDomain } from '../../types';
+import { CopyBox } from '../../shared-components/panels/CopyBox';
+import { YesNoToggle } from './offerForm/controls';
+import { TargetingPanel } from './offerForm/TargetingPanel';
+import { targetingErrors } from './offerForm/targetingValidation';
+import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
+import { ThumbnailField } from './offerForm/ThumbnailField';
+import { DEFAULT_ATTRIBUTION, DEFAULT_EMAIL, DEFAULT_REVENUE, settingsErrors, withDefaults } from './offerForm/settings';
+import type {
+  Offer, Advertiser, TrackingDomain, OfferTargeting,
+  OfferAttributionSettings, OfferRevenueSettings, OfferEmailSettings,
+} from '../../types';
 
-const TABS = ['General', 'Tracking & Controls', 'Revenue & Payout (Events)', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'] as const;
+const TABS = ['General', 'Tracking & Controls', 'Postback Configuration', 'Revenue & Payout (Events)', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'] as const;
 // Everflow-reference order (Active · Paused · Pending). Edit keeps "Deleted" (archived) as a 4th
 // segment — unlike the create form — so an already-archived offer still shows its current status.
 const STATUSES = ['active', 'paused', 'draft', 'archived'] as const;
@@ -30,7 +37,7 @@ const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-s
 // Display labels for the real backend enum — matches the Offers list vocabulary; API value stays raw.
 const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
-const DEVICES = ['desktop', 'mobile', 'tablet'] as const;
+const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => import('react').ReactNode): Column<Row> => ({ header, cell });
@@ -42,177 +49,17 @@ interface FormState {
   payoutModel: string; defaultPayout: string; defaultRevenue: string;
   attributionWindowS: string; dedupWindowS: string; fallbackUrl: string; allowedTrafficTypes: string[];
   trackingDomainId: string;
-}
-
-function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" onClick={() => onChange(!on)}
-      className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${on ? 'text-accent-text' : 'text-fg-secondary'}`}>
-      {on ? 'Yes' : 'No'}
-      <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${on ? 'bg-success' : 'bg-border'}`}>
-        <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0'}`} />
-      </span>
-    </button>
-  );
-}
-
-/** Left list + right panel picker used by the Targeting tab. Only `active===realKey` shows real
- * content (device chips); every other row is a visual match for the reference with no backing rule. */
-function CategoryPicker({ categories, panel }: { categories: string[]; panel: (c: string) => import('react').ReactNode }) {
-  const [active, setActive] = useState<string>(categories[0] ?? '');
-  return (
-    <div className="grid grid-cols-1 overflow-hidden rounded-card border border-border sm:grid-cols-[220px_1fr]">
-      <div className="divide-y divide-border border-b border-border sm:border-b-0 sm:border-r">
-        {categories.map((c) => (
-          <button key={c} type="button" onClick={() => setActive(c)}
-            className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-small ${active === c ? 'bg-accent-subtle font-medium text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-            {c}<span>›</span>
-          </button>
-        ))}
-      </div>
-      <div className="min-h-[120px] bg-page p-4">{panel(active)}</div>
-    </div>
-  );
-}
-
-// ── Tabs with no real backing fields at all — extracted so their toggles/segments can hold
-// genuine local state (real clicks, real visual feedback) instead of dead onChange={() => {}}. ────
-
-function TrackingExtras({ domains, value, onChange }: { domains: TrackingDomain[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <>
-      <p className="text-small font-semibold text-fg">Tracking Domain</p>
-      <Field label="Tracking Domain *">
-        <select className="input" required value={value} onChange={(e) => onChange(e.target.value)}>
-          <option value="" disabled>Select Tracking Domain…</option>
-          {domains.map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
-        </select>
-      </Field>
-
-      <p className="text-small font-semibold text-fg">Click Tracking</p>
-      <UnavailableField label="Linking Type">
-        <Segmented options={['Redirect Linking', 'Redirect + Direct Linking']} value="Redirect Linking" onChange={() => {}} />
-      </UnavailableField>
-
-      <p className="text-small font-semibold text-fg">Conversion Event Tracking</p>
-      <div>
-        <label className="label mb-1 block">Conversion Tracking</label>
-        <p className="text-small text-fg-secondary">Conversions are accepted via Server-to-Server postback, pixel, or iframe — the advertiser fires whichever they use. It isn't a per-offer setting.</p>
-      </div>
-
-      <div>
-        <label className="flex items-start gap-2 text-small text-fg">
-          <input type="checkbox" defaultChecked className="mt-0.5 h-4 w-4 rounded border-border" />
-          <span><strong>Support Deep Links</strong> — Allow Partners to direct traffic to alternate landing pages without additional Offer URLs.</span>
-        </label>
-      </div>
-    </>
-  );
-}
-
-function RevenueExtras({ revenue, onRevenueChange }: { revenue: string; onRevenueChange: (v: string) => void }) {
-  const [revenueAction, setRevenueAction] = useState('Base Conversion Event');
-  const [revenueType, setRevenueType] = useState('Fixed Revenue');
-  const [pricePerProduct, setPricePerProduct] = useState(false);
-  return (
-    <>
-      <div>
-        <label className="label mb-2 block">Revenue Action *</label>
-        <Segmented options={['Impression', 'Click', 'Base Conversion Event']} value={revenueAction} onChange={setRevenueAction} />
-      </div>
-      <div className="space-y-3 rounded-card border border-border bg-page p-4">
-        <label className="label mb-1 block">Revenue Type *</label>
-        <Segmented options={['Fixed Revenue', 'Percentage Revenue', 'Mixed Revenue']} value={revenueType} onChange={setRevenueType} />
-        <Field label="Revenue Per Action (RPA) *"><input className="input" value={revenue} onChange={(e) => onRevenueChange(e.target.value)} /></Field>
-        <label className="flex items-start gap-2 text-small text-fg">
-          <input type="checkbox" checked={pricePerProduct} onChange={(e) => setPricePerProduct(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border" />
-          <span><strong>Price Per Product</strong> — enable custom pricing per product.</span>
-        </label>
-      </div>
-    </>
-  );
-}
-
-function AttributionExtras() {
-  const [tracker24, setTracker24] = useState(false);
-  const [ipQuality, setIpQuality] = useState(false);
-  const [throttle, setThrottle] = useState(false);
-  const [clickToConv, setClickToConv] = useState(true);
-  const [emailOwnership, setEmailOwnership] = useState(false);
-  const [viewThrough, setViewThrough] = useState(false);
-  const [serverSideClick, setServerSideClick] = useState(false);
-  return (
-    <>
-      <div>
-        <label className="label mb-2 block">24metrics Tracker</label>
-        <div className="flex items-center gap-2">
-          <YesNoToggle on={tracker24} onChange={setTracker24} />
-          {tracker24 && <select className="input"><option>Not available yet</option></select>}
-        </div>
-      </div>
-      <div>
-        <label className="label mb-2 block">Enable IPQualityScore Fraud Detection</label>
-        <YesNoToggle on={ipQuality} onChange={setIpQuality} />
-      </div>
-      <div>
-        <label className="label mb-2 block">Apply Throttle Rate</label>
-        <YesNoToggle on={throttle} onChange={setThrottle} />
-      </div>
-      <div>
-        <label className="label mb-2 block">Enable Click to Conversion Time</label>
-        <YesNoToggle on={clickToConv} onChange={setClickToConv} />
-        {clickToConv && (
-          <div className="mt-3 grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-2">
-            <Field label="Minimum Lookback Window"><input className="input" defaultValue="5 Seconds" /></Field>
-            <Field label="Max. Approved Click to Conversion Time"><select className="input" defaultValue="6 Hours"><option>6 Hours</option><option>12 Hours</option><option>24 Hours</option></select></Field>
-          </div>
-        )}
-      </div>
-      <div>
-        <label className="label mb-2 block">Enable Email Ownership</label>
-        <YesNoToggle on={emailOwnership} onChange={setEmailOwnership} />
-      </div>
-      <div>
-        <label className="label mb-2 block">Enable View-Through</label>
-        <YesNoToggle on={viewThrough} onChange={setViewThrough} />
-      </div>
-      <div>
-        <label className="label mb-2 block">Enable Server-Side Click</label>
-        <YesNoToggle on={serverSideClick} onChange={setServerSideClick} />
-      </div>
-    </>
-  );
-}
-
-function EmailTab() {
-  const [ezepo, setEzepo] = useState(false);
-  const [optizmo, setOptizmo] = useState(false);
-  const [instructions, setInstructions] = useState(false);
-  return (
-    <div className="max-w-2xl space-y-4">
-      <UnavailableField label="Enable Suppression File"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
-      <div>
-        <label className="label mb-2 block">Ezepo Enabled</label>
-        <input type="checkbox" checked={ezepo} onChange={(e) => setEzepo(e.target.checked)} className="h-4 w-4 rounded border-border" />
-      </div>
-      <div>
-        <label className="label mb-2 block">Optizmo Suppression List</label>
-        <YesNoToggle on={optizmo} onChange={setOptizmo} />
-      </div>
-      <div>
-        <label className="label mb-2 block">Enable Email Instructions</label>
-        <YesNoToggle on={instructions} onChange={setInstructions} />
-      </div>
-      <UnavailableField label="Enable Email Opt-out"><YesNoToggle on={false} onChange={() => {}} /></UnavailableField>
-    </div>
-  );
+  linkingType: string; deepLinkEnabled: boolean; firePartnerPostback: boolean;
+  appIdentifier: string; internalNotes: string; productId: string; thumbnailUrl: string;
+  targeting: OfferTargeting;
+  attribution: OfferAttributionSettings; revenue: OfferRevenueSettings; email: OfferEmailSettings;
 }
 
 export default function OfferEdit() {
   const { id = '' } = useParams();
   const nav = useNavigate();
   const base = `/api/offers/${id}`;
-  const { data: offer, loading, error } = useQuery<Offer>(base);
+  const { data: offer, loading, error, refetch } = useQuery<Offer>(base);
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: groups, refetch: refetchGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
@@ -228,7 +75,10 @@ export default function OfferEdit() {
   const [assignGroup, setAssignGroup] = useState(false);
   const [groupId, setGroupId] = useState('');
   const [catNew, setCatNew] = useState(false);
+  const [formErrors, setFormErrors] = useState<string[]>([]);
   const { run, busy, error: saveError } = useMutation((body: Record<string, unknown>) => api.patch(base, body));
+  const regenCode = useMutation(() => api.post<{ securityCode: string }>(`${base}/security-code/regenerate`));
+  const clearCode = useMutation(async (_args: void) => { await api.del(`${base}/security-code`); });
 
   useEffect(() => {
     if (!offer) return;
@@ -244,6 +94,16 @@ export default function OfferEdit() {
       dedupWindowS: offer.dedupWindowS != null ? String(offer.dedupWindowS) : '',
       fallbackUrl: offer.fallbackUrl ?? '', allowedTrafficTypes: offer.allowedTrafficTypes ?? [],
       trackingDomainId: offer.trackingDomainId ?? '',
+      linkingType: offer.linkingType ?? 'redirect',
+      deepLinkEnabled: offer.deepLinkEnabled ?? false,
+      // Unset = on (the tracker fires partner postbacks unless explicitly turned off).
+      firePartnerPostback: offer.firePartnerPostback ?? true,
+      appIdentifier: offer.appIdentifier ?? '', internalNotes: offer.internalNotes ?? '',
+      productId: offer.productId ?? '', thumbnailUrl: offer.thumbnailUrl ?? '',
+      targeting: offer.targeting ?? {},
+      attribution: withDefaults(DEFAULT_ATTRIBUTION, offer.attributionSettings),
+      revenue: withDefaults(DEFAULT_REVENUE, offer.revenueSettings),
+      email: withDefaults(DEFAULT_EMAIL, offer.emailSettings),
     });
     setCapsEnabled(Boolean(offer.dailyClickCap || offer.dailyConversionCap || offer.totalConversionCap));
     setFailTrafficEnabled(Boolean(offer.fallbackUrl));
@@ -260,27 +120,56 @@ export default function OfferEdit() {
   if (error || !offer) return <StateBlock>{error ?? 'Offer not found'}</StateBlock>;
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
-  const toggleDevice = (d: string) => set('allowedTrafficTypes', form.allowedTrafficTypes.includes(d) ? form.allowedTrafficTypes.filter((x) => x !== d) : [...form.allowedTrafficTypes, d]);
+
+  const regenerateCode = async () => {
+    const code = await regenCode.run(undefined);
+    if (code) await refetch();
+  };
+  const removeCode = async () => {
+    await clearCode.run(undefined);
+    await refetch();
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const tErrors = targetingErrors(form.targeting);
+    const sErrors = settingsErrors(form.attribution, form.revenue, form.email);
+    if (failTrafficEnabled && !form.fallbackUrl.trim()) sErrors.push('Fail Traffic: enter a Fallback URL or turn Fail Traffic off.');
+    if (tErrors.length || sErrors.length) {
+      setFormErrors([...tErrors.map((m) => `Targeting: ${m}`), ...sErrors]);
+      if (tErrors.length) setTab('Targeting');
+      return;
+    }
+    setFormErrors([]);
     const normalizeUrl = (v: string) => (v && !/^https?:\/\//i.test(v) ? 'https://' + v : v);
+    const orNull = (v: string) => (v.trim() ? v.trim() : null);
+    const capOrNull = (v: string) => (capsEnabled && v !== '' ? Number(v) : null);
     const body: Record<string, unknown> = {
       name: form.name, status: form.status, advertiserId: form.advertiserId, currency: form.currency,
       visibility: form.visibility, destinationUrl: normalizeUrl(form.destinationUrl), payoutModel: form.payoutModel,
       defaultPayout: form.defaultPayout || '0', defaultRevenue: form.defaultRevenue || '0',
       allowedTrafficTypes: form.allowedTrafficTypes,
+      category: orNull(form.category),
+      previewUrl: form.previewUrl.trim() ? normalizeUrl(form.previewUrl.trim()) : null,
+      description: orNull(form.description),
+      linkingType: form.linkingType,
+      deepLinkEnabled: form.deepLinkEnabled,
+      firePartnerPostback: form.firePartnerPostback,
+      // Disabled or cleared → null, so the server really drops the old value.
+      fallbackUrl: failTrafficEnabled && form.fallbackUrl.trim() ? normalizeUrl(form.fallbackUrl.trim()) : null,
+      dailyClickCap: capOrNull(form.dailyClickCap),
+      dailyConversionCap: capOrNull(form.dailyConversionCap),
+      totalConversionCap: capOrNull(form.totalConversionCap),
+      appIdentifier: orNull(form.appIdentifier),
+      internalNotes: orNull(form.internalNotes),
+      productId: orNull(form.productId),
+      thumbnailUrl: form.thumbnailUrl.trim() ? normalizeUrl(form.thumbnailUrl.trim()) : null,
+      targeting: form.targeting,
+      attributionSettings: form.attribution,
+      revenueSettings: form.revenue,
+      emailSettings: form.email,
     };
-    if (form.category) body.category = form.category;
-    if (form.previewUrl) body.previewUrl = normalizeUrl(form.previewUrl);
-    if (form.description) body.description = form.description;
     if (form.trackingDomainId) body.trackingDomainId = form.trackingDomainId;
-    if (failTrafficEnabled && form.fallbackUrl) body.fallbackUrl = normalizeUrl(form.fallbackUrl);
-    if (capsEnabled) {
-      if (form.dailyClickCap) body.dailyClickCap = Number(form.dailyClickCap);
-      if (form.dailyConversionCap) body.dailyConversionCap = Number(form.dailyConversionCap);
-      if (form.totalConversionCap) body.totalConversionCap = Number(form.totalConversionCap);
-    }
     if (form.attributionWindowS) body.attributionWindowS = Number(form.attributionWindowS);
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
     if (!(await run(body))) return;
@@ -299,6 +188,9 @@ export default function OfferEdit() {
     nav(`/app/offers/${id}`);
   };
 
+  const trackHost = resolveTrackingHost(domains, form.trackingDomainId);
+  const domainGroups = groupTrackingDomains(domains);
+
   return (
     <>
       <PageHeader title={`Edit Offer: ${offer.name}`} subtitle={`Offers › ${offer.name} › Edit`} />
@@ -306,6 +198,11 @@ export default function OfferEdit() {
       <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
       <form onSubmit={submit} className="card space-y-6">
         {saveError && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{saveError}</p>}
+        {formErrors.length > 0 && (
+          <ul className="space-y-0.5 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">
+            {formErrors.map((m) => <li key={m}>{m}</li>)}
+          </ul>
+        )}
         <p className="flex items-center gap-1.5 text-tiny text-fg-secondary">
           <Info size={13} className="shrink-0 text-fg-muted" /> Fields with an asterisk (*) are mandatory.
         </p>
@@ -329,9 +226,7 @@ export default function OfferEdit() {
                   {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </Field>
-              <UnavailableField label="Thumbnail">
-                <div className="grid h-[42px] place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">Drag and drop or Browse</div>
-              </UnavailableField>
+              <ThumbnailField offerId={id} url={form.thumbnailUrl} onUrlChange={(v) => set('thumbnailUrl', v)} />
             </div>
             <Field label="Category" hint="Grouping label used for list filtering and marketplace facets. Pick an existing one, or choose “＋ New category…” to add a new label.">
               {catNew ? (
@@ -373,12 +268,18 @@ export default function OfferEdit() {
               </div>
             </div>
             <LabelsEditor base={base} />
-            <UnavailableField label="App Identifier"><input className="input" disabled placeholder="e.g. com.acme.app" /></UnavailableField>
+            <Field label="App Identifier" hint="Store bundle / package ID for app offers (e.g. com.acme.app or id123456789).">
+              <input className="input" placeholder="e.g. com.acme.app" maxLength={255} value={form.appIdentifier} onChange={(e) => set('appIdentifier', e.target.value)} />
+            </Field>
             <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
               <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
             </Field>
-            <Field label="Internal Notes"><textarea className="input min-h-[80px]" /></Field>
-            <Field label="Product ID"><input className="input" /></Field>
+            <Field label="Internal Notes" hint="Visible to your team only — never shown to partners or advertisers.">
+              <textarea className="input min-h-[80px]" value={form.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} />
+            </Field>
+            <Field label="Product ID" hint="Your own or the advertiser's product / SKU reference for this offer.">
+              <input className="input" maxLength={255} value={form.productId} onChange={(e) => set('productId', e.target.value)} />
+            </Field>
             <Field label="Description" hint="Notes about the offer for your team and partners. Plain text.">
               <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} />
             </Field>
@@ -392,7 +293,38 @@ export default function OfferEdit() {
               <p className="text-small font-semibold text-fg">Default Landing Page</p>
               <Field label="Default Landing Page URL *"><textarea className="input min-h-[80px] font-mono text-tiny" required value={form.destinationUrl} onChange={(e) => set('destinationUrl', e.target.value)} /></Field>
 
-              <TrackingExtras domains={domains ?? []} value={form.trackingDomainId} onChange={(v) => set('trackingDomainId', v)} />
+              <p className="text-small font-semibold text-fg">Tracking Domain</p>
+              <Field label="Tracking Domain *" hint="Tracking links and the S2S postback URL for this offer use this domain.">
+                <select className="input" required value={form.trackingDomainId} onChange={(e) => set('trackingDomainId', e.target.value)}>
+                  <option value="" disabled>Select Tracking Domain…</option>
+                  {domainGroups.production.length > 0 && (
+                    <optgroup label="Production">
+                      {domainGroups.production.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                    </optgroup>
+                  )}
+                  {domainGroups.devOnly.length > 0 && (
+                    <optgroup label="Local Testing">
+                      {domainGroups.devOnly.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                    </optgroup>
+                  )}
+                </select>
+              </Field>
+
+              <p className="text-small font-semibold text-fg">Click Tracking</p>
+              <Field label="Linking Type">
+                <Segmented options={LINKING_TYPES} value={form.linkingType || 'redirect'} onChange={(v) => set('linkingType', v)} />
+              </Field>
+
+              <p className="text-small font-semibold text-fg">Conversion Event Tracking</p>
+              <div>
+                <label className="label mb-1 block">Conversion Tracking</label>
+                <p className="text-small text-fg-secondary">Conversions are accepted via Server-to-Server postback, pixel, or iframe — the advertiser fires whichever they use. It isn't a per-offer setting.</p>
+              </div>
+
+              <label className="flex items-start gap-2 text-small text-fg">
+                <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={form.deepLinkEnabled} onChange={(e) => set('deepLinkEnabled', e.target.checked)} />
+                <span><strong>Support Deep Links</strong> — Allow Partners to direct traffic to alternate landing pages without additional Offer URLs.</span>
+              </label>
             </div>
 
             <div className="space-y-4 border-t border-border pt-4">
@@ -408,27 +340,61 @@ export default function OfferEdit() {
                   <Field label="Total Conversion Cap"><input type="number" min={0} className="input" value={form.totalConversionCap} onChange={(e) => set('totalConversionCap', e.target.value)} placeholder="Unlimited" /></Field>
                 </div>
               )}
+              {!capsEnabled && <p className="text-tiny text-fg-muted">Caps off — saving removes any existing caps on this offer.</p>}
+            </div>
+          </div>
+        )}
+
+        {tab === 'Postback Configuration' && (
+          <div className="max-w-2xl space-y-6">
+            <p className="text-small text-fg-secondary">Give this URL to the advertiser. They should fire it from their server when a user converts. The click_id is passed automatically via the redirect.</p>
+            <div className="space-y-4">
+              <Field label="S2S Postback URL" hint="Advertiser fires this on conversion. Macros in {braces} are filled at conversion time.">
+                <CopyBox value={trackHost ? `${trackingBase(trackHost)}/postback?click_id={click_id}&txn_id={txn_id}&secure_code={secure_code}` : ''} placeholder="No active tracking domain — add one first." />
+              </Field>
+              <div>
+                <p className="label mb-2 block">Available Macros</p>
+                <table className="premium-table w-full">
+                  <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Macro</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Description</th></tr></thead>
+                  <tbody>
+                    {[['{click_id}', 'The unique click identifier generated on each redirect'], ['{txn_id}', 'Your order/revenue transaction ID (passes through unchanged)'], ['{secure_code}', 'Per-offer security code — validates the postback is genuine'], ['{event}', 'Conversion event name (if multiple goals exist)'], ['{payout}', 'Resolved publisher payout amount'], ['{revenue}', 'Resolved advertiser revenue amount'], ['{currency}', 'Offer currency (e.g. USD)'], ['{sub1}–{sub5}', 'Sub-ID values carried from the click']].map(([m, d]) => (
+                      <tr key={String(m)}><td className="py-1 font-mono text-tiny text-accent-text">{m}</td><td className="py-1 text-small text-fg-secondary">{d}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-4 border-t border-border pt-4">
+              <h3 className="text-h3 font-medium text-fg">Per-Offer Security Code</h3>
+              <p className="text-small text-fg-secondary">Overrides the network-wide code when set. The advertiser must include the per-offer security code in their postback. Leave empty to use the network default.</p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <input className="input font-mono text-tiny" readOnly value={offer.securityCode ?? ''} placeholder="No per-offer code set — using network default" />
+                </div>
+                <button type="button" className="btn-ghost !py-2" disabled={regenCode.busy} onClick={regenerateCode}>{regenCode.busy ? 'Generating…' : (offer.securityCode ? 'Regenerate' : 'Generate')}</button>
+                {offer.securityCode && <button type="button" className="btn-ghost !py-2 text-danger-text" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
+              </div>
+            </div>
+
+            <div className="space-y-4 border-t border-border pt-4">
+              <h3 className="text-h3 font-medium text-fg">Publisher Postback</h3>
+              <div>
+                <label className="flex items-start gap-2 text-small text-fg">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={form.firePartnerPostback} onChange={(e) => set('firePartnerPostback', e.target.checked)} />
+                  <span><strong>Fire Partner Postback</strong> — automatically notify publishers via their configured postback URL when a conversion is approved.</span>
+                </label>
+                <p className="mt-1 text-tiny text-fg-secondary">Publisher postback URLs and macros are configured separately on each publisher's postback settings. When enabled, approved conversions trigger an outbound call to the publisher with their configured macro template.</p>
+              </div>
             </div>
           </div>
         )}
 
         {tab === 'Revenue & Payout (Events)' && (
           <div className="max-w-2xl space-y-6">
-            <div className="space-y-4">
-              <h3 className="text-h3 font-medium text-fg">Base Conversion Event</h3>
-              <p className="text-tiny text-fg-muted">Default name is set as Base, but you can change it.</p>
-              <Field label="Base Conversion Event Name"><input className="input" defaultValue="Base" /></Field>
-              <div className="space-y-2">
-                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" defaultChecked className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Fire Partner Postback</strong> — fire Partner Postbacks when a conversion or Event is approved.</span></label>
-                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Manually Approve Conversions</strong> — require manual approval for Partner conversions.</span></label>
-                <label className="flex items-start gap-2 text-small text-fg"><input type="checkbox" defaultChecked className="mt-0.5 h-4 w-4 rounded border-border" /><span><strong>Allow Duplicate Conversions</strong> — allow duplicate conversions triggered by the same click ID.</span></label>
-              </div>
-            </div>
-
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Base Revenue</h3>
-              <RevenueExtras revenue={form.defaultRevenue} onRevenueChange={(v) => set('defaultRevenue', v)} />
-            </div>
+            <RevenueSettingsPanel value={form.revenue} onChange={(v) => set('revenue', v)}
+              firePartnerPostback={form.firePartnerPostback} onFirePartnerPostbackChange={(v) => set('firePartnerPostback', v)}
+              revenue={form.defaultRevenue} onRevenueChange={(v) => set('defaultRevenue', v)} />
 
             <div className="space-y-4 border-t border-border pt-4">
               <h3 className="text-h3 font-medium text-fg">Base Payout</h3>
@@ -448,57 +414,13 @@ export default function OfferEdit() {
               <Field label="Attribution Window (seconds)"><input type="number" min={0} className="input" value={form.attributionWindowS} onChange={(e) => set('attributionWindowS', e.target.value)} placeholder="2592000" /></Field>
               <Field label="Dedup Window (seconds)"><input type="number" min={0} className="input" value={form.dedupWindowS} onChange={(e) => set('dedupWindowS', e.target.value)} placeholder="86400" /></Field>
             </div>
-
-            <AttributionExtras />
+            <AttributionSettingsPanel value={form.attribution} onChange={(v) => set('attribution', v)} />
           </div>
         )}
 
         {tab === 'Targeting' && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="mb-2 text-h3 font-medium text-fg">Inclusion/Exclusion Summary</h3>
-              {form.allowedTrafficTypes.length === 0 ? (
-                <p className="text-small italic text-fg-muted">No targeting rules configured — all traffic is allowed.</p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {form.allowedTrafficTypes.map((d) => (
-                    <span key={d} className="inline-flex items-center gap-1.5 rounded-full border border-success bg-success-bg px-3 py-1 text-tiny font-medium capitalize text-success-text">
-                      Device: {d}<button type="button" onClick={() => toggleDevice(d)}>×</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <h3 className="mb-2 text-h3 font-medium text-fg">Device Characteristics</h3>
-              <CategoryPicker
-                categories={['Platform', 'Device Type', 'Browser', 'Device Brand', 'OS Version', 'Language']}
-                panel={(c) => c === 'Device Type' ? (
-                  <div className="flex flex-wrap gap-2">
-                    {DEVICES.map((d) => (
-                      <button key={d} type="button" onClick={() => toggleDevice(d)}
-                        className={`rounded-full border px-4 py-1.5 text-small font-medium capitalize transition-colors ${form.allowedTrafficTypes.includes(d) ? 'border-accent bg-accent-subtle text-accent-text' : 'border-border bg-surface text-fg-secondary hover:bg-page'}`}>
-                        {d}
-                      </button>
-                    ))}
-                  </div>
-                ) : <p className="text-tiny text-fg-muted">Not available yet.</p>}
-              />
-            </div>
-
-            <div>
-              <h3 className="mb-2 text-h3 font-medium text-fg">Geolocation</h3>
-              <CategoryPicker categories={['Country', 'Region', 'City', 'DMA', 'Mobile Carrier', 'ISP']} panel={() => <p className="text-tiny text-fg-muted">Not available yet.</p>} />
-            </div>
-
-            <Field label="ZIP/Postal Code"><textarea className="input min-h-[100px]" placeholder="Enter one value per line" /></Field>
-
-            <div>
-              <h3 className="mb-2 text-h3 font-medium text-fg">IP Ranges</h3>
-              <CategoryPicker categories={['Exact', 'Range']} panel={() => <p className="text-tiny text-fg-muted">Not available yet.</p>} />
-            </div>
-          </div>
+          <TargetingPanel targeting={form.targeting} onChange={(t) => set('targeting', t)}
+            deviceTypes={form.allowedTrafficTypes} onDeviceTypesChange={(d) => set('allowedTrafficTypes', d)} />
         )}
 
         {tab === 'Fail Traffic' && (
@@ -507,11 +429,13 @@ export default function OfferEdit() {
               <label className="label mb-2 block">Enable Fail Traffic</label>
               <YesNoToggle on={failTrafficEnabled} onChange={setFailTrafficEnabled} />
             </div>
-            {failTrafficEnabled && (
+            {failTrafficEnabled ? (
               <div className="rounded-card border border-border bg-page p-4">
-                <Field label="Fallback URL"><input className="input" value={form.fallbackUrl} onChange={(e) => set('fallbackUrl', e.target.value)} placeholder="https://…" /></Field>
-                <p className="mt-2 text-tiny text-fg-muted">Traffic that fails targeting/cap rules redirects here instead of the offer's destination URL.</p>
+                <Field label="Fallback URL *"><input className="input" value={form.fallbackUrl} onChange={(e) => set('fallbackUrl', e.target.value)} placeholder="https://…" /></Field>
+                <p className="mt-2 text-tiny text-fg-muted">Clicks that fail targeting, geo, traffic-control, blocking or cap rules redirect here instead of the offer's destination URL.</p>
               </div>
+            ) : (
+              <p className="text-tiny text-fg-muted">Off — clicks that fail a rule get an empty response (HTTP 204) instead of a redirect. Saving removes any existing Fallback URL.</p>
             )}
           </div>
         )}
@@ -535,7 +459,7 @@ export default function OfferEdit() {
             ]} />
         )}
 
-        {tab === 'Email' && <EmailTab />}
+        {tab === 'Email' && <EmailSettingsPanel value={form.email} onChange={(v) => set('email', v)} />}
 
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <button type="button" className="btn-ghost" onClick={() => nav(`/app/offers/${id}`)}>Cancel</button>

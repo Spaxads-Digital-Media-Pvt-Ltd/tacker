@@ -11,7 +11,9 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { env } from '../../config/env.js';
 import { buildHealthReport, buildLivenessReport, buildReadinessReport, errorEnvelope } from '../../lib/http/index.js';
 import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
-import { lookupGeo, geoAvailable } from '../../lib/geo/geoip.js';
+import { lookupGeo, geoAvailable, carrierAvailable } from '../../lib/geo/geoip.js';
+import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
+import { resolveEntityId } from './ref-resolver.js';
 import { parseUA } from '../../lib/ua.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
@@ -205,11 +207,14 @@ export function buildTrackingApp(): FastifyInstance {
  if (!tenant) return reply.code(404).send(errorEnvelope('not_found', 'unknown_tracking_host', 404));
 
  const q = req.query as Record<string, unknown>;
- const offerId = firstStr(q['offer_id']) ?? firstStr(q['o']);
- if (!offerId) return reply.code(400).send(errorEnvelope('bad_request', 'missing_offer_id', 400));
+ const rawOfferId = firstStr(q['offer_id']) ?? firstStr(q['o']);
+ if (!rawOfferId) return reply.code(400).send(errorEnvelope('bad_request', 'missing_offer_id', 400));
+ // offer_id / pub_id accept either the full UUID or the short numeric ref (e.g. offer_id=190).
+ const offerId = await resolveEntityId('offer', tenant.networkId, rawOfferId);
+ if (!offerId) return divert(reply, null);
  // publisher_id is a UUID column downstream (clicks/conversions). Ignore a malformed value rather
  // than 500 the conversion later — a bad pub_id shouldn't break attribution or the redirect.
- const publisherId = asUuid(firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
+ const publisherId = await resolveEntityId('publisher', tenant.networkId, firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
  const smartLinkId = asUuid(firstStr(q['sl'])); // set when a smart link routed this click
  const subs = [1, 2, 3, 4, 5].map((i) => firstStr(q[`sub${i}`]));
  const sourceId = firstStr(q['source_id']) ?? firstStr(q['source']) ?? firstStr(q['src']) ?? null;
@@ -237,6 +242,19 @@ export function buildTrackingApp(): FastifyInstance {
  const geoKnown = geoAvailable() || forcedGeo != null;
  const geoDecision = evaluateGeoRules(offer.geoRules, country, geoKnown);
  if (!geoDecision.allowed) return divert(reply, offer.fallbackUrl, offer.id);
+
+ // 4a. Offer targeting (Edit Offer › Targeting). Device Type is the offer's allowed traffic types.
+ const allowedTypes = offer.allowedTrafficTypes ?? [];
+ if (allowedTypes.length > 0 && !(ua.device && allowedTypes.includes(ua.device))) {
+ return divert(reply, offer.fallbackUrl, offer.id);
+ }
+ const targetingDecision = evaluateTargeting(offer.targeting, {
+ platform: ua.osName, browser: ua.browserName, deviceBrand: ua.deviceBrand, osVersion: ua.osVersion,
+ language: primaryLanguage(firstStr(req.headers['accept-language'])),
+ country, region: geo?.region ?? null, city: geo?.city ?? null, dma: geo?.dma ?? null,
+ mobileCarrier: geo?.carrier ?? null, isp: geo?.isp ?? null, zip: geo?.postal ?? null, ip,
+ }, { geo: geoAvailable(), country: geoKnown, carrier: carrierAvailable() });
+ if (!targetingDecision.allowed) return divert(reply, offer.fallbackUrl, offer.id);
 
  // 4b. Traffic Controls — real Blacklist/Whitelist rules on sub-values, geo, device, etc.
  // (Offers › Traffic Controls). "Block" diverts like any other rule; "Fail Traffic" lets the
@@ -284,6 +302,7 @@ export function buildTrackingApp(): FastifyInstance {
  fraudFlags: tcMatch?.action === 'fail_traffic' ? [...fraud.flags, 'traffic_control'] : fraud.flags,
  resolvedPayout, resolvedRevenue, currency: offer.currency,
  smartLinkId,
+ ipqs: offer.attribution?.ipqs?.enabled ?? false,
  };
  await enqueueClick(job);
 
@@ -314,6 +333,11 @@ export function buildTrackingApp(): FastifyInstance {
  if (urlViolation) {
  reply.log.warn({ offerId: offer.id, reason: urlViolation, source: 'destination' }, 'redirect_blocked');
  return reply.code(204).send();
+ }
+ // Server-side click (Attribution › Enable Server-Side Click): a server can create the click and
+ // get the click_id back as JSON instead of following a redirect.
+ if (offer.attribution?.serverSideClick && firstStr(q['format']) === 'json') {
+ return reply.code(200).header('cache-control', 'no-store').send({ ok: true, data: { click_id: clickId, redirect_url: finalUrl } });
  }
  return reply.code(302).header('location', finalUrl).header('cache-control', 'no-store').send();
  });

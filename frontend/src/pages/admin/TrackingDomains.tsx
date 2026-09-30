@@ -2,10 +2,17 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { isDevOnlyHost } from '../../lib/trackingLinks';
 import type { TrackingDomain } from '../../types';
 
 const columns: Column<TrackingDomain>[] = [
-  { header: 'Host', cell: (d) => <span className="font-mono text-xs">{d.host}{d.isPrimary && <span className="ml-2 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 ">PRIMARY</span>}</span> },
+  { header: 'Host', cell: (d) => (
+    <span className="font-mono text-xs">
+      {d.host}
+      {d.isPrimary && <span className="ml-2 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 ">PRIMARY</span>}
+      {isDevOnlyHost(d.host) && <span className="ml-2 rounded bg-warning-bg px-1.5 py-0.5 text-[10px] font-semibold text-warning-text" title="Local/dev testing only — excluded from the Production group when picking an offer's tracking domain">LOCAL</span>}
+    </span>
+  ) },
   { header: 'Mode', cell: (d) => d.mode },
   { header: 'Status', cell: (d) => <Badge value={d.status} /> },
   { header: 'Verification', cell: (d) => <Badge value={d.verificationState} /> },

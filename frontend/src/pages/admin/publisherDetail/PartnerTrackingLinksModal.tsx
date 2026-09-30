@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import { Overlay } from '../../../shared-components/primitives/ui';
 import { useQuery } from '../../../lib/useApi';
+import { linkId, resolveTrackingHost, trackingBase } from '../../../lib/trackingLinks';
 import type { Publisher, Offer, TrackingDomain } from '../../../types';
 
 const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'] as const;
@@ -14,10 +15,6 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
   publisher: Publisher; domains: TrackingDomain[]; onClose: () => void;
 }) {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
-  const activeDomains = domains.filter((d) => d.status === 'active');
-  const primary = activeDomains.find((d) => d.isPrimary) ?? activeDomains[0];
-  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  const trackBase = isLocal ? 'http://localhost:4002' : `https://${primary?.host ?? 'your-tracking-domain.com'}`;
 
   const [type, setType] = useState<'Click' | 'Impression'>('Click');
   const [offerId, setOfferId] = useState('');
@@ -26,14 +23,18 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
   const [encrypt, setEncrypt] = useState(false);
   const setExtra = (k: string, v: string) => setExtras((s) => ({ ...s, [k]: v }));
 
+  // The selected offer's own tracking domain (network primary only if it has none).
+  const selectedOffer = (offers ?? []).find((o) => o.id === offerId);
+  const trackBase = trackingBase(resolveTrackingHost(domains, selectedOffer?.trackingDomainId));
+
   const link = useMemo(() => {
-    if (!offerId) return '';
+    if (!selectedOffer || !trackBase) return '';
     const filled = Object.fromEntries(Object.entries(extras).filter(([, v]) => v.trim()));
-    const base: Record<string, string> = { offer_id: offerId, pub_id: publisher.id, type: type.toLowerCase() };
+    const base: Record<string, string> = { offer_id: linkId(selectedOffer), pub_id: linkId(publisher), type: type.toLowerCase() };
     if (!encrypt) return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}`;
     const packed = btoa(JSON.stringify(filled));
     return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}`;
-  }, [offerId, type, extras, encrypt, trackBase, publisher.id]);
+  }, [selectedOffer, type, extras, encrypt, trackBase, publisher]);
 
   return (
     <Overlay onClose={onClose}>
@@ -59,7 +60,7 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
               <option value="">Select Offer…</option>
               {(offers ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
-            {isLocal && <p className="mt-1 text-tiny text-warning">Local mode: link points at http://localhost:4002 so you can test clicks locally.</p>}
+            {selectedOffer && !trackBase && <p className="mt-1 text-tiny text-warning-text">This offer has no tracking domain — set one on the offer first.</p>}
 
             <button type="button" onClick={() => setShowExtra((s) => !s)} className="mt-4 flex items-center gap-1.5 text-small font-medium text-accent-text">
               {showExtra ? <ChevronDown size={15} /> : <ChevronRight size={15} />} Additional Parameters

@@ -212,6 +212,63 @@ export function Modal({
   );
 }
 
+/**
+ * Replacement for native `window.prompt`. Takes a title + message, returns the entered text via
+ * onConfirm, or closes with no value via onClose.
+ */
+export function PromptModal({
+  open, onClose, title, message, placeholder, onConfirm,
+}: {
+  open: boolean; onClose: () => void; title: string; message: string; placeholder?: string; onConfirm: (value: string) => void;
+}) {
+  const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) { setValue(''); setTimeout(() => inputRef.current?.focus(), 50); }
+  }, [open]);
+
+  const submit = () => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onConfirm(trimmed);
+    onClose();
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    if (e.key === 'Escape') onClose();
+  };
+
+  if (!open) return null;
+  return (
+    <Overlay onClose={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prompt-title"
+        className="animate-fade-in w-full max-w-sm rounded-card border border-border bg-elevated p-6 shadow-elevated"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="prompt-title" className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
+        <p className="mt-2 text-small text-fg-secondary">{message}</p>
+        <input
+          ref={inputRef}
+          className="input mt-4"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={onKey}
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-primary" onClick={submit}>Save</button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 // ── Entity multi-select ──────────────────────────────────────────────────────
 export interface EntityOpt { value: string; label: string }
 

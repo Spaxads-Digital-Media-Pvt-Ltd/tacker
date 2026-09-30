@@ -20,7 +20,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, Search, MoreVertical, SlidersHorizontal } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { PageHeader, Spinner, StateBlock, PromptModal } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
@@ -152,6 +152,7 @@ export default function PartnerReport() {
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const tableActionsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -311,9 +312,7 @@ export default function PartnerReport() {
     <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort(metric)}>{label} {sortIcon(metric)}</th>
   );
 
-  const saveReport = () => {
-    const name = window.prompt('Name this saved report:');
-    if (!name) return;
+  const saveReport = (name: string) => {
     const config: SavedConfig = { from, to, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns] };
     const next = [...savedReports.filter((s) => s.name !== name), { name, config }];
     setSavedReports(next);
@@ -353,7 +352,7 @@ export default function PartnerReport() {
             </button>
             {pageMenuOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                <button onClick={saveReport} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Save</button>
+                <button onClick={() => { setPageMenuOpen(false); setSaveModalOpen(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Save</button>
                 <div className="relative" onMouseEnter={() => setLoadOpen(true)} onMouseLeave={() => setLoadOpen(false)}>
                   <button disabled={!savedReports.length} onClick={() => setLoadOpen((s) => !s)}
                     className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
@@ -549,6 +548,7 @@ export default function PartnerReport() {
         excludeOffer: excludeOfferId, excludeAdvertiser: excludeAdvertiserId, excludePartner: excludePublisherId, excludeCountry, excludeDevice,
         ignoreFailTraffic: appliedIgnoreFailTraffic ? 'true' : undefined,
       }} />}
+      <PromptModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} title="Save Report" message="Name this saved report:" placeholder="e.g. Partner Overview" onConfirm={saveReport} />
     </>
   );
 }
