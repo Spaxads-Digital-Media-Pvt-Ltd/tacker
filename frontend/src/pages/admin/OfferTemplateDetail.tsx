@@ -60,8 +60,8 @@ export default function OfferTemplateDetail() {
           <div className="flex items-center gap-1">
             <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => nav(`/app/offers-templates/${id}/edit`)}><Pencil size={12} />Edit</button>
             <GeneralMenu isDefault={data.isDefault}
-              onSetDefault={async () => { try { const ok = await setDefault.run(data.id); if (ok) refetch(); } catch {} }}
-              onDelete={async () => { if (confirm('Delete this template?')) { try { const ok = await del.run(data.id); if (ok) nav('/app/offers-templates'); } catch {} } }} />
+              onSetDefault={async () => { try { const ok = await setDefault.run(data.id); if (ok) refetch(); } catch { /* surfaced via setDefault.error above */ } }}
+              onDelete={async () => { if (confirm('Delete this template?')) { try { const ok = await del.run(data.id); if (ok) nav('/app/offers-templates'); } catch { /* surfaced via del.error above */ } } }} />
           </div>
         }>
           <InfoGrid>
