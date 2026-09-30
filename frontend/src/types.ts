@@ -74,16 +74,16 @@ export interface Offer {
   fallbackUrl?: string | null;
   description?: string | null;
   notes?: string[];
-  appIdentifier?: string | null;
-  linkingType?: string | null;
-  suppressionFileEnabled?: boolean;
-  emailOptOutEnabled?: boolean;
   securityCode?: string | null;
   trackingDomainId?: string | null;
   linkingType?: 'redirect' | 'redirect_direct' | null;
   deepLinkEnabled?: boolean | null;
   firePartnerPostback?: boolean | null;
   appIdentifier?: string | null;
+  /** @deprecated derived from emailSettings.suppression.enabled server-side — kept for API back-compat. */
+  suppressionFileEnabled?: boolean;
+  /** @deprecated derived from emailSettings.optOut.enabled server-side — kept for API back-compat. */
+  emailOptOutEnabled?: boolean;
   internalNotes?: string | null;
   productId?: string | null;
   thumbnailUrl?: string | null;
