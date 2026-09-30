@@ -164,12 +164,12 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
       {error && <p className="text-small text-danger-text">{error}</p>}
 
       <div>
-        <label className="label mb-1 flex items-center gap-1.5">Name <span className="text-danger-text">*</span> <HelpIcon text="Shown as this integration's name in the Feeds table." /></label>
+        <label className="label flex items-center gap-1.5">Name <span className="text-danger-text">*</span> <HelpIcon text="Shown as this integration's name in the Feeds table." /></label>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
       </div>
 
       <div>
-        <label className="label mb-1 block">Status <span className="text-danger-text">*</span></label>
+        <label className="label">Status <span className="text-danger-text">*</span></label>
         <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
           {(['active', 'paused'] as const).map((s) => (
             <button key={s} type="button" onClick={() => setStatus(s)}
@@ -184,14 +184,14 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-4">
           <div>
-            <label className="label mb-1 block">Default Advertiser <span className="text-danger-text">*</span></label>
+            <label className="label">Default Advertiser <span className="text-danger-text">*</span></label>
             <select className="input" value={advertiserId} onChange={(e) => setAdvertiserId(e.target.value)} required>
               <option value="">Select Default Advertiser…</option>
               {advertisers.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
           <div>
-            <label className="label mb-1 flex items-center gap-1.5">Sync Frequency <span className="text-danger-text">*</span> <HelpIcon text="How often this feed would refresh." /></label>
+            <label className="label flex items-center gap-1.5">Sync Frequency <span className="text-danger-text">*</span> <HelpIcon text="How often this feed would refresh." /></label>
             <select className="input" value={syncFrequency} onChange={(e) => setSyncFrequency(e.target.value)}>
               {SYNC_FREQUENCIES.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
@@ -202,7 +202,7 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
           </label>
         </div>
         <div>
-          <label className="label mb-1 block">Thumbnail</label>
+          <label className="label">Thumbnail</label>
           <div className="flex h-full min-h-32 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border">
             <FileCheck size={22} className="text-fg-muted" />
             <span className="text-small font-medium text-fg">Custom Feed</span>
@@ -214,11 +214,11 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
         <h3 className="mb-3 text-small font-semibold text-fg">Custom Feed</h3>
         <div className="space-y-3">
           <div>
-            <label className="label mb-1 block">Feed URL <span className="text-danger-text">*</span>{urlSet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
+            <label className="label">Feed URL <span className="text-danger-text">*</span>{urlSet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
             <input className="input" value={url} placeholder={urlSet ? '••••••••' : 'https://… or demo://offer-feed'} onChange={(e) => setUrl(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">Feed API Key <span className="text-danger-text">*</span>{keySet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
+            <label className="label">Feed API Key <span className="text-danger-text">*</span>{keySet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
             <input className="input" type="password" value={key} placeholder={keySet ? '••••••••' : ''} onChange={(e) => setKey(e.target.value)} />
           </div>
         </div>

@@ -144,7 +144,7 @@ export default function TierForm() {
           <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
 
           <div>
-            <label className="label mb-2 block">Status *</label>
+            <label className="label">Status *</label>
             <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} labels={STATUS_LABEL} dots={STATUS_DOT} />
           </div>
 

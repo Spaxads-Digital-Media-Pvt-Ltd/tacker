@@ -89,7 +89,7 @@ export default function CouponCodeForm() {
               <input className="input" required value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} />
             </Field>
             <div>
-              <label className="label mb-2 block">Status *</label>
+              <label className="label">Status *</label>
               <Segmented options={STATUSES} value={form.status} onChange={(v) => setForm((f) => ({ ...f, status: v as FormState['status'] }))} labels={STATUS_LABEL} dots={STATUS_DOT} />
             </div>
           </div>
@@ -111,7 +111,7 @@ export default function CouponCodeForm() {
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
             <div>
-              <label className="label mb-2 block">Set Start Date</label>
+              <label className="label">Set Start Date</label>
               <div className="flex items-center gap-3">
                 <YesNoToggle value={form.setStart} onChange={(v) => setForm((f) => ({ ...f, setStart: v }))} />
                 {form.setStart && (
@@ -120,7 +120,7 @@ export default function CouponCodeForm() {
               </div>
             </div>
             <div>
-              <label className="label mb-2 block">Set End Date</label>
+              <label className="label">Set End Date</label>
               <div className="flex items-center gap-3">
                 <YesNoToggle value={form.setEnd} onChange={(v) => setForm((f) => ({ ...f, setEnd: v }))} />
                 {form.setEnd && (

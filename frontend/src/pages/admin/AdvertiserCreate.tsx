@@ -81,7 +81,7 @@ export default function AdvertiserCreate() {
           <div className="space-y-4">
             <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
             <div>
-              <label className="label mb-2 block">Status *</label>
+              <label className="label">Status *</label>
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -102,19 +102,19 @@ export default function AdvertiserCreate() {
             <p className="text-tiny text-fg-secondary">Labels can be added once the advertiser is created (Edit → General).</p>
             <Field label="Verification token"><input className="input" value={form.verificationToken} onChange={(e) => set('verificationToken', e.target.value)} /></Field>
             <div>
-              <label className="label mb-2 block">Attribution Method *</label>
+              <label className="label">Attribution Method *</label>
               <Segmented options={['Last Touch', 'First Touch']} value={attribution} onChange={setAttribution} />
             </div>
             <div>
-              <label className="label mb-2 block">Attribution Priority *</label>
+              <label className="label">Attribution Priority *</label>
               <Segmented options={['Click', 'Coupon Code']} value={priority} onChange={setPriority} />
             </div>
             <div>
-              <label className="label mb-2 block">Email Attribution Method *</label>
+              <label className="label">Email Attribution Method *</label>
               <Segmented options={['Last Partner Attribution', 'First Partner Attribution']} value={emailAttribution} onChange={setEmailAttribution} />
             </div>
             <div>
-              <label className="label mb-2 block">Enable Variables exposed in the Advertiser UI</label>
+              <label className="label">Enable Variables exposed in the Advertiser UI</label>
               <YesNoToggle on={variables} onChange={setVariables} />
             </div>
             <Field label="Internal Notes"><textarea className="input min-h-[80px]" /></Field>
@@ -124,7 +124,7 @@ export default function AdvertiserCreate() {
         {step === 1 && (
           <div className="space-y-4">
             <div>
-              <label className="label mb-2 block">Enable Address</label>
+              <label className="label">Enable Address</label>
               <YesNoToggle on={addressEnabled} onChange={setAddressEnabled} />
             </div>
             {addressEnabled && (
@@ -154,7 +154,7 @@ export default function AdvertiserCreate() {
             <Field label="Tax ID / VAT or SSN"><input className="input" /></Field>
             <Field label="Billing Terms *"><textarea className="input min-h-[80px]" required value={form.billingTerms} onChange={(e) => set('billingTerms', e.target.value)} placeholder="Net-30, prepay…" /></Field>
             <div>
-              <label className="label mb-2 block">Automatic Invoice Creation</label>
+              <label className="label">Automatic Invoice Creation</label>
               <YesNoToggle on={autoInvoice} onChange={setAutoInvoice} />
             </div>
             {autoInvoice && (

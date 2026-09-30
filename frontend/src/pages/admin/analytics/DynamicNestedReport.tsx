@@ -108,7 +108,7 @@ function SingleSelectDropdown({ label, value, onChange }: { label: string; value
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <label className="label mb-1 block">{label} <span className="text-danger-text">*</span></label>
+      <label className="label">{label} <span className="text-danger-text">*</span></label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
         {DIM_OPTIONS.find((d) => d.key === value)?.label} <ChevronDown size={13} className="text-fg-muted" />
       </button>
@@ -392,11 +392,11 @@ export default function DynamicNestedReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <SingleSelectDropdown label="Parent" value={parentDim} onChange={setParentDim} />

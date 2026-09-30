@@ -73,7 +73,7 @@ function OfferPicker({ value, onChange, opts }: { value: string | null; onChange
   const filtered = opts.offers.filter((o) => o.label.toLowerCase().includes(q.trim().toLowerCase()));
   return (
     <div className="relative">
-      <label className="label mb-1 block">Target <span className="text-danger-text">*</span></label>
+      <label className="label">Target <span className="text-danger-text">*</span></label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex !w-64 items-center justify-between !py-2 text-left">
         <span className="truncate">{selected ? selected.label : 'None'}</span> <ChevronDown size={13} className="shrink-0 text-fg-muted" />
       </button>
@@ -105,7 +105,7 @@ function ChildPicker({ value, onChange }: { value: ChildDim; onChange: (k: Child
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <label className="label mb-1 block">Child <span className="text-danger-text">*</span></label>
+      <label className="label">Child <span className="text-danger-text">*</span></label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
         {CHILD_DIM_OPTIONS.find((d) => d.key === value)?.label} <ChevronDown size={13} className="text-fg-muted" />
       </button>
@@ -131,7 +131,7 @@ function EventsPicker({ goals, selected, onChange, disabled }: { goals: Goal[]; 
   const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   return (
     <div className="relative">
-      <label className="label mb-1 block">Add Events <span className="text-danger-text">*</span></label>
+      <label className="label">Add Events <span className="text-danger-text">*</span></label>
       <button type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
         className="input flex !w-64 items-center justify-between !py-2 text-left disabled:cursor-not-allowed disabled:opacity-60">
         <span className="truncate">{selected.length ? `${selected.length} selected` : 'Select Events…'}</span> <ChevronDown size={13} className="shrink-0 text-fg-muted" />
@@ -236,15 +236,15 @@ export default function FunnelReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">Funnel Type</label>
+            <label className="label">Funnel Type</label>
             <div className="input flex !w-44 items-center !py-2 text-fg-secondary">Offer Level Events</div>
           </div>
           <OfferPicker value={offerId} onChange={(id) => { setOfferId(id); setSelectedGoalIds([]); }} opts={opts} />

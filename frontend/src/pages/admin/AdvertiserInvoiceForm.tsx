@@ -105,7 +105,7 @@ export default function AdvertiserInvoiceForm() {
           {!isEdit && <p className="-mt-4 text-tiny text-fg-secondary">Billed amount is calculated automatically from this Advertiser's ledger activity within the payment period.</p>}
 
           <div>
-            <label className="label mb-2 block">Invoice Hidden From Advertiser</label>
+            <label className="label">Invoice Hidden From Advertiser</label>
             <YesNoToggle value={form.hidden} onChange={(v) => setForm((f) => ({ ...f, hidden: v }))} />
           </div>
 

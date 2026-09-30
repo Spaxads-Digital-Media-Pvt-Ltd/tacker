@@ -24,6 +24,9 @@ export const createOfferSchema = z.object({
   previewUrl: redirectUrlWithMax(2000).nullable().optional(),
   description: z.string().max(20_000).nullable().optional(),
   kpi: z.string().max(5000).nullable().optional(),
+  appIdentifier: z.string().max(200).nullable().optional(),
+  suppressionFileEnabled: z.boolean().optional(),
+  emailOptOutEnabled: z.boolean().optional(),
   trackingDomainId: z.string().uuid().nullable().optional(),
 });
 

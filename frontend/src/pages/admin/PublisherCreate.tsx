@@ -9,6 +9,7 @@ import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Segmented, Spinner } from '../../shared-components/primitives/ui';
 import { Stepper } from '../../shared-components/panels/Stepper';
+import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
 
 const STEPS = ['General', 'Address', 'Billing', 'User'];
 const STATUSES = ['active', 'pending', 'inactive'] as const;
@@ -58,6 +59,7 @@ export default function PublisherCreate() {
 
  const [notify, setNotify] = useState(true);
  const [dynamicPayouts, setDynamicPayouts] = useState(false);
+ const [labels, setLabels] = useState<string[]>([]);
  const [trafficSourceEnabled, setTrafficSourceEnabled] = useState(false);
  const [macroVisibility, setMacroVisibility] = useState('None');
  const [addressEnabled, setAddressEnabled] = useState(false);
@@ -99,9 +101,11 @@ export default function PublisherCreate() {
  trafficSource: trafficSourceEnabled ? form.trafficSource || undefined : undefined,
  };
  const res = await run(body);
- if (res) {
- nav(`/app/publishers/${res.id}`);
+ if (!res) return;
+ for (const name of labels) {
+ await api.post(`/api/publishers/${res.id}/tags`, { name });
  }
+ nav(`/app/publishers/${res.id}`);
  };
 
  const next = (e: FormEvent) => {
@@ -130,7 +134,7 @@ export default function PublisherCreate() {
  {fieldError('name')}
  </Field>
  <div>
- <label className="label mb-2 block">Status *</label>
+ <label className="label">Status *</label>
  <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
  </div>
  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -141,7 +145,7 @@ export default function PublisherCreate() {
  </select>
  </Field>
  <div>
- <label className="label mb-2 block">Account Executive</label>
+ <label className="label">Account Executive</label>
  <div className="flex items-center gap-2">
  <button type="button" onClick={() => setAccountExec(!accountExec)}
  className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${accountExec ? 'text-accent-text' : 'text-fg-secondary'}`}>
@@ -155,7 +159,7 @@ export default function PublisherCreate() {
  </div>
  </div>
  <div>
- <label className="label mb-2 block">Referred By</label>
+ <label className="label">Referred By</label>
  <div className="flex items-center gap-2">
  <button type="button" onClick={() => setReferredBy(!referredBy)}
  className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${referredBy ? 'text-accent-text' : 'text-fg-secondary'}`}>
@@ -172,7 +176,7 @@ export default function PublisherCreate() {
  <input className="input" maxLength={3} value={form.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} />
  </Field>
  <div>
- <label className="label mb-2 block">Partner Tier</label>
+ <label className="label">Partner Tier</label>
  <div className="flex items-center gap-2">
  <button type="button" onClick={() => setPartnerTier(!partnerTier)}
  className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${partnerTier ? 'text-accent-text' : 'text-fg-secondary'}`}>
@@ -185,10 +189,7 @@ export default function PublisherCreate() {
  </div>
  </div>
  </div>
- <Field label="Labels">
- <input className="input" placeholder="Add labels…" disabled />
- <p className="mt-1 text-[11px] text-fg-muted">Not yet available in this app.</p>
- </Field>
+ <LabelsInput value={labels} onChange={setLabels} />
  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
  <div className="flex items-center gap-3">
  <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="h-4 w-4 rounded border-border" />
@@ -254,7 +255,7 @@ export default function PublisherCreate() {
  </Field>
  </div>
  <div>
- <label className="label mb-2 block">Enable Payment Method</label>
+ <label className="label">Enable Payment Method</label>
  <div className="flex items-center gap-3">
  <button type="button" onClick={() => setPaymentEnabled(!paymentEnabled)}
  className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${paymentEnabled ? 'text-accent-text' : 'text-fg-secondary'}`}>

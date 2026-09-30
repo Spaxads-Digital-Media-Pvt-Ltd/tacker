@@ -209,10 +209,10 @@ export function HelpMenu({ expanded }: { expanded: boolean }) {
             <h3 className="text-small font-semibold text-fg">Help &amp; Support</h3>
           </div>
           <div className="p-1.5">
-            <button title="Not available yet" className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-left text-small font-medium text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
+            <button type="button" disabled className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-left text-small font-medium text-fg-muted cursor-default opacity-60">
               <BookOpen size={16} className="shrink-0" /> Documentation
             </button>
-            <button title="Not available yet" className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-left text-small font-medium text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
+            <button type="button" disabled className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-left text-small font-medium text-fg-muted cursor-default opacity-60">
               <Keyboard size={16} className="shrink-0" /> Keyboard Shortcuts
             </button>
             <a href={`mailto:${supportEmail}`} onClick={() => setOpen(false)}

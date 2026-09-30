@@ -109,14 +109,14 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
     <Modal open onClose={onClose} title="Import Conversions" size="xl">
       <div className="space-y-4">
         <div>
-          <label className="label mb-1 block">Type</label>
+          <label className="label">Type</label>
           <select className="input" value={type} onChange={(e) => setType(e.target.value as ImportType)}>
             {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
           <p className="mt-1 text-tiny text-fg-muted">Expected columns: <span className="font-mono">{typeInfo.columns}</span></p>
         </div>
         <div>
-          <label className="label mb-1 block">CSV (with header row)</label>
+          <label className="label">CSV (with header row)</label>
           <textarea className="input h-40 resize-y font-mono text-tiny" value={csvText} onChange={(e) => setCsvText(e.target.value)}
             placeholder={type === 'create' ? 'offerRef,event,payout,revenue,transactionId\n2,sale,5.00,10.00,txn-001' : 'transactionId,payout,revenue\ntxn-001,5.00,10.00'} />
           <p className="mt-1 text-tiny text-fg-muted">{rows.length > 0 ? `${rows.length} row${rows.length === 1 ? '' : 's'} parsed.` : 'Paste CSV text above, including a header row.'}</p>

@@ -182,12 +182,12 @@ export default function PostbackControlForm() {
               <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
 
               <div>
-                <label className="label mb-2 block">Status *</label>
+                <label className="label">Status *</label>
                 <Segmented options={['active', 'inactive']} value={form.status} onChange={(v) => set('status', v as FormState['status'])} dots={{ active: 'bg-success', inactive: 'bg-warning' }} />
               </div>
 
               <div>
-                <label className="label mb-2 block">Effective Between *</label>
+                <label className="label">Effective Between *</label>
                 <Segmented options={['Always On', 'Set Specific Period']} value={form.effectiveMode} onChange={(v) => set('effectiveMode', v as FormState['effectiveMode'])} />
                 {form.effectiveMode === 'Set Specific Period' && (
                   <div className="mt-3 grid grid-cols-2 gap-4">
@@ -198,7 +198,7 @@ export default function PostbackControlForm() {
               </div>
 
               <div>
-                <label className="label mb-2 block">Control Type *</label>
+                <label className="label">Control Type *</label>
                 <p className="mb-2 text-tiny text-fg-secondary">Automatically manage conversions by accepting, rejecting, or putting them on hold based on incoming variables.</p>
                 <Segmented options={['accept', 'reject', 'hold']} value={form.controlType} onChange={(v) => set('controlType', v as FormState['controlType'])} dots={{ accept: 'bg-success', reject: 'bg-danger-text', hold: 'bg-warning' }} />
               </div>
@@ -213,7 +213,7 @@ export default function PostbackControlForm() {
           {step === 1 && (
             <div className="space-y-6">
               <div>
-                <label className="label mb-2 block">Set Specific Target</label>
+                <label className="label">Set Specific Target</label>
                 <p className="mb-2 text-tiny text-fg-secondary">Apply only to selected Offers or Advertisers.</p>
                 <YesNoToggle value={form.hasTarget} onChange={(v) => set('hasTarget', v)} />
                 {form.hasTarget && (
@@ -225,7 +225,7 @@ export default function PostbackControlForm() {
               </div>
 
               <div>
-                <label className="label mb-2 block">Apply Only to Selected Partners</label>
+                <label className="label">Apply Only to Selected Partners</label>
                 <YesNoToggle value={form.hasPartners} onChange={(v) => set('hasPartners', v)} />
                 {form.hasPartners && (
                   <div className="mt-3">
@@ -237,7 +237,7 @@ export default function PostbackControlForm() {
               <div className="border-t border-border pt-5">
                 <h3 className="mb-3 text-h3 font-medium text-fg">Build Your Rule(s)</h3>
                 <div>
-                  <label className="label mb-2 block">Condition *</label>
+                  <label className="label">Condition *</label>
                   <Segmented options={['all', 'any']} value={form.conditionLogic} onChange={(v) => set('conditionLogic', v as FormState['conditionLogic'])} />
                   <p className="mt-1 text-tiny text-fg-secondary">{form.conditionLogic === 'all' ? 'All Must Apply' : 'One Or More Must Apply'}</p>
                 </div>

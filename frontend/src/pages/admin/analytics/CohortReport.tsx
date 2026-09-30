@@ -58,7 +58,7 @@ function SingleSelect<T extends string>({ label, value, options, onChange }: { l
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <label className="label mb-1 block">{label} <span className="text-danger-text">*</span></label>
+      <label className="label">{label} <span className="text-danger-text">*</span></label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
         {options.find((o) => o.key === value)?.label} <ChevronDown size={13} className="text-fg-muted" />
       </button>
@@ -168,11 +168,11 @@ export default function CohortReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <SingleSelect label="Top-level Metric" value={topLevel} options={TOP_LEVEL_OPTIONS} onChange={setTopLevel} />

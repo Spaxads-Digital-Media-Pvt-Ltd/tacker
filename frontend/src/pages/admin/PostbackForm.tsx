@@ -82,19 +82,19 @@ export default function PostbackForm() {
  <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
  <div>
- <label className="label mb-2 block">Status *</label>
+ <label className="label">Status *</label>
  <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} labels={STATUS_LABEL} dots={STATUS_DOT} />
  </div>
 
  <Field label="Description"><textarea className="input min-h-[70px]" value={form.description} onChange={(e) => set('description', e.target.value)} /></Field>
 
  <div>
- <label className="label mb-2 block">Postback Type *</label>
+ <label className="label">Postback Type *</label>
  <Segmented options={TYPES} value={form.postbackType} onChange={(v) => set('postbackType', v)} labels={TYPE_LABEL} />
  </div>
 
  <div>
- <label className="label mb-2 block">Postback Level *</label>
+ <label className="label">Postback Level *</label>
  <Segmented options={LEVELS} value={form.level} onChange={(v) => set('level', v)} labels={LEVEL_LABEL} />
  {(form.level === 'global' || form.level === 'specific') && (
  <div className="mt-3 rounded-card border border-border bg-page p-4">

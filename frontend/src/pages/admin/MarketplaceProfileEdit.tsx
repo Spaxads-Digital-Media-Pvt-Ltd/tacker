@@ -100,7 +100,7 @@ function LogoUrlField({ value, onChange }: { value: string; onChange: (v: string
 
   return (
     <div>
-      <label className="label mb-1 block">Logo URL</label>
+      <label className="label">Logo URL</label>
       <p className="mb-1 text-tiny text-fg-muted">
         Paste a <strong>direct</strong> PNG/JPG/SVG link (must start with <code className="font-mono">https://</code> and end with an image extension).
         Do not paste a Google Images page URL.
@@ -137,7 +137,7 @@ function MultiSelect({ label, options, selected, onChange, max, required }: {
   };
   return (
     <div className="relative">
-      <label className="label mb-1 block">{label} {required && <span className="text-danger-text">*</span>} {max ? <span className="text-fg-muted">({selected.length}/{max})</span> : null}</label>
+      <label className="label">{label} {required && <span className="text-danger-text">*</span>} {max ? <span className="text-fg-muted">({selected.length}/{max})</span> : null}</label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex w-full items-center justify-between !py-2 text-left">
         <span className="truncate">{selected.length ? selected.join(', ') : 'Select…'}</span> <ChevronDown size={13} className="shrink-0 text-fg-muted" />
       </button>
@@ -239,17 +239,17 @@ export default function MarketplaceProfileEdit() {
           <h3 className="mb-4 text-h3 font-medium text-fg">General Information</h3>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div>
-              <label className="label mb-1 block">Name to use in the Marketplace <span className="text-danger-text">*</span></label>
+              <label className="label">Name to use in the Marketplace <span className="text-danger-text">*</span></label>
               <input className="input" value={d.name} onChange={(e) => set('name', e.target.value)} />
             </div>
             <LogoUrlField value={d.logoUrl} onChange={(v) => set('logoUrl', v)} />
             <div className="lg:col-span-2">
-              <label className="label mb-1 block">Description <span className="text-danger-text">*</span></label>
+              <label className="label">Description <span className="text-danger-text">*</span></label>
               <textarea className="input min-h-24" value={d.description} onChange={(e) => set('description', e.target.value)} />
             </div>
 
             <div>
-              <label className="label mb-1 block">Categories <span className="text-danger-text">*</span></label>
+              <label className="label">Categories <span className="text-danger-text">*</span></label>
               <div className="mb-2 inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
                 <button type="button" onClick={() => set('categoriesMode', 'targeted')} className={`px-3 py-1.5 text-tiny font-medium ${d.categoriesMode === 'targeted' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>Targeted (Up to 5)</button>
                 <button type="button" onClick={() => set('categoriesMode', 'all')} className={`px-3 py-1.5 text-tiny font-medium ${d.categoriesMode === 'all' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>All</button>
@@ -264,7 +264,7 @@ export default function MarketplaceProfileEdit() {
             <MultiSelect label="Device Types Covered" options={DEVICE_TYPES} selected={d.deviceTypesCovered} onChange={(v) => set('deviceTypesCovered', v)} required />
 
             <div>
-              <label className="label mb-1 block">Geolocations Covered <span className="text-danger-text">*</span></label>
+              <label className="label">Geolocations Covered <span className="text-danger-text">*</span></label>
               <div className="mb-2 inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
                 <button type="button" onClick={() => set('geolocationsMode', 'global')} className={`px-3 py-1.5 text-tiny font-medium ${d.geolocationsMode === 'global' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>Global</button>
                 <button type="button" onClick={() => set('geolocationsMode', 'specific')} className={`px-3 py-1.5 text-tiny font-medium ${d.geolocationsMode === 'specific' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>Specific</button>
@@ -276,7 +276,7 @@ export default function MarketplaceProfileEdit() {
               )}
             </div>
             <div>
-              <label className="label mb-1 block">Website URL <span className="text-danger-text">*</span></label>
+              <label className="label">Website URL <span className="text-danger-text">*</span></label>
               <input className="input" placeholder="https://example.com" value={d.websiteUrl} onChange={(e) => set('websiteUrl', e.target.value)} />
             </div>
           </div>
@@ -291,19 +291,19 @@ export default function MarketplaceProfileEdit() {
           </div>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div>
-              <label className="label mb-1 block">First Name <span className="text-danger-text">*</span></label>
+              <label className="label">First Name <span className="text-danger-text">*</span></label>
               <input className="input" value={d.contactFirstName} onChange={(e) => set('contactFirstName', e.target.value)} />
             </div>
             <div>
-              <label className="label mb-1 block">Last Name <span className="text-danger-text">*</span></label>
+              <label className="label">Last Name <span className="text-danger-text">*</span></label>
               <input className="input" value={d.contactLastName} onChange={(e) => set('contactLastName', e.target.value)} />
             </div>
             <div>
-              <label className="label mb-1 block">Phone Number</label>
+              <label className="label">Phone Number</label>
               <input className="input" value={d.contactPhone} onChange={(e) => set('contactPhone', e.target.value)} />
             </div>
             <div>
-              <label className="label mb-1 block">Email <span className="text-danger-text">*</span></label>
+              <label className="label">Email <span className="text-danger-text">*</span></label>
               <input className="input" type="email" value={d.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} />
             </div>
           </div>
@@ -315,7 +315,7 @@ export default function MarketplaceProfileEdit() {
               ['socialTiktok', 'TikTok URL'], ['socialYoutube', 'YouTube URL'], ['socialLinkedin', 'LinkedIn URL'],
             ] as const).map(([key, label]) => (
               <div key={key}>
-                <label className="label mb-1 block">{label}</label>
+                <label className="label">{label}</label>
                 <input className="input" value={d[key]} onChange={(e) => set(key, e.target.value)} />
               </div>
             ))}
@@ -324,11 +324,11 @@ export default function MarketplaceProfileEdit() {
           <p className="mb-2 mt-6 text-small font-medium text-fg">Custom Link</p>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div>
-              <label className="label mb-1 block">Label</label>
+              <label className="label">Label</label>
               <input className="input" value={d.customLinkLabel} onChange={(e) => set('customLinkLabel', e.target.value)} />
             </div>
             <div>
-              <label className="label mb-1 block">Link</label>
+              <label className="label">Link</label>
               <input className="input" value={d.customLinkUrl} onChange={(e) => set('customLinkUrl', e.target.value)} />
             </div>
           </div>
