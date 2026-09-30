@@ -19,6 +19,7 @@ function makeMockRedis() {
  for (const pair of incrResults) r.push([pair[0], pair[1]]);
  return r;
  },
+ get: (_k: string) => chainable,
  incr: (_k: string) => chainable,
  expire: (_k: string) => chainable,
  };
@@ -151,6 +152,7 @@ describe('checkLoginRateLimit (unit, mocked Redis)', () => {
  pipeline: () => {
  const keys: string[] = [];
  const self = {
+ get: (key: string) => { keys.push(key); return self; },
  incr: (key: string) => { keys.push(key); return self; },
  expire: (key: string) => { keys.push(key); return self; },
  del: () => self,
