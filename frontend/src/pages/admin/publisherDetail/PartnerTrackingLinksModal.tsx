@@ -46,7 +46,7 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div>
             <p className="mb-3 text-h3 font-medium text-fg">Parameters</p>
-            <label className="label mb-2 block">Type</label>
+            <label className="label">Type</label>
             <div className="mb-3 inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
               {(['Click', 'Impression'] as const).map((t) => (
                 <button key={t} type="button" onClick={() => setType(t)}

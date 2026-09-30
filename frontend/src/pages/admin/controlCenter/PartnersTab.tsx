@@ -5,9 +5,9 @@
  */
 import { useEffect, useState } from 'react';
 import { Info } from 'lucide-react';
-import { cc } from '../../../lib/controlCenter';
 import { api } from '../../../lib/api';
-import { useQuery, useMutation } from '../../../lib/useApi';
+import { cc } from '../../../lib/controlCenter';
+import { useQuery } from '../../../lib/useApi';
 import { Tabs, Field } from '../../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import { InfoCard, InfoGrid, InfoRow, NotificationCard, InfoBanner, HeadsUpBanner, YesNoToggle, HelpIcon, EditHeaderAction, type NotifyDef, type NotifySaved } from './shared';
@@ -26,15 +26,19 @@ function EditGeneralPortalForm({ initial, onCancel, onSave }: {
   const [headerHtml, setHeaderHtml] = useState(String(initial['htmlCustomHeader'] ?? ''));
   const [footerHtml, setFooterHtml] = useState(String(initial['htmlCustomFooter'] ?? ''));
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const save = async () => {
     setBusy(true);
+    setFormError(null);
     try {
       await onSave({
         hideTotalClick, showAccountManagerDetails: showAcctMgr,
         showAccountManagerCustomDetails: showAcctMgrCustom,
         htmlCustomHeader: headerHtml, htmlCustomFooter: footerHtml,
       });
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setBusy(false);
     }
@@ -43,16 +47,17 @@ function EditGeneralPortalForm({ initial, onCancel, onSave }: {
   return (
     <div className="space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
+      {formError && <p className="text-small text-danger-text">{formError}</p>}
       <div>
-        <label className="label mb-2 block">Hide Total Click</label>
+        <label className="label">Hide Total Click</label>
         <input type="checkbox" checked={hideTotalClick} onChange={(e) => setHideTotalClick(e.target.checked)} className="h-4 w-4 rounded border-border" />
       </div>
       <div>
-        <label className="label mb-2 block">Show Account Manager Details</label>
+        <label className="label">Show Account Manager Details</label>
         <YesNoToggle value={showAcctMgr} onChange={setShowAcctMgr} />
         {showAcctMgr && (
           <div className="mt-3 max-w-md rounded-card border border-border bg-page p-3">
-            <label className="label mb-2 block">Show Account Manager Custom Details</label>
+            <label className="label">Show Account Manager Custom Details</label>
             <YesNoToggle value={showAcctMgrCustom} onChange={setShowAcctMgrCustom} />
           </div>
         )}
@@ -83,16 +88,28 @@ function GeneralPortalCard() {
   const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/partners');
   const portal = (config?.portal as Record<string, unknown> | undefined) ?? {};
   const [editing, setEditing] = useState(false);
-  const saveMut = useMutation((body: Record<string, unknown>) => cc.putConfig('partners', { portal: body }));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const save = async (body: Record<string, unknown>) => {
-    const ok = await saveMut.run(body);
-    if (ok) { setEditing(false); refetch(); }
-    return !!ok;
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await api.put('/api/control-center/config/partners', { portal: body });
+      setEditing(false);
+      refetch();
+      return true;
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      return false;
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <InfoCard title="General" action={<EditHeaderAction editing={editing} saving={saveMut.busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} />}>
+    <InfoCard title="General" action={<EditHeaderAction editing={editing} saving={busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} />}>
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       {editing ? <EditGeneralPortalForm initial={portal} onCancel={() => setEditing(false)} onSave={save} /> : (
         <InfoGrid>
           <InfoRow label="Show Account Manager Details" value={portal['showAccountManagerDetails'] === false ? 'NO' : 'YES'} />
@@ -122,9 +139,11 @@ function EditSignupFormForm({ initial, onCancel, onSave }: {
   const [autoApprove, setAutoApprove] = useState(Boolean(initial['autoApprovePartners']));
   const [language, setLanguage] = useState(String(initial['language'] ?? 'English'));
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const save = async () => {
     setBusy(true);
+    setFormError(null);
     try {
       await onSave({
         useExternalSignUpUrl: externalUrl, externalSignUpUrl,
@@ -132,6 +151,8 @@ function EditSignupFormForm({ initial, onCancel, onSave }: {
         customSignUpHeader: headerHtml, customSignUpConfirmation: confirmHtml,
         autoApprovePartners: autoApprove, language,
       });
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setBusy(false);
     }
@@ -140,8 +161,9 @@ function EditSignupFormForm({ initial, onCancel, onSave }: {
   return (
     <div className="space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
+      {formError && <p className="text-small text-danger-text">{formError}</p>}
       <div>
-        <label className="label mb-2 block">Use External Sign Up URL</label>
+        <label className="label">Use External Sign Up URL</label>
         <YesNoToggle value={externalUrl} onChange={setExternalUrl} />
         {externalUrl && (
           <div className="mt-3 max-w-lg">
@@ -152,27 +174,27 @@ function EditSignupFormForm({ initial, onCancel, onSave }: {
         )}
       </div>
       <div>
-        <label className="label mb-2 block">Customize Header</label>
+        <label className="label">Customize Header</label>
         <YesNoToggle value={customizeHeader} onChange={setCustomizeHeader} />
         {customizeHeader && (
           <div className="mt-3 max-w-lg rounded-card border border-border bg-page p-3">
-            <label className="label mb-2 block">Custom Sign Up Header</label>
+            <label className="label">Custom Sign Up Header</label>
             <textarea rows={6} className="input w-full font-mono text-tiny" value={headerHtml} onChange={(e) => setHeaderHtml(e.target.value)} />
           </div>
         )}
       </div>
       <div>
-        <label className="label mb-2 block">Customize Confirmation</label>
+        <label className="label">Customize Confirmation</label>
         <YesNoToggle value={customizeConfirmation} onChange={setCustomizeConfirmation} />
         {customizeConfirmation && (
           <div className="mt-3 max-w-lg rounded-card border border-border bg-page p-3">
-            <label className="label mb-2 block">Custom Sign Up Confirmation</label>
+            <label className="label">Custom Sign Up Confirmation</label>
             <textarea rows={6} className="input w-full font-mono text-tiny" value={confirmHtml} onChange={(e) => setConfirmHtml(e.target.value)} />
           </div>
         )}
       </div>
       <div>
-        <label className="label mb-2 block">Auto Approve Partners</label>
+        <label className="label">Auto Approve Partners</label>
         <YesNoToggle value={autoApprove} onChange={setAutoApprove} />
       </div>
       <Field label="Language *">
@@ -192,13 +214,25 @@ function SignupFormCard() {
   const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/partners');
   const signup = (config?.signup as Record<string, unknown> | undefined) ?? {};
   const [editing, setEditing] = useState(false);
-  const saveMut = useMutation((body: Record<string, unknown>) => cc.putConfig('partners', { signup: body }));
+  const [busy, setBusy] = useState(false);
   const { data: fields, loading } = useQuery<Array<{ id: string; sortOrder: number; label: string; fieldType: string; required: boolean }>>('/api/custom-fields?entity=publisher');
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const save = async (body: Record<string, unknown>) => {
-    const ok = await saveMut.run(body);
-    if (ok) { setEditing(false); refetch(); }
-    return !!ok;
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await api.put('/api/control-center/config/partners', { signup: body });
+      setEditing(false);
+      refetch();
+      return true;
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      return false;
+    } finally {
+      setBusy(false);
+    }
   };
 
   const cfRows = (fields ?? []).map((f) => ({
@@ -212,7 +246,8 @@ function SignupFormCard() {
   }));
 
   return (
-    <InfoCard title="Partner Sign Up Form Customization" action={<EditHeaderAction editing={editing} saving={saveMut.busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} />}>
+    <InfoCard title="Partner Sign Up Form Customization" action={<EditHeaderAction editing={editing} saving={busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} />}>
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       {editing ? <EditSignupFormForm initial={signup} onCancel={() => setEditing(false)} onSave={save} /> : (
         <InfoGrid>
           <InfoRow label="Custom Sign Up Header" value={String(signup['customSignUpHeader'] ?? '')} />
@@ -253,7 +288,8 @@ function PartnerDashboardCard() {
   const cardVis = (dashboard['cards'] as Record<string, boolean> | undefined) ?? {};
   const [editing, setEditing] = useState(false);
   const [vis, setVis] = useState<Record<string, boolean>>({});
-  const saveMut = useMutation((body: Record<string, unknown>) => cc.putConfig('partners', { dashboard: body }));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const next: Record<string, boolean> = {};
@@ -262,13 +298,23 @@ function PartnerDashboardCard() {
   }, [config]);
 
   const save = async () => {
-    const ok = await saveMut.run({ cards: vis });
-    if (ok) { setEditing(false); refetch(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await api.put('/api/control-center/config/partners', { dashboard: { cards: vis } });
+      setEditing(false);
+      refetch();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <InfoCard title="Partner Dashboard Customization"
-      action={<EditHeaderAction editing={editing} saving={saveMut.busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onSave={save} />}>
+      action={<EditHeaderAction editing={editing} saving={busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onSave={save} />}>
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       <InfoBanner>Tailor your Partner Dashboard to reflect your brand. Click <strong>Edit</strong> to adjust the visibility, size, and order of the Dashboard cards.</InfoBanner>
       <HeadsUpBanner>Any changes made here will be updated across all Partner Dashboards</HeadsUpBanner>
       <p className="mb-2 mt-4 text-small font-semibold text-fg">Partner Dashboard Cards</p>
@@ -298,8 +344,8 @@ function PartnerDashboardCard() {
       </div>
       {editing && (
         <div className="mt-4 flex justify-end gap-2 border-t border-border pt-4">
-          <button type="button" className="btn-ghost" onClick={() => setEditing(false)} disabled={saveMut.busy}>Cancel</button>
-          <button type="button" className="btn-primary" onClick={save} disabled={saveMut.busy}>{saveMut.busy ? 'Saving…' : 'Save'}</button>
+          <button type="button" className="btn-ghost" onClick={() => setEditing(false)} disabled={busy}>Cancel</button>
+          <button type="button" className="btn-primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
       )}
     </InfoCard>
@@ -359,7 +405,6 @@ function ReferralSub() {
     createdAt: string; updatedAt: string;
   }>>(`/api/control-center/partner-referrals?status=${status}`);
   const { data: publishers } = useQuery<Array<{ id: string; name: string }>>('/api/publishers');
-  const saveMut = useMutation((body: Record<string, unknown>) => cc.putConfig('partners', { referral: body }));
 
   const [enabled, setEnabled] = useState(false);
   const [method, setMethod] = useState('');
@@ -367,6 +412,8 @@ function ReferralSub() {
   const [duration, setDuration] = useState('');
   const [fixedAmountRate, setFixedAmountRate] = useState('');
   const [minimumThreshold, setMinimumThreshold] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     setEnabled(Boolean(referral['enabled']));
@@ -378,8 +425,17 @@ function ReferralSub() {
   }, [config]);
 
   const saveGlobal = async () => {
-    const ok = await saveMut.run({ enabled, method, commissionType, duration, fixedAmountRate, minimumThreshold });
-    if (ok) { setEditing(false); refetchConfig(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await cc.putConfig('partners', { referral: { enabled, method, commissionType, duration, fixedAmountRate, minimumThreshold } });
+      setEditing(false);
+      refetchConfig();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const rows = (data ?? []).map((r) => ({
@@ -404,11 +460,12 @@ function ReferralSub() {
 
   return (
     <div className="space-y-4">
-      <InfoCard title="Global Setting" action={<EditHeaderAction editing={editing} saving={saveMut.busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onSave={saveGlobal} />}>
+      <InfoCard title="Global Setting" action={<EditHeaderAction editing={editing} saving={busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onSave={saveGlobal} />}>
+        {saveError && <p className="text-small text-danger-text">{saveError}</p>}
         {editing ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="label mb-2 block">Enable Partner Referral</label>
+              <label className="label">Enable Partner Referral</label>
               <YesNoToggle value={enabled} onChange={setEnabled} />
             </div>
             <Field label="Method"><input className="input" value={method} onChange={(e) => setMethod(e.target.value)} placeholder="e.g. Tracking link" /></Field>
@@ -438,8 +495,12 @@ function ReferralSub() {
         statusFilter={status === 'all' ? 'All' : status === 'active' ? 'Active' : status === 'inactive' ? 'Inactive' : 'Deleted'}
         onStatusFilterChange={(next) => setStatus(next === 'All' ? 'all' : next.toLowerCase())}
         onAddSubmit={async (v) => {
+          const partnerName = v['Partner']?.trim();
+          if (!partnerName) return 'Partner is required.';
+          const publisherId = findPublisherId(partnerName);
+          if (!publisherId) return `Partner "${partnerName}" not found.`;
           await cc.create('partner-referrals', {
-            publisherId: findPublisherId(v['Partner'] ?? ''),
+            publisherId,
             enabled: v['Enabled']?.toLowerCase() !== 'no',
             commissionStructure: v['Commission Structure'] ?? '',
             fixedAmountRate: v['Fixed Amount / Rate'] ?? '',
@@ -461,7 +522,8 @@ function TermsSub() {
   const [editing, setEditing] = useState(false);
   const [enforce, setEnforce] = useState(false);
   const [content, setContent] = useState('');
-  const saveMut = useMutation((body: Record<string, unknown>) => cc.putConfig('partners', { terms: body }));
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const { data, loading, refetch } = useQuery<Array<{
     id: string; partner?: string | null; partnerUser: string; userAgent: string | null; ipAddress: string | null; createdAt: string;
   }>>('/api/control-center/terms-acceptances');
@@ -473,8 +535,17 @@ function TermsSub() {
   }, [config]);
 
   const saveTerms = async () => {
-    const ok = await saveMut.run({ enforce, content });
-    if (ok) { setEditing(false); refetchConfig(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await cc.putConfig('partners', { terms: { enforce, content } });
+      setEditing(false);
+      refetchConfig();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const findPublisherId = (name: string) => {
@@ -495,11 +566,12 @@ function TermsSub() {
 
   return (
     <div className="space-y-4">
-      <InfoCard title="Terms and Conditions" action={<EditHeaderAction editing={editing} saving={saveMut.busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onSave={saveTerms} />}>
+      <InfoCard title="Terms and Conditions" action={<EditHeaderAction editing={editing} saving={busy} onEdit={() => setEditing(true)} onCancel={() => setEditing(false)} onSave={saveTerms} />}>
+        {saveError && <p className="text-small text-danger-text">{saveError}</p>}
         {editing ? (
           <div className="space-y-4">
             <div>
-              <label className="label mb-2 block">Enforce Terms and Conditions</label>
+              <label className="label">Enforce Terms and Conditions</label>
               <YesNoToggle value={enforce} onChange={setEnforce} />
             </div>
             <Field label="Terms and Conditions">
@@ -520,8 +592,11 @@ function TermsSub() {
         rows={rows}
         loading={loading}
         onAddSubmit={async (v) => {
+          const partnerName = v['Partner']?.trim();
+          if (!partnerName) return 'Partner is required.';
+          const publisherId = findPublisherId(partnerName);
+          if (!publisherId) return `Partner "${partnerName}" not found.`;
           await api.post('/api/control-center/terms-acceptances', {
-            publisherId: findPublisherId(v['Partner'] ?? ''),
             partnerUser: v['Partner User'] ?? '',
             userAgent: v['User Agent'] || undefined,
             ipAddress: v['IP Address'] || undefined,

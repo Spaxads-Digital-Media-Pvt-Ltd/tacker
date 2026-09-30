@@ -108,7 +108,7 @@ function SingleSelectDropdown({ label, value, onChange }: { label: string; value
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <label className="label mb-1 block">{label} <span className="text-danger-text">*</span></label>
+      <label className="label">{label} <span className="text-danger-text">*</span></label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
         {DIM_OPTIONS.find((d) => d.key === value)?.label} <ChevronDown size={13} className="text-fg-muted" />
       </button>
@@ -137,13 +137,14 @@ function ExpandedChildRows({
 }) {
   const params = new URLSearchParams({ groupBy: childDim, metrics: METRICS_PARAM, from: toIso(from), to: toIso(to, true), limit: '200' });
   params.set(parentFilterParam, parentRawId);
-  const { data, loading } = useQuery<AggResult>(`/api/reports?${params.toString()}`);
+  const { data, loading, error } = useQuery<AggResult>(`/api/reports?${params.toString()}`);
   const rows = useMemo(() => (data?.rows ?? [])
     .filter((r) => r.dimensions[childDim])
     .map((r) => ({ raw: r.dimensions[childDim]!, name: resolveName(childDim, r.dimensions[childDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics) })),
   [data, childDim, opts, smartLinkMap]);
 
   if (loading) return <tr><td colSpan={1 + ALL_COLUMNS.length + 1} className="px-4 py-3 text-center"><Spinner /></td></tr>;
+  if (error) return <tr><td colSpan={1 + ALL_COLUMNS.length + 1} className="px-4 py-3 text-small text-danger-text">{error}</td></tr>;
   if (!rows.length) return <tr><td colSpan={1 + ALL_COLUMNS.length + 1} className="px-4 py-3 text-small text-fg-muted">No activity for this period.</td></tr>;
   return (
     <>
@@ -390,11 +391,11 @@ export default function DynamicNestedReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <SingleSelectDropdown label="Parent" value={parentDim} onChange={setParentDim} />

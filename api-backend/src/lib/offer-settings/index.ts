@@ -182,6 +182,10 @@ const METADATA_FIELDS: Record<string, string> = {
   attributionSettings: 'attribution_settings',
   revenueSettings: 'revenue_settings',
   emailSettings: 'email_settings',
+  // Legacy flat aliases (pre-date emailSettings) — API back-compat only. toAdminDTO derives
+  // suppressionFileEnabled/emailOptOutEnabled from emailSettings first, these as a fallback.
+  suppressionFileEnabled: 'suppressionFileEnabled',
+  emailOptOutEnabled: 'emailOptOutEnabled',
 };
 
 /** Merge any metadata-backed fields present in `body` over `before`. Returns null when none were sent. */

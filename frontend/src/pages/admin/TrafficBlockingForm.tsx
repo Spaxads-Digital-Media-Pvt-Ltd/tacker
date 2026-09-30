@@ -90,7 +90,7 @@ export default function TrafficBlockingForm() {
           </Field>
 
           <div>
-            <label className="label mb-2 block">Status *</label>
+            <label className="label">Status *</label>
             <Segmented options={STATUSES} value={form.status} onChange={(v) => setForm((f) => ({ ...f, status: v }))} labels={STATUS_LABEL} dots={STATUS_DOT} />
           </div>
 
@@ -108,7 +108,7 @@ export default function TrafficBlockingForm() {
                 const f = form.fields[k];
                 return (
                   <div key={k}>
-                    <label className="label mb-1 block">{FIELD_LABEL[k]}</label>
+                    <label className="label">{FIELD_LABEL[k]}</label>
                     <div className="flex flex-wrap items-center gap-3">
                       <button type="button" role="switch" aria-checked={f.enabled}
                         onClick={() => setFieldState(k, { enabled: !f.enabled })}

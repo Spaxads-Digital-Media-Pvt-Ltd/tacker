@@ -41,7 +41,7 @@ function FormulaBuilder({ tokens, onChange }: { tokens: FormulaToken[]; onChange
   return (
     <div className="space-y-3">
       <div>
-        <label className="label mb-1 block">Formula</label>
+        <label className="label">Formula</label>
         <div className="flex min-h-[42px] flex-wrap items-center gap-1 rounded-[var(--radius)] border border-border bg-page px-3 py-2">
           {tokens.length === 0 ? <span className="text-small text-fg-muted">Click metrics and operators below to build a formula…</span>
             : tokens.map((t, i) => <TokenChip key={i} t={t} />)}
@@ -53,7 +53,7 @@ function FormulaBuilder({ tokens, onChange }: { tokens: FormulaToken[]; onChange
       </div>
 
       <div>
-        <label className="label mb-1 block">Metrics</label>
+        <label className="label">Metrics</label>
         <div className="flex flex-wrap gap-1.5">
           {METRIC_KEYS.map((k) => (
             <button key={k} type="button" onClick={() => push({ type: 'metric', key: k })}
@@ -65,7 +65,7 @@ function FormulaBuilder({ tokens, onChange }: { tokens: FormulaToken[]; onChange
       </div>
 
       <div>
-        <label className="label mb-1 block">Operators</label>
+        <label className="label">Operators</label>
         <div className="flex flex-wrap items-center gap-1.5">
           {OPERATORS.map((o) => (
             <button key={o.value} type="button" onClick={() => push({ type: 'op', value: o.value })}
@@ -101,11 +101,11 @@ function MetricModal({ initial, onClose, onSaved }: { initial: CustomMetric | nu
     <Modal open onClose={onClose} title={initial ? 'Edit Custom Metric' : 'Add Custom Metric'} size="xl">
       <div className="space-y-4">
         <div>
-          <label className="label mb-1 block">Name</label>
+          <label className="label">Name</label>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Click to Event rate" />
         </div>
         <div>
-          <label className="label mb-1 block">Format</label>
+          <label className="label">Format</label>
           <select className="input" value={format} onChange={(e) => setFormat(e.target.value as MetricFormat)}>
             {(Object.keys(FORMAT_LABELS) as MetricFormat[]).map((f) => <option key={f} value={f}>{FORMAT_LABELS[f]}</option>)}
           </select>

@@ -108,6 +108,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   const available = scopeInfo?.available ?? [];
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>([]);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const { run, busy, error } = useMutation((body: { name?: string; scopes?: string[] }) => api.post<{ key: string }>('/api/keys', body));
 
   useEffect(() => {
@@ -118,16 +119,19 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const res = await run({ name: name || undefined, scopes: scopes.length ? scopes : undefined });
+    setSubmitError(null);
+    if (!scopes.length) { setSubmitError('Select at least one permission.'); return; }
+    const res = await run({ name: name.trim() || undefined, scopes: scopes.length ? scopes : undefined });
     if (res) onCreated(res.key);
   };
 
   return (
     <form onSubmit={submit} className="space-y-4">
       {error && <p className="text-small text-danger-text">{error}</p>}
+      {submitError && <p className="text-small text-danger-text">{submitError}</p>}
       <Field label="Name (optional)"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. production integration" /></Field>
       <div>
-        <p className="label mb-2 block">Permissions</p>
+        <p className="label">Permissions</p>
         <div className="max-h-48 space-y-2 overflow-y-auto rounded-card border border-border p-3">
           {available.map((s) => (
             <label key={s} className="flex items-center gap-2 text-small text-fg">
@@ -235,7 +239,8 @@ function MfaSub() {
   const [enableMfa, setEnableMfa] = useState(false);
   const [methods, setMethods] = useState('');
   const [emp, setEmp] = useState<Record<string, EmployeeMfa>>({});
-  const { run, busy, error } = useMutation((body: Record<string, unknown>) => cc.putConfig('security', body));
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const latestLogin = (user: UserRow) =>
     (logins ?? []).find((e) => e.employee === user.name || e.employee === user.email);
@@ -263,8 +268,17 @@ function MfaSub() {
   };
 
   const save = async () => {
-    const ok = await run({ mfa: { enableNetworkMfa: enableMfa, supportedMethods: methods, employees: emp } });
-    if (ok) { setEditing(false); refetch(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await cc.putConfig('security', { mfa: { enableNetworkMfa: enableMfa, supportedMethods: methods, employees: emp } });
+      setEditing(false);
+      refetch();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const patchEmp = (id: string, part: Partial<EmployeeMfa>) => {
@@ -274,9 +288,9 @@ function MfaSub() {
   return (
     <div className="space-y-4">
       <InfoCard title="General" action={<EditHeaderAction editing={editing} saving={busy} onEdit={startEdit} onCancel={() => setEditing(false)} onSave={save} />}>
+        {saveError && <p className="text-small text-danger-text">{saveError}</p>}
         {editing ? (
           <div className="space-y-4">
-            {error && <p className="text-small text-danger-text">{error}</p>}
             <div>
               <p className="mb-2 text-small font-semibold text-fg">Enable Network MFA</p>
               <YesNoToggle value={enableMfa} onChange={setEnableMfa} />

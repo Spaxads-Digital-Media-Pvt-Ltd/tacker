@@ -148,30 +148,30 @@ export default function CustomerValueRuleForm() {
               <h3 className="text-h3 font-medium text-fg">Basic Details</h3>
               <Field label="Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
               <div>
-                <label className="label mb-2 block">Status *</label>
+                <label className="label">Status *</label>
                 <Segmented options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} value={status} onChange={setStatus} />
               </div>
 
               <h3 className="text-h3 font-medium text-fg">Scope</h3>
               <p className="text-small text-fg-secondary">Choose how the rule applies to your Customer's Conversion Events.</p>
               <div>
-                <label className="label mb-2 block">Conversion Events Grouping *</label>
+                <label className="label">Conversion Events Grouping *</label>
                 <Segmented options={[{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: 'Separately By' }]} value={grouping} onChange={setGrouping} />
               </div>
 
               <p className="font-semibold text-fg">Apply Rule To</p>
               <div>
-                <label className="label mb-2 block">Advertisers *</label>
+                <label className="label">Advertisers *</label>
                 <Segmented options={[{ value: 'all', label: 'All' }, { value: 'specific', label: 'Specific' }]} value={applyAdvertisersMode} onChange={setApplyAdvertisersMode} />
                 {applyAdvertisersMode === 'specific' && <div className="mt-2"><CheckboxList items={advertisers ?? []} selected={applyAdvertiserIds} onChange={setApplyAdvertiserIds} /></div>}
               </div>
               <div>
-                <label className="label mb-2 block">Offers *</label>
+                <label className="label">Offers *</label>
                 <Segmented options={[{ value: 'all', label: 'All' }, { value: 'specific', label: 'Specific' }]} value={applyOffersMode} onChange={setApplyOffersMode} />
                 {applyOffersMode === 'specific' && <div className="mt-2"><CheckboxList items={offers ?? []} selected={applyOfferIds} onChange={setApplyOfferIds} /></div>}
               </div>
               <div>
-                <label className="label mb-2 block">Partners *</label>
+                <label className="label">Partners *</label>
                 <Segmented options={[{ value: 'all', label: 'All' }, { value: 'specific', label: 'Specific' }]} value={applyPartnersMode} onChange={setApplyPartnersMode} />
                 {applyPartnersMode === 'specific' && <div className="mt-2"><CheckboxList items={publishers ?? []} selected={applyPartnerIds} onChange={setApplyPartnerIds} /></div>}
               </div>

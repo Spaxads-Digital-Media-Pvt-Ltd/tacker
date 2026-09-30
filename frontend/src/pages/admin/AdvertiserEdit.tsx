@@ -62,19 +62,19 @@ function GeneralExtras({
       <LabelsEditor base={base} />
       <Field label="Verification token"><input className="input" value={form.verificationToken} onChange={(e) => set('verificationToken', e.target.value)} /></Field>
       <div>
-        <label className="label mb-2 block">Attribution Method *</label>
+        <label className="label">Attribution Method *</label>
         <Segmented options={['Last Touch', 'First Touch']} value={attribution} onChange={setAttribution} />
       </div>
       <div>
-        <label className="label mb-2 block">Attribution Priority *</label>
+        <label className="label">Attribution Priority *</label>
         <Segmented options={['Click', 'Coupon Code']} value={priority} onChange={setPriority} />
       </div>
       <div>
-        <label className="label mb-2 block">Email Attribution Method *</label>
+        <label className="label">Email Attribution Method *</label>
         <Segmented options={['Last Partner Attribution', 'First Partner Attribution']} value={emailAttribution} onChange={setEmailAttribution} />
       </div>
       <div>
-        <label className="label mb-2 block">Enable Variables exposed in the Advertiser UI</label>
+        <label className="label">Enable Variables exposed in the Advertiser UI</label>
         <YesNoToggle on={variables} onChange={setVariables} />
       </div>
       <Field label="Internal Notes"><textarea className="input min-h-[80px]" /></Field>
@@ -88,7 +88,7 @@ function AddressTab() {
   return (
     <div className="space-y-4">
       <div>
-        <label className="label mb-2 block">Enable Address</label>
+        <label className="label">Enable Address</label>
         <YesNoToggle on={enabled} onChange={setEnabled} />
       </div>
       {enabled && (
@@ -122,7 +122,7 @@ function BillingTab({ form, set }: { form: FormState; set: <K extends keyof Form
       </div>
       <Field label="Tax ID / VAT or SSN"><input className="input" /></Field>
       <div>
-        <label className="label mb-2 flex items-center gap-1 block">Automatic Invoice Creation</label>
+        <label className="label">Automatic Invoice Creation</label>
         <YesNoToggle on={autoInvoice} onChange={setAutoInvoice} />
       </div>
       {autoInvoice && (
@@ -137,14 +137,14 @@ function BillingTab({ form, set }: { form: FormState; set: <K extends keyof Form
 
       <h3 className="text-h3 font-medium text-fg">Default Invoice Settings</h3>
       <div>
-        <label className="label mb-2 block">Enable Payment Terms</label>
+        <label className="label">Enable Payment Terms</label>
         <div className="flex items-center gap-2">
           <YesNoToggle on={paymentTerms} onChange={setPaymentTerms} />
           {paymentTerms && <select className="input !w-auto" defaultValue="Net 30">{['Net 15', 'Net 30', 'Net 60'].map((t) => <option key={t}>{t}</option>)}</select>}
         </div>
       </div>
       <div>
-        <label className="label mb-2 block">Hide Invoices from Advertisers</label>
+        <label className="label">Hide Invoices from Advertisers</label>
         <input type="checkbox" className="h-4 w-4 rounded border-border" />
       </div>
     </div>
@@ -219,7 +219,7 @@ export default function AdvertiserEdit() {
           <div className="space-y-4">
             <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
             <div>
-              <label className="label mb-2 block">Status *</label>
+              <label className="label">Status *</label>
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

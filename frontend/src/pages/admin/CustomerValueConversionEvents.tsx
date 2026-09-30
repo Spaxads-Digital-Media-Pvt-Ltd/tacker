@@ -103,15 +103,15 @@ export default function CustomerValueConversionEvents() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-56">
-            <label className="label mb-1 block">User ID *</label>
+            <label className="label">User ID *</label>
             <input className="input" placeholder="e.g. cust_778" value={userIdInput} onChange={(e) => setUserIdInput(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>

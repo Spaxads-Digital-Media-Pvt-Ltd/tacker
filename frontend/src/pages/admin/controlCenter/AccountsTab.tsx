@@ -15,8 +15,8 @@ import { Tabs, Badge, Spinner, StateBlock, Field } from '../../../shared-compone
 import { ColumnsModal } from '../../../shared-components/primitives/TableActionsKit';
 import { Pagination, daysAgo, todayStr, toIso, DASH } from '../../../shared-components/primitives/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../../lib/export';
-import { cc } from '../../../lib/controlCenter';
-import { useQuery, useMutation } from '../../../lib/useApi';
+import { api } from '../../../lib/api';
+import { useQuery } from '../../../lib/useApi';
 import type { DashboardUser } from '../../../types';
 
 const ACCOUNT_COLUMNS = [
@@ -43,23 +43,29 @@ function AddAccountForm({ onCancel, onCreated }: { onCancel: () => void; onCreat
   const [partnerManager, setPartnerManager] = useState(false);
   const [advertiserManager, setAdvertiserManager] = useState(false);
   const [superUser, setSuperUser] = useState(false);
-  const { run, busy, error } = useMutation((body: Record<string, unknown>) => cc.createUser(body));
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const ok = await run({
-      name, email, role,
-      businessUnit: businessUnit || undefined,
-      primaryPhone: primaryPhone || undefined,
-      title: title || undefined,
-      partnerManager, advertiserManager, superUser,
-    });
-    if (ok) onCreated();
+    setBusy(true);
+    setSaveError(null);
+    try {
+      if (!name.trim()) throw new Error('Name is required.');
+      if (!email.trim()) throw new Error('Email is required.');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) throw new Error('Enter a valid email address.');
+      await api.post('/api/users', { name: name.trim(), email: email.trim(), role, businessUnit: businessUnit || undefined, primaryPhone: primaryPhone || undefined, title: title || undefined, partnerManager, advertiserManager, superUser });
+      onCreated();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Failed to create account.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <form onSubmit={submit} className="card mb-3 space-y-4">
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required /></Field>
         <Field label="Email *"><input type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
@@ -158,11 +164,11 @@ function DateRangeChip({ from, to, onApply }: { from: string; to: string; onAppl
       {open && (
         <div className="absolute left-0 top-full z-30 mt-1 w-72 space-y-3 rounded-card border border-border bg-elevated p-3 shadow-elevated">
           <div>
-            <label className="label mb-1 block">From</label>
+            <label className="label">From</label>
             <input type="date" className="input" value={draftFrom} max={draftTo} onChange={(e) => setDraftFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label mb-1 block">To</label>
+            <label className="label">To</label>
             <input type="date" className="input" value={draftTo} min={draftFrom} max={todayStr()} onChange={(e) => setDraftTo(e.target.value)} />
           </div>
           <div className="flex justify-end gap-2">
@@ -211,7 +217,7 @@ function MoreFiltersButton({ portal, method, onApply }: { portal: string; method
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-64 space-y-3 rounded-card border border-border bg-elevated p-3 shadow-elevated">
           <div>
-            <label className="label mb-1 block">Portal</label>
+            <label className="label">Portal</label>
             <select className="input" value={draftPortal} onChange={(e) => setDraftPortal(e.target.value)}>
               <option value="">All</option>
               <option value="Dashboard">Dashboard</option>
@@ -221,7 +227,7 @@ function MoreFiltersButton({ portal, method, onApply }: { portal: string; method
             </select>
           </div>
           <div>
-            <label className="label mb-1 block">Method</label>
+            <label className="label">Method</label>
             <select className="input" value={draftMethod} onChange={(e) => setDraftMethod(e.target.value)}>
               <option value="">All</option>
               <option value="POST">POST</option>

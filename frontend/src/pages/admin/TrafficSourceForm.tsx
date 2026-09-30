@@ -137,7 +137,7 @@ export default function TrafficSourceForm() {
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
             <div>
-              <label className="label mb-2 block">Enable Postback URL</label>
+              <label className="label">Enable Postback URL</label>
               <button type="button" role="switch" aria-checked={form.enablePostback}
                 onClick={() => setForm((f) => ({ ...f, enablePostback: !f.enablePostback }))}
                 className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${form.enablePostback ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
@@ -147,7 +147,7 @@ export default function TrafficSourceForm() {
               </button>
             </div>
             <div>
-              <label className="label mb-2 flex items-center gap-1.5">
+              <label className="label flex items-center gap-1.5">
                 Visible to Partners
                 <span title="Partners can see and select this traffic source when generating their own tracking links."><HelpCircle size={13} className="text-fg-muted" /></span>
               </label>

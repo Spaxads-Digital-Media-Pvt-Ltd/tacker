@@ -493,7 +493,7 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 export function UnavailableField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <label className="label mb-2 block text-fg-muted">{label}</label>
+      <label className="label text-fg-muted">{label}</label>
       <div className="pointer-events-none select-none opacity-50">{children}</div>
       <p className="mt-1 text-[11px] text-fg-muted">Not yet available in this app.</p>
     </div>

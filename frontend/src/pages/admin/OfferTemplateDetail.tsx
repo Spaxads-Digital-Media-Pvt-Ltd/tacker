@@ -49,13 +49,19 @@ export default function OfferTemplateDetail() {
   return (
     <>
       <PageHeader title={`Template Details: ${data.name}`} subtitle={`Offers › Offer Templates › ${data.name} › Details`} />
+      {(setDefault.error || del.error) && (
+        <div className="mb-4 space-y-1">
+          {setDefault.error && <p className="text-small text-danger-text">{setDefault.error}</p>}
+          {del.error && <p className="text-small text-danger-text">{del.error}</p>}
+        </div>
+      )}
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <InfoCard title="General" action={
           <div className="flex items-center gap-1">
             <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => nav(`/app/offers-templates/${id}/edit`)}><Pencil size={12} />Edit</button>
             <GeneralMenu isDefault={data.isDefault}
-              onSetDefault={async () => { await setDefault.run(data.id); refetch(); }}
-              onDelete={async () => { if (confirm('Delete this template?')) { await del.run(data.id); nav('/app/offers-templates'); } }} />
+              onSetDefault={async () => { try { const ok = await setDefault.run(data.id); if (ok) refetch(); } catch {} }}
+              onDelete={async () => { if (confirm('Delete this template?')) { try { const ok = await del.run(data.id); if (ok) nav('/app/offers-templates'); } catch {} } }} />
           </div>
         }>
           <InfoGrid>

@@ -187,21 +187,21 @@ export default function TieredCommissionForm() {
             <div className="space-y-5">
               <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
               <div>
-                <label className="label mb-2 block">Status *</label>
+                <label className="label">Status *</label>
                 <Segmented options={['active', 'inactive']} value={form.status} onChange={(v) => set('status', v as FormState['status'])} dots={{ active: 'bg-success', inactive: 'bg-warning' }} />
               </div>
               <Field label="Notes"><textarea className="input min-h-[60px]" value={form.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
 
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                 <div>
-                  <label className="label mb-2 block">Enable Start Date</label>
+                  <label className="label">Enable Start Date</label>
                   <div className="flex items-center gap-2">
                     <YesNoToggle value={form.hasStart} onChange={(v) => set('hasStart', v)} />
                     {form.hasStart && <input type="date" className="input" value={form.effectiveStart} onChange={(e) => set('effectiveStart', e.target.value)} />}
                   </div>
                 </div>
                 <div>
-                  <label className="label mb-2 block">Enable End Date</label>
+                  <label className="label">Enable End Date</label>
                   <div className="flex items-center gap-2">
                     <YesNoToggle value={form.hasEnd} onChange={(v) => set('hasEnd', v)} />
                     {form.hasEnd && <input type="date" className="input" min={form.effectiveStart || undefined} value={form.effectiveEnd} onChange={(e) => set('effectiveEnd', e.target.value)} />}
@@ -210,7 +210,7 @@ export default function TieredCommissionForm() {
               </div>
 
               <div>
-                <label className="label mb-2 block">Targeted Entity Type *</label>
+                <label className="label">Targeted Entity Type *</label>
                 <Segmented options={['offer', 'advertiser']} value={form.targetType} onChange={(v) => { set('targetType', v as FormState['targetType']); set('targetIds', []); }} />
                 <div className="mt-3">
                   <MultiSelectPicker label={form.targetType === 'offer' ? 'Offers' : 'Advertisers'} options={targetOptions} selected={form.targetIds} onChange={(ids) => set('targetIds', ids)} />
@@ -219,7 +219,7 @@ export default function TieredCommissionForm() {
               </div>
 
               <div>
-                <label className="label mb-2 block">Apply to specific Affiliates</label>
+                <label className="label">Apply to specific Affiliates</label>
                 <YesNoToggle value={form.hasPartners} onChange={(v) => set('hasPartners', v)} />
                 {form.hasPartners && (
                   <div className="mt-3">
@@ -271,7 +271,7 @@ export default function TieredCommissionForm() {
                             </Field>
                           </div>
                           <div>
-                            <label className="label mb-2 block">Add Upper Bound</label>
+                            <label className="label">Add Upper Bound</label>
                             <div className="flex items-center gap-2">
                               <YesNoToggle value={goal.maxValue != null} onChange={(v) => updateGoal(i, { ...goal, maxValue: v ? goal.minValue + 1 : null })} />
                               {goal.maxValue != null && (
@@ -295,7 +295,7 @@ export default function TieredCommissionForm() {
                 <h3 className="mb-3 text-h3 font-medium text-fg">Revenue &amp; Payout</h3>
                 <div className="space-y-4">
                   <div>
-                    <label className="label mb-2 block">Enable Payout Setting</label>
+                    <label className="label">Enable Payout Setting</label>
                     <YesNoToggle value={form.payoutEnabled} onChange={(v) => set('payoutEnabled', v)} />
                     {form.payoutEnabled && (
                       <div className="mt-3 grid grid-cols-2 gap-3">
@@ -312,7 +312,7 @@ export default function TieredCommissionForm() {
                     )}
                   </div>
                   <div>
-                    <label className="label mb-2 block">Enable Revenue Setting</label>
+                    <label className="label">Enable Revenue Setting</label>
                     <YesNoToggle value={form.revenueEnabled} onChange={(v) => set('revenueEnabled', v)} />
                     {form.revenueEnabled && (
                       <div className="mt-3 grid grid-cols-2 gap-3">
@@ -329,7 +329,7 @@ export default function TieredCommissionForm() {
                     )}
                   </div>
                   <div>
-                    <label className="label mb-2 flex items-center gap-1 block">Retroactive Mode *</label>
+                    <label className="label flex items-center gap-1">Retroactive Mode *</label>
                     <Segmented options={['disabled', 'enabled', 'custom']} value={form.retroactiveMode} onChange={(v) => set('retroactiveMode', v as FormState['retroactiveMode'])} />
                     {form.retroactiveMode !== 'disabled' && (
                       <p className="mt-1 text-tiny text-fg-secondary">Only "Disabled" semantics are enforced in this app — the setting is saved for reference, but this conversion and future ones are what actually get adjusted; already-recorded conversions are never rewritten.</p>

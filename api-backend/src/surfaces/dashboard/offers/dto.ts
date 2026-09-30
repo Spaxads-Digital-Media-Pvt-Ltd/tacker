@@ -41,6 +41,10 @@ export interface OfferAdminDTO {
   deepLinkEnabled: boolean | null;
   firePartnerPostback: boolean | null;
   appIdentifier: string | null;
+  /** @deprecated derived from emailSettings.suppression.enabled — kept for API back-compat. */
+  suppressionFileEnabled: boolean;
+  /** @deprecated derived from emailSettings.optOut.enabled — kept for API back-compat. */
+  emailOptOutEnabled: boolean;
   internalNotes: string | null;
   productId: string | null;
   thumbnailUrl: string | null;
@@ -80,10 +84,15 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     notes: Array.isArray(meta['notes']) ? (meta['notes'] as string[]) : [],
     securityCode: row.security_code ?? null,
     trackingDomainId: row.tracking_domain_id,
-    linkingType: typeof meta['linking_type'] === 'string' ? (meta['linking_type'] as string) : null,
+    linkingType: typeof meta['linking_type'] === 'string' ? (meta['linking_type'] as string)
+      : (meta['linkingType'] as string | undefined) ?? null, // legacy camelCase key, pre-dates the snake_case convention
     deepLinkEnabled: typeof meta['deep_link_enabled'] === 'boolean' ? (meta['deep_link_enabled'] as boolean) : null,
     firePartnerPostback: typeof meta['fire_partner_postback'] === 'boolean' ? (meta['fire_partner_postback'] as boolean) : null,
-    appIdentifier: readString(meta, 'app_identifier'),
+    appIdentifier: readString(meta, 'app_identifier') ?? (meta['appIdentifier'] as string | undefined) ?? null, // legacy camelCase key
+    // Derived from the richer emailSettings object; legacy flat keys read as a fallback for any
+    // pre-existing data saved before emailSettings existed.
+    suppressionFileEnabled: readEmail(meta).suppression.enabled || Boolean(meta['suppressionFileEnabled']),
+    emailOptOutEnabled: readEmail(meta).optOut.enabled || Boolean(meta['emailOptOutEnabled']),
     internalNotes: readString(meta, 'internal_notes'),
     productId: readString(meta, 'product_id'),
     thumbnailUrl: readString(meta, 'thumbnail_url'),

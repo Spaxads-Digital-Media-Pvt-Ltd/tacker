@@ -127,7 +127,7 @@ function SingleSelectDropdown({ label, value, onChange, allowNone }: { label: st
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <label className="label mb-1 block">{label} {!allowNone && <span className="text-danger-text">*</span>}</label>
+      <label className="label">{label} {!allowNone && <span className="text-danger-text">*</span>}</label>
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
         {value ? DIM_OPTIONS.find((d) => d.key === value)?.label : 'None'} <ChevronDown size={13} className="text-fg-muted" />
       </button>
@@ -274,7 +274,7 @@ export default function VarianceReport() {
   const curTableQs = qs({ groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedCurrentFrom), to: toIso(appliedCurrentTo, true), ...dimParams, limit: 200 });
   const prevTableQs = qs({ groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedPreviousFrom), to: toIso(appliedPreviousTo, true), ...dimParams, limit: 200 });
   const { data: curData, loading: curLoading, error: curError } = useQuery<AggResult>(`/api/reports?${curTableQs}`);
-  const { data: prevData, loading: prevLoading } = useQuery<AggResult>(`/api/reports?${prevTableQs}`);
+  const { data: prevData, loading: prevLoading, error: prevError } = useQuery<AggResult>(`/api/reports?${prevTableQs}`);
 
   const rows = useMemo((): VarianceRow[] => mergeRows(curData?.rows ?? [], prevData?.rows ?? [], appliedParentDim)
     .map((r) => ({ raw: r.raw, name: resolveName(appliedParentDim, r.raw, opts, smartLinkMap), current: r.current, previous: r.previous }))
@@ -295,7 +295,9 @@ export default function VarianceReport() {
     return { current: deriveRow(sum(curData?.rows ?? [])), previous: deriveRow(sum(prevData?.rows ?? [])) };
   }, [curData, prevData]);
 
+  const canRun = !!parentDim;
   const runReport = () => {
+    if (!canRun) return;
     setAppliedParentDim(parentDim); setAppliedChildDim(childDim);
     setAppliedCurrentFrom(currentFrom); setAppliedCurrentTo(currentTo);
     setAppliedPreviousFrom(previousFrom); setAppliedPreviousTo(previousTo);
@@ -350,7 +352,7 @@ export default function VarianceReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label mb-1 block">Current <span className="text-danger-text">*</span></label>
+            <label className="label">Current <span className="text-danger-text">*</span></label>
             <div className="flex items-center gap-1.5">
               <input type="date" className="input !w-40" value={currentFrom} max={currentTo} onChange={(e) => setCurrentFrom(e.target.value)} />
               <span className="text-fg-muted">–</span>
@@ -358,7 +360,7 @@ export default function VarianceReport() {
             </div>
           </div>
           <div>
-            <label className="label mb-1 block">Previous <span className="text-danger-text">*</span></label>
+            <label className="label">Previous <span className="text-danger-text">*</span></label>
             <div className="flex items-center gap-1.5">
               <input type="date" className="input !w-40" value={previousFrom} max={previousTo} onChange={(e) => setPreviousFrom(e.target.value)} />
               <span className="text-fg-muted">–</span>
@@ -389,7 +391,7 @@ export default function VarianceReport() {
           <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
           <div className="flex-1" />
         </div>
-        <button type="button" className="btn-primary w-full" onClick={runReport}>Run Report</button>
+        <button type="button" className="btn-primary w-full" disabled={!canRun} onClick={runReport}>Run Report</button>
       </div>
 
       <div className="card mb-4">
@@ -436,6 +438,7 @@ export default function VarianceReport() {
 
         {loading ? <StateBlock><Spinner /></StateBlock>
           : curError ? <StateBlock>{curError}</StateBlock>
+          : prevError ? <StateBlock>{prevError}</StateBlock>
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">

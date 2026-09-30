@@ -181,7 +181,7 @@ function FormModal({
 function renderInput(fd: FieldDef, value: string | boolean, onChange: (v: string | boolean) => void): ReactNode {
   if (fd.type === 'checkbox') {
     return (
-      <input type="checkbox" className="h-4 w-4 accent-accent" checked={Boolean(value)}
+      <input type="checkbox" className="chk" checked={Boolean(value)}
         onChange={(e) => onChange(e.target.checked)} />
     );
   }

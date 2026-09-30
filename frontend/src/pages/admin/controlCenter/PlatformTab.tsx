@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Info, Search, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { cc } from '../../../lib/controlCenter';
-import { useQuery, useMutation } from '../../../lib/useApi';
+import { useQuery } from '../../../lib/useApi';
 import { Tabs, Table, Badge, Field, Spinner, StateBlock, type Column, Segmented } from '../../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 import { Pagination } from '../../../shared-components/primitives/ReportPageKit';
@@ -100,7 +100,7 @@ function UploadBox({ label, value, error, onFile, onClear }: {
 
   return (
     <div>
-      <label className="label mb-2 block">{label}</label>
+      <label className="label">{label}</label>
       <div
         className={`rounded-card border border-dashed bg-page p-3 text-center transition-colors ${
           dragging ? 'border-accent bg-accent-subtle' : 'border-border'
@@ -197,13 +197,18 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setBusy(true);
     setSaveError(null);
     try {
+      if (!name.trim()) throw new Error('Network Displayed Name is required.');
+      if (!currency.trim()) throw new Error('Currency is required.');
+      if (supportEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail.trim())) {
+        throw new Error('Support Email must be a valid address.');
+      }
       await api.put('/api/settings/general', {
-        name,
-        supportEmail: supportEmail || undefined,
+        name: name.trim(),
+        supportEmail: supportEmail.trim() || undefined,
         defaultCurrency: currency,
         timezone,
       });
-      await cc.putConfig('platform', {
+      await api.put('/api/control-center/config/platform', {
         branding: { logoUrl: logoUrl || null, faviconUrl: faviconUrl || null },
       });
       onSaved();
@@ -286,7 +291,8 @@ function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?:
     for (const g of GLOBAL_TOGGLES) out[g] = t[g] ?? defaults.has(g);
     return out;
   });
-  const { run, busy, error } = useMutation((body: Record<string, unknown>) => cc.putConfig('platform', body));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const g = (config?.global as Record<string, unknown> | undefined) ?? {};
@@ -326,24 +332,23 @@ function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?:
   ];
 
   const save = async () => {
-    const ok = await run({
-      global: {
-        offerCapThreshold: threshold,
-        cpcBasis,
-        macroVisibility,
-        adv110Visible,
-        saleAmountVisible,
-        onHoldVisibility,
-        toggles,
-      },
-    });
-    if (ok) { onSaved?.(); onCancel(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await api.put('/api/control-center/config/platform', { global: { offerCapThreshold: threshold, cpcBasis, macroVisibility, adv110Visible, saleAmountVisible, onHoldVisibility, toggles } });
+      onSaved?.();
+      onCancel();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="max-w-2xl mx-auto card space-y-4">
       <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       {leading.map((g) => (
         <label key={g} className="flex items-center gap-2 text-small text-fg">
           <input type="checkbox" checked={!!toggles[g]} onChange={(e) => setToggles((t) => ({ ...t, [g]: e.target.checked }))} className="h-4 w-4 rounded border-border" />
@@ -352,7 +357,7 @@ function EditGlobalForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?:
       ))}
       <Field label="Set Offer cap Threshold Percentage *"><input className="input" value={threshold} onChange={(e) => setThreshold(e.target.value)} /></Field>
       <div>
-        <label className="label mb-2 block">Set CPC Calculation Based On *</label>
+        <label className="label">Set CPC Calculation Based On *</label>
         <Segmented options={['Unique Clicks', 'Gross Clicks']} value={cpcBasis} onChange={setCpcBasis} />
       </div>
       <label className="flex items-center gap-2 text-small text-fg">
@@ -660,8 +665,9 @@ function DomainsSub() {
 function EditIpsBlacklistForm({ onCancel, onSaved }: { onCancel: () => void; onSaved?: () => void }) {
   const [rows, setRows] = useState<{ id: number; from: string; to: string }[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const nextId = useRef(1);
-  const { run, busy, error } = useMutation((ranges: { from: string; to?: string }[]) => cc.ipBlacklist.put(ranges));
 
   useEffect(() => {
     cc.ipBlacklist.get().then((data) => {
@@ -675,9 +681,20 @@ function EditIpsBlacklistForm({ onCancel, onSaved }: { onCancel: () => void; onS
   const setField = (id: number, k: 'from' | 'to', v: string) => setRows((r) => r.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
 
   const save = async () => {
-    const ranges = rows.filter((r) => r.from.trim()).map((r) => ({ from: r.from.trim(), to: r.to.trim() || undefined }));
-    const ok = await run(ranges);
-    if (ok) { onSaved?.(); onCancel(); }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const empty = rows.filter((r) => !r.from.trim());
+      if (empty.length) throw new Error('All ranges must have a "From" IP.');
+      const ranges = rows.map((r) => ({ from: r.from.trim(), to: r.to.trim() || undefined }));
+      await cc.ipBlacklist.put(ranges);
+      onSaved?.();
+      onCancel();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!loaded) return <StateBlock><Spinner /></StateBlock>;
@@ -685,7 +702,7 @@ function EditIpsBlacklistForm({ onCancel, onSaved }: { onCancel: () => void; onS
   return (
     <div className="card space-y-4">
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
-      {error && <p className="text-small text-danger-text">{error}</p>}
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       <div className="flex items-center gap-2">
         <label className="text-small font-semibold text-fg">IP Blacklist</label>
         <button type="button" onClick={addRow} title="Add a range" className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Plus size={14} /></button>
@@ -794,19 +811,54 @@ const ADVERTISER_BILLING_FIELDS: EditField[] = [
 
 function BillingSub() {
   const { data: config, refetch } = useQuery<Record<string, unknown>>('/api/control-center/config/platform');
-  const billing = (config?.billing as Record<string, unknown> | undefined) ?? {};
-  const saveSection = useMutation(async (key: string) => {
-    const res = await cc.putConfig('platform', { billing: { ...billing, [key]: billing[key] ?? {} } });
-    if (res) refetch();
-    return !!res;
-  });
+  const billing = (config?.billing as Record<string, Record<string, unknown>> | undefined) ?? {};
+
+  const generalSection = billing['general'] ?? {};
+  const partnerSection = billing['partner'] ?? {};
+  const partnerRestrictedSection = billing['partnerRestricted'] ?? {};
+  const advertiserSection = billing['advertiser'] ?? {};
+
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const sectionKeys: Record<string, string> = { general: 'general', 'Partner Billing Settings': 'partner', 'Partner Restricted Payments Settings': 'partnerRestricted', 'Advertiser Billing Settings': 'advertiser' };
+  const sectionConfigs: Record<string, Record<string, unknown>> = { general: generalSection, partner: partnerSection, 'Partner Billing Settings': partnerSection, 'Partner Restricted Payments Settings': partnerRestrictedSection, 'Advertiser Billing Settings': advertiserSection };
+
+  const mkInitialValues = (sectionKey: string) => {
+    const cfg = sectionConfigs[sectionKey] ?? {};
+    const init: Record<string, boolean | string> = {};
+    const relevantFields = (sectionKey === 'general' ? BILLING_GENERAL_FIELDS : sectionKey === 'partner' || sectionKey === 'Partner Billing Settings' ? PARTNER_BILLING_FIELDS : sectionKey === 'Partner Restricted Payments Settings' ? PARTNER_RESTRICTED_PAYMENTS_FIELDS : ADVERTISER_BILLING_FIELDS);
+    for (const f of relevantFields) {
+      init[f.label] = (cfg[f.label] ?? (f.type === 'boolean' ? false : '')) as boolean | string;
+    }
+    return init;
+  };
+
+  const saveSection = async (sectionTitle: string, values: Record<string, boolean | string>) => {
+    const key = sectionKeys[sectionTitle] ?? sectionTitle.toLowerCase();
+    const prev = billing[key] ?? {};
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const body: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) body[k] = v;
+      await cc.putConfig('platform', { billing: { ...billing, [key]: { ...prev, ...body } } });
+      refetch();
+      return true;
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} onSave={async () => !!(await saveSection.run('general'))} />
-      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} onSave={async () => !!(await saveSection.run('partner'))} />
-      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} onSave={async () => !!(await saveSection.run('partnerRestricted'))} />
-      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} onSave={async () => !!(await saveSection.run('advertiser'))} />
+      <EditableInfoCard title="General" fields={BILLING_GENERAL_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('general')} onSave={(data) => saveSection('General', data)} />
+      <EditableInfoCard title="Partner Billing Settings" fields={PARTNER_BILLING_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('Partner Billing Settings')} onSave={(data) => saveSection('Partner Billing Settings', data)} />
+      <EditableInfoCard title="Partner Restricted Payments Settings" fields={PARTNER_RESTRICTED_PAYMENTS_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('Partner Restricted Payments Settings')} onSave={(data) => saveSection('Partner Restricted Payments Settings', data)} />
+      <EditableInfoCard title="Advertiser Billing Settings" fields={ADVERTISER_BILLING_FIELDS} busy={busy} error={saveError} initialValues={mkInitialValues('Advertiser Billing Settings')} onSave={(data) => saveSection('Advertiser Billing Settings', data)} />
     </div>
   );
 }

@@ -27,13 +27,16 @@ export default function PartnerInvoiceDetail() {
   const { data: ledger, loading: ledgerLoading } = useQuery<PartnerInvoiceLedgerEntry[]>(`/api/partner-invoices/${id}/ledger`);
   const approvePay = useMutation(() => api.post(`/api/partner-invoices/${id}/approve-pay`, {}));
   const [confirming, setConfirming] = useState(false);
+  const [approveErr, setApproveErr] = useState<string | null>(null);
 
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   if (error || !invoice) return <StateBlock>{error ?? 'Invoice not found'}</StateBlock>;
 
   const doApprovePay = async () => {
     setConfirming(false);
-    if (await approvePay.run(undefined)) refetch();
+    setApproveErr(null);
+    try { const ok = await approvePay.run(undefined); if (ok) refetch(); }
+    catch { setApproveErr('Failed to approve & pay.'); }
   };
 
   const ledgerColumns: Column<PartnerInvoiceLedgerEntry>[] = [
@@ -96,6 +99,7 @@ export default function PartnerInvoiceDetail() {
           <div className="w-full max-w-md rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-2 text-h3 font-semibold text-fg">Approve &amp; Pay</h2>
             <p className="mb-4 text-small text-fg-secondary">Mark Invoice ID: {invoice.ref} as paid in full for {money(invoice.billedAmount, invoice.currency)}?</p>
+            {approveErr && <p className="mb-3 text-small text-danger-text">{approveErr}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>Cancel</button>
               <button type="button" className="btn-primary" disabled={approvePay.busy} onClick={doApprovePay}>{approvePay.busy ? 'Processing…' : 'Approve & Pay'}</button>

@@ -221,15 +221,14 @@ export interface ShellRow {
 
 export function EmptyShellTable({
   columns, addLabel, entityName, search = true, status, statusFilter, onStatusFilterChange, left,
-  rows, loading, onAddSubmit, onDelete,
+  rows, loading, error: tableError, onAddSubmit, onDelete,
 }: {
   columns: string[]; addLabel?: string; entityName?: string; search?: boolean; status?: string; left?: ReactNode;
-  /** Controlled status filter (All / Active / Inactive / Deleted). */
   statusFilter?: string;
   onStatusFilterChange?: (next: string) => void;
-  /** When set, table shows live data and add form saves via API. */
   rows?: ShellRow[];
   loading?: boolean;
+  error?: string | null;
   onAddSubmit?: (values: Record<string, string>) => Promise<boolean | string>;
   onDelete?: (id: string) => Promise<void>;
 }) {
@@ -277,30 +276,34 @@ export function EmptyShellTable({
         )}
       </div>
       <TableScroll>
-        <table className="premium-table">
-          <thead>
-            <tr>{shown.map((c) => <th key={c}>{c}</th>)}{onDelete && <th />}</tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">Loading…</td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">No Record Found</td></tr>
-            ) : filtered.map((row) => (
-              <tr key={row.id}>
-                {shown.map((c) => (
-                  <td key={c}>{row.cells[c] ?? '—'}</td>
-                ))}
-                {onDelete && (
-                  <td className="text-right">
-                    <button type="button" className="text-tiny text-danger-text hover:underline"
-                      onClick={() => onDelete(row.id)}>Delete</button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {tableError ? (
+          <p className="text-small text-danger-text">{tableError}</p>
+        ) : (
+          <table className="premium-table">
+            <thead>
+              <tr>{shown.map((c) => <th key={c}>{c}</th>)}{onDelete && <th />}</tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">Loading…</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">No Record Found</td></tr>
+              ) : filtered.map((row) => (
+                <tr key={row.id}>
+                  {shown.map((c) => (
+                    <td key={c}>{row.cells[c] ?? '—'}</td>
+                  ))}
+                  {onDelete && (
+                    <td className="text-right">
+                      <button type="button" className="text-tiny text-danger-text hover:underline"
+                        onClick={() => onDelete(row.id)}>Delete</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </TableScroll>
       <div className="mt-2 flex justify-end">
         <Pagination total={wired ? filtered.length : 0} page={1} pageSize={25} onPageChange={() => {}} />

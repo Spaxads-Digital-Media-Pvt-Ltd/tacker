@@ -6,7 +6,7 @@ import { useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { cc } from '../../../lib/controlCenter';
-import { useQuery, useMutation } from '../../../lib/useApi';
+import { useQuery } from '../../../lib/useApi';
 import { StateBlock, Spinner, Tabs } from '../../../shared-components/primitives/ui';
 
 const SUB_TABS = ['Categories', 'Channels', 'Labels', 'Business Unit'] as const;
@@ -24,16 +24,17 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
-function Toolbar({ addLabel, status, onAdd, onStatusChange, moreVertical }: {
-  addLabel: string; status?: string; onAdd?: () => void; onStatusChange?: (s: string) => void; moreVertical?: boolean;
+function Toolbar({ addLabel, status, onAdd, onStatusChange, moreVertical, onSearch }: {
+  addLabel: string; status?: string; onAdd?: () => void; onStatusChange?: (s: string) => void; moreVertical?: boolean; onSearch?: (q: string) => void;
 }) {
+  const [q, setQ] = useState('');
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <button className="btn-primary" onClick={onAdd}>+ {addLabel}</button>
       <div className="flex items-center gap-2">
         <div className="relative">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-          <input placeholder="Search…" className="input !w-56 !pl-8" />
+          <input placeholder="Search…" className="input !pl-8 !w-56" value={q} onChange={(e) => { setQ(e.target.value); onSearch?.(e.target.value); }} />
         </div>
         {status && onStatusChange && (
           <button className="input flex !w-auto items-center gap-2 !py-1.5" onClick={() => onStatusChange(status === 'Active' ? 'Inactive' : 'Active')}>
@@ -65,17 +66,27 @@ function CrudSub({ resource, addLabel, columns, desc }: {
   const [status, setStatus] = useState('Active');
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
+  const [search, setSearch] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const path = `/api/control-center/${resource}?status=${statusParam(status)}`;
   const { data, loading, refetch } = useQuery<SegRow[]>(path);
-  const createMut = useMutation((body: Record<string, unknown>) => cc.create(resource, body));
-  const rows = data ?? [];
+  const rows = (data ?? []).filter((r) => !search.trim() || r.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const filtered = rows;
 
   const submit = async () => {
-    if (!name.trim()) return;
-    if (await createMut.run({ name: name.trim() })) {
+    setBusy(true);
+    setSaveError(null);
+    try {
+      if (!name.trim()) throw new Error('Name is required.');
+      await cc.create(resource, { name: name.trim() });
       setName('');
       setAdding(false);
       refetch();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -86,16 +97,17 @@ function CrudSub({ resource, addLabel, columns, desc }: {
       <p className="mb-3 text-small text-fg-secondary">{desc}</p>
       {adding && (
         <div className="card mb-3 flex flex-wrap items-end gap-2">
+          {saveError && <p className="text-small text-danger-text">{saveError}</p>}
           <div className="flex-1">
-            <label className="label mb-1 block">Name *</label>
+            <label className="label">Name *</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <button className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
-          <button className="btn-primary" onClick={submit} disabled={createMut.busy}>{createMut.busy ? 'Saving…' : 'Save'}</button>
+          <button className="btn-primary" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
       )}
-      <Toolbar addLabel={addLabel} status={status} onAdd={() => setAdding(true)} onStatusChange={setStatus} moreVertical={resource === 'channels'} />
-      {rows.length === 0 ? (
+      <Toolbar addLabel={addLabel} status={status} onAdd={() => setAdding(true)} onStatusChange={(next) => setStatus(next)} moreVertical={resource === 'channels'} onSearch={setSearch} />
+      {filtered.length === 0 ? (
         <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">No Record Found</p>
       ) : (
         <SegTable columns={[...columns, '']}>
@@ -124,19 +136,27 @@ function CrudSub({ resource, addLabel, columns, desc }: {
 function LabelsSub() {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const { data, loading, refetch } = useQuery<Array<{
     id: string; name: string; color: string | null;
     advertisers: number; partners: number; offers: number; partnerTiers: number;
   }>>('/api/control-center/tags-with-usage');
-  const createMut = useMutation((body: { name: string }) => api.post('/api/tags', body));
   const tags = data ?? [];
 
   const submit = async () => {
-    if (!name.trim()) return;
-    if (await createMut.run({ name: name.trim() })) {
+    setBusy(true);
+    setSaveError(null);
+    try {
+      if (!name.trim()) throw new Error('Label name is required.');
+      await api.post('/api/tags', { name: name.trim() });
       setName('');
       setAdding(false);
       refetch();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -147,12 +167,13 @@ function LabelsSub() {
       <p className="mb-3 text-small text-fg-secondary">Set custom tags to link with a Partner, Advertiser, or Offer for internal reporting, searching, or filtering.</p>
       {adding && (
         <div className="card mb-3 flex flex-wrap items-end gap-2">
+          {saveError && <p className="text-small text-danger-text">{saveError}</p>}
           <div className="flex-1">
-            <label className="label mb-1 block">Name *</label>
+            <label className="label">Name *</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <button className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
-          <button className="btn-primary" onClick={submit} disabled={createMut.busy}>{createMut.busy ? 'Saving…' : 'Save'}</button>
+          <button className="btn-primary" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
       )}
       <Toolbar addLabel="Label" onAdd={() => setAdding(true)} moreVertical />
