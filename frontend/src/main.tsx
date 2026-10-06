@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './auth/AuthContext';
 import { ThemeProvider, applyTheme, readStoredTheme } from './theme/ThemeContext';
+import { ConfirmProvider } from './shared-components/primitives/ConfirmDialog';
 import './index.css';
 
 // Apply the user's saved light/dark choice before first paint (light unless they opted into dark).
@@ -20,7 +21,9 @@ function Root() {
     <BrowserRouter>
       <ThemeProvider>
         <AuthProvider>
-          <App />
+          <ConfirmProvider>
+            <App />
+          </ConfirmProvider>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

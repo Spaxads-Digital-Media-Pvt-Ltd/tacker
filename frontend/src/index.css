@@ -167,6 +167,8 @@
     background-color: rgb(35, 45, 65) !important;
   }
   .btn-ghost   { @apply btn border border-fg-muted/30 bg-surface text-fg shadow-sm hover:border-accent/50 hover:bg-accent-subtle hover:shadow; }
+  /* Destructive primary action (Delete / Revoke / Remove) — used by ConfirmDialog. */
+  .btn-danger  { @apply btn border border-danger bg-danger text-white shadow-sm hover:opacity-90; }
   /* Card: white surface, hairline border, 12px radius, ultra-subtle shadow.
    * Hover-lift + border emphasis kept from the Slate & Teal branch; colours token-driven
    * (shadow-card + border-fg-muted) so they track the theme instead of being pinned to hex. */

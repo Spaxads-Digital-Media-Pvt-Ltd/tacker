@@ -15,6 +15,7 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CopyBox } from '../../shared-components/panels/CopyBox';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
@@ -45,6 +46,7 @@ const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL
 
 export default function OfferCreate() {
   const nav = useNavigate();
+  const confirm = useConfirm();
   // "+ Offer" on Advertiser Details → Offers opens this page with ?advertiserId=… to preselect the
   // advertiser (same URL-prefill pattern as Add Conversion's ?offerId=). Only a starting value: the
   // field stays editable and the backend still checks the advertiser belongs to the caller's network.
@@ -171,7 +173,7 @@ export default function OfferCreate() {
     if (pendingThumb) {
       try { await api.upload(`/api/offers/${res.id}/thumbnail`, pendingThumb); } catch { problems.push('thumbnail'); }
     }
-    if (problems.length) window.alert(`Offer created, but these could not be saved: ${problems.join(', ')}. You can set them from Edit Offer.`);
+    if (problems.length) await confirm({ title: 'Offer created with warnings', message: `Offer created, but these could not be saved: ${problems.join(', ')}. You can set them from Edit Offer.`, cancelLabel: null });
     nav(`/app/offers/${res.id}`);
   };
 

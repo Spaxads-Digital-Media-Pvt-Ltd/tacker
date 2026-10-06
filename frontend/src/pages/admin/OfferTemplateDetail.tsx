@@ -9,6 +9,7 @@ import { Pencil, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, MenuPopover, MenuItem } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
 import { useFieldSpecs, valueLabel, fmtDateTime, type Template } from '../../data/offerTemplateFields';
 
@@ -40,6 +41,7 @@ export default function OfferTemplateDetail() {
   const specs = useFieldSpecs();
   const { data, loading, refetch } = useQuery<Template>(`/api/offer-templates/${id}`);
   const del = useMutation((tid: string) => api.del(`/api/offer-templates/${tid}`));
+  const confirm = useConfirm();
   const setDefault = useMutation((tid: string) => api.patch(`/api/offer-templates/${tid}`, { isDefault: true }));
 
   if (loading || !data) return <StateBlock><Spinner /></StateBlock>;
@@ -61,7 +63,7 @@ export default function OfferTemplateDetail() {
             <button className="flex items-center gap-1 text-tiny font-medium text-accent-text" onClick={() => nav(`/app/offers-templates/${id}/edit`)}><Pencil size={12} />Edit</button>
             <GeneralMenu isDefault={data.isDefault}
               onSetDefault={async () => { try { const ok = await setDefault.run(data.id); if (ok) refetch(); } catch { /* surfaced via setDefault.error above */ } }}
-              onDelete={async () => { if (confirm('Delete this template?')) { try { const ok = await del.run(data.id); if (ok) nav('/app/offers-templates'); } catch { /* surfaced via del.error above */ } } }} />
+              onDelete={() => confirm({ title: 'Delete template?', message: 'Are you sure you want to delete this offer template?', confirmLabel: 'Delete', destructive: true, onConfirm: async () => { try { const ok = await del.run(data.id); if (ok) nav('/app/offers-templates'); } catch { /* surfaced via del.error above */ } } })} />
           </div>
         }>
           <InfoGrid>

@@ -14,6 +14,7 @@ import { Search, SlidersHorizontal, Link2, Pencil, Trash2, Clock } from 'lucide-
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import { resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
@@ -65,10 +66,14 @@ function RowMenu({ coupon, onDeleted }: { coupon: CouponCode; onDeleted: () => v
   const del = useMutation(() => api.del(`/api/coupon-codes/${coupon.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm(`Delete coupon code "${coupon.code}"?`)) return;
-    if (await del.run(undefined)) onDeleted();
+    void confirm({
+      title: 'Delete coupon code?', message: `Are you sure you want to delete coupon code "${coupon.code}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+    });
   };
 
   return (

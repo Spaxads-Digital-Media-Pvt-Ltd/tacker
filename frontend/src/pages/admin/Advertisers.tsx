@@ -14,6 +14,7 @@ import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, Clock, 
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { TableActionsMenu, } from './AdvertisersTableActions';
 import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
@@ -95,11 +96,14 @@ function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onCh
     const res = await impersonate.run(undefined);
     if (res) window.open(res.link, '_blank', 'noopener');
   };
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm(`Delete advertiser "${advertiser.name}"?`)) return;
-    setErrDismissed(false);
-    if (await del.run(undefined)) onChanged();
+    void confirm({
+      title: 'Delete advertiser?', message: `Are you sure you want to delete advertiser "${advertiser.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { setErrDismissed(false); if (await del.run(undefined)) onChanged(); },
+    });
   };
 
   return (

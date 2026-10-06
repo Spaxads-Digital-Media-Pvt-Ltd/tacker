@@ -13,6 +13,7 @@ import { Search, SlidersHorizontal, ChevronDown, Pencil, CreditCard, Trash2, Clo
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { AdvertiserInvoice, AdvertiserInvoiceSummary, Advertiser, DashboardUser } from '../../types';
@@ -136,10 +137,14 @@ function RowMenu({ invoice, onChanged }: { invoice: AdvertiserInvoice; onChanged
   const [historyOpen, setHistoryOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
 
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm(`Delete Invoice ID: ${invoice.ref}?`)) return;
-    if (await del.run(undefined)) onChanged();
+    void confirm({
+      title: 'Delete invoice?', message: `Are you sure you want to delete invoice ID ${invoice.ref}?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onChanged(); },
+    });
   };
 
   return (

@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { PageHeader, Field, Segmented, Spinner } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { Stepper } from '../../shared-components/panels/Stepper';
 import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
 import type { DashboardUser, Publisher } from '../../types';
@@ -57,6 +58,7 @@ const INITIAL_FORM: FormState = {
 
 export default function PublisherCreate() {
  const nav = useNavigate();
+ const confirm = useConfirm();
  const [step, setStep] = useState(0);
  const [form, setForm] = useState<FormState>(INITIAL_FORM);
  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -122,7 +124,7 @@ export default function PublisherCreate() {
  for (const name of labels) {
  try { await api.post(`/api/publishers/${res.id}/tags`, { name }); } catch { failedLabels.push(name); }
  }
- if (failedLabels.length) window.alert(`Partner created, but these labels could not be added: ${failedLabels.join(', ')}`);
+ if (failedLabels.length) await confirm({ title: 'Partner created with warnings', message: `Partner created, but these labels could not be added: ${failedLabels.join(', ')}`, cancelLabel: null });
  nav(`/app/publishers/${res.id}`);
  };
 

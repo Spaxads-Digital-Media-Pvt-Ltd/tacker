@@ -11,6 +11,7 @@ import { Search } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { Table, Modal, Field, Spinner, StateBlock, EntitySearchSelect, DurationField, type Column, type EntityOpt } from '../primitives/ui';
+import { useConfirm } from '../primitives/confirm';
 
 export interface FieldDef {
   key: string;
@@ -100,6 +101,7 @@ export function CollectionTab({
   }, [data, searchKeys, q]);
 
   const del = useMutation((id: string) => api.del(`${basePath}/${id}`));
+  const confirm = useConfirm();
   const withActions = useMemo<Column<Row>[]>(() => [
     ...columns,
     {
@@ -108,11 +110,17 @@ export function CollectionTab({
         <span className="flex justify-end gap-3">
           {editable && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setEditRow(row)}>Edit</button>}
           <button className="text-tiny font-medium text-danger-text hover:underline"
-            onClick={async () => { if (confirm('Delete this item?') && await del.run(row.id) !== null) refetch(); }}>Delete</button>
+            onClick={() => confirm({
+              title: 'Delete item?',
+              message: 'Are you sure you want to delete this item? This cannot be undone.',
+              confirmLabel: 'Delete',
+              destructive: true,
+              onConfirm: async () => { if (await del.run(row.id) !== null) refetch(); },
+            })}>Delete</button>
         </span>
       ),
     },
-  ], [columns, del, refetch, editable]);
+  ], [columns, del, refetch, editable, confirm]);
 
   return (
     <div className="space-y-4">

@@ -10,6 +10,7 @@ import { Search, MoreVertical, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { TrafficSource } from '../../types';
@@ -19,9 +20,13 @@ const ALL_COLUMNS = ['ID', 'Name', 'URL', 'Tracking Link Parameters', 'Created',
 function RowMenu({ source, onDeleted }: { source: TrafficSource; onDeleted: () => void }) {
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/traffic-sources/${source.id}`));
+  const confirm = useConfirm();
   const doDelete = async () => {
-    if (!confirm(`Delete traffic source "${source.name}"?`)) return;
-    if (await del.run(undefined)) onDeleted();
+    void confirm({
+      title: 'Delete traffic source?', message: `Are you sure you want to delete traffic source "${source.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+    });
   };
   return (
     <MenuPopover

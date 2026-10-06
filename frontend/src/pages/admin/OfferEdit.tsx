@@ -14,6 +14,7 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column, Segmented } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
 import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
@@ -58,6 +59,7 @@ interface FormState {
 export default function OfferEdit() {
   const { id = '' } = useParams();
   const nav = useNavigate();
+  const confirm = useConfirm();
   const base = `/api/offers/${id}`;
   const { data: offer, loading, error, refetch } = useQuery<Offer>(base);
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
@@ -190,7 +192,7 @@ export default function OfferEdit() {
       }
       refetchGroups();
     }
-    if (failedGroups.length) window.alert(`Offer saved, but its offer-group membership could not be updated for: ${failedGroups.join(', ')}.`);
+    if (failedGroups.length) await confirm({ title: 'Offer saved with warnings', message: `Offer saved, but its offer-group membership could not be updated for: ${failedGroups.join(', ')}.`, cancelLabel: null });
     nav(`/app/offers/${id}`);
   };
 

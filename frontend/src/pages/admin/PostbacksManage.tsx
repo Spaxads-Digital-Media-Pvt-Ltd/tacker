@@ -12,6 +12,7 @@ import { Search, SlidersHorizontal, ChevronDown, Pencil, Play, Trash2, Clock, Mo
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { useDropdown, ColumnsModal, ApiRequestModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { Postback, Publisher, Offer } from '../../types';
@@ -127,13 +128,19 @@ function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted:
       ? `The endpoint answered HTTP ${res.status}${res.body ? `: ${res.body.slice(0, 160)}` : ''}`
       : `The test could not reach the endpoint: ${res.error ?? 'unknown error'}`);
   };
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
     setErr(null);
-    if (!confirm('Delete this postback?')) return;
-    // useMutation.run never throws — it resolves null on failure and sets .error.
-    const ok = await del.run(undefined);
-    if (ok) onDeleted(); else setErr(del.error ?? 'Failed to delete postback.');
+    void confirm({
+      title: 'Delete postback?', message: 'Are you sure you want to delete this postback configuration?',
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => {
+        // useMutation.run never throws — it resolves null on failure and sets .error.
+        const ok = await del.run(undefined);
+        if (ok) onDeleted(); else setErr(del.error ?? 'Failed to delete postback.');
+      },
+    });
   };
 
   return (

@@ -11,6 +11,7 @@ import { Search, SlidersHorizontal, Pencil, Trash2, Clock } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { LinkTemplate, Advertiser } from '../../types';
@@ -44,10 +45,14 @@ function RowMenu({ template, onChanged }: { template: LinkTemplate; onChanged: (
   const del = useMutation(() => api.del(`/api/link-templates/${template.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm(`Delete link template "${template.name}"?`)) return;
-    if (await del.run(undefined)) onChanged();
+    void confirm({
+      title: 'Delete link template?', message: `Are you sure you want to delete link template "${template.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onChanged(); },
+    });
   };
 
   return (

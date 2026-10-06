@@ -13,6 +13,7 @@ import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeO
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { PartnerInvoice, PartnerInvoiceSummary, Publisher } from '../../types';
@@ -198,12 +199,18 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
   const [exportOpen, setExportOpen] = useState(false);
   const [rowErr, setRowErr] = useState<string | null>(null);
 
+  const confirm = useConfirm();
   const doDelete = async (menu: { close: () => void }) => {
     menu.close();
-    if (!confirm(`Delete Invoice ID: ${invoice.ref}?`)) return;
-    setRowErr(null);
-    try { const ok = await del.run(undefined); if (ok) onChanged(); }
-    catch { setRowErr('Failed to delete invoice.'); }
+    void confirm({
+      title: 'Delete invoice?', message: `Are you sure you want to delete invoice ID ${invoice.ref}?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => {
+        setRowErr(null);
+        try { const ok = await del.run(undefined); if (ok) onChanged(); }
+        catch { setRowErr('Failed to delete invoice.'); }
+      },
+    });
   };
   const doToggleVisible = async (menu: { close: () => void }) => {
     menu.close();

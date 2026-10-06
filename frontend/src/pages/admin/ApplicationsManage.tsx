@@ -12,6 +12,7 @@ import { Search, SlidersHorizontal, ChevronDown, Check, X, MoreVertical } from '
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal, useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { OfferApplication, QuestionnaireListItem, Publisher, Offer, Advertiser, DashboardUser } from '../../types';
@@ -214,6 +215,7 @@ function QuestionnairesTab() {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const nav = useNavigate();
   const del = useMutation((id: string) => api.del(`/api/questionnaires/${id}`));
+  const confirm = useConfirm();
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
@@ -247,8 +249,11 @@ function QuestionnairesTab() {
 
   const doDelete = async (item: QuestionnaireListItem) => {
     setOpenMenuId(null);
-    if (!confirm(`Delete questionnaire "${item.name}"?`)) return;
-    if (await del.run(item.id)) refetch();
+    void confirm({
+      title: 'Delete questionnaire?', message: `Are you sure you want to delete questionnaire "${item.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(item.id)) refetch(); },
+    });
   };
 
   const columnsByHeader: Record<string, Column<QuestionnaireListItem>> = {

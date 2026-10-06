@@ -23,6 +23,7 @@ import { Search, MoreVertical, ChevronRight, ChevronLeft, SlidersHorizontal } fr
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
@@ -35,12 +36,18 @@ import type { Advertiser, Offer, Publisher } from '../../types';
  */
 function ConversionActions({ row, onChanged }: { row: ConvRow; onChanged: () => void }) {
   const act = useMutation((action: 'approve' | 'reject') => api.post(`/api/finance/conversions/${row.conversion_id}/${action}`, {}));
+  const confirm = useConfirm();
   if (row.status === 'rejected') return <span className="text-tiny text-fg-muted">—</span>;
   const go = async (action: 'approve' | 'reject') => {
-    if (action === 'reject' && !confirm(row.status === 'approved'
-      ? 'Reject this approved conversion? Its payout and billing will be reversed in the ledger.'
-      : 'Reject this pending conversion?')) return;
-    if (await act.run(action)) onChanged();
+    const run = async () => { if (await act.run(action)) onChanged(); };
+    if (action !== 'reject') { await run(); return; }
+    void confirm({
+      title: 'Reject conversion?',
+      message: row.status === 'approved'
+        ? 'Reject this approved conversion? Its payout and billing will be reversed in the ledger.'
+        : 'Reject this pending conversion?',
+      confirmLabel: 'Reject', destructive: true, onConfirm: run,
+    });
   };
   return (
     <div className="flex items-center gap-3 whitespace-nowrap">
