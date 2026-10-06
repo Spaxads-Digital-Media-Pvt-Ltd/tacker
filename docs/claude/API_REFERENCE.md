@@ -84,6 +84,11 @@
 | PATCH,DELETE | `/api/keys/:id` | Update/revoke API keys | admin |
 | GET,POST | `/api/portal/publisher/keys` | Publisher API keys | portal:publisher |
 | GET,POST | `/api/portal/advertiser/keys` | Advertiser API keys | portal:advertiser |
+| GET,POST | `/api/advertisers/:id/keys` | List/create a given advertiser's API keys (audience `advertiser`, owner = that advertiser; same keys the portal shows) | admin |
+| DELETE | `/api/advertisers/:id/keys/:keyId` | Revoke one of that advertiser's keys | admin |
+| GET | `/api/advertisers/:id/events` | Advertiser's events = goals (`offer_goals`) on its offers, with `offerId`/`offerName`/`offerRef` ("Associated to") | admin (any role) |
+| POST | `/api/advertisers/:id/events` | Create an event: goal body + `offerId` (must be one of this advertiser's offers); currency defaults to the offer's | admin/manager |
+| PATCH,DELETE | `/api/advertisers/:id/events/:eventId` | Edit/delete an event of this advertiser (the offer can't be changed). Same rules, audit and cache invalidation as `/api/offers/:id/goals` | admin/manager |
 
 ### Portal Routes (owner-scoped)
 | Method | Endpoint | Purpose | Auth |

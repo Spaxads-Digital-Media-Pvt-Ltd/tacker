@@ -19,13 +19,22 @@ import { requireRole, requirePortal } from '../auth.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
-import { createAdvertiserSchema, updateAdvertiserSchema, debugPostbackSchema, type DebugPostback } from './schemas.js';
+import {
+  createAdvertiserSchema, updateAdvertiserSchema, debugPostbackSchema, type DebugPostback,
+  createAdvertiserEventSchema, updateAdvertiserEventSchema, type CreateAdvertiserEvent, type UpdateAdvertiserEvent,
+} from './schemas.js';
+import { GOAL_ASSET, goalDTO, createAsset, updateAsset, deleteAsset } from '../offers/asset-routes.js';
 import { toAdminDTO, toSelfDTO } from './dto.js';
 import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
+import { apiKeyManagementRoutes } from '../api-keys/routes.js';
 
 const TABLE = 'advertisers';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Advertiser whose keys an admin is managing — set only after it's verified to be in the caller's network. */
+const keyOwner = new WeakMap<import('express').Request, string>();
 
 interface AuditLogRow { id: string; action: string; actor_type: string; actor_id: string | null; ip: string | null; user_agent: string | null; created_at: string }
 const METHOD_BY_ACTION_SUFFIX: Record<string, string> = { create: 'POST', update: 'PATCH', delete: 'DELETE' };
@@ -99,6 +108,109 @@ export function advertisersAdminRoutes(): Router {
       categories: r.categories.filter((c): c is string => c != null), payoutModels: r.payout_models,
       offerCount: r.offer_count, hasFunnel: r.has_funnel,
     })));
+  }));
+
+  // API keys for this advertiser (Advertiser Details → API Keys). Same factory as the advertiser
+  // portal's own /portal/advertiser/keys, so a key minted here is identical (audience 'advertiser',
+  // owner_id = advertiser id) and only works on /api/v1/advertiser/*. Admin role only, like /keys.
+  r.use(
+    '/:id/keys',
+    requireRole('admin'),
+    asyncHandler(async (req, _res, next) => {
+      const id = req.params.id ?? '';
+      if (!UUID_RE.test(id) || !(await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id }))) {
+        throw notFound('Advertiser not found');
+      }
+      keyOwner.set(req, id);
+      next();
+    }),
+    apiKeyManagementRoutes('advertiser', (req) => {
+      const id = keyOwner.get(req);
+      if (!id) throw notFound('Advertiser not found');
+      return id;
+    }),
+  );
+
+  // ── Events (Advertiser Details → Events) ──────────────────────────────────────────────────────
+  // An advertiser's events are the goals ("events" in the reference's vocabulary) on its offers —
+  // the same offer_goals rows that /api/offers/:id/goals manages and that /postback matches by
+  // `event`. "Associated to" is the offer. Writes go through the shared goal asset functions, so
+  // validation, audit and offer-cache invalidation are identical to the offer's Goals tab.
+  const ensureAdvertiser = async (req: import('express').Request): Promise<string> => {
+    const id = req.params.id ?? '';
+    if (!UUID_RE.test(id) || !(await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id }))) {
+      throw notFound('Advertiser not found');
+    }
+    return id;
+  };
+  /** The event's offer id, only if the event is a goal on one of THIS advertiser's offers in this network. */
+  const eventOfferId = async (req: import('express').Request, advertiserId: string): Promise<string> => {
+    const eventId = req.params.eventId ?? '';
+    if (!UUID_RE.test(eventId)) throw notFound('Event not found');
+    const { rows } = await query<{ offer_id: string }>(
+      `SELECT g.offer_id FROM offer_goals g
+         JOIN offers o ON o.id = g.offer_id AND o.network_id = g.network_id
+        WHERE g.id = $1 AND g.network_id = $2 AND o.advertiser_id = $3`,
+      [eventId, req.scope!.networkId, advertiserId],
+    );
+    if (!rows[0]) throw notFound('Event not found');
+    return rows[0].offer_id;
+  };
+  interface EventRow { id: string; offer_id: string; offer_name: string; offer_ref: string | null; created_at: string; updated_at: string; [k: string]: unknown }
+  const toEventDTO = (r: EventRow) => ({
+    ...goalDTO(r),
+    offerId: r.offer_id, offerName: r.offer_name, offerRef: r.offer_ref == null ? null : Number(r.offer_ref),
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  });
+  const loadEvent = async (networkId: string, goalId: string): Promise<EventRow> => {
+    const { rows } = await query<EventRow>(
+      `SELECT g.*, o.name AS offer_name, o.ref::text AS offer_ref
+         FROM offer_goals g JOIN offers o ON o.id = g.offer_id AND o.network_id = g.network_id
+        WHERE g.id = $1 AND g.network_id = $2`,
+      [goalId, networkId],
+    );
+    if (!rows[0]) throw notFound('Event not found');
+    return rows[0];
+  };
+
+  r.get('/:id/events', asyncHandler(async (req, res) => {
+    const advertiserId = await ensureAdvertiser(req);
+    const { rows } = await query<EventRow>(
+      `SELECT g.*, o.name AS offer_name, o.ref::text AS offer_ref
+         FROM offer_goals g JOIN offers o ON o.id = g.offer_id AND o.network_id = g.network_id
+        WHERE g.network_id = $1 AND o.advertiser_id = $2
+        ORDER BY g.created_at DESC, g.id
+        LIMIT 2000`,
+      [req.scope!.networkId, advertiserId],
+    );
+    sendOk(res, rows.map(toEventDTO), { limit: 2000, offset: 0, total: rows.length });
+  }));
+
+  r.post('/:id/events', requireRole('admin', 'manager'), validateBody(createAdvertiserEventSchema), asyncHandler(async (req, res) => {
+    const advertiserId = await ensureAdvertiser(req);
+    const { offerId, ...goal } = req.body as CreateAdvertiserEvent;
+    const offer = await dbForRequest(req).selectOne<{ id: string; currency: string }>('offers', { id: offerId, advertiser_id: advertiserId });
+    if (!offer) throw badRequest('Associated to must be one of this advertiser\'s offers.');
+    const row = await createAsset(req, GOAL_ASSET, offerId, { ...goal, currency: goal.currency ?? offer.currency });
+    sendOk(res, toEventDTO(await loadEvent(req.scope!.networkId, row.id)), undefined, 201);
+  }));
+
+  r.patch('/:id/events/:eventId', requireRole('admin', 'manager'), validateBody(updateAdvertiserEventSchema), asyncHandler(async (req, res) => {
+    const advertiserId = await ensureAdvertiser(req);
+    const offerId = await eventOfferId(req, advertiserId);
+    const { offerId: requestedOffer, ...goal } = req.body as UpdateAdvertiserEvent;
+    if (requestedOffer && requestedOffer !== offerId) {
+      throw badRequest('An event can\'t be moved to another offer. Delete it and create it on the other offer instead.');
+    }
+    await updateAsset(req, GOAL_ASSET, offerId, req.params.eventId!, goal);
+    sendOk(res, toEventDTO(await loadEvent(req.scope!.networkId, req.params.eventId!)));
+  }));
+
+  r.delete('/:id/events/:eventId', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const advertiserId = await ensureAdvertiser(req);
+    const offerId = await eventOfferId(req, advertiserId);
+    await deleteAsset(req, GOAL_ASSET, offerId, req.params.eventId!);
+    sendOk(res, { deleted: true });
   }));
 
   // Get one.

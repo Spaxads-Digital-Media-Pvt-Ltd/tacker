@@ -9,7 +9,7 @@
  * thumbnail file. Creatives are added from the Offer Detail page after creation.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
@@ -45,6 +45,10 @@ const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL
 
 export default function OfferCreate() {
   const nav = useNavigate();
+  // "+ Offer" on Advertiser Details → Offers opens this page with ?advertiserId=… to preselect the
+  // advertiser (same URL-prefill pattern as Add Conversion's ?offerId=). Only a starting value: the
+  // field stays editable and the backend still checks the advertiser belongs to the caller's network.
+  const [searchParams] = useSearchParams();
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: offers } = useQuery<Offer[]>('/api/offers');
@@ -60,7 +64,7 @@ export default function OfferCreate() {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(() => {
     const base = {
-      advertiserId: '', name: '', destinationUrl: '', previewUrl: '', trackingDomainId: '',
+      advertiserId: searchParams.get('advertiserId') ?? '', name: '', destinationUrl: '', previewUrl: '', trackingDomainId: '',
       payoutModel: 'CPA', currency: 'USD', defaultRevenue: '', defaultPayout: '',
       category: '', visibility: 'public', status: 'active',
       description: '', attributionWindowS: '2592000', dedupWindowS: '86400', fallbackUrl: '',

@@ -8,8 +8,14 @@ interface ApiKey {
   lastUsedAt: string | null; createdAt: string;
 }
 
-/** Reused by the publisher and advertiser portals; `basePath` points at their key namespace. */
-export default function ApiKeys({ basePath }: { basePath: string }) {
+/**
+ * Reused by the publisher and advertiser portals and by the admin Advertiser Details → API Keys tab;
+ * `basePath` points at the key namespace.
+ */
+export default function ApiKeys({
+  basePath,
+  subtitle = 'Programmatic access scoped to your own data. The full key is shown once at creation.',
+}: { basePath: string; subtitle?: string }) {
   const { data, loading, error, refetch } = useQuery<ApiKey[]>(basePath);
   const [open, setOpen] = useState(false);
   const [freshKey, setFreshKey] = useState<string | null>(null);
@@ -32,7 +38,7 @@ export default function ApiKeys({ basePath }: { basePath: string }) {
     <>
       <PageHeader
         title="API Keys"
-        subtitle="Programmatic access scoped to your own data. The full key is shown once at creation."
+        subtitle={subtitle}
         action={<button className="btn-primary" onClick={() => setOpen(true)}>New key</button>}
       />
       {loading ? <StateBlock><Spinner /></StateBlock>
