@@ -5,6 +5,7 @@
  * equivalent for — real ledger rows stand in for it instead).
  */
 import { useState } from 'react';
+import { formatDateOnly } from '../../lib/dateOnly';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
@@ -65,8 +66,8 @@ export default function PartnerInvoiceDetail() {
             <Row label="Status"><span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${STATUS_DOT[invoice.status]}`} />{STATUS_LABEL[invoice.status]}</span></Row>
             <Row label="Partner"><Link to={`/app/publishers/${invoice.publisherId}`} className="text-accent-text hover:underline">{invoice.publisherName}</Link></Row>
             <Row label="Modified">{new Date(invoice.updatedAt).toLocaleString()}</Row>
-            <Row label="Start Date">{new Date(invoice.periodStart).toLocaleDateString()}</Row>
-            <Row label="End Date">{new Date(invoice.periodEnd).toLocaleDateString()}</Row>
+            <Row label="Start Date">{formatDateOnly(invoice.periodStart)}</Row>
+            <Row label="End Date">{formatDateOnly(invoice.periodEnd)}</Row>
             <Row label="Payment Terms">{invoice.paymentTerms ?? '-'}</Row>
             <Row label="Created">{new Date(invoice.createdAt).toLocaleString()}</Row>
             <Row label="Billed">{money(invoice.billedAmount, invoice.currency)}</Row>

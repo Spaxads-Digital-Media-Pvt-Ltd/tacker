@@ -4,6 +4,7 @@
  * or records a conversion — it's a pure connectivity check.
  */
 import { substituteMacros } from '../../surfaces/tracking/macros.js';
+import { BlockedDestinationError, safeRequest } from '../net/safe-http.js';
 
 export interface PostbackTestResult {
   ok: boolean;
@@ -35,24 +36,22 @@ export async function firePostbackTest(
   urlTemplate: string, method: 'GET' | 'POST', macros: Record<string, string>,
 ): Promise<PostbackTestResult> {
   const finalUrl = substituteMacros(urlTemplate, macros);
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   const started = Date.now();
   try {
-    const res = await fetch(finalUrl, {
+    const res = await safeRequest(finalUrl, {
       method,
-      signal: ctrl.signal,
+      timeoutMs: TIMEOUT_MS,
+      maxBodyBytes: 500,
       ...(method === 'POST'
         ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(macros) }
         : {}),
     });
-    const bodyText = await res.text().catch(() => '');
-    const body = bodyText ? bodyText.slice(0, 500) : null;
-    return { ok: res.status >= 200 && res.status < 300, status: res.status, ms: Date.now() - started, finalUrl, error: null, body };
+    return { ok: res.status >= 200 && res.status < 300, status: res.status, ms: Date.now() - started, finalUrl, error: null, body: res.body || null };
   } catch (err) {
     const e = err as Error;
-    return { ok: false, status: null, ms: Date.now() - started, finalUrl, error: e.name === 'AbortError' ? 'timeout' : e.message, body: null };
-  } finally {
-    clearTimeout(timer);
+    const error = e instanceof BlockedDestinationError
+      ? 'Blocked: postbacks can only be sent to public internet addresses.'
+      : e.name === 'AbortError' ? 'timeout' : e.message;
+    return { ok: false, status: null, ms: Date.now() - started, finalUrl, error, body: null };
   }
 }

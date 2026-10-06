@@ -190,16 +190,18 @@ export default function AdvertiserEdit() {
     });
   }, [advertiser]);
 
+  // Error first: a failed load never sets `form`, so checking the spinner first would spin forever.
+  if (error) return <StateBlock>{error}</StateBlock>;
   if (loading || !form) return <StateBlock><Spinner /></StateBlock>;
-  if (error || !advertiser) return <StateBlock>{error ?? 'Advertiser not found'}</StateBlock>;
+  if (!advertiser) return <StateBlock>Advertiser not found</StateBlock>;
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const body: Record<string, unknown> = {
-      name: form.name, status: form.status, contactEmail: form.contactEmail,
-      defaultCurrency: form.defaultCurrency, billingTerms: form.billingTerms,
+      name: form.name, status: form.status, contactEmail: form.contactEmail.trim() || null,
+      defaultCurrency: form.defaultCurrency, billingTerms: form.billingTerms.trim() || null,
       accountManagerId: form.accountManagerId || null, salesManagerId: form.salesManagerId || null,
       billingFrequency: form.billingFrequency || null, verificationToken: form.verificationToken || null,
     };

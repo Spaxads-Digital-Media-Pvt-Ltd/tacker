@@ -11,7 +11,7 @@ import { uploadPublicObject } from '../../../lib/storage/supabase-storage.js';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { paginationSchema, type PaginationQuery } from '../../../lib/http/pagination.js';
+import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
 import { badRequest, notFound, forbidden } from '../../../lib/http/errors.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -33,6 +33,7 @@ import {
  createGeoRuleSchema,
  updateGeoRuleSchema,
  createAccessSchema,
+ updateAccessSchema,
  type CreateOffer,
  type UpdateOffer,
  type CreateGeoRule,
@@ -51,6 +52,7 @@ import {
  toOfferCountryDTO,
  toAccessDTO,
 } from './dto.js';
+import { env } from '../../../config/env.js';
 import { mountOfferAssets } from './asset-routes.js';
 import { attachTagRoutes } from '../tags/routes.js';
 
@@ -118,10 +120,11 @@ export function offersAdminRoutes(): Router {
  '/',
  validateQuery(paginationSchema),
  asyncHandler(async (req, res) => {
- const { limit, offset } = res.locals.query as PaginationQuery;
+ const { offset } = res.locals.query as PaginationQuery;
+ const limit = entityListLimit(req.query, res.locals.query as PaginationQuery);
  const db = dbForRequest(req);
  const [rows, total] = await Promise.all([
- db.selectMany<OfferRow>(OFFERS, { limit, offset, orderBy: 'created_at' }),
+ db.selectMany<OfferRow>(OFFERS, { limit, offset, orderBy: 'created_at', maxLimit: ENTITY_LIST_CAP }),
  db.count(OFFERS),
  ]);
  sendOk(res, rows.map(toAdminDTO), { limit, offset, total });
@@ -202,8 +205,10 @@ export function offersAdminRoutes(): Router {
  const adv = await db.selectOne<AdvertiserRow>('advertisers', { id: b.advertiserId });
  if (!adv) throw badRequest('advertiserId does not belong to this network');
  if (b.trackingDomainId) {
- const dom = await db.selectOne('tracking_domains', { id: b.trackingDomainId });
+ const dom = await db.selectOne<{ status: string; verification_state: string; host: string }>('tracking_domains', { id: b.trackingDomainId });
  if (!dom) throw badRequest('trackingDomainId does not belong to this network');
+ // /click only resolves active + verified hosts — any other domain would make every link dead.
+ if (dom.status !== 'active' || dom.verification_state !== 'verified') throw badRequest(`Tracking domain ${dom.host} is not active and verified yet, so links on it would not work.`);
  }
 
  const row = await db.insert<OfferRow>(OFFERS, {
@@ -251,9 +256,11 @@ export function offersAdminRoutes(): Router {
  const adv = await db.selectOne<AdvertiserRow>('advertisers', { id: b.advertiserId });
  if (!adv) throw badRequest('advertiserId does not belong to this network');
  }
- if (b.trackingDomainId) {
- const dom = await db.selectOne('tracking_domains', { id: b.trackingDomainId });
+ if (b.trackingDomainId && b.trackingDomainId !== before.tracking_domain_id) {
+ const dom = await db.selectOne<{ status: string; verification_state: string; host: string }>('tracking_domains', { id: b.trackingDomainId });
  if (!dom) throw badRequest('trackingDomainId does not belong to this network');
+ // /click only resolves active + verified hosts — switching to any other domain would make every link dead.
+ if (dom.status !== 'active' || dom.verification_state !== 'verified') throw badRequest(`Tracking domain ${dom.host} is not active and verified yet, so links on it would not work.`);
  }
 
  const patch: Record<string, unknown> = {};
@@ -449,6 +456,8 @@ export function offersAdminRoutes(): Router {
  );
  }
  if (opts.includeForwardingRules) await copyTable('offer_forwarding_rules', 'name, partner_ids, offer_urls, destination, countries, status');
+ // Copied geo rules feed the target's cached click config.
+ await invalidateOfferConfig(networkId, target.id);
 
  await writeAudit(req, { action: 'offer.copy_settings_to', entityType: 'offer', entityId: target.id, after: { sourceOfferId: src.id, ...opts } });
  sendOk(res, result);
@@ -567,16 +576,42 @@ export function offersAdminRoutes(): Router {
  const pub = await db.selectOne<PublisherRow>('publishers', { id: b.publisherId });
  if (!pub) throw badRequest('publisherId does not belong to this network');
 
- const row = await db.insert<OfferPublisherAccessRow>(ACCESS, {
- offer_id: req.params.id,
- publisher_id: b.publisherId,
- access: b.access,
- approval_status: b.approvalStatus,
- payout_override: b.payoutOverride ?? null,
- });
+ // Upsert: granting access to a partner who already has a row (e.g. their own pending request)
+ // updates that row instead of failing on the (offer_id, publisher_id) unique key.
+ const { rows: upserted } = await query<OfferPublisherAccessRow>(
+ `INSERT INTO offer_publisher_access (network_id, offer_id, publisher_id, access, approval_status, payout_override)
+ VALUES ($1, $2, $3, $4, $5, $6)
+ ON CONFLICT (offer_id, publisher_id) DO UPDATE
+ SET access = EXCLUDED.access, approval_status = EXCLUDED.approval_status,
+ payout_override = EXCLUDED.payout_override, updated_at = now()
+ WHERE offer_publisher_access.network_id = EXCLUDED.network_id
+ RETURNING *`,
+ [db.scope.networkId, req.params.id, b.publisherId, b.access, b.approvalStatus, b.payoutOverride ?? null],
+ );
+ const row = upserted[0];
+ if (!row) throw notFound('Access entry not found');
  await writeAudit(req, { action: 'offer.access.create', entityType: 'offer_publisher_access', entityId: row.id, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!); // block/allow takes effect on next click
  sendOk(res, toAccessDTO(row), undefined, 201);
+ }),
+ );
+
+ r.patch(
+ '/:id/publishers/:accessId',
+ requireRole('admin', 'manager'),
+ validateBody(updateAccessSchema),
+ asyncHandler(async (req, res) => {
+ const db = dbForRequest(req);
+ const b = req.body as z.infer<typeof updateAccessSchema>;
+ const patch: Record<string, unknown> = {};
+ if (b.access !== undefined) patch['access'] = b.access;
+ if (b.approvalStatus !== undefined) patch['approval_status'] = b.approvalStatus;
+ if (b.payoutOverride !== undefined) patch['payout_override'] = b.payoutOverride;
+ const [row] = await db.update<OfferPublisherAccessRow>(ACCESS, patch, { id: req.params.accessId, offer_id: req.params.id });
+ if (!row) throw notFound('Access entry not found');
+ await writeAudit(req, { action: 'offer.access.update', entityType: 'offer_publisher_access', entityId: row.id, after: row });
+ await invalidateOfferConfig(db.scope.networkId, req.params.id!); // deny list + partner payout are cached for /click
+ sendOk(res, toAccessDTO(row));
  }),
  );
 
@@ -693,6 +728,43 @@ const offerPortalFilterSchema = z.object({
 
 const offerPortalPaginationSchema = paginationSchema.extend(offerPortalFilterSchema.shape);
 
+// ---- Partner-portal offer visibility (used by list + detail; $1 = network, $2 = publisher) ----
+const PORTAL_JOINS = `LEFT JOIN offer_publisher_access a
+ ON a.offer_id = o.id AND a.network_id = o.network_id AND a.publisher_id = $2
+ LEFT JOIN tracking_domains td
+ ON td.id = o.tracking_domain_id AND td.network_id = o.network_id AND td.status = 'active'`;
+/** Hide offers this partner was denied/rejected on; a still-pending request stays visible. */
+const PORTAL_NOT_DENIED = `NOT COALESCE(a.access = 'deny' AND a.approval_status <> 'pending', false)`;
+const PORTAL_VISIBLE = `(o.visibility IN ('public', 'ask') OR (o.visibility = 'private' AND a.access = 'allow' AND a.approval_status = 'approved'))`;
+type PortalOfferRow = OfferRow & { effective_payout: string; access: string | null; approval_status: string | null; offer_host: string | null };
+
+/** A partner may send traffic to a public offer, or to any offer they're approved on. */
+function portalCanRun(row: PortalOfferRow): boolean {
+ if (row.access === 'allow' && row.approval_status === 'approved') return true;
+ return row.visibility === 'public' && row.access !== 'deny';
+}
+
+async function primaryTrackingHost(networkId: string): Promise<string | null> {
+ const { rows } = await query<{ host: string }>(
+ `SELECT host FROM tracking_domains WHERE network_id = $1 AND status = 'active'
+ ORDER BY is_primary DESC, created_at ASC LIMIT 1`, [networkId]);
+ return rows[0]?.host ?? null;
+}
+
+async function offerTrackingHost(networkId: string, trackingDomainId: string | null): Promise<string | null> {
+ if (!trackingDomainId) return null;
+ const { rows } = await query<{ host: string }>(
+ `SELECT host FROM tracking_domains WHERE id = $1 AND network_id = $2 AND status = 'active'`, [trackingDomainId, networkId]);
+ return rows[0]?.host ?? null;
+}
+
+/** Tracking link on the offer's own domain (local dev hosts point at the tracking server port). */
+function portalClickUrl(host: string | null, offerId: string, pubId: string | null): string | null {
+ if (!host) return null;
+ const base = /^(localhost|127\.0\.0\.1)$/i.test(host) ? `http://${host}:${env.PORT_TRACKING}` : `https://${host}`;
+ return `${base}/click?offer_id=${offerId}${pubId ? `&pub_id=${pubId}` : ''}`;
+}
+
 export function offerPortalRoutes(): Router {
  const r = Router();
 
@@ -723,16 +795,18 @@ export function offerPortalRoutes(): Router {
  params.push(filter.status);
  }
  const whereClause = where.join(' AND ');
- const [{ rows: data }, { rowCount: total }] = await Promise.all([
+ const [{ rows: data }, { rows: countRows }] = await Promise.all([
  query<OfferRow>(`SELECT * FROM offers WHERE ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`, [...params, limit, offset]),
  query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM offers WHERE ${whereClause}`, params),
  ]);
- sendOk(res, data.map(toAdvertiserDTO), { limit, offset, total: Number(total) });
+ sendOk(res, data.map(toAdvertiserDTO), { limit, offset, total: Number(countRows[0]?.count ?? 0) });
  return;
  }
 
- // publisher: public + ask (can request) + explicitly allowed private offers; effective payout applied.
- const where = ['o.network_id = $1', 'a.publisher_id = $2'];
+ // publisher: ACTIVE public + ask (can request) + approved private offers, minus any this partner
+ // is denied/rejected on (a pending request stays visible); effective payout applied. LEFT JOIN so
+ // public offers show without an access row.
+ const where = ['o.network_id = $1', "o.status = 'active'", PORTAL_NOT_DENIED];
  const params: (string | number)[] = [networkId, ownerId];
  if (filter.q) {
  const next = params.length + 1;
@@ -749,43 +823,32 @@ export function offerPortalRoutes(): Router {
  where.push(`o.visibility = $${next}`);
  params.push(filter.visibility);
  }
- const accessFilter = "(o.visibility IN ('public', 'ask') OR (o.visibility = 'private' AND a.access = 'allow' AND a.approval_status = 'approved'))";
  const whereClause = where.join(' AND ');
 
- const [{ rows }, { rowCount: total }] = await Promise.all([
- query<OfferRow & { effective_payout: string } & { access: string; approval_status: string }>(
+ const [{ rows }, { rows: countRows }] = await Promise.all([
+ query<PortalOfferRow>(
  `SELECT o.*, COALESCE(a.payout_override, o.default_payout) AS effective_payout,
- a.access, a.approval_status
- FROM offer_publisher_access a
- JOIN offers o ON o.id = a.offer_id AND o.network_id = a.network_id
- WHERE ${whereClause} AND ${accessFilter}
+ a.access, a.approval_status, td.host AS offer_host
+ FROM offers o ${PORTAL_JOINS}
+ WHERE ${whereClause} AND ${PORTAL_VISIBLE}
  ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
  [...params, limit, offset],
  ),
  query<{ count: string }>(
- `SELECT COUNT(*)::text AS count
- FROM offer_publisher_access a
- JOIN offers o ON o.id = a.offer_id AND o.network_id = a.network_id
- WHERE ${whereClause} AND ${accessFilter}`,
+ `SELECT COUNT(*)::text AS count FROM offers o ${PORTAL_JOINS}
+ WHERE ${whereClause} AND ${PORTAL_VISIBLE}`,
  params,
  ),
  ]);
 
- const accessRows = rows as (OfferRow & { effective_payout: string } & { access: string; approval_status: string })[];
-
- const dom = await query<{ host: string }>(
- `SELECT host FROM tracking_domains WHERE network_id = $1 AND status = 'active'
- ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
- [networkId],
- );
- const host = dom.rows[0]?.host ?? null;
- const withLink = accessRows.map((row) => ({
+ const primary = await primaryTrackingHost(networkId);
+ const withLink = rows.map((row) => ({
  ...toPublisherDTO(row, row.effective_payout),
- trackingUrl: host ? `https://${host}/click?offer_id=${row.id}&pub_id=${ownerId}` : null,
+ trackingUrl: portalCanRun(row) ? portalClickUrl(row.offer_host ?? primary, row.id, ownerId) : null,
  access: row.access as 'allow' | 'deny' | 'pending',
  approvalStatus: row.approval_status as 'approved' | 'pending' | 'rejected',
  }));
- sendOk(res, withLink, { limit, offset, total: Number(total) });
+ sendOk(res, withLink, { limit, offset, total: Number(countRows[0]?.count ?? 0) });
  }),
  );
 
@@ -805,35 +868,24 @@ export function offerPortalRoutes(): Router {
  [networkId, ownerId, req.params.id],
  );
  if (!rows[0]) throw notFound('Offer not found');
- const dom = await query<{ host: string }>(
- `SELECT host FROM tracking_domains WHERE network_id = $1 AND status = 'active'
- ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
- [networkId],
- );
- sendOk(res, toAdvertiserDetailDTO(rows[0], dom.rows[0]?.host ? `https://${dom.rows[0].host}/click?offer_id=${rows[0].id}` : null));
+ const host = (await offerTrackingHost(networkId, rows[0].tracking_domain_id)) ?? await primaryTrackingHost(networkId);
+ sendOk(res, toAdvertiserDetailDTO(rows[0], portalClickUrl(host, rows[0].id, null)));
  return;
  }
 
- // publisher: public + ask + allowed private; attach access + effective payout
- const { rows } = await query<OfferRow & { effective_payout: string; access: string; approval_status: string }>(
+ // publisher: same visibility rules as the list; attach access + effective payout
+ const { rows } = await query<PortalOfferRow>(
  `SELECT o.*, COALESCE(a.payout_override, o.default_payout) AS effective_payout,
- a.access, a.approval_status
- FROM offer_publisher_access a
- JOIN offers o ON o.id = a.offer_id AND o.network_id = a.network_id
- WHERE o.network_id = $1 AND a.publisher_id = $2 AND o.id = $3
- AND (o.visibility IN ('public', 'ask') OR (o.visibility = 'private' AND a.access = 'allow' AND a.approval_status = 'approved'))`,
+ a.access, a.approval_status, td.host AS offer_host
+ FROM offers o ${PORTAL_JOINS}
+ WHERE o.network_id = $1 AND o.id = $3 AND o.status = 'active' AND ${PORTAL_NOT_DENIED} AND ${PORTAL_VISIBLE}`,
  [networkId, ownerId, req.params.id],
  );
  if (!rows[0]) throw notFound('Offer not found');
  const row = rows[0];
- const dom = await query<{ host: string }>(
- `SELECT host FROM tracking_domains WHERE network_id = $1 AND status = 'active'
- ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
- [networkId],
- );
- const host = dom.rows[0]?.host ?? null;
+ const host = row.offer_host ?? await primaryTrackingHost(networkId);
  sendOk(res, toPublisherDetailDTO(row, row.effective_payout, row.access as 'allow' | 'deny' | null, row.approval_status as 'approved' | 'pending' | 'rejected' | null,
- host ? `https://${host}/click?offer_id=${row.id}&pub_id=${ownerId}` : null));
+ portalCanRun(row) ? portalClickUrl(host, row.id, ownerId) : null));
  }),
  );
 
@@ -866,13 +918,17 @@ export function offerPortalRoutes(): Router {
  return;
  }
 
+ // A pending request must not run traffic: it stays blocked ('deny') until an admin approves it
+ // (Offer Applications → approve sets access='allow'). The body's `access` is ignored on purpose.
+ void b;
  const row = await query<{ id: string }>(
  `INSERT INTO offer_publisher_access (network_id, offer_id, publisher_id, access, approval_status)
- VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
- [networkId, offerId, ownerId, b.access],
+ VALUES ($1, $2, $3, 'deny', 'pending') RETURNING id`,
+ [networkId, offerId, ownerId],
  );
- await writeAudit(req, { action: 'offer.access.request', entityType: 'offer_publisher_access', entityId: row.rows[0]!.id, after: { offerId, access: b.access } });
- sendOk(res, { access: b.access, approvalStatus: 'pending' }, undefined, 201);
+ await invalidateOfferConfig(networkId, offerId);
+ await writeAudit(req, { action: 'offer.access.request', entityType: 'offer_publisher_access', entityId: row.rows[0]!.id, after: { offerId } });
+ sendOk(res, { access: 'deny', approvalStatus: 'pending' }, undefined, 201);
  }),
  );
 
@@ -893,6 +949,7 @@ export function offerPortalRoutes(): Router {
  [networkId, offerId, ownerId],
  );
  if (!n.rows[0]) throw notFound('No pending request found');
+ await invalidateOfferConfig(networkId, offerId);
  await writeAudit(req, { action: 'offer.access.withdraw', entityType: 'offer_publisher_access', entityId: offerId, after: { publisherId: ownerId } });
  sendOk(res, { withdrawn: true });
  }),

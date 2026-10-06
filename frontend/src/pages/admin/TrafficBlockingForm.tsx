@@ -13,7 +13,8 @@ const STATUSES = ['active', 'inactive'] as const;
 const STATUS_LABEL: Record<string, string> = { active: 'Active', inactive: 'Inactive' };
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', inactive: 'bg-warning' };
 
-const FIELD_KEYS: TrafficBlockingFieldKey[] = ['sub1', 'sub2', 'sub3', 'sub4', 'sub5', 'sub6', 'sub7', 'sub8', 'sub9', 'sub10', 'sourceId'];
+// Only the click fields /click receives (sub1–sub5 + source_id); sub6–sub10 could never match.
+const FIELD_KEYS: TrafficBlockingFieldKey[] = ['sub1', 'sub2', 'sub3', 'sub4', 'sub5', 'sourceId'];
 const FIELD_LABEL: Record<TrafficBlockingFieldKey, string> = {
   sub1: 'Sub1', sub2: 'Sub2', sub3: 'Sub3', sub4: 'Sub4', sub5: 'Sub5',
   sub6: 'Sub6', sub7: 'Sub7', sub8: 'Sub8', sub9: 'Sub9', sub10: 'Sub10', sourceId: 'Source ID',

@@ -1,141 +1,17 @@
--- Partition clicks, conversions, and postback_logs by created_at (monthly RANGE).
---
--- Once partitioned, retention can DROP PARTITION instead of row-by-row ctid deletes,
--- which is O(1) and produces no vacuum pressure.
---
--- Postgres 15+ supports ATTACH PARTITION on partitioned tables.
--- Strategy: create new partitioned tables, drop old indexes, attach old tables as partitions.
---
--- For existing data, old rows live in partitions until dropped by retention.
--- New rows will flow into the default partition unless the retention job creates
--- monthly partitions. See retention.ts for the partition-management logic.
---
+-- NEUTRALIZED (intentional no-op). Originally partitioned clicks / conversions / postback_logs by
+-- created_at. That broke every click and conversion write on any DB it ran on:
+--   * it created no partitions at all, so every INSERT failed with "no partition of relation";
+--   * Postgres requires unique indexes on a partitioned table to include the partition key, so
+--     the global unique keys the money path depends on — clicks.click_id, conversions.conversion_id
+--     and conversions(offer_id, transaction_id) (txn_id idempotency) — could no longer exist, and
+--     every `ON CONFLICT (click_id)` / `ON CONFLICT (offer_id, transaction_id)` errored;
+--   * it dropped the `id` defaults/primary keys and the 'manual' conversion source.
+-- Retention does not need partitioning: retention.ts falls back to bounded ctid deletes on regular
+-- tables. DBs that already applied the original version are repaired by
+-- 1700000064000_unpartition-tracking-tables.
+
 -- Up Migration
-
--- 1. clicks: create partitioned replacement
-CREATE TABLE clicks_new (
- id uuid NOT NULL,
- click_id text NOT NULL,
- network_id uuid NOT NULL,
- offer_id uuid NOT NULL,
- publisher_id uuid,
- created_at timestamptz NOT NULL DEFAULT now(),
- ip inet,
- country text,
- region text,
- city text,
- isp text,
- device text,
- os text,
- browser text,
- referrer text,
- user_agent text,
- sub1 text, sub2 text, sub3 text, sub4 text, sub5 text,
- is_unique boolean NOT NULL DEFAULT true,
- fraud_score integer NOT NULL DEFAULT 0,
- fraud_flags text[] NOT NULL DEFAULT '{}',
- resolved_payout numeric(14,4),
- resolved_revenue numeric(14,4),
- currency text,
- smart_link_id uuid
-) PARTITION BY RANGE (created_at);
-
--- 2. Drop old indexes and recreate on the partitioned table
-DROP INDEX IF EXISTS clicks_click_id_key;
-DROP INDEX IF EXISTS clicks_network_created_idx;
-DROP INDEX IF EXISTS clicks_offer_idx;
-DROP INDEX IF EXISTS clicks_publisher_idx;
-CREATE UNIQUE INDEX clicks_click_id_key ON clicks_new (click_id, created_at);
-CREATE INDEX clicks_network_created_idx ON clicks_new (network_id, created_at DESC);
-CREATE INDEX clicks_offer_idx ON clicks_new (network_id, offer_id, created_at DESC);
-CREATE INDEX clicks_publisher_idx ON clicks_new (network_id, publisher_id, created_at DESC);
-
--- 3. Copy existing clicks data into the partitioned table (lands in auto-created default partition)
-INSERT INTO clicks_new SELECT * FROM clicks;
-
--- 4. Drop old table, rename
-DROP TABLE clicks;
-ALTER TABLE clicks_new RENAME TO clicks;
-
--- 5. conversions: create partitioned replacement
-CREATE TABLE conversions_new (
- id uuid NOT NULL,
- conversion_id text NOT NULL,
- network_id uuid NOT NULL,
- click_id text NOT NULL,
- offer_id uuid NOT NULL,
- publisher_id uuid,
- advertiser_id uuid,
- created_at timestamptz NOT NULL DEFAULT now(),
- event_name text,
- status text NOT NULL DEFAULT 'pending'
- CHECK (status IN ('pending', 'approved', 'rejected')),
- reason text,
- payout numeric(14,4),
- revenue numeric(14,4),
- currency text,
- transaction_id text,
- source text NOT NULL CHECK (source IN ('postback', 'pixel', 'iframe')),
- raw_params jsonb NOT NULL DEFAULT '{}'::jsonb,
- fraud_score integer NOT NULL DEFAULT 0,
- fraud_flags text[] NOT NULL DEFAULT '{}',
- goal_id uuid
-) PARTITION BY RANGE (created_at);
-
--- Drop old conversions indexes before recreating on partitioned table
-DROP INDEX IF EXISTS conversions_conversion_id_key;
-DROP INDEX IF EXISTS conversions_offer_txn_key;
-DROP INDEX IF EXISTS conversions_network_created_idx;
-DROP INDEX IF EXISTS conversions_click_idx;
-DROP INDEX IF EXISTS conversions_offer_idx;
-DROP INDEX IF EXISTS conversions_publisher_idx;
-DROP INDEX IF EXISTS conversions_status_idx;
-CREATE UNIQUE INDEX conversions_conversion_id_key ON conversions_new (conversion_id, created_at);
-CREATE UNIQUE INDEX conversions_offer_txn_key ON conversions_new (offer_id, transaction_id, created_at)
- WHERE transaction_id IS NOT NULL;
-CREATE INDEX conversions_network_created_idx ON conversions_new (network_id, created_at DESC);
-CREATE INDEX conversions_click_idx ON conversions_new (network_id, click_id);
-CREATE INDEX conversions_offer_idx ON conversions_new (network_id, offer_id, created_at DESC);
-CREATE INDEX conversions_publisher_idx ON conversions_new (network_id, publisher_id, created_at DESC);
-CREATE INDEX conversions_status_idx ON conversions_new (network_id, status);
-
--- Copy existing data
-INSERT INTO conversions_new SELECT * FROM conversions;
-
--- Drop old table, rename
-DROP TABLE conversions;
-ALTER TABLE conversions_new RENAME TO conversions;
-
--- 6. publisher_postbacks (referenced by FK, not retention target — no partition change needed)
--- No changes to publisher_postbacks.
-
--- 7. postback_logs: create partitioned replacement
-CREATE TABLE postback_logs_new (
- id uuid NOT NULL,
- network_id uuid NOT NULL,
- conversion_id text NOT NULL,
- publisher_id uuid,
- url text NOT NULL,
- attempt integer NOT NULL DEFAULT 1,
- status_code integer,
- success boolean NOT NULL DEFAULT false,
- error text,
- created_at timestamptz NOT NULL DEFAULT now()
-) PARTITION BY RANGE (created_at);
-
--- Drop old postback_logs indexes before recreating on partitioned table
-DROP INDEX IF EXISTS postback_logs_conversion_idx;
-DROP INDEX IF EXISTS postback_logs_created_idx;
-CREATE INDEX postback_logs_conversion_idx ON postback_logs_new (network_id, conversion_id);
-CREATE INDEX postback_logs_created_idx ON postback_logs_new (network_id, created_at DESC);
-
--- Copy existing postback_logs data
-INSERT INTO postback_logs_new SELECT * FROM postback_logs;
-
--- Drop old table, rename
-DROP TABLE postback_logs;
-ALTER TABLE postback_logs_new RENAME TO postback_logs;
+SELECT 1;
 
 -- Down Migration
--- (Cannot fully reverse — drops partitioned tables, preserves data in default partitions)
--- Manual rollback: restore from backup or manually detach partitions.
+SELECT 1;

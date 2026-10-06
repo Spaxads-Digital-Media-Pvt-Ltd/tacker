@@ -6,6 +6,7 @@
  * app has no separate payments ledger to record partial amounts against.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatDateOnly } from '../../lib/dateOnly';
 
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeOff, CheckCircle2, Trash2, Download, Clock } from 'lucide-react';
@@ -117,8 +118,23 @@ function NotesModal({ title, text, onClose }: { title: string; text: string; onC
   );
 }
 
+/** Exact sum of 2-dp amount strings (integer cents, never float), grouped by currency. */
+function sumByCurrency(invoices: PartnerInvoice[]): string {
+  const cents = new Map<string, bigint>();
+  for (const inv of invoices) {
+    const neg = inv.billedAmount.trim().startsWith('-');
+    const [i, f = ''] = inv.billedAmount.replace('-', '').split('.');
+    const c = BigInt(i || '0') * 100n + BigInt((f + '00').slice(0, 2));
+    cents.set(inv.currency, (cents.get(inv.currency) ?? 0n) + (neg ? -c : c));
+  }
+  return [...cents].map(([cur, c]) => {
+    const a = c < 0n ? -c : c;
+    return money(`${c < 0n ? '-' : ''}${a / 100n}.${(a % 100n).toString().padStart(2, '0')}`, cur);
+  }).join(' + ');
+}
+
 function ApprovePayModal({ invoices, onClose, onDone }: { invoices: PartnerInvoice[]; onClose: () => void; onDone: () => void }) {
-  const total = invoices.reduce((sum, inv) => sum + Number(inv.billedAmount), 0);
+  const total = sumByCurrency(invoices);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,7 +161,7 @@ function ApprovePayModal({ invoices, onClose, onDone }: { invoices: PartnerInvoi
       <div className="space-y-4">
         <div className="rounded-card border border-border bg-page p-4 text-center">
           <p className="text-tiny uppercase text-fg-secondary">Total {invoices[0]?.currency ?? 'USD'}</p>
-          <p className="text-h2 font-semibold text-fg">{money(total, invoices[0]?.currency)}</p>
+          <p className="text-h2 font-semibold text-fg">{total}</p>
         </div>
         {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
         <div className="overflow-x-auto rounded-card border border-border">
@@ -322,8 +338,8 @@ export default function PartnerInvoicesManage() {
     Visibility: { header: 'Visibility', cell: (i) => (i.visibleToPartner ? 'YES' : <span className="text-danger-text">NO</span>) },
     'Payment Terms': { header: 'Payment Terms', cell: (i) => i.paymentTerms ?? <span className="text-fg-muted">-</span> },
     'Payment Method': { header: 'Payment Method', cell: (i) => i.paymentMethod ?? <span className="text-fg-muted">-</span> },
-    'Start Date': { header: 'Start Date', cell: (i) => new Date(i.periodStart).toLocaleDateString() },
-    'End Date': { header: 'End Date', cell: (i) => new Date(i.periodEnd).toLocaleDateString() },
+    'Start Date': { header: 'Start Date', cell: (i) => formatDateOnly(i.periodStart) },
+    'End Date': { header: 'End Date', cell: (i) => formatDateOnly(i.periodEnd) },
     Billed: { header: 'Billed', className: 'text-right', cell: (i) => money(i.billedAmount, i.currency) },
     Payments: { header: 'Payments', className: 'text-right', cell: (i) => money(i.paymentsAmount, i.currency) },
     'Paid Date': { header: 'Paid Date', cell: (i) => (i.paidAt ? new Date(i.paidAt).toLocaleDateString() : <span className="text-fg-muted">-</span>) },
@@ -363,9 +379,10 @@ export default function PartnerInvoicesManage() {
         </button>
         {summaryOpen && (
           <div className="grid grid-cols-3 gap-4 border-t border-border px-4 py-4">
-            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.billedAmount) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Payments Amount(s)</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.paymentsAmount) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Balance</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.balance) : '—'}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.billedAmount, summary.currency) : '—'}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Payments Amount(s)</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.paymentsAmount, summary.currency) : '—'}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Balance</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.balance, summary.currency) : '—'}</p></div>
+            {summary && summary.otherCurrencies.length > 0 && <p className="col-span-3 text-tiny text-fg-muted">Totals are in {summary.currency}; invoices in {summary.otherCurrencies.join(', ')} are not included.</p>}
           </div>
         )}
       </div>

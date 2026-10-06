@@ -57,6 +57,8 @@ interface AssetSpec {
   auditKind: string;                  // e.g. 'goal'
   invalidateCache?: boolean;          // goals affect payout resolution → bust the offer cache
   beforeWrite?: (db: Db, offerId: string, body: Record<string, unknown>) => Promise<void>;
+  /** Allow-listed exact-match list filters: query param → snake_case column (e.g. ?level=event). */
+  listFilters?: Record<string, string>;
 }
 
 function mountAsset(r: Router, spec: AssetSpec): void {
@@ -65,7 +67,12 @@ function mountAsset(r: Router, spec: AssetSpec): void {
   r.get(base, asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     await ensureOffer(db, req.params.id);
-    const rows = await db.selectMany<Row>(spec.table, { where: { offer_id: req.params.id }, limit: 1000, orderBy: 'created_at' });
+    const where: Record<string, unknown> = { offer_id: req.params.id };
+    for (const [param, column] of Object.entries(spec.listFilters ?? {})) {
+      const v = req.query[param];
+      if (typeof v === 'string' && v) where[column] = v;
+    }
+    const rows = await db.selectMany<Row>(spec.table, { where, limit: 1000, orderBy: 'created_at' });
     sendOk(res, rows.map(spec.dto));
   }));
 
@@ -199,7 +206,7 @@ export function mountOfferAssets(r: Router): void {
     collection: 'postbacks', table: 'publisher_postbacks',
     createSchema: createOfferPostbackSchema, updateSchema: updateOfferPostbackSchema,
     colMap: { publisherId: 'publisher_id', url: 'url', method: 'method', event: 'event', level: 'level', status: 'status' },
-    dto: offerPostbackDTO, auditKind: 'postback',
+    dto: offerPostbackDTO, auditKind: 'postback', listFilters: { level: 'level' },
     // The partner (publisher) a postback is scoped to must belong to this network.
     beforeWrite: async (db, _offerId, body) => {
       const pid = body['publisherId'];

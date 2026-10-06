@@ -6,8 +6,8 @@
 import { useMemo, useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { Plus, Trash2, Search } from 'lucide-react';
-import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { patchEach } from '../../lib/bulk';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { Advertiser, DashboardUser } from '../../types';
 
@@ -120,12 +120,11 @@ export default function AdvertisersBulkEdit() {
   const { run, busy, error } = useMutation(async () => {
     const patch: Record<string, unknown> = {};
     for (const c of validChanges) patch[c.field] = c.value;
-    for (const id of selectedIds) await api.patch(`/api/advertisers/${id}`, patch);
+    return patchEach(selectedIds, (id) => `/api/advertisers/${id}`, patch, (id) => advertisers?.find((a) => a.id === id)?.name ?? id);
   });
 
   const apply = async () => {
-    await run(undefined);
-    nav('/app/advertisers');
+    if (await run(undefined)) nav('/app/advertisers');
   };
 
   if (loading) return <StateBlock><Spinner /></StateBlock>;

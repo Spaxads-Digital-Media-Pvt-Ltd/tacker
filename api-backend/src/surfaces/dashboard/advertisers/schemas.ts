@@ -3,8 +3,8 @@ import { z } from 'zod';
 export const createAdvertiserSchema = z.object({
   name: z.string().min(1).max(200),
   status: z.enum(['active', 'pending', 'inactive']).default('pending'),
-  contactEmail: z.string().email().optional(),
-  billingTerms: z.string().max(500).optional(),
+  contactEmail: z.string().trim().email().nullable().optional(),
+  billingTerms: z.string().max(500).nullable().optional(),
   defaultCurrency: z.string().length(3).default('USD'),
   accountManagerId: z.string().uuid().nullable().optional(),
   salesManagerId: z.string().uuid().nullable().optional(),
@@ -20,7 +20,7 @@ export type CreateAdvertiser = z.infer<typeof createAdvertiserSchema>;
 export type UpdateAdvertiser = z.infer<typeof updateAdvertiserSchema>;
 
 export const debugPostbackSchema = z.object({
-  url: z.string().url().max(2000),
+  url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL'),
   method: z.enum(['GET', 'POST']).default('GET'),
   country: z.string().max(3).optional(),
   device: z.string().max(40).optional(),

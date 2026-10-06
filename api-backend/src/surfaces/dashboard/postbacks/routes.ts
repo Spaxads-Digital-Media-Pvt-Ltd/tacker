@@ -46,7 +46,7 @@ const baseSchema = z.object({
   offerId: z.string().uuid().nullable().optional(),
   deliveryMethod: z.enum(['postback', 'html', 'meta', 'tiktok', 'snapchat', 'rumble']).default('postback'),
   method: z.enum(['GET', 'POST']).default('GET'),
-  url: z.string().url().max(2000).nullable().optional(),
+  url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL').nullable().optional(),
   htmlCode: z.string().max(20_000).nullable().optional(),
   event: z.string().max(100).nullable().optional(),
   delay: z.string().max(100).nullable().optional(),

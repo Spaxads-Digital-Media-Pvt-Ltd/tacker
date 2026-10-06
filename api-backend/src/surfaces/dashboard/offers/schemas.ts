@@ -60,6 +60,12 @@ export const createAccessSchema = z.object({
   payoutOverride: moneySchema.nullable().optional(),
 });
 
+export const updateAccessSchema = z.object({
+  access: z.enum(['allow', 'deny']).optional(),
+  approvalStatus: z.enum(['approved', 'pending', 'rejected']).optional(),
+  payoutOverride: moneySchema.nullable().optional(),
+});
+
 /** Publisher self-service request/withdraw. publisherId comes from the authenticated identity — not from the body. */
 export const requestAccessSchema = z.object({
  access: z.enum(['allow', 'deny']).default('allow'),

@@ -1,15 +1,16 @@
 /**
  * Add Partner (Everflow-style 4-step wizard: General/Address/Billing/User).
- * POSTs to /api/publishers on the final step with the fields the backend schema supports.
- * Fields without backend support are shown as inert controls for layout parity.
+ * POSTs to /api/publishers on the final step. Every field the backend stores is wired (same
+ * sources/options as Partner Edit); the few preferences with no backing field are labelled as such.
  */
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { useMutation } from '../../lib/useApi';
+import { useMutation, useQuery } from '../../lib/useApi';
 import { PageHeader, Field, Segmented, Spinner } from '../../shared-components/primitives/ui';
 import { Stepper } from '../../shared-components/panels/Stepper';
 import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
+import type { DashboardUser, Publisher } from '../../types';
 
 const STEPS = ['General', 'Address', 'Billing', 'User'];
 const STATUSES = ['active', 'pending', 'inactive'] as const;
@@ -23,9 +24,13 @@ interface FormState {
  trafficSource: string;
  payoutTerms: string;
  country: string;
- currency: string;
  tier: string;
  partnerManagerId: string;
+ accountExecutiveId: string;
+ referredById: string;
+ billingFrequency: string;
+ paymentMethod: string;
+ taxId: string;
  notes: string;
  contactFirstName: string;
  contactLastName: string;
@@ -38,9 +43,13 @@ const INITIAL_FORM: FormState = {
  trafficSource: '',
  payoutTerms: '',
  country: '',
- currency: 'USD',
  tier: '',
  partnerManagerId: '',
+ accountExecutiveId: '',
+ referredById: '',
+ billingFrequency: '',
+ paymentMethod: '',
+ taxId: '',
  notes: '',
  contactFirstName: '',
  contactLastName: '',
@@ -63,11 +72,12 @@ export default function PublisherCreate() {
  const [trafficSourceEnabled, setTrafficSourceEnabled] = useState(false);
  const [macroVisibility, setMacroVisibility] = useState('None');
  const [addressEnabled, setAddressEnabled] = useState(false);
- const [paymentEnabled, setPaymentEnabled] = useState(true);
  const [accountExec, setAccountExec] = useState(false);
  const [referredBy, setReferredBy] = useState(false);
  const [partnerTier, setPartnerTier] = useState(false);
 
+ const { data: users } = useQuery<DashboardUser[]>('/api/users');
+ const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
  const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.post<{ id: string }>('/api/publishers', body));
 
  const validateStep0 = (): boolean => {
@@ -94,17 +104,25 @@ export default function PublisherCreate() {
  contactName: [form.contactFirstName, form.contactLastName].filter(Boolean).join(' ') || undefined,
  payoutTerms: form.payoutTerms || undefined,
  country: form.country || undefined,
- currency: form.currency,
- tier: form.tier || undefined,
+ tier: partnerTier ? form.tier.trim() || undefined : undefined,
  partnerManagerId: form.partnerManagerId || undefined,
+ accountExecutiveId: accountExec ? form.accountExecutiveId || undefined : undefined,
+ referredById: referredBy ? form.referredById || undefined : undefined,
+ billingFrequency: form.billingFrequency || undefined,
+ paymentMethod: form.paymentMethod || undefined,
+ taxId: form.taxId.trim() || undefined,
  notes: form.notes || undefined,
  trafficSource: trafficSourceEnabled ? form.trafficSource || undefined : undefined,
  };
  const res = await run(body);
  if (!res) return;
+ // The partner exists now — a failed label must not strand the user on the wizard (a resubmit
+ // would create a duplicate partner), so report it and carry on to the new partner.
+ const failedLabels: string[] = [];
  for (const name of labels) {
- await api.post(`/api/publishers/${res.id}/tags`, { name });
+ try { await api.post(`/api/publishers/${res.id}/tags`, { name }); } catch { failedLabels.push(name); }
  }
+ if (failedLabels.length) window.alert(`Partner created, but these labels could not be added: ${failedLabels.join(', ')}`);
  nav(`/app/publishers/${res.id}`);
  };
 
@@ -141,7 +159,7 @@ export default function PublisherCreate() {
  <Field label="Partner Manager">
  <select className="input" value={form.partnerManagerId} onChange={(e) => set('partnerManagerId', e.target.value)}>
  <option value="">— Select —</option>
- <option value="placeholder-uuid">Not available yet</option>
+ {(users ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
  </select>
  </Field>
  <div>
@@ -154,7 +172,10 @@ export default function PublisherCreate() {
  <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${accountExec ? 'translate-x-[18px]' : 'translate-x-0'}`} />
  </span>
  </button>
- {accountExec && <select className="input"><option>Not available yet</option></select>}
+ {accountExec && <select className="input" value={form.accountExecutiveId} onChange={(e) => set('accountExecutiveId', e.target.value)}>
+ <option value="">— Select —</option>
+ {(users ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+ </select>}
  </div>
  </div>
  </div>
@@ -168,13 +189,13 @@ export default function PublisherCreate() {
  <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${referredBy ? 'translate-x-[18px]' : 'translate-x-0'}`} />
  </span>
  </button>
- {referredBy && <select className="input"><option>Not available yet</option></select>}
+ {referredBy && <select className="input" value={form.referredById} onChange={(e) => set('referredById', e.target.value)}>
+ <option value="">— Select —</option>
+ {(publishers ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+ </select>}
  </div>
  </div>
  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
- <Field label="Currency">
- <input className="input" maxLength={3} value={form.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} />
- </Field>
  <div>
  <label className="label">Partner Tier</label>
  <div className="flex items-center gap-2">
@@ -185,7 +206,7 @@ export default function PublisherCreate() {
  <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${partnerTier ? 'translate-x-[18px]' : 'translate-x-0'}`} />
  </span>
  </button>
- {partnerTier && <select className="input"><option>Not available yet</option></select>}
+ {partnerTier && <input className="input" value={form.tier} onChange={(e) => set('tier', e.target.value)} placeholder="e.g. Gold, Silver, Bronze" />}
  </div>
  </div>
  </div>
@@ -220,6 +241,7 @@ export default function PublisherCreate() {
  <Field label="Set Macro Parameter Visibility">
  <Segmented options={['None', 'Custom', 'Full access']} value={macroVisibility} onChange={setMacroVisibility} />
  </Field>
+ <p className="text-[11px] text-fg-muted">Notification, dynamic-payout and macro-visibility preferences are not stored yet.</p>
  </div>
  )}
 
@@ -246,37 +268,29 @@ export default function PublisherCreate() {
  <div className="space-y-4">
  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
  <Field label="Billing Frequency">
- <select className="input" defaultValue="Weekly">
- {['Weekly', 'Bimonthly', 'Monthly'].map((f) => <option key={f}>{f}</option>)}
+ <select className="input" value={form.billingFrequency} onChange={(e) => set('billingFrequency', e.target.value)}>
+ <option value="">—</option>
+ {['Weekly', 'Bi-Weekly', 'Monthly', 'Net 15', 'Net 30'].map((f) => <option key={f} value={f}>{f}</option>)}
  </select>
  </Field>
  <Field label="Payout Terms *">
  <textarea className="input min-h-[80px]" required value={form.payoutTerms} onChange={(e) => set('payoutTerms', e.target.value)} placeholder="Net-30, minimum $50…" />
  </Field>
  </div>
- <div>
- <label className="label">Enable Payment Method</label>
- <div className="flex items-center gap-3">
- <button type="button" onClick={() => setPaymentEnabled(!paymentEnabled)}
- className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${paymentEnabled ? 'text-accent-text' : 'text-fg-secondary'}`}>
- {paymentEnabled ? 'Yes' : 'No'}
- <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${paymentEnabled ? 'bg-success' : 'bg-border'}`}>
- <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${paymentEnabled ? 'translate-x-[18px]' : 'translate-x-0'}`} />
- </span>
- </button>
- {paymentEnabled && <select className="input !w-auto" defaultValue="Wire">
- {['Wire', 'PayPal', 'ACH', 'Check'].map((m) => <option key={m}>{m}</option>)}
- </select>}
- </div>
- </div>
- {paymentEnabled && (
+ <Field label="Payment Method">
+ <select className="input !w-auto" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)}>
+ <option value="">—</option>
+ {['Wire', 'Paypal', 'Webmoney', 'Direct Deposit', 'None'].map((m) => <option key={m} value={m}>{m}</option>)}
+ </select>
+ </Field>
+ {form.paymentMethod && form.paymentMethod !== 'None' && (
  <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-2">
  <Field label="Bank Name"><input className="input" /></Field>
  <Field label="Account Number"><input className="input" /></Field>
- <Field label="Tax ID / VAT or SSN"><input className="input" /></Field>
+ <p className="text-[11px] text-fg-muted sm:col-span-2">Bank details are not stored yet.</p>
  </div>
  )}
- <p className="text-[11px] text-fg-muted">Bank details and Tax ID are not yet persisted to the database.</p>
+ <Field label="Tax ID / VAT or SSN"><input className="input" value={form.taxId} onChange={(e) => set('taxId', e.target.value)} /></Field>
  </div>
  )}
 

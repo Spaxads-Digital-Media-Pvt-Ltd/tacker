@@ -66,7 +66,7 @@ export function catalogRoutes(): Router {
 
   // Network-level postback tester (no publisher context needed — used by the standalone Test page).
   const testSchema = z.object({
-    url: z.string().url().max(2000), method: z.enum(['GET', 'POST']).default('GET'),
+    url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL'), method: z.enum(['GET', 'POST']).default('GET'),
     country: z.string().max(3).optional(), device: z.string().max(40).optional(),
   });
   r.post('/postbacks/test', requireRole('admin', 'manager'), validateBody(testSchema), asyncHandler(async (req, res) => {

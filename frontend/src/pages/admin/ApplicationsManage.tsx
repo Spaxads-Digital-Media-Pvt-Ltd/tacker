@@ -60,14 +60,17 @@ function AppRowMenu({ app, onChanged }: { app: OfferApplication; onChanged: () =
   };
 
   return (
-    <TableRowMenu>
-      {(api) => (
-        <>
-          <MenuItem icon={Check} tone="success" disabled={app.status === 'approved'} onSelect={() => decideAndClose(api, 'approved')}>Approve</MenuItem>
-          <MenuItem icon={X} tone="danger" disabled={app.status === 'rejected'} onSelect={() => decideAndClose(api, 'rejected')}>Reject</MenuItem>
-        </>
-      )}
-    </TableRowMenu>
+    <div className="flex items-center justify-end gap-2">
+      {decide.error && <span className="max-w-[220px] truncate text-tiny text-danger-text" title={decide.error}>{decide.error}</span>}
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Check} tone="success" disabled={app.status === 'approved' || decide.busy} onSelect={() => decideAndClose(api, 'approved')}>Approve</MenuItem>
+            <MenuItem icon={X} tone="danger" disabled={app.status === 'rejected' || decide.busy} onSelect={() => decideAndClose(api, 'rejected')}>Reject</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
+    </div>
   );
 }
 

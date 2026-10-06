@@ -66,6 +66,18 @@ export function errorHandler(
  return;
  }
 
+ // Postgres constraint violations are caller mistakes, not server faults — answer with a clear
+ // 4xx instead of a bare 500 (no constraint/table names leaked).
+ const pgCode = (err as { code?: unknown })?.code;
+ if (pgCode === '23505' || pgCode === '23503' || pgCode === '23514') {
+ const message = pgCode === '23505' ? 'That record already exists.'
+ : pgCode === '23503' ? 'This record is still in use by other records (or references one that does not exist), so the change was not made.'
+ : 'One of the values is not allowed.';
+ const body: ErrorEnvelope = { ok: false, error: { code: pgCode === '23514' ? 'bad_request' : 'conflict', message } };
+ res.status(pgCode === '23514' ? 400 : 409).json(body);
+ return;
+ }
+
  // Unknown error — never leak internals to the caller (spec §3A/§12).
  logger.error({ err }, 'unhandled error');
  captureError(err, { path: _req.path, method: _req.method });

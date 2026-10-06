@@ -55,12 +55,12 @@ async function originalByDay(networkId: string, publisherId: string, offerId: st
   const map = new Map<string, Metrics>();
   for (const d of eachDate(dateFrom, dateTo)) map.set(d, zeroMetrics());
 
-  const { rows: clickRows } = await query<{ day: string; total_clicks: string; unique_clicks: string; revenue: string; payout: string }>(
+  // Clicks contribute COUNTS only. clicks.resolved_revenue/payout are the per-conversion rates
+  // frozen for later attribution — not money earned — so summing them double-counted revenue/payout.
+  const { rows: clickRows } = await query<{ day: string; total_clicks: string; unique_clicks: string }>(
     `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
             COUNT(*)::text AS total_clicks,
-            COUNT(*) FILTER (WHERE is_unique)::text AS unique_clicks,
-            COALESCE(SUM(resolved_revenue), 0)::text AS revenue,
-            COALESCE(SUM(resolved_payout), 0)::text AS payout
+            COUNT(*) FILTER (WHERE is_unique)::text AS unique_clicks
        FROM clicks
       WHERE network_id = $1 AND publisher_id = $2 AND offer_id = $3
         AND created_at >= $4::date AND created_at < ($5::date + interval '1 day')
@@ -70,7 +70,6 @@ async function originalByDay(networkId: string, publisherId: string, offerId: st
   for (const r of clickRows) {
     const m = map.get(r.day) ?? zeroMetrics();
     m.totalClicks += Number(r.total_clicks); m.uniqueClicks += Number(r.unique_clicks);
-    m.revenue += Number(r.revenue); m.payout += Number(r.payout);
     map.set(r.day, m);
   }
 

@@ -7,6 +7,7 @@
  * payout, revenue, source, sub1-5) — no fabricated fields.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { endOfLocalDayIso, localYmd, startOfLocalDayIso } from '../../lib/dateOnly';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, Search, X } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -115,8 +116,8 @@ export default function PostbackControlForm() {
     setForm({
       name: existing.name, status: existing.status,
       effectiveMode: existing.effectiveStart || existing.effectiveEnd ? 'Set Specific Period' : 'Always On',
-      effectiveStart: existing.effectiveStart ? existing.effectiveStart.slice(0, 10) : '',
-      effectiveEnd: existing.effectiveEnd ? existing.effectiveEnd.slice(0, 10) : '',
+      effectiveStart: localYmd(existing.effectiveStart),
+      effectiveEnd: localYmd(existing.effectiveEnd),
       controlType: existing.controlType,
       hasTarget: Boolean(existing.targetType), targetType: existing.targetType ?? 'offer', targetIds: existing.targetIds,
       hasPartners: existing.partnerIds.length > 0, partnerIds: existing.partnerIds,
@@ -143,8 +144,8 @@ export default function PostbackControlForm() {
     e.preventDefault();
     const body = {
       name: form.name, status: form.status,
-      effectiveStart: form.effectiveMode === 'Set Specific Period' && form.effectiveStart ? new Date(form.effectiveStart).toISOString() : null,
-      effectiveEnd: form.effectiveMode === 'Set Specific Period' && form.effectiveEnd ? new Date(form.effectiveEnd).toISOString() : null,
+      effectiveStart: form.effectiveMode === 'Set Specific Period' && form.effectiveStart ? startOfLocalDayIso(form.effectiveStart) : null,
+      effectiveEnd: form.effectiveMode === 'Set Specific Period' && form.effectiveEnd ? endOfLocalDayIso(form.effectiveEnd) : null,
       controlType: form.controlType,
       targetType: form.hasTarget ? form.targetType : null,
       targetIds: form.hasTarget ? form.targetIds : [],

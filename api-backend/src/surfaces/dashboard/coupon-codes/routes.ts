@@ -103,7 +103,8 @@ export function couponCodesRoutes(): Router {
   r.post('/bulk', requireRole('admin', 'manager'), validateBody(bulkCreateSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof bulkCreateSchema>;
-    const created: Row[] = [];
+    // Validate the WHOLE batch before inserting anything, so one bad row can't leave a half-finished import.
+    const seen = new Set<string>();
     for (const item of b.items) {
       const offer = await db.selectOne('offers', { id: item.offerId });
       if (!offer) throw badRequest(`offerId ${item.offerId} does not belong to this network`);
@@ -111,6 +112,20 @@ export function couponCodesRoutes(): Router {
         const pub = await db.selectOne('publishers', { id: item.publisherId });
         if (!pub) throw badRequest(`publisherId ${item.publisherId} does not belong to this network`);
       }
+      const key = `${item.offerId}:${item.code.toLowerCase()}`;
+      if (seen.has(key)) throw badRequest(`Code "${item.code}" appears more than once for the same offer in this import`);
+      seen.add(key);
+    }
+    const { rows: existing } = await query<{ code: string }>(
+      `SELECT c.code FROM offer_coupons c
+         JOIN unnest($2::uuid[], $3::text[]) AS i(offer_id, code) ON c.offer_id = i.offer_id AND lower(c.code) = lower(i.code)
+        WHERE c.network_id = $1`,
+      [req.scope!.networkId, b.items.map((i) => i.offerId), b.items.map((i) => i.code)],
+    );
+    if (existing.length) throw badRequest(`These codes already exist on their offer: ${existing.map((e) => e.code).join(', ')}`);
+
+    const created: Row[] = [];
+    for (const item of b.items) {
       const row = await db.insert<Row>(TABLE, {
         code: item.code, status: item.status, offer_id: item.offerId, publisher_id: item.publisherId ?? null,
         starts_at: item.startsAt ?? null, ends_at: item.endsAt ?? null, description: item.description ?? null, notes: item.notes ?? null,

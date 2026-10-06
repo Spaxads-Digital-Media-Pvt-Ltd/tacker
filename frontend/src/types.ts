@@ -411,7 +411,7 @@ export interface PartnerInvoice {
   updatedAt: string;
 }
 
-export interface PartnerInvoiceSummary { billedAmount: string; paymentsAmount: string; balance: string }
+export interface PartnerInvoiceSummary { currency: string; billedAmount: string; paymentsAmount: string; balance: string; otherCurrencies: string[] }
 
 export interface PartnerInvoiceLedgerEntry {
   id: string;
@@ -477,7 +477,7 @@ export interface AdvertiserInvoice {
   updatedAt: string;
 }
 
-export interface AdvertiserInvoiceSummary { billedAmount: string; paidAmount: string; balance: string }
+export interface AdvertiserInvoiceSummary { currency: string; billedAmount: string; paidAmount: string; balance: string; otherCurrencies: string[] }
 
 export interface AdvertiserInvoiceLedgerEntry {
   id: string;

@@ -211,7 +211,7 @@ export function tieredCommissionsRoutes(): Router {
          LEFT JOIN publishers p ON p.id = c.publisher_id AND p.network_id = c.network_id
         WHERE ${where}
         GROUP BY c.publisher_id, p.name, c.offer_id, o.name
-        ORDER BY conversions DESC LIMIT 200`,
+        ORDER BY COUNT(*) DESC LIMIT 200`,
       params,
     );
     sendOk(res, rows.map((r) => ({

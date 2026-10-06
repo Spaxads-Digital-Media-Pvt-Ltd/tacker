@@ -7,6 +7,7 @@
  * pattern already shipped for Partners.
  */
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, Clock, Trash2 } from 'lucide-react';
@@ -85,6 +86,7 @@ function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onCh
   const impersonate = useMutation(() => api.post<{ link: string }>(`/api/advertisers/${advertiser.id}/impersonate`, {}));
   const del = useMutation(() => api.del(`/api/advertisers/${advertiser.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [errDismissed, setErrDismissed] = useState(false);
 
   const go = (api: { close: () => void }, to: string) => { api.close(); nav(to); };
   const doImpersonate = async (api: { close: () => void }) => {
@@ -96,6 +98,7 @@ function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onCh
   const doDelete = async (api: { close: () => void }) => {
     api.close();
     if (!confirm(`Delete advertiser "${advertiser.name}"?`)) return;
+    setErrDismissed(false);
     if (await del.run(undefined)) onChanged();
   };
 
@@ -119,6 +122,13 @@ function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onCh
         )}
       </TableRowMenu>
       {historyOpen && <HistoryModal advertiserId={advertiser.id} onClose={() => setHistoryOpen(false)} />}
+      {(del.error || impersonate.error) && !errDismissed && createPortal(
+        <button type="button" onClick={() => setErrDismissed(true)} title="Dismiss"
+          className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-left text-small text-danger-text shadow-elevated">
+          {del.error ?? impersonate.error}
+        </button>,
+        document.body,
+      )}
     </>
   );
 }

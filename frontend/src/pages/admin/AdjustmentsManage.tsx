@@ -16,6 +16,7 @@ import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '.
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { ReportingAdjustment, Publisher, Offer, AdjustmentMetrics } from '../../types';
+import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedNote';
 
 const ALL_COLUMNS = ['Partner', 'Offer', 'Advertiser', 'Total Clicks', 'Conversions', 'Payout', 'Revenue', 'Gross Sales', 'Impressions', 'Created', 'Modified', 'Last Modified By'] as const;
 
@@ -123,6 +124,7 @@ export default function AdjustmentsManage() {
   return (
     <>
       <PageHeader title="Manage Reporting Adjustments" subtitle="Partners › Adjustments › Manage" />
+      <NotEnforcedNote>Adjustments are recorded here for review. They don't change the ledger, payouts, invoices or the main reports.</NotEnforcedNote>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">

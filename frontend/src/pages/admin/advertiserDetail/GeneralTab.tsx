@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Badge, Spinner } from '../../../shared-components/primitives/ui';
 import { PostbackTester } from '../../../features/postback/PostbackTester';
 import { useQuery } from '../../../lib/useApi';
-import type { Advertiser } from '../../../types';
+import type { Advertiser, DashboardUser } from '../../../types';
 
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
 const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
@@ -33,8 +33,11 @@ function todayIso(daysAgo: number): string {
 
 export function GeneralTab({ adv, base }: { adv: Advertiser; base: string }) {
   const [range] = useState({ from: todayIso(30), to: todayIso(0) });
-  const statsPath = `/api/reports?advertiserId=${adv.id}&metrics=clicks,conversions,revenue,payout,margin,cr&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
+  // groupBy=advertiser → one row totalled across ALL of this advertiser's offers (the API's default
+  // grouping is per offer, which made rows[0] show a single offer).
+  const statsPath = `/api/reports?advertiserId=${adv.id}&groupBy=advertiser&metrics=clicks,conversions,revenue,payout,margin,cr&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
   const stats = useQuery<AggResult>(statsPath);
+  const users = useQuery<DashboardUser[]>('/api/users');
   const statsRow = stats.data?.rows[0]?.metrics;
 
   return (
@@ -44,7 +47,7 @@ export function GeneralTab({ adv, base }: { adv: Advertiser; base: string }) {
           <dl>
             <InfoRow label="ID">{adv.ref ?? '—'}</InfoRow>
             <InfoRow label="Name">{adv.name}</InfoRow>
-            <InfoRow label="Account Manager">—</InfoRow>
+            <InfoRow label="Account Manager">{users.data?.find((u) => u.id === adv.accountManagerId)?.name ?? '—'}</InfoRow>
             <InfoRow label="Status"><Badge value={adv.status} /></InfoRow>
             <InfoRow label="Currency">{adv.defaultCurrency}</InfoRow>
             <InfoRow label="Contact Email">{adv.contactEmail ?? '—'}</InfoRow>

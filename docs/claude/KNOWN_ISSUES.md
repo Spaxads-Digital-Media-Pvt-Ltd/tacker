@@ -49,9 +49,8 @@
 
 ### 8. Redis Cache Staleness
 **Location**: `api-backend/src/surfaces/tracking/offer-cache.ts`
-**Severity**: Medium (needs verification)
-**Issue**: Offer config is cached in Redis with a load-through pattern. If the cache is stale (e.g., offer status changes, fallback URL updated), clicks could route incorrectly until the cache TTL expires.
-**Suggested investigation**: Verify cache invalidation on offer updates.
+**Severity**: Low (verified)
+**Status**: Offer PATCH/DELETE, geo rules, goals, access rows (grant/PATCH/delete, applications, portal requests), per-offer and network secure codes, traffic controls/blocking and copy-settings all invalidate the cached offer config; tracking-domain delete invalidates the host cache. Any NEW write path that changes an input of `loadFromDb()` must call `invalidateOfferConfig` (or `invalidateNetworkOfferConfigs` for network-wide inputs).
 
 ### 9. No Input Sanitization on Search
 **Location**: Frontend report filters
@@ -86,6 +85,9 @@ Some of the 50+ dashboard route modules have minimal implementations. As phases 
 
 ### 15. Frontend Mock Data
 `frontend/src/pages/dashboardMock.ts` contains mock data. This should be removed once real endpoints are fully populated.
+
+### 17. Stored-but-not-enforced settings (labelled in the UI)
+Saved and shown, but not acted on by the tracker yet — each page says so: Scheduled Actions (no executor), Link Templates, Coupon Codes (no coupon-based attribution), Reporting Adjustments (not applied to ledger/reports), Partner Tier margin / auto-approve, invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), SmartSwitch rules, group-level shared caps, CPC-level postbacks.
 
 ### 16. Schema Uses Serial Ref Numbers
 The `ref` column on entities (offers, publishers, advertisers, etc.) is a `serial` (auto-increment integer). This is visible to users as display IDs. Consider if this should remain sequential.

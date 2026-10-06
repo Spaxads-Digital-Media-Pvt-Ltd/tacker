@@ -15,6 +15,7 @@ import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShel
 import { Pagination } from '../../../shared-components/primitives/ReportPageKit';
 import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField, type NotifySaved } from './shared';
 import type { TrackingDomain } from '../../../types';
+import { advertiserPostbackUrl } from '../../../lib/trackingLinks';
 import { readFileAsDataUrl } from '../../../data/creatives';
 import {
   PARTNER_NOTIFS, OFFER_NOTIFS_PLATFORM, OFFER_GROUP_NOTIFS, ADVERTISER_NOTIFS,
@@ -431,9 +432,7 @@ function GlobalPostbackCard() {
   const { data: security } = useQuery<{ securityCode: string | null }>('/api/settings/security');
   const [copied, setCopied] = useState(false);
   const primary = domains?.find((d) => d.isPrimary) ?? domains?.[0];
-  const url = primary
-    ? `https://${primary.host}/postback?click_id=CLICK_ID&transaction_id=TRANSACTION_ID${security?.securityCode ? `&secure_code=${security.securityCode}` : ''}`
-    : null;
+  const url = primary ? advertiserPostbackUrl(primary.host, security?.securityCode) : null;
 
   const copy = () => {
     if (!url) return;

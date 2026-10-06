@@ -13,7 +13,8 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { pool, query } from '../../../lib/db/pool.js';
-import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
+import { rebalanceConversionLedger, writeConversionLedger } from '../../../lib/ledger/ledger.js';
+import { normalizeMoney } from '../../../lib/money.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 
@@ -29,6 +30,12 @@ const importSchema = z.object({
   type: z.enum(IMPORT_TYPES),
   rows: z.array(rowSchema).min(1).max(1000),
 });
+
+/** Decimal-validated money for one CSV cell (null when blank); throws a per-row error otherwise. */
+function moneyOrNull(v: string | undefined, field: string): string | null {
+  if (v == null || v.trim() === '') return null;
+  try { return normalizeMoney(v); } catch { throw new Error(`${field} "${v}" is not a valid amount`); }
+}
 
 function actingUserId(req: import('express').Request): string | null {
   return req.identity && req.identity.surface === 'dashboard' ? req.identity.userId : null;
@@ -78,23 +85,29 @@ export function conversionImportsRoutes(): Router {
           }
 
           const conversionId = randomUUID().replace(/-/g, '');
-          const status = (row['status'] ?? 'approved') as 'pending' | 'approved' | 'rejected';
+          const status = (row['status'] ?? 'approved').toLowerCase();
+          if (!['pending', 'approved', 'rejected'].includes(status)) throw new Error(`status must be pending, approved or rejected (got "${status}")`);
+          const payout = moneyOrNull(row['payout'], 'payout');
+          const revenue = moneyOrNull(row['revenue'], 'revenue');
+          const currency = row['currency'] ?? 'USD';
+          const txnId = row['transactionId'] ?? row['transaction_id'] ?? null;
           const client = await pool.connect();
           try {
             await client.query('BEGIN');
-            await client.query(
+            const ins = await client.query(
               `INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,
                  event_name, status, payout, revenue, currency, transaction_id, source, raw_params)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'manual','{}'::jsonb)
-               ON CONFLICT (offer_id, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING`,
+               ON CONFLICT (offer_id, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING
+               RETURNING conversion_id`,
               [conversionId, networkId, conversionId, offer.id, publisherId, offer.advertiser_id,
-                row['event'] ?? null, status, row['payout'] ?? null, row['revenue'] ?? null,
-                row['currency'] ?? 'USD', row['transactionId'] ?? row['transaction_id'] ?? null],
+                row['event'] ?? null, status, payout, revenue, currency, txnId],
             );
+            // A duplicate transaction_id is skipped — and must not write money for a row that doesn't exist.
+            if (ins.rows.length === 0) throw new Error(`transaction_id "${txnId}" already exists for this offer — skipped`);
             if (status === 'approved') {
               await writeConversionLedger(client, {
-                networkId, conversionId, publisherId, advertiserId: offer.advertiser_id,
-                payout: row['payout'] ?? null, revenue: row['revenue'] ?? null, currency: row['currency'] ?? 'USD',
+                networkId, conversionId, publisherId, advertiserId: offer.advertiser_id, payout, revenue, currency,
               });
             }
             await client.query('COMMIT');
@@ -110,16 +123,43 @@ export function conversionImportsRoutes(): Router {
             ? (row['transactionId'] ?? row['transaction_id'])
             : (row['conversionId'] ?? row['conversion_id']);
           if (!matchVal) throw new Error(`${matchCol} is required`);
-          const sets: string[] = [];
-          const params: unknown[] = [networkId, matchVal];
-          if (row['payout'] !== undefined && row['payout'] !== '') { params.push(row['payout']); sets.push(`payout = $${params.length}`); }
-          if (row['revenue'] !== undefined && row['revenue'] !== '') { params.push(row['revenue']); sets.push(`revenue = $${params.length}`); }
-          if (!sets.length) throw new Error('payout or revenue is required');
-          const { rowCount } = await query(
-            `UPDATE conversions SET ${sets.join(', ')} WHERE network_id = $1 AND ${matchCol} = $2`,
-            params,
-          );
-          if (!rowCount) throw new Error(`no conversion found for ${matchCol} "${matchVal}"`);
+          const newPayout = row['payout'] !== undefined && row['payout'] !== '' ? moneyOrNull(row['payout'], 'payout') : undefined;
+          const newRevenue = row['revenue'] !== undefined && row['revenue'] !== '' ? moneyOrNull(row['revenue'], 'revenue') : undefined;
+          if (newPayout === undefined && newRevenue === undefined) throw new Error('payout or revenue is required');
+          const client = await pool.connect();
+          try {
+            await client.query('BEGIN');
+            const { rows: matched } = await client.query<{
+              conversion_id: string; status: string; publisher_id: string | null; advertiser_id: string | null;
+              payout: string | null; revenue: string | null; currency: string | null;
+            }>(
+              `SELECT conversion_id, status, publisher_id, advertiser_id, payout, revenue, currency
+                 FROM conversions WHERE network_id = $1 AND ${matchCol} = $2 FOR UPDATE`,
+              [networkId, matchVal],
+            );
+            if (!matched.length) throw new Error(`no conversion found for ${matchCol} "${matchVal}"`);
+            for (const c of matched) {
+              const payout = newPayout !== undefined ? newPayout : c.payout;
+              const revenue = newRevenue !== undefined ? newRevenue : c.revenue;
+              await client.query(
+                `UPDATE conversions SET payout = $3, revenue = $4 WHERE network_id = $1 AND conversion_id = $2`,
+                [networkId, c.conversion_id, payout, revenue],
+              );
+              // Approved money already sits in the append-only ledger — append the difference.
+              if (c.status === 'approved') {
+                await rebalanceConversionLedger(client, {
+                  networkId, conversionId: c.conversion_id, publisherId: c.publisher_id, advertiserId: c.advertiser_id,
+                  payout, revenue, currency: c.currency ?? 'USD', reason: 'conversion_import_update',
+                });
+              }
+            }
+            await client.query('COMMIT');
+          } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+          } finally {
+            client.release();
+          }
         }
         processed++;
       } catch (err) {

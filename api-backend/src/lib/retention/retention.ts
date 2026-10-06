@@ -5,15 +5,11 @@
  * ledger, so they get a much longer default window and are pruned last; the ledger itself is NEVER
  * touched here (spec: append-only, no UPDATE/DELETE).
  *
- * `clicks`, `conversions`, and `postback_logs` are monthly RANGE-partitioned on `created_at`
- * (migration 1700000062000_partition-retention). Retention runs `DROP PARTITION` on partitions
- * fully older than the cutoff — this is O(1) on Postgres (catalog operation), generates zero
- * dead tuples, and needs no VACUUM afterwards.
- *
- * For partitions that straddle the cutoff boundary (i.e. the most recent month), we fall back to
- * the bounded ctid batch-delete path to avoid dropping rows that are still in window. The
- * `PARTITION_DEFAULT` partition holding pre-existing data is also pruned with ctid since it is
- * not month-bounded.
+ * `clicks`, `conversions`, and `postback_logs` are regular tables (they must keep global unique
+ * keys on click_id / conversion_id / (offer_id, transaction_id), which Postgres can't enforce on a
+ * table partitioned by created_at — see migration 1700000064000). Pruning uses the bounded ctid
+ * batch-delete path. The partition helpers below only act on a table that IS partitioned and are
+ * otherwise no-ops.
  *
  * Per-run safety: at most 5M rows/table on the ctid fallback (BATCH * MAX_BATCHES).
  */
@@ -101,6 +97,8 @@ async function ensureMonthlyPartitions(): Promise<void> {
 
  const months = [lastMonth, thisMonth, nextMonth, monthAfter];
  for (const table of ['clicks', 'conversions', 'postback_logs'] as const) {
+ const kind = await query<{ relkind: string }>(`SELECT relkind FROM pg_class WHERE oid = $1::regclass`, [table]);
+ if (kind.rows[0]?.relkind !== 'p') continue;
  for (const m of months) {
  const { year, month } = monthKey(m);
  const name = partitionName(table, year, month);

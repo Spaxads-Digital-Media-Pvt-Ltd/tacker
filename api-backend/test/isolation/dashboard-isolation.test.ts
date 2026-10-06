@@ -11,6 +11,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { buildDashboardApp } from '../../src/surfaces/dashboard/app.js';
 import { canConnect, resetDb, seedFixture, type Fixture } from '../helpers/db.js';
+import { query } from '../../src/lib/db/pool.js';
 import { operatorToken, portalToken, bearer } from '../helpers/tokens.js';
 
 const run = process.env.INTEGRATION_DB === '1';
@@ -53,15 +54,29 @@ d('Dashboard API isolation (live DB)', () => {
   });
 
   // --- Owner isolation (publisher X <-> publisher Y in the SAME network) ---
-  it('publisher sees only offers granted to them', async () => {
-    const a1 = await request(app).get('/api/portal/offers').set(bearer(portalToken({ userId: 'p1', networkId: fx.networkA, kind: 'publisher', ownerId: fx.pubA1 })));
-    expect(a1.status).toBe(200);
-    expect(a1.body.data.map((o: { id: string }) => o.id)).toContain(fx.offerA);
+  it('publisher sees a PRIVATE offer only when granted to them', async () => {
+    // Private = visible only to approved partners (a public offer is, by design, visible to every
+    // partner of the network — see the next test).
+    await query(`UPDATE offers SET visibility = 'private' WHERE id = $1`, [fx.offerA]);
+    try {
+      const a1 = await request(app).get('/api/portal/offers').set(bearer(portalToken({ userId: 'p1', networkId: fx.networkA, kind: 'publisher', ownerId: fx.pubA1 })));
+      expect(a1.status).toBe(200);
+      expect(a1.body.data.map((o: { id: string }) => o.id)).toContain(fx.offerA);
 
-    // pubA2 has NO access grant → must NOT see offerA.
+      // pubA2 has NO access grant → must NOT see the private offerA.
+      const a2 = await request(app).get('/api/portal/offers').set(bearer(portalToken({ userId: 'p2', networkId: fx.networkA, kind: 'publisher', ownerId: fx.pubA2 })));
+      expect(a2.status).toBe(200);
+      expect(a2.body.data.map((o: { id: string }) => o.id)).not.toContain(fx.offerA);
+    } finally {
+      await query(`UPDATE offers SET visibility = 'public' WHERE id = $1`, [fx.offerA]);
+    }
+  });
+
+  it('a PUBLIC offer is listed for every partner of the network, and never for another network', async () => {
     const a2 = await request(app).get('/api/portal/offers').set(bearer(portalToken({ userId: 'p2', networkId: fx.networkA, kind: 'publisher', ownerId: fx.pubA2 })));
-    expect(a2.status).toBe(200);
-    expect(a2.body.data.map((o: { id: string }) => o.id)).not.toContain(fx.offerA);
+    expect(a2.body.data.map((o: { id: string }) => o.id)).toContain(fx.offerA);
+    const b1 = await request(app).get('/api/portal/offers').set(bearer(portalToken({ userId: 'pb', networkId: fx.networkB, kind: 'publisher', ownerId: fx.pubB1 })));
+    expect(b1.body.data.map((o: { id: string }) => o.id)).not.toContain(fx.offerA);
   });
 
   it('publisher offer DTO never exposes revenue/margin (only payout)', async () => {

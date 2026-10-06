@@ -72,14 +72,17 @@ async function setLabels(db: ReturnType<typeof dbForRequest>, tierId: string, la
 }
 
 /** Replace a tier's partner membership with exactly `partnerIds` (all must belong to this network). */
+async function assertPartnersInNetwork(networkId: string, partnerIds: string[]): Promise<void> {
+  if (partnerIds.length === 0) return;
+  const { rows } = await query<{ id: string }>(
+    `SELECT id FROM publishers WHERE network_id = $1 AND id = ANY($2::uuid[])`,
+    [networkId, partnerIds],
+  );
+  if (rows.length !== new Set(partnerIds).size) throw badRequest('One or more partnerIds do not belong to this network');
+}
+
 async function setMembers(db: ReturnType<typeof dbForRequest>, networkId: string, tierId: string, partnerIds: string[]): Promise<void> {
-  if (partnerIds.length > 0) {
-    const { rows } = await query<{ id: string }>(
-      `SELECT id FROM publishers WHERE network_id = $1 AND id = ANY($2::uuid[])`,
-      [networkId, partnerIds],
-    );
-    if (rows.length !== new Set(partnerIds).size) throw badRequest('One or more partnerIds do not belong to this network');
-  }
+  await assertPartnersInNetwork(networkId, partnerIds);
   await db.delete('partner_tier_members', { tier_id: tierId });
   for (const publisherId of partnerIds) {
     await db.insert('partner_tier_members', { tier_id: tierId, publisher_id: publisherId });
@@ -127,6 +130,8 @@ export function partnerTiersRoutes(): Router {
   r.post('/', requireRole('admin', 'manager'), validateBody(createSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof createSchema>;
+    // Validate members BEFORE creating the tier, so a bad partner id can't leave an orphan tier.
+    await assertPartnersInNetwork(req.scope!.networkId, b.partnerIds);
     const row = await db.insert<Row>(TABLE, {
       name: b.name, status: b.status, description: b.description ?? null, margin_pct: b.marginPct,
     });

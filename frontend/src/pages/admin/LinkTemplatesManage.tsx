@@ -14,6 +14,7 @@ import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } 
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { LinkTemplate, Advertiser } from '../../types';
+import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedNote';
 
 const ALL_COLUMNS = ['ID', 'Name', 'Advertiser', 'Destination URL', 'Created', 'Modified'] as const;
 
@@ -119,6 +120,7 @@ export default function LinkTemplatesManage() {
   return (
     <>
       <PageHeader title="Manage Link Templates" subtitle="Advertisers › Link Templates › Manage" />
+      <NotEnforcedNote>Link templates are saved for reference only — offer tracking links and landing pages don't use them yet.</NotEnforcedNote>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <Link to="/app/adv-link-templates/new" className="btn-primary">+ Link Template</Link>

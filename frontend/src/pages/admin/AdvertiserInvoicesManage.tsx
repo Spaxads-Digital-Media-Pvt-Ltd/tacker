@@ -6,6 +6,7 @@
  * billedAmount is computed once at creation from the real ledger (see advertiser-invoices/routes.ts).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatDateOnly } from '../../lib/dateOnly';
 
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, Pencil, CreditCard, Trash2, Clock } from 'lucide-react';
@@ -220,8 +221,8 @@ export default function AdvertiserInvoicesManage() {
     Status: { header: 'Status', cell: (i) => <span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${STATUS_DOT[i.status]}`} />{STATUS_LABEL[i.status]}</span> },
     Visibility: { header: 'Visibility', cell: (i) => (i.visibleToAdvertiser ? 'YES' : <span className="text-danger-text">NO</span>) },
     'Payment Terms': { header: 'Payment Terms', cell: (i) => i.paymentTerms ?? <span className="text-fg-muted">-</span> },
-    'Start Date': { header: 'Start Date', cell: (i) => new Date(i.periodStart).toLocaleDateString() },
-    'End Date': { header: 'End Date', cell: (i) => new Date(i.periodEnd).toLocaleDateString() },
+    'Start Date': { header: 'Start Date', cell: (i) => formatDateOnly(i.periodStart) },
+    'End Date': { header: 'End Date', cell: (i) => formatDateOnly(i.periodEnd) },
     Billed: { header: 'Billed', className: 'text-right', cell: (i) => money(i.billedAmount, i.currency) },
     Paid: { header: 'Paid', className: 'text-right', cell: (i) => money(i.paidAmount, i.currency) },
     Balance: { header: 'Balance', className: 'text-right', cell: (i) => <span className="font-semibold">{money(i.balance, i.currency)}</span> },
@@ -247,9 +248,10 @@ export default function AdvertiserInvoicesManage() {
         </button>
         {summaryOpen && (
           <div className="grid grid-cols-3 gap-4 border-t border-border px-4 py-4">
-            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.billedAmount) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Paid Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.paidAmount) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Balance</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.balance) : '—'}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.billedAmount, summary.currency) : '—'}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Paid Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.paidAmount, summary.currency) : '—'}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Balance</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.balance, summary.currency) : '—'}</p></div>
+            {summary && summary.otherCurrencies.length > 0 && <p className="col-span-3 text-tiny text-fg-muted">Totals are in {summary.currency}; invoices in {summary.otherCurrencies.join(', ')} are not included.</p>}
           </div>
         )}
       </div>

@@ -14,7 +14,7 @@ import type { Offer, Publisher, Advertiser, TrackingDomain } from '../../types';
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => ReactNode): Column<Row> => ({ header, cell });
 
-const TABS = ['General', 'Creatives', 'Offer Applications', 'Custom Settings', 'Forwarding Rules', 'Scheduled Actions', 'Postbacks', 'History', 'Coupons & Deals', 'Tags'] as const;
+const TABS = ['General', 'Goals', 'Creatives', 'Offer Applications', 'Custom Settings', 'Forwarding Rules', 'Scheduled Actions', 'Postbacks', 'History', 'Coupons & Deals', 'Tags'] as const;
 
 export default function OfferDetail() {
   const { id = '' } = useParams();
@@ -62,6 +62,38 @@ export default function OfferDetail() {
 
       {tab === 'General' && <GeneralTab offer={offer} advName={advName} domains={domains ?? []} base={base} onSaved={refetch} />}
 
+      {tab === 'Goals' && (
+        <div className="space-y-3">
+          <p className="text-small text-fg-secondary">
+            A postback's <span className="font-mono">event</span> picks the goal with that event name and its payout/revenue. Without a match
+            the default goal applies — but a partner's or country's own rate frozen on the click still wins over the default goal.
+            Goal caps reject conversions beyond the cap (UTC day for daily caps).
+          </p>
+          <CollectionTab basePath={`${base}/goals`} addLabel="Add goal" editable emptyText="No goals — every conversion uses the offer's own payout and revenue."
+            fields={[
+              { key: 'name', label: 'Name', required: true },
+              { key: 'eventName', label: 'Event name (matches the postback event)', placeholder: 'e.g. purchase' },
+              { key: 'payoutModel', label: 'Payout model', type: 'select', options: ['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'], default: 'CPA' },
+              { key: 'payout', label: 'Payout', type: 'money', default: '0' },
+              { key: 'revenue', label: 'Revenue', type: 'money', default: '0' },
+              { key: 'currency', label: 'Currency', default: offer.currency },
+              { key: 'dailyConversionCap', label: 'Daily conversion cap', type: 'number', placeholder: 'Unlimited' },
+              { key: 'totalConversionCap', label: 'Total conversion cap', type: 'number', placeholder: 'Unlimited' },
+              { key: 'isDefault', label: 'Default goal', type: 'checkbox' },
+              { key: 'status', label: 'Status', type: 'select', options: ['active', 'paused'], default: 'active' },
+            ] as FieldDef[]}
+            columns={[
+              col('Name', (r) => String(r.name)),
+              col('Event', (r) => (r.eventName ? <span className="font-mono text-tiny">{String(r.eventName)}</span> : '—')),
+              col('Payout', (r) => `${r.currency ?? offer.currency} ${r.payout ?? '0'}`),
+              col('Revenue', (r) => `${r.currency ?? offer.currency} ${r.revenue ?? '0'}`),
+              col('Caps', (r) => [r.dailyConversionCap ? `${r.dailyConversionCap}/day` : null, r.totalConversionCap ? `${r.totalConversionCap} total` : null].filter(Boolean).join(' · ') || '—'),
+              col('Default', (r) => (r.isDefault ? 'Yes' : '')),
+              col('Status', (r) => String(r.status)),
+            ]} />
+        </div>
+      )}
+
       {tab === 'Creatives' && (
         <CollectionTab basePath={`${base}/creatives`} addLabel="Creative" editable emptyText="No creatives."
           fields={[
@@ -77,12 +109,13 @@ export default function OfferDetail() {
 
       {tab === 'Offer Applications' && (
         <div className="space-y-6">
-          <CollectionTab basePath={`${base}/publishers`} addLabel="Grant access" emptyText="No affiliate access rules."
+          <p className="text-small text-fg-secondary">A partner's payout override replaces the offer payout (and any country rate) for every click that partner sends. Granting access to a partner who already requested it approves that request.</p>
+          <CollectionTab basePath={`${base}/publishers`} addLabel="Grant access" editable emptyText="No affiliate access rules."
             fields={[
               { key: 'publisherId', label: 'Affiliate', type: 'select', options: pubOptions, required: true },
               { key: 'access', label: 'Access', type: 'select', options: ['allow', 'deny'], default: 'allow' },
               { key: 'approvalStatus', label: 'Approval', type: 'select', options: ['approved', 'pending', 'rejected'], default: 'approved' },
-              { key: 'payoutOverride', label: 'Payout override', type: 'money' },
+              { key: 'payoutOverride', label: 'Payout override', type: 'money', placeholder: 'Offer payout' },
             ] as FieldDef[]}
             columns={[col('Affiliate', (r) => pubName(r.publisherId)), col('Access', (r) => String(r.access)), col('Approval', (r) => String(r.approvalStatus)), col('Payout override', (r) => String(r.payoutOverride ?? '—'))]} />
           <BlockedAffiliates base={base} pubName={pubName} />

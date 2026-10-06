@@ -7,9 +7,10 @@ import { Router } from 'express';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { paginationSchema, type PaginationQuery } from '../../../lib/http/pagination.js';
-import { notFound, badRequest } from '../../../lib/http/errors.js';
+import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
+import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
+import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { getSupabaseAdmin } from '../../../lib/supabase.js';
@@ -46,10 +47,11 @@ export function advertisersAdminRoutes(): Router {
     '/',
     validateQuery(paginationSchema),
     asyncHandler(async (req, res) => {
-      const { limit, offset } = res.locals.query as PaginationQuery;
+      const { offset } = res.locals.query as PaginationQuery;
+      const limit = entityListLimit(req.query, res.locals.query as PaginationQuery);
       const db = dbForRequest(req);
       const [rows, total] = await Promise.all([
-        db.selectMany<AdvertiserRow>(TABLE, { limit, offset, orderBy: 'created_at' }),
+        db.selectMany<AdvertiserRow>(TABLE, { limit, offset, orderBy: 'created_at', maxLimit: ENTITY_LIST_CAP }),
         db.count(TABLE),
       ]);
       sendOk(res, rows.map(toAdminDTO), { limit, offset, total });
@@ -116,6 +118,8 @@ export function advertisersAdminRoutes(): Router {
     validateBody(createAdvertiserSchema),
     asyncHandler(async (req, res) => {
       const b = req.body as import('./schemas.js').CreateAdvertiser;
+      await assertSameNetwork(req.scope!.networkId, 'users', b.accountManagerId, 'accountManagerId');
+      await assertSameNetwork(req.scope!.networkId, 'users', b.salesManagerId, 'salesManagerId');
       const row = await dbForRequest(req).insert<AdvertiserRow>(TABLE, {
         name: b.name,
         status: b.status,
@@ -144,6 +148,8 @@ export function advertisersAdminRoutes(): Router {
       if (!before) throw notFound('Advertiser not found');
 
       const b = req.body as import('./schemas.js').UpdateAdvertiser;
+      await assertSameNetwork(db.scope.networkId, 'users', b.accountManagerId, 'accountManagerId');
+      await assertSameNetwork(db.scope.networkId, 'users', b.salesManagerId, 'salesManagerId');
       const patch: Record<string, unknown> = {};
       if (b.name !== undefined) patch['name'] = b.name;
       if (b.status !== undefined) patch['status'] = b.status;
@@ -170,6 +176,14 @@ export function advertisersAdminRoutes(): Router {
       const db = dbForRequest(req);
       const before = await db.selectOne<AdvertiserRow>(TABLE, { id: req.params.id });
       if (!before) throw notFound('Advertiser not found');
+      // Offers block the delete (FK RESTRICT), and invoices would be silently cascade-deleted —
+      // refuse with a clear reason instead. Set the advertiser inactive to retire it.
+      const [offers, invoices] = await Promise.all([
+        db.count('offers', { advertiser_id: req.params.id }),
+        db.count('advertiser_invoices', { advertiser_id: req.params.id }),
+      ]);
+      if (offers > 0) throw conflict(`This advertiser still has ${offers} offer(s). Move or delete them first, or set the advertiser to inactive.`);
+      if (invoices > 0) throw conflict(`This advertiser has ${invoices} invoice(s), which are financial records. Set the advertiser to inactive instead of deleting it.`);
       await db.delete(TABLE, { id: req.params.id });
       await writeAudit(req, { action: 'advertiser.delete', entityType: 'advertiser', entityId: req.params.id, before });
       sendOk(res, { deleted: true });

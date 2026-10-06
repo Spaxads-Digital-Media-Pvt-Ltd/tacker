@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { groupTrackingDomains, resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
+import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
 import { CopyBox } from '../../shared-components/panels/CopyBox';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
@@ -49,6 +49,7 @@ export default function OfferCreate() {
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: offerGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
+  const { data: networkSecurity } = useQuery<{ securityCode: string | null }>('/api/settings/security');
   // Distinct category values already in use — the offers.category column is free text (no reference
   // table), so this is the honest source for autocomplete suggestions, same list the Offers filter
   // drawer builds.
@@ -146,23 +147,27 @@ export default function OfferCreate() {
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
     const res = await run(body);
     if (!res) return;
+    // The offer exists from here on. Follow-up steps are best-effort: a failure is reported but must
+    // not strand the user on the wizard (re-submitting would create a duplicate offer).
+    const problems: string[] = [];
     // Offer-group membership lives on the group (offer_groups.offer_ids), not the offer create
     // payload — so, like OfferEdit, add the new offer to the chosen group as a follow-up PATCH.
     if (assignGroup && groupId) {
       const group = (offerGroups ?? []).find((g) => g.id === groupId);
       if (group && !group.offerIds.includes(res.id)) {
-        await api.patch(`/api/offer-groups/${groupId}`, { offerIds: [...group.offerIds, res.id] });
+        try { await api.patch(`/api/offer-groups/${groupId}`, { offerIds: [...group.offerIds, res.id] }); }
+        catch { problems.push(`offer group "${group.name}"`); }
       }
     }
     // Labels: real tag assignment (POST {name} → find-or-create) once the offer id exists.
     for (const name of labels) {
-      await api.post(`/api/offers/${res.id}/tags`, { name });
+      try { await api.post(`/api/offers/${res.id}/tags`, { name }); } catch { problems.push(`label "${name}"`); }
     }
-    // A dropped/browsed thumbnail file needs the offer id, so it uploads now. A failed upload
-    // doesn't lose the offer — it can be re-uploaded from Edit.
+    // A dropped/browsed thumbnail file needs the offer id, so it uploads now.
     if (pendingThumb) {
-      await api.upload(`/api/offers/${res.id}/thumbnail`, pendingThumb).catch(() => undefined);
+      try { await api.upload(`/api/offers/${res.id}/thumbnail`, pendingThumb); } catch { problems.push('thumbnail'); }
     }
+    if (problems.length) window.alert(`Offer created, but these could not be saved: ${problems.join(', ')}. You can set them from Edit Offer.`);
     nav(`/app/offers/${res.id}`);
   };
 
@@ -173,6 +178,7 @@ export default function OfferCreate() {
   };
 
   const trackHost = resolveTrackingHost(domains, form.trackingDomainId);
+  const currentDomainId: string | null | undefined = null;
   const domainGroups = groupTrackingDomains(domains);
 
   return (
@@ -287,12 +293,12 @@ export default function OfferCreate() {
                   <option value="" disabled>Select Tracking Domain…</option>
                   {domainGroups.production.length > 0 && (
                     <optgroup label="Production">
-                      {domainGroups.production.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                      {domainGroups.production.map((d) => <option key={d.id} value={d.id} disabled={(d.status !== 'active' || d.verificationState !== 'verified') && d.id !== currentDomainId}>{d.host}{d.status !== 'active' ? ` (${d.status})` : d.verificationState !== 'verified' ? ' (not verified)' : ''}</option>)}
                     </optgroup>
                   )}
                   {domainGroups.devOnly.length > 0 && (
                     <optgroup label="Local Testing">
-                      {domainGroups.devOnly.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                      {domainGroups.devOnly.map((d) => <option key={d.id} value={d.id} disabled={(d.status !== 'active' || d.verificationState !== 'verified') && d.id !== currentDomainId}>{d.host}{d.status !== 'active' ? ` (${d.status})` : d.verificationState !== 'verified' ? ' (not verified)' : ''}</option>)}
                     </optgroup>
                   )}
                 </select>
@@ -332,16 +338,16 @@ export default function OfferCreate() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <label className="label block">S2S Postback URL</label>
-                <CopyBox value={trackHost ? `${trackingBase(trackHost)}/postback?click_id={click_id}&txn_id={txn_id}&secure_code={secure_code}` : ''} placeholder="No active tracking domain — add one first." />
-                <p className="text-tiny text-fg-secondary">Advertiser fires this on conversion. Macros in {`{braces}`} are filled at conversion time.</p>
+                <CopyBox value={advertiserPostbackUrl(trackHost, networkSecurity?.securityCode)} placeholder="No active tracking domain — add one first." />
+                <p className="text-tiny text-fg-secondary">The advertiser replaces {`{click_id}`} and {`{txn_id}`} with their own values. The network secure code is already filled in; generate a per-offer code from the offer page after creating it.</p>
               </div>
               <div>
-                <p className="label mb-2 block">Available Macros</p>
+                <p className="label mb-2 block">Postback Parameters</p>
                 <table className="premium-table w-full">
-                  <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Macro</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Description</th></tr></thead>
+                  <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Parameter</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Meaning</th></tr></thead>
                   <tbody>
-                    {[['{click_id}', 'The unique click identifier generated on each redirect'], ['{txn_id}', 'Your order/revenue transaction ID (passes through unchanged)'], ['{secure_code}', 'Per-offer security code — validates the postback is genuine'], ['{event}', 'Conversion event name (if multiple goals exist)'], ['{payout}', 'Resolved publisher payout amount'], ['{revenue}', 'Resolved advertiser revenue amount'], ['{currency}', 'Offer currency (e.g. USD)'], ['{sub1}–{sub5}', 'Sub-ID values carried from the click']].map(([m, d]) => (
-                      <tr key={String(m)}><td className="py-1 font-mono text-tiny text-accent-text">{m}</td><td className="py-1 text-small text-fg-secondary">{d}</td></tr>
+                    {POSTBACK_PARAMS.map(([m, d]) => (
+                      <tr key={m}><td className="py-1 font-mono text-tiny text-accent-text">{m}</td><td className="py-1 text-small text-fg-secondary">{d}</td></tr>
                     ))}
                   </tbody>
                 </table>

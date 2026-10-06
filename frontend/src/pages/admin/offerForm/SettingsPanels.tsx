@@ -139,7 +139,7 @@ export function RevenueSettingsPanel({ value, onChange, firePartnerPostback, onF
           </label>
           <label className="flex items-start gap-2 text-small text-fg">
             <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={value.manualApproval} onChange={(e) => set('manualApproval', e.target.checked)} />
-            <span><strong>Manually Approve Conversions</strong> — conversions that would auto-approve are held as Pending for review.</span>
+            <span><strong>Manually Approve Conversions</strong> — conversions that would auto-approve are held as Pending (no payout, no partner postback) until approved in Reporting › Conversion.</span>
           </label>
           <label className="flex items-start gap-2 text-small text-fg">
             <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={value.allowDuplicates} onChange={(e) => set('allowDuplicates', e.target.checked)} />
@@ -166,7 +166,7 @@ export function RevenueSettingsPanel({ value, onChange, firePartnerPostback, onF
             </Field>
           )}
           {pct && (
-            <Field label="Revenue Percentage *" hint="Share of the sale amount the advertiser reports as sale_amount (or amount) on the postback.">
+            <Field label="Revenue Percentage *" hint="Share of the sale amount the advertiser reports as sale_amount (or order_amount) on the postback.">
               <div className="flex items-center gap-1.5">
                 <input type="number" min={0} max={100} step="0.01" className="input !w-32" value={value.revenuePct ?? ''}
                   onChange={(e) => set('revenuePct', e.target.value === '' ? null : Number(e.target.value))} />
