@@ -37,7 +37,7 @@ function buildCorsMiddleware(origin: string | string[]): express.RequestHandler 
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Api-Key, Idempotency-Key');
     }
     if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
     next();

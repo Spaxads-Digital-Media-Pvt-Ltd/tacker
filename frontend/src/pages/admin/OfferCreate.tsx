@@ -13,6 +13,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
@@ -110,17 +111,32 @@ export default function OfferCreate() {
   const [email, setEmail] = useState(DEFAULT_EMAIL);
   const [pendingThumb, setPendingThumb] = useState<File | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
-  const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.post<{ id: string }>('/api/offers', body));
+  // One Idempotency-Key per form session, reused on every attempt: if a create went through but the
+  // response was lost (timeout, retry, double submit), the server returns that same offer instead
+  // of inserting another. A failed create frees the key server-side, so retrying it is fine.
+  const [idempotencyKey] = useState(() => (typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID() // secure contexts (https / localhost)
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('')));
+  const { run, busy, error } = useMutation((body: Record<string, unknown>) =>
+    api.post<{ id: string }>('/api/offers', body, { 'Idempotency-Key': idempotencyKey }));
 
-  const submit = async (e: FormEvent) => {
+  // One lock for the whole create flow (POST + group/labels/thumbnail follow-ups). `busy` alone
+  // dropped as soon as the POST returned, so a click during the thumbnail upload created a duplicate.
+  const { pending: submitting, guard } = useSubmitGuard();
+  const submit = (e: FormEvent) => {
     e.preventDefault();
+    void guard(createOffer);
+  };
+
+  /** Resolves true once the offer exists and we're navigating to it (keeps the button locked). */
+  const createOffer = async (): Promise<boolean> => {
     const tErrors = targetingErrors(targeting);
     const sErrors = settingsErrors(attribution, revenue, email);
     if (failTrafficEnabled && !form.fallbackUrl.trim()) sErrors.push('Fail Traffic: enter a Fallback URL or turn Fail Traffic off.');
     if (tErrors.length || sErrors.length) {
       setFormErrors([...tErrors.map((m) => `Targeting: ${m}`), ...sErrors]);
       if (tErrors.length) setStep(TARGETING_STEP);
-      return;
+      return false;
     }
     setFormErrors([]);
     const normalizeUrl = (v: string) => (v && !/^https?:\/\//i.test(v) ? 'https://' + v : v);
@@ -152,7 +168,7 @@ export default function OfferCreate() {
     if (form.attributionWindowS) body.attributionWindowS = Number(form.attributionWindowS);
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
     const res = await run(body);
-    if (!res) return;
+    if (!res) return false;
     // The offer exists from here on. Follow-up steps are best-effort: a failure is reported but must
     // not strand the user on the wizard (re-submitting would create a duplicate offer).
     const problems: string[] = [];
@@ -175,10 +191,12 @@ export default function OfferCreate() {
     }
     if (problems.length) await confirm({ title: 'Offer created with warnings', message: `Offer created, but these could not be saved: ${problems.join(', ')}. You can set them from Edit Offer.`, cancelLabel: null });
     nav(`/app/offers/${res.id}`);
+    return true;
   };
 
   const next = (e: FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (step < STEPS.length - 1) setStep(step + 1);
     else submit(e);
   };
@@ -430,7 +448,7 @@ export default function OfferCreate() {
           <button type="button" className="text-small font-medium text-fg-muted hover:text-fg-secondary" onClick={() => nav('/app/offers')}>Cancel</button>
           <div className="flex gap-2">
             {step > 0 && <button type="button" className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button>}
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Creating…' : step === STEPS.length - 1 ? 'Create Offer' : 'Next'}</button>
+            <button type="submit" className="btn-primary" disabled={busy || submitting} aria-busy={busy || submitting}>{busy || submitting ? 'Creating…' : step === STEPS.length - 1 ? 'Create Offer' : 'Next'}</button>
           </div>
         </div>
       </form>

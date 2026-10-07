@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import { Image as ImageIcon } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { Table, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
+import { OfferThumbnail } from '../../../shared-components/primitives/OfferThumbnail';
 import type { Offer } from '../../../types';
 
 /** Real data — offers that belong to this advertiser. "+ Offer" opens the regular Add Offer flow
@@ -12,7 +12,7 @@ export function OffersTab({ advertiserId }: { advertiserId: string }) {
   const createHref = `/app/offers/new?advertiserId=${encodeURIComponent(advertiserId)}`;
 
   const columns: Column<Offer>[] = [
-    { header: 'Thumbnail', cell: () => <div className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-page text-fg-muted"><ImageIcon size={15} /></div> },
+    { header: 'Thumbnail', cell: (o) => <OfferThumbnail url={o.thumbnailUrl} name={o.name} /> },
     { header: 'Name', cell: (o) => <Link to={`/app/offers/${o.id}`} className="font-medium text-accent-text hover:underline">{o.name}</Link> },
     { header: 'Visibility', cell: (o) => <span className="capitalize text-fg-secondary">{o.visibility ?? 'public'}</span> },
     { header: 'Category', cell: (o) => o.category ?? '—' },

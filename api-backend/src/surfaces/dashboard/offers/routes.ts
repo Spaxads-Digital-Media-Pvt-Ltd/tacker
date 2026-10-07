@@ -16,6 +16,7 @@ import { badRequest, notFound, forbidden } from '../../../lib/http/errors.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { idempotentCreate } from '../../../lib/http/idempotency.js';
 import type {
  OfferRow,
  OfferGeoRuleRow,
@@ -201,6 +202,9 @@ export function offersAdminRoutes(): Router {
  asyncHandler(async (req, res) => {
  const b = req.body as CreateOffer;
  const db = dbForRequest(req);
+ // Optional Idempotency-Key: a repeat of the same create (retry, resubmit, second tab) returns
+ // the original offer instead of inserting another. Without the header nothing changes.
+ const { result: row, replayed } = await idempotentCreate(req, 'offers:create', async () => {
  // Tenant integrity: advertiser must belong to this network.
  const adv = await db.selectOne<AdvertiserRow>('advertisers', { id: b.advertiserId });
  if (!adv) throw badRequest('advertiserId does not belong to this network');
@@ -211,7 +215,7 @@ export function offersAdminRoutes(): Router {
  if (dom.status !== 'active' || dom.verification_state !== 'verified') throw badRequest(`Tracking domain ${dom.host} is not active and verified yet, so links on it would not work.`);
  }
 
- const row = await db.insert<OfferRow>(OFFERS, {
+ const created = await db.insert<OfferRow>(OFFERS, {
  advertiser_id: b.advertiserId,
  name: b.name,
  status: b.status,
@@ -237,7 +241,10 @@ export function offersAdminRoutes(): Router {
    return metadata ? { metadata } : {};
  })(),
  });
- await writeAudit(req, { action: 'offer.create', entityType: 'offer', entityId: row.id, after: row });
+ await writeAudit(req, { action: 'offer.create', entityType: 'offer', entityId: created.id, after: created });
+ return created;
+ }, (id) => db.selectOne<OfferRow>(OFFERS, { id }));
+ if (replayed) res.setHeader('Idempotent-Replayed', 'true');
  sendOk(res, toAdminDTO(row), undefined, 201);
  }),
  );

@@ -172,6 +172,7 @@ A partner explicitly denied is diverted. Private and Request-access (`ask`) offe
 - `POST /api/finance/conversions/:conversionId/reject` — status + offsetting ledger entries in one transaction (net per account → 0). Admin/finance.
 
 ### Offer access (dashboard)
+- `POST /api/offers` accepts an optional `Idempotency-Key` header (1–200 visible ASCII chars, kept 10 min per network in Redis). A repeat with the same key returns the original offer (`201`, `Idempotent-Replayed: true`) instead of creating another; a concurrent repeat gets `409`; the same key with a different body gets `422`; a failed create frees the key for retry. Without the header, behaviour is unchanged.
 - `POST /api/offers/:id/publishers` — grant access (upsert on the partner's existing row)
 - `PATCH /api/offers/:id/publishers/:accessId` — change access / approval / payout override
 - `GET /api/offers/:id/postbacks?level=conversion|event|cpc` — filtered offer postbacks
