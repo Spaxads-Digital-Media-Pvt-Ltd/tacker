@@ -61,7 +61,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       const err = body.error ?? { code: 'unknown', message: res.statusText };
       throw new ApiError(err.code, err.message, res.status, err.details);
     }
-    return body.data as T;
+    const data = body.data as T;
+    // Keep server pagination (limit/offset/total) reachable on list responses without changing
+    // their shape: non-enumerable, so spreads / JSON / .map() never see it.
+    const pagination = (body as { pagination?: unknown }).pagination;
+    if (pagination && Array.isArray(data)) Object.defineProperty(data, 'pagination', { value: pagination, enumerable: false });
+    return data;
   } catch (e) {
     if (e instanceof ApiError) throw e;
     if (e instanceof NetworkError) throw e;

@@ -218,21 +218,22 @@ export default function PublisherEdit() {
     });
   }, [publisher]);
 
+  if (error) return <StateBlock>{error}</StateBlock>;
   if (loading || !form) return <StateBlock><Spinner /></StateBlock>;
-  if (error || !publisher) return <StateBlock>{error ?? 'Partner not found'}</StateBlock>;
+  if (!publisher) return <StateBlock>Partner not found</StateBlock>;
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const body: Record<string, unknown> = {
-      name: form.name, status: form.status, contactEmail: form.contactEmail, payoutTerms: form.payoutTerms,
+      name: form.name, status: form.status, contactEmail: form.contactEmail.trim() || null, payoutTerms: form.payoutTerms.trim() || null,
       country: form.country || null, paymentMethod: form.paymentMethod || null, billingFrequency: form.billingFrequency || null,
       tier: form.tier || null, partnerManagerId: form.partnerManagerId || null, accountExecutiveId: form.accountExecutiveId || null,
       referredById: form.referredById || null,
       contactName: form.contactName || null, taxId: form.taxId || null, website: form.website || null, notes: form.notes || null,
     };
-    if (form.trafficSource) body.trafficSource = form.trafficSource;
+    body.trafficSource = form.trafficSource || null; // empty clears it
     if (form.defaultAttributionWindowS) body.defaultAttributionWindowS = Number(form.defaultAttributionWindowS);
     if (await run(body)) nav(`/app/publishers/${id}`);
   };
@@ -261,7 +262,7 @@ export default function PublisherEdit() {
               <Field label="Traffic Source"><input className="input" value={form.trafficSource} onChange={(e) => set('trafficSource', e.target.value)} placeholder="Social, Display, SEO…" /></Field>
               <Field label="Website"><input className="input" value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="https://…" /></Field>
             </div>
-            <Field label="Default Attribution Window (seconds)"><input type="number" min={0} className="input" value={form.defaultAttributionWindowS} onChange={(e) => set('defaultAttributionWindowS', e.target.value)} placeholder="2592000" /></Field>
+            <Field label="Default Attribution Window (seconds)" hint="Saved for reference — the attribution window that applies is the offer's own."><input type="number" min={0} className="input" value={form.defaultAttributionWindowS} onChange={(e) => set('defaultAttributionWindowS', e.target.value)} placeholder="2592000" /></Field>
             <Field label="Payout Terms *"><textarea className="input min-h-[80px]" required value={form.payoutTerms} onChange={(e) => set('payoutTerms', e.target.value)} /></Field>
             <GeneralExtras base={base} publisherId={id} form={form} set={set} users={users ?? []} publishers={publishers ?? []} />
           </div>

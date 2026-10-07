@@ -5,12 +5,13 @@
  * advertiser postbacks upstream are already deduped by recordConversion, so this only fires once
  * per approved conversion.
  */
-import { Worker, type ConnectionOptions } from 'bullmq';
+import { Worker, UnrecoverableError, type ConnectionOptions } from 'bullmq';
 import { makeQueueConnection } from '../../../lib/redis.js';
 import { query } from '../../../lib/db/pool.js';
 import { surfaceLogger } from '../../../lib/logger.js';
 import { substituteMacros } from '../../tracking/macros.js';
 import { postbackDeliveries } from '../../../lib/metrics.js';
+import { BlockedDestinationError, safeRequest } from '../../../lib/net/safe-http.js';
 import { QUEUE } from '../queues.js';
 import type { OutboundPostbackJob } from '../../tracking/conversions/enqueue-postback.js';
 
@@ -21,13 +22,21 @@ interface PostbackRow {
   id: string; url: string; method: 'GET' | 'POST';
 }
 
+/**
+ * Best-matching fire-able postback: Specific (partner + offer) beats the partner's Global postback,
+ * which beats the offer's Global (Offer) postback; an event-specific row beats a catch-all. HTML
+ * pixels (browser-side) and CPC-level rows aren't fired on a conversion.
+ */
 async function fire(job: OutboundPostbackJob, attempt: number): Promise<void> {
   const { rows } = await query<PostbackRow>(
     `SELECT id, url, method FROM publisher_postbacks
-      WHERE network_id = $1 AND publisher_id = $2 AND status = 'active'
+      WHERE network_id = $1 AND status = 'active'
+        AND (publisher_id = $2 OR (publisher_id IS NULL AND offer_id = $3))
         AND (offer_id = $3 OR offer_id IS NULL)
         AND (event = $4 OR event IS NULL)
-      ORDER BY (offer_id IS NOT NULL) DESC, (event IS NOT NULL) DESC
+        AND delivery_method <> 'html' AND level <> 'cpc' AND url IS NOT NULL
+      ORDER BY (publisher_id IS NOT NULL AND offer_id IS NOT NULL) DESC, (publisher_id IS NOT NULL) DESC,
+               (event IS NOT NULL) DESC
       LIMIT 1`,
     [job.networkId, job.publisherId, job.offerId, job.event],
   );
@@ -47,12 +56,11 @@ async function fire(job: OutboundPostbackJob, attempt: number): Promise<void> {
   };
   const url = substituteMacros(cfg.url, macros);
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await safeRequest(url, {
       method: cfg.method,
-      signal: ctrl.signal,
+      timeoutMs: TIMEOUT_MS,
+      maxBodyBytes: 0,
       ...(cfg.method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(macros) } : {}),
     });
     const success = res.status >= 200 && res.status < 300;
@@ -60,10 +68,12 @@ async function fire(job: OutboundPostbackJob, attempt: number): Promise<void> {
     if (!success) throw new Error(`postback http ${res.status}`);
   } catch (err) {
     if ((err as Error).message?.startsWith('postback http')) throw err; // already logged
+    if (err instanceof BlockedDestinationError) {
+      await logDelivery(job, url, attempt, null, false, err.message);
+      throw new UnrecoverableError(err.message); // retrying a blocked address can never succeed
+    }
     await logDelivery(job, url, attempt, null, false, (err as Error).name === 'AbortError' ? 'timeout' : String((err as Error).message));
     throw err;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

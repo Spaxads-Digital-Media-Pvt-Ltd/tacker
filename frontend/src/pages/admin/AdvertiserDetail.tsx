@@ -44,10 +44,10 @@ export default function AdvertiserDetail() {
       <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
 
       {tab === 'General' && <GeneralTab adv={adv} base={base} />}
-      {tab === 'Events' && <EventsTab />}
+      {tab === 'Events' && <EventsTab advertiserId={id} />}
       {tab === 'Users' && <UsersTab />}
       {tab === 'Offers' && <OffersTab advertiserId={adv.id} />}
-      {tab === 'API Keys' && <ApiKeysTab />}
+      {tab === 'API Keys' && <ApiKeysTab advertiserId={id} />}
       {tab === 'API IPs' && <ApiIpsTab />}
       {tab === 'Whitelist' && <WhitelistTab />}
       {tab === 'Documents' && <DocumentsTab />}

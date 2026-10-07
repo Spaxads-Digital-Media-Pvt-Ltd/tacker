@@ -21,6 +21,7 @@ import { MoreVertical, Plus, Search } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, Modal } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import {
   METRIC_KEYS, METRIC_LABELS, OPERATORS, FORMAT_LABELS,
   type FormulaToken, type MetricFormat, tokenLabel,
@@ -126,6 +127,7 @@ function MetricModal({ initial, onClose, onSaved }: { initial: CustomMetric | nu
 function RowMenu({ metric, onEdit, onDeleted }: { metric: CustomMetric; onEdit: () => void; onDeleted: () => void }) {
   const [open, setOpen] = useState(false);
   const del = useMutation((id: string) => api.del(`/api/custom-metrics/${id}`));
+  const confirm = useConfirm();
   return (
     <div className="relative">
       <button type="button" title="Actions" onClick={() => setOpen((o) => !o)}
@@ -135,7 +137,7 @@ function RowMenu({ metric, onEdit, onDeleted }: { metric: CustomMetric; onEdit: 
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-36 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setOpen(false)}>
           <button onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Edit</button>
-          <button onClick={async () => { if (confirm(`Delete metric "${metric.name}"?`)) { setOpen(false); if (await del.run(metric.id)) onDeleted(); } }}
+          <button onClick={() => { setOpen(false); void confirm({ title: 'Delete metric?', message: `Are you sure you want to delete metric "${metric.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await del.run(metric.id)) onDeleted(); } }); }}
             className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Delete</button>
         </div>
       )}

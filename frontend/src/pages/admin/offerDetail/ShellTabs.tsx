@@ -41,6 +41,8 @@ export function ForwardingRulesTab({ base, pubOptions = [] }: { base: string; pu
 
 export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; pubOptions?: PubOptions }) {
   return (
+    <>
+    <p className="mb-3 rounded-card border border-border bg-page px-3 py-2 text-[11px] text-fg-muted">Scheduled actions are saved but not executed automatically yet — change the offer status yourself at the scheduled time.</p>
     <CollectionTab
       basePath={`${base}/scheduled-actions`}
       addLabel="Action"
@@ -65,6 +67,7 @@ export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; p
         col('Modified', (r) => fmt(r.updatedAt)),
       ]}
     />
+    </>
   );
 }
 
@@ -72,7 +75,7 @@ function PostbackLevel({ base, level, pubOptions }: { base: string; level: strin
   return (
     <CollectionTab
       basePath={`${base}/postbacks`}
-      listPath={`${base}/postbacks`}
+      listPath={`${base}/postbacks?level=${level}`}
       addLabel="Add"
       emptyText={`No ${level} postbacks.`}
       editable
@@ -97,11 +100,14 @@ function PostbackLevel({ base, level, pubOptions }: { base: string; level: strin
 }
 
 export function PostbacksTab({ base, pubOptions }: { base: string; pubOptions: PubOptions }) {
+  const all = useQuery<Row[]>(`${base}/postbacks`);
+  const count = (level: string) => all.data?.filter((r) => r.level === level).length;
   return (
     <div className="space-y-4">
-      <Accordion title="Conversion" count={0}><PostbackLevel base={base} level="conversion" pubOptions={pubOptions} /></Accordion>
-      <Accordion title="Event" count={0}><PostbackLevel base={base} level="event" pubOptions={pubOptions} /></Accordion>
-      <Accordion title="CPC" count={0}><PostbackLevel base={base} level="cpc" pubOptions={pubOptions} /></Accordion>
+      <p className="text-small text-fg-secondary">Conversion and Event postbacks fire to the partner when a conversion is approved; CPC postbacks are stored for click-based setups and are not fired on conversions.</p>
+      <Accordion title="Conversion" count={count('conversion')}><PostbackLevel base={base} level="conversion" pubOptions={pubOptions} /></Accordion>
+      <Accordion title="Event" count={count('event')}><PostbackLevel base={base} level="event" pubOptions={pubOptions} /></Accordion>
+      <Accordion title="CPC" count={count('cpc')}><PostbackLevel base={base} level="cpc" pubOptions={pubOptions} /></Accordion>
     </div>
   );
 }

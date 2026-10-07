@@ -6,13 +6,13 @@ import { Overlay } from '../primitives/ui';
 import { linkId, resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
 import type { Offer, Publisher, TrackingDomain } from '../../types';
 
-const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5', 'sub6', 'sub7', 'sub8', 'sub9'] as const;
+// /click reads source_id and sub1–sub5 only — anything else would be silently dropped.
+const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'] as const;
 
 /** General-purpose version of the per-offer/per-publisher tracking-link generators already built
  * into Offer Detail and Partner Detail — here both Offer and Partner are selectable, matching the
- * reference's Dashboard-level "Tracking Link Generator" modal. "Encrypt Parameters" is a real,
- * working obfuscation (base64-packs the extra params into one `p=` token) rather than a fake
- * label — there's no backend encryption endpoint to call. */
+ * reference's Dashboard-level "Tracking Link Generator" modal. (The old "Encrypt Parameters"
+ * toggle was removed: /click never decoded its `p=` token, so it silently dropped every sub ID.) */
 export function TrackingLinkGeneratorModal({ onClose }: { onClose: () => void }) {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
@@ -22,7 +22,6 @@ export function TrackingLinkGeneratorModal({ onClose }: { onClose: () => void })
   const [pubId, setPubId] = useState('');
   const [showExtra, setShowExtra] = useState(false);
   const [extras, setExtras] = useState<Record<string, string>>({});
-  const [encrypt, setEncrypt] = useState(false);
 
   const selectedOffer = (offers ?? []).find((o) => o.id === offerId);
   const selectedPub = (publishers ?? []).find((p) => p.id === pubId);
@@ -33,14 +32,8 @@ export function TrackingLinkGeneratorModal({ onClose }: { onClose: () => void })
     if (!selectedOffer || !pubId || !host) return '';
     const ids = { offer_id: linkId(selectedOffer), pub_id: linkId(selectedPub ?? { id: pubId }) };
     const filled = Object.fromEntries(Object.entries(extras).filter(([, v]) => v.trim()));
-    if (!encrypt) {
-      const p = new URLSearchParams({ ...ids, ...filled });
-      return `${trackBase}/click?${p.toString()}`;
-    }
-    const packed = btoa(JSON.stringify(filled));
-    const p = new URLSearchParams({ ...ids, ...(Object.keys(filled).length ? { p: packed } : {}) });
-    return `${trackBase}/click?${p.toString()}`;
-  }, [selectedOffer, selectedPub, pubId, extras, encrypt, trackBase, host]);
+    return `${trackBase}/click?${new URLSearchParams({ ...ids, ...filled }).toString()}`;
+  }, [selectedOffer, selectedPub, pubId, extras, trackBase, host]);
 
   const setExtra = (k: string, v: string) => setExtras((s) => ({ ...s, [k]: v }));
 
@@ -81,15 +74,7 @@ export function TrackingLinkGeneratorModal({ onClose }: { onClose: () => void })
         </div>
 
         <div>
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-h3 font-medium text-fg">Link</p>
-            <label className="flex items-center gap-2 text-small text-fg-secondary">
-              Encrypt Parameters
-              <button type="button" onClick={() => setEncrypt((v) => !v)} className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${encrypt ? 'bg-accent' : 'bg-border'}`}>
-                <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${encrypt ? 'translate-x-4' : 'translate-x-0'}`} />
-              </button>
-            </label>
-          </div>
+          <p className="mb-3 text-h3 font-medium text-fg">Link</p>
           {!link ? (
             <div className="rounded-[var(--radius)] border border-dashed border-border bg-page p-4 text-small text-fg-secondary">
               Tracking link will be displayed here as soon as parameters are set

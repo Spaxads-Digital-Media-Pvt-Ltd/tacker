@@ -12,6 +12,7 @@ import { Search, SlidersHorizontal, ChevronDown, Check, X, MoreVertical } from '
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal, useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { OfferApplication, QuestionnaireListItem, Publisher, Offer, Advertiser, DashboardUser } from '../../types';
@@ -60,14 +61,17 @@ function AppRowMenu({ app, onChanged }: { app: OfferApplication; onChanged: () =
   };
 
   return (
-    <TableRowMenu>
-      {(api) => (
-        <>
-          <MenuItem icon={Check} tone="success" disabled={app.status === 'approved'} onSelect={() => decideAndClose(api, 'approved')}>Approve</MenuItem>
-          <MenuItem icon={X} tone="danger" disabled={app.status === 'rejected'} onSelect={() => decideAndClose(api, 'rejected')}>Reject</MenuItem>
-        </>
-      )}
-    </TableRowMenu>
+    <div className="flex items-center justify-end gap-2">
+      {decide.error && <span className="max-w-[220px] truncate text-tiny text-danger-text" title={decide.error}>{decide.error}</span>}
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Check} tone="success" disabled={app.status === 'approved' || decide.busy} onSelect={() => decideAndClose(api, 'approved')}>Approve</MenuItem>
+            <MenuItem icon={X} tone="danger" disabled={app.status === 'rejected' || decide.busy} onSelect={() => decideAndClose(api, 'rejected')}>Reject</MenuItem>
+          </>
+        )}
+      </TableRowMenu>
+    </div>
   );
 }
 
@@ -211,6 +215,7 @@ function QuestionnairesTab() {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const nav = useNavigate();
   const del = useMutation((id: string) => api.del(`/api/questionnaires/${id}`));
+  const confirm = useConfirm();
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
@@ -244,8 +249,11 @@ function QuestionnairesTab() {
 
   const doDelete = async (item: QuestionnaireListItem) => {
     setOpenMenuId(null);
-    if (!confirm(`Delete questionnaire "${item.name}"?`)) return;
-    if (await del.run(item.id)) refetch();
+    void confirm({
+      title: 'Delete questionnaire?', message: `Are you sure you want to delete questionnaire "${item.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(item.id)) refetch(); },
+    });
   };
 
   const columnsByHeader: Record<string, Column<QuestionnaireListItem>> = {

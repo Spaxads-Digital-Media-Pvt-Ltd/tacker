@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool, query } from '../db/pool.js';
+import { absMoney, moneySign, subMoney } from '../money.js';
 
 export type AccountType = 'publisher' | 'advertiser';
 type EntryType = 'earning' | 'billing' | 'reversal' | 'adjustment' | 'payout';
@@ -82,38 +83,86 @@ export async function writeConversionLedger(
   }
 }
 
+interface ConversionNet { account_type: AccountType; account_id: string; currency: string; net: string }
+
+/** Current net (credit − debit) per account for one conversion, across every entry type. */
+async function conversionNets(client: PoolClient, networkId: string, conversionId: string): Promise<ConversionNet[]> {
+  const { rows } = await client.query<ConversionNet>(
+    `SELECT account_type, account_id, currency,
+            SUM(CASE direction WHEN 'credit' THEN amount ELSE -amount END)::numeric(14,4)::text AS net
+       FROM ledger_entries
+      WHERE network_id = $1 AND conversion_id = $2 AND status = 'approved'
+      GROUP BY account_type, account_id, currency`,
+    [networkId, conversionId],
+  );
+  return rows;
+}
+
 /**
  * Reverse a conversion's ledger effect (spec §8): write offsetting entries — do NOT delete the
- * originals. Net effect becomes zero while history shows both. Idempotent.
+ * originals. Offsets the NET per account (earning/billing plus any adjustments), so the result is
+ * exactly zero. Idempotent per account. Pass `client` to join the caller's transaction.
  */
-export async function reverseConversionLedger(networkId: string, conversionId: string, reason: string): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { rows } = await client.query<{
-      account_type: AccountType; account_id: string; direction: Direction; amount: string; currency: string;
-    }>(
-      `SELECT account_type, account_id, direction, amount, currency
-         FROM ledger_entries
-        WHERE network_id = $1 AND conversion_id = $2 AND entry_type IN ('earning', 'billing')`,
-      [networkId, conversionId],
-    );
-    for (const o of rows) {
-      await insertEntry(client, {
-        networkId, accountType: o.account_type, accountId: o.account_id, conversionId,
+export async function reverseConversionLedger(networkId: string, conversionId: string, reason: string, client?: PoolClient): Promise<void> {
+  const run = async (c: PoolClient) => {
+    for (const n of await conversionNets(c, networkId, conversionId)) {
+      const sign = moneySign(n.net);
+      if (sign === 0) continue;
+      await insertEntry(c, {
+        networkId, accountType: n.account_type, accountId: n.account_id, conversionId,
         entryType: 'reversal',
-        direction: o.direction === 'credit' ? 'debit' : 'credit', // opposite to offset
-        amount: o.amount, currency: o.currency,
-        idempotencyKey: `conv-reversal:${o.account_type}:${conversionId}`,
+        direction: sign > 0 ? 'debit' : 'credit', // opposite of the net to bring it to zero
+        amount: absMoney(n.net), currency: n.currency,
+        idempotencyKey: `conv-reversal:${n.account_type}:${conversionId}`,
         metadata: { conversion_id: conversionId, reason },
       });
     }
-    await client.query('COMMIT');
+  };
+  if (client) return run(client);
+  const own = await pool.connect();
+  try {
+    await own.query('BEGIN');
+    await run(own);
+    await own.query('COMMIT');
   } catch (err) {
-    await client.query('ROLLBACK');
+    await own.query('ROLLBACK');
     throw err;
   } finally {
-    client.release();
+    own.release();
+  }
+}
+
+/**
+ * Bring an APPROVED conversion's ledger in line with its (changed) payout / revenue by appending
+ * `adjustment` entries for the difference — originals are never edited. Target nets: publisher
+ * +payout (credit), advertiser −revenue (debit). Runs in the caller's transaction.
+ */
+export async function rebalanceConversionLedger(
+  client: PoolClient,
+  args: {
+    networkId: string; conversionId: string;
+    publisherId: string | null; advertiserId: string | null;
+    payout: string | null; revenue: string | null; currency: string; reason: string;
+  },
+): Promise<void> {
+  const nets = await conversionNets(client, args.networkId, args.conversionId);
+  const targets: [AccountType, string | null, string][] = [
+    ['publisher', args.publisherId, args.payout ?? '0'],
+    ['advertiser', args.advertiserId, args.revenue ? subMoney('0', args.revenue) : '0'],
+  ];
+  for (const [accountType, accountId, target] of targets) {
+    if (!accountId) continue;
+    const current = nets.find((n) => n.account_type === accountType && n.account_id === accountId)?.net ?? '0';
+    const delta = subMoney(target, current);
+    const sign = moneySign(delta);
+    if (sign === 0) continue;
+    await insertEntry(client, {
+      networkId: args.networkId, accountType, accountId, conversionId: args.conversionId,
+      entryType: 'adjustment', direction: sign > 0 ? 'credit' : 'debit',
+      amount: absMoney(delta), currency: args.currency,
+      idempotencyKey: `conv-adjust:${accountType}:${args.conversionId}:${randomUUID()}`,
+      metadata: { conversion_id: args.conversionId, reason: args.reason, from: current, to: target },
+    });
   }
 }
 

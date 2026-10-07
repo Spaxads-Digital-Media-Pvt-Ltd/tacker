@@ -120,13 +120,15 @@ export default function PublisherOffers() {
  const rows = data ?? [];
  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
- const handleAction = async (type: string) => {
- if (!actionRowId) return;
- if (type === 'request') await requestMut.run(actionRowId);
- else if (type === 'withdraw') await withdrawMut.run(actionRowId);
+ // Takes the row id directly — reading it back from state in the same click would see the old value.
+ const handleAction = async (offerId: string, type: string) => {
+ setActionRowId(offerId);
+ if (type === 'request') await requestMut.run(offerId);
+ else if (type === 'withdraw') await withdrawMut.run(offerId);
  refetch();
  setActionRowId(null);
  };
+ const actionError = requestMut.error ?? withdrawMut.error;
 
  const columns: Column<PublisherOffer>[] = [
  { header: 'Offer', cell: (o) => <Link to={`/publisher/offers/${o.id}`} className="font-medium text-accent-text hover:underline">{o.name}</Link> },
@@ -135,7 +137,8 @@ export default function PublisherOffers() {
  { header: 'Model', cell: (o) => o.payoutModel },
  { header: 'Your payout', cell: (o) => <span className="font-semibold text-success-text">{o.currency} {o.payout}</span> },
  { header: 'Tracking', cell: (o) => <CopyLink url={o.trackingUrl} /> },
- { header: '', cell: (o) => <RowActions row={o} onAction={(t) => { setActionRowId(o.id); handleAction(t); }} />, className: 'w-10' },
+ { header: 'Access', cell: (o) => o.approvalStatus === 'pending' ? <span className="text-tiny text-warning-text">Pending approval</span> : o.trackingUrl ? <span className="text-tiny text-success-text">Can run</span> : <span className="text-tiny text-fg-muted">Request needed</span> },
+ { header: '', cell: (o) => actionRowId === o.id ? <span className="text-tiny text-fg-muted">…</span> : <RowActions row={o} onAction={(t) => handleAction(o.id, t)} />, className: 'w-10' },
  ];
 
  return (
@@ -149,6 +152,7 @@ export default function PublisherOffers() {
  <DropdownSelect options={STATUS_OPTS} value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
  <DropdownSelect options={VISIBILITY_OPTS} value={visibility} onChange={(v) => { setVisibility(v); setPage(1); }} />
  </div>
+ {actionError && <p className="mb-3 rounded-[var(--radius)] bg-danger-bg px-3 py-2 text-small text-danger-text">{actionError}</p>}
  {loading ? <StateBlock><Spinner /></StateBlock>
  : error ? <StateBlock>{error}</StateBlock>
  : rows.length === 0 ? <StateBlock>No offers match these filters.</StateBlock>

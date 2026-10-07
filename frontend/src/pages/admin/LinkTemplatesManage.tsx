@@ -11,9 +11,11 @@ import { Search, SlidersHorizontal, Pencil, Trash2, Clock } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { LinkTemplate, Advertiser } from '../../types';
+import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedNote';
 
 const ALL_COLUMNS = ['ID', 'Name', 'Advertiser', 'Destination URL', 'Created', 'Modified'] as const;
 
@@ -43,10 +45,14 @@ function RowMenu({ template, onChanged }: { template: LinkTemplate; onChanged: (
   const del = useMutation(() => api.del(`/api/link-templates/${template.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm(`Delete link template "${template.name}"?`)) return;
-    if (await del.run(undefined)) onChanged();
+    void confirm({
+      title: 'Delete link template?', message: `Are you sure you want to delete link template "${template.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onChanged(); },
+    });
   };
 
   return (
@@ -119,6 +125,7 @@ export default function LinkTemplatesManage() {
   return (
     <>
       <PageHeader title="Manage Link Templates" subtitle="Advertisers › Link Templates › Manage" />
+      <NotEnforcedNote>Link templates are saved for reference only — offer tracking links and landing pages don't use them yet.</NotEnforcedNote>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <Link to="/app/adv-link-templates/new" className="btn-primary">+ Link Template</Link>

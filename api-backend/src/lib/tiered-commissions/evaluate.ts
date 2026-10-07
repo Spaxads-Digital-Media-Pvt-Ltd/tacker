@@ -9,6 +9,7 @@
  * reprocessing job this app doesn't have.
  */
 import { query } from '../db/pool.js';
+import { addMoney, normalizeMoney, percentOfMoney, subMoneyFloorZero } from '../money.js';
 
 export const TIERED_VARIABLES = ['conversion', 'total_payout', 'total_revenue'] as const;
 export type TieredVariable = typeof TIERED_VARIABLES[number];
@@ -23,8 +24,9 @@ export interface ConversionContext {
   offerId: string;
   advertiserId: string | null;
   publisherId: string | null;
-  payout: number;
-  revenue: number;
+  /** Decimal money strings — adjusted with exact decimal math, never floats. */
+  payout: string;
+  revenue: string;
 }
 
 interface CommissionRow {
@@ -49,13 +51,13 @@ function periodStart(period: TimePeriod, now: Date): Date {
   return new Date(0); // global — lifetime
 }
 
-export function applyAction(base: number, action: TieredAction | null | undefined, value: string | number | null | undefined): number {
+export function applyAction(base: string, action: TieredAction | null | undefined, value: string | number | null | undefined): string {
   if (!action || value == null) return base;
-  const v = Number(value);
-  if (action === 'increase_flat') return base + v;
-  if (action === 'decrease_flat') return Math.max(0, base - v);
-  if (action === 'increase_pct') return base * (1 + v / 100);
-  if (action === 'decrease_pct') return Math.max(0, base * (1 - v / 100));
+  const v = String(value);
+  if (action === 'increase_flat') return addMoney(base, normalizeMoney(v));
+  if (action === 'decrease_flat') return subMoneyFloorZero(base, normalizeMoney(v));
+  if (action === 'increase_pct') return addMoney(base, percentOfMoney(base, v));
+  if (action === 'decrease_pct') return subMoneyFloorZero(base, percentOfMoney(base, v));
   return base;
 }
 
@@ -79,7 +81,7 @@ async function currentPeriodValue(
  * Returns the (possibly unchanged) payout/revenue plus which commission applied, if any. */
 export async function applyTieredCommission(
   networkId: string, ctx: ConversionContext,
-): Promise<{ payout: number; revenue: number; appliedId: string | null; appliedName: string | null }> {
+): Promise<{ payout: string; revenue: string; appliedId: string | null; appliedName: string | null }> {
   if (!ctx.publisherId) return { payout: ctx.payout, revenue: ctx.revenue, appliedId: null, appliedName: null };
 
   const { rows } = await query<CommissionRow>(
@@ -102,7 +104,8 @@ export async function applyTieredCommission(
     let matched = false;
     for (const goal of row.goals) {
       const current = await currentPeriodValue(networkId, ctx.publisherId, row.target_type, row.target_ids, goal.variable, since);
-      const projected = goal.variable === 'conversion' ? current + 1 : current + (goal.variable === 'total_payout' ? ctx.payout : ctx.revenue);
+      // Threshold comparison only (no money is written from this value).
+      const projected = goal.variable === 'conversion' ? current + 1 : current + Number(goal.variable === 'total_payout' ? ctx.payout : ctx.revenue);
       if (projected >= goal.minValue && (goal.maxValue == null || projected < goal.maxValue)) { matched = true; break; }
     }
     if (!matched) continue;

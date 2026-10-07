@@ -107,6 +107,7 @@ export default function AdvertiserInvoiceForm() {
           <div>
             <label className="label">Invoice Hidden From Advertiser</label>
             <YesNoToggle value={form.hidden} onChange={(v) => setForm((f) => ({ ...f, hidden: v }))} />
+            <p className="mt-1 text-[11px] text-fg-muted">Saved on the invoice. The advertiser portal doesn't list invoices yet, so it has no visible effect today.</p>
           </div>
 
           <Field label="Notes">

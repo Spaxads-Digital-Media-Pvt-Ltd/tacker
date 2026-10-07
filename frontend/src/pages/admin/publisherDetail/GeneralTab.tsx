@@ -95,10 +95,10 @@ export function GeneralTab({ pub }: { pub: Publisher }) {
 
         <Card title="Billing">
           <div className="grid grid-cols-1 gap-x-4 gap-y-0 sm:grid-cols-2">
-            <InfoRow label="Billing Frequency">—</InfoRow>
-            <InfoRow label="Auto Invoice">—</InfoRow>
-            <InfoRow label="Payment Method">{pub.payoutTerms ?? '—'}</InfoRow>
-            <InfoRow label="Payment Terms">—</InfoRow>
+            <InfoRow label="Billing Frequency">{pub.billingFrequency ?? '—'}</InfoRow>
+            <InfoRow label="Payment Method">{pub.paymentMethod ?? '—'}</InfoRow>
+            <InfoRow label="Payout Terms">{pub.payoutTerms ?? '—'}</InfoRow>
+            <InfoRow label="Tax ID">{pub.taxId ?? '—'}</InfoRow>
           </div>
           <p className="mt-2 text-tiny text-fg-muted">Detailed billing configuration isn't available yet.</p>
         </Card>

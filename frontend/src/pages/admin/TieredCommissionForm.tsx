@@ -7,6 +7,7 @@
  * (conversion count, total payout, total revenue) — no fabricated metrics.
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { endOfLocalDayIso, localYmd, startOfLocalDayIso } from '../../lib/dateOnly';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, Search, X } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -112,8 +113,8 @@ export default function TieredCommissionForm() {
     if (!existing) return;
     setForm({
       name: existing.name, status: existing.status, notes: existing.notes ?? '',
-      hasStart: Boolean(existing.effectiveStart), effectiveStart: existing.effectiveStart ? existing.effectiveStart.slice(0, 10) : '',
-      hasEnd: Boolean(existing.effectiveEnd), effectiveEnd: existing.effectiveEnd ? existing.effectiveEnd.slice(0, 10) : '',
+      hasStart: Boolean(existing.effectiveStart), effectiveStart: localYmd(existing.effectiveStart),
+      hasEnd: Boolean(existing.effectiveEnd), effectiveEnd: localYmd(existing.effectiveEnd),
       targetType: existing.targetType, targetIds: existing.targetIds,
       hasPartners: existing.partnerIds.length > 0, partnerIds: existing.partnerIds,
       timePeriod: existing.timePeriod, goals: existing.goals,
@@ -146,8 +147,8 @@ export default function TieredCommissionForm() {
     e.preventDefault();
     const body = {
       name: form.name, status: form.status, notes: form.notes || null,
-      effectiveStart: form.hasStart && form.effectiveStart ? new Date(form.effectiveStart).toISOString() : null,
-      effectiveEnd: form.hasEnd && form.effectiveEnd ? new Date(form.effectiveEnd).toISOString() : null,
+      effectiveStart: form.hasStart && form.effectiveStart ? startOfLocalDayIso(form.effectiveStart) : null,
+      effectiveEnd: form.hasEnd && form.effectiveEnd ? endOfLocalDayIso(form.effectiveEnd) : null,
       targetType: form.targetType, targetIds: form.targetIds,
       partnerIds: form.hasPartners ? form.partnerIds : [],
       timePeriod: form.timePeriod || undefined,

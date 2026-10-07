@@ -30,7 +30,7 @@ interface Row {
   public_notes: string | null; internal_notes: string | null;
   created_at: string; updated_at: string;
 }
-interface JoinedRow extends Row { publisher_ref: number; publisher_name: string }
+interface JoinedRow extends Row { publisher_ref: number; publisher_name: string; balance: string }
 
 /** node-pg parses `date` columns into JS Date objects at LOCAL midnight, not strings — normalize
  * with local getters (never toISOString/UTC, which can shift the day by the server's UTC offset). */
@@ -47,7 +47,7 @@ const dto = (r: JoinedRow) => ({
   paymentTerms: r.payment_terms, paymentMethod: r.payment_method, currency: r.currency,
   periodStart: toDateStr(r.period_start), periodEnd: toDateStr(r.period_end),
   billedAmount: r.billed_amount, paymentsAmount: r.payments_amount,
-  balance: (Number(r.billed_amount) - Number(r.payments_amount)).toFixed(2),
+  balance: r.balance,
   paidAt: r.paid_at, publicNotes: r.public_notes, internalNotes: r.internal_notes,
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
@@ -65,7 +65,8 @@ const toHistoryDTO = (r: AuditLogRow) => {
 };
 
 const SELECT = `
-  SELECT i.*, p.ref AS publisher_ref, p.name AS publisher_name
+  SELECT i.*, p.ref AS publisher_ref, p.name AS publisher_name,
+         (i.billed_amount - i.payments_amount)::numeric(14,2)::text AS balance
     FROM partner_invoices i
     JOIN publishers p ON p.id = i.publisher_id AND p.network_id = i.network_id
 `;
@@ -88,29 +89,40 @@ const updateSchema = z.object({
   internalNotes: z.string().max(2000).nullable().optional(),
 });
 
-async function billedAmountFor(networkId: string, publisherId: string, periodStart: string, periodEnd: string): Promise<string> {
+/** What the partner earned in the period: earnings minus reversals ± adjustments, in the invoice
+ * currency. Payout-run debits are settlements, not activity, so they're excluded — otherwise a
+ * period that was already paid out would invoice as ~0. Exact numeric math in Postgres. */
+async function billedAmountFor(networkId: string, publisherId: string, currency: string, periodStart: string, periodEnd: string): Promise<string> {
   const { rows } = await query<{ total: string }>(
-    `SELECT COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount ELSE -amount END), 0)::text AS total
+    `SELECT ROUND(COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount ELSE -amount END), 0), 2)::text AS total
        FROM ledger_entries
       WHERE network_id = $1 AND account_type = 'publisher' AND account_id = $2 AND status = 'approved'
+        AND entry_type <> 'payout' AND currency = $5
         AND created_at >= $3::date AND created_at < ($4::date + interval '1 day')`,
-    [networkId, publisherId, periodStart, periodEnd],
+    [networkId, publisherId, periodStart, periodEnd, currency],
   );
-  return rows[0]?.total ?? '0';
+  return rows[0]?.total ?? '0.00';
 }
 
 export function partnerInvoicesRoutes(): Router {
   const r = Router();
 
+  // Totals in the network's default currency (never adds different currencies together).
   r.get('/summary', asyncHandler(async (req, res) => {
-    const { rows } = await query<{ billed: string; payments: string }>(
-      `SELECT COALESCE(SUM(billed_amount), 0)::text AS billed, COALESCE(SUM(payments_amount), 0)::text AS payments
-         FROM partner_invoices WHERE network_id = $1 AND status != 'deleted'`,
+    const { rows } = await query<{ currency: string; billed: string; payments: string; balance: string; other: string[] }>(
+      `SELECT n.default_currency AS currency,
+              COALESCE(SUM(i.billed_amount) FILTER (WHERE i.currency = n.default_currency), 0)::numeric(14,2)::text AS billed,
+              COALESCE(SUM(i.payments_amount) FILTER (WHERE i.currency = n.default_currency), 0)::numeric(14,2)::text AS payments,
+              COALESCE(SUM(i.billed_amount - i.payments_amount) FILTER (WHERE i.currency = n.default_currency), 0)::numeric(14,2)::text AS balance,
+              COALESCE(array_agg(DISTINCT i.currency) FILTER (WHERE i.currency <> n.default_currency), '{}') AS other
+         FROM networks n
+         LEFT JOIN partner_invoices i ON i.network_id = n.id AND i.status <> 'deleted'
+        WHERE n.id = $1
+        GROUP BY n.default_currency`,
       [req.scope!.networkId],
     );
-    const billed = Number(rows[0]?.billed ?? 0);
-    const payments = Number(rows[0]?.payments ?? 0);
-    sendOk(res, { billedAmount: billed.toFixed(2), paymentsAmount: payments.toFixed(2), balance: (billed - payments).toFixed(2) });
+    const s = rows[0];
+    sendOk(res, { currency: s?.currency ?? 'USD', billedAmount: s?.billed ?? '0.00', paymentsAmount: s?.payments ?? '0.00', balance: s?.balance ?? '0.00', otherCurrencies: s?.other ?? [] });
   }));
 
   r.get('/', asyncHandler(async (req, res) => {
@@ -131,11 +143,12 @@ export function partnerInvoicesRoutes(): Router {
     const b = req.body as z.infer<typeof createSchema>;
     const publisher = await db.selectOne<{ id: string; payment_method: string | null }>('publishers', { id: b.publisherId });
     if (!publisher) throw badRequest('publisherId does not belong to this network');
-    const billed = await billedAmountFor(networkId, b.publisherId, b.periodStart, b.periodEnd);
+    const currency = (await query<{ c: string }>('SELECT default_currency AS c FROM networks WHERE id = $1', [networkId])).rows[0]?.c ?? 'USD';
+    const billed = await billedAmountFor(networkId, b.publisherId, currency, b.periodStart, b.periodEnd);
     const row = await db.insert<Row>(TABLE, {
       publisher_id: b.publisherId, status: 'unpaid', visible_to_partner: b.visibleToPartner,
       payment_terms: b.paymentTerms ?? null, payment_method: publisher.payment_method ?? null,
-      currency: 'USD', period_start: b.periodStart, period_end: b.periodEnd,
+      currency, period_start: b.periodStart, period_end: b.periodEnd,
       billed_amount: billed, payments_amount: '0',
       public_notes: b.publicNotes ?? null, internal_notes: b.internalNotes ?? null,
     });

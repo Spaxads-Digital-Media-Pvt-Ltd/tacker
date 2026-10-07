@@ -162,7 +162,10 @@ describe('AUTH-1: dashboard auth end-to-end (mocked app)', () => {
  vi.resetModules();
  vi.doMock('../../src/lib/db/pool.js', () => ({
  pool: { connect: async () => ({ query: async () => ({ rows: [], rowCount: 0 }), release: () => {} }) },
- query: async () => ({ rows: [], rowCount: 0 }),
+ // dashboardAuth confirms the network_id claim names an existing network.
+ query: async (sql: string) => (/FROM networks WHERE id/.test(sql)
+ ? { rows: [{ '?column?': 1 }], rowCount: 1 }
+ : { rows: [], rowCount: 0 }),
  }));
  const { buildDashboardApp } = await import('../../src/surfaces/dashboard/app.js');
  app = buildDashboardApp();
@@ -170,7 +173,7 @@ describe('AUTH-1: dashboard auth end-to-end (mocked app)', () => {
  const secret = new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET ?? 'test-jwt-secret-do-not-use-in-prod');
  const token = await new SignJWT({
  sub: 'user-1',
- network_id: 'net-1',
+ network_id: '11111111-1111-4111-8111-111111111111',
  kind: 'admin',
  role: 'admin',
  app_metadata: { role: 'admin' },

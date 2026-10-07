@@ -3,9 +3,9 @@ import { z } from 'zod';
 export const createPublisherSchema = z.object({
   name: z.string().min(1).max(200),
   status: z.enum(['active', 'pending', 'inactive']).default('pending'),
-  contactEmail: z.string().email().optional(),
-  trafficSource: z.string().max(200).optional(),
-  payoutTerms: z.string().max(500).optional(),
+  contactEmail: z.string().trim().email().nullable().optional(),
+  trafficSource: z.string().max(200).nullable().optional(),
+  payoutTerms: z.string().max(500).nullable().optional(),
   defaultAttributionWindowS: z.number().int().min(0).max(31_536_000).optional(),
   defaultDedupWindowS: z.number().int().min(0).max(31_536_000).optional(),
   country: z.string().max(100).nullable().optional(),
@@ -29,7 +29,7 @@ export type CreatePublisher = z.infer<typeof createPublisherSchema>;
 export type UpdatePublisher = z.infer<typeof updatePublisherSchema>;
 
 export const createPostbackSchema = z.object({
-  url: z.string().url().max(2000),
+  url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL'),
   method: z.enum(['GET', 'POST']).default('GET'),
   offerId: z.string().uuid().nullable().optional(),
   event: z.string().max(100).nullable().optional(),
@@ -43,7 +43,7 @@ export const updatePostbackSchema = createPostbackSchema.partial().extend({
 export type UpdatePostback = z.infer<typeof updatePostbackSchema>;
 
 export const postbackTestSchema = z.object({
-  url: z.string().url().max(2000),
+  url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL'),
   method: z.enum(['GET', 'POST']).default('GET'),
   country: z.string().max(3).optional(),
   device: z.string().max(40).optional(),

@@ -7,6 +7,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Badge, Field, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 
 interface Def { id: string; key: string; label: string; fieldType: string; options: string[]; required: boolean }
 
@@ -14,6 +15,7 @@ export function CustomFieldsManage({ entityType }: { entityType: 'publisher' | '
   const { data, loading, error, refetch } = useQuery<Def[]>(`/api/custom-fields?entity=${entityType}`);
   const [open, setOpen] = useState(false);
   const del = useMutation((id: string) => api.del(`/api/custom-fields/${id}`));
+  const confirm = useConfirm();
   const noun = entityType === 'publisher' ? 'affiliate' : entityType;
 
   const cols: Column<Def>[] = [
@@ -21,7 +23,7 @@ export function CustomFieldsManage({ entityType }: { entityType: 'publisher' | '
     { header: 'Key', cell: (d) => <span className="font-mono text-xs">{d.key}</span> },
     { header: 'Type', cell: (d) => d.fieldType },
     { header: 'Required', cell: (d) => (d.required ? <Badge value="active" /> : '—') },
-    { header: '', className: 'text-right', cell: (d) => <button className="text-tiny font-medium text-danger-text hover:underline" onClick={async () => { if (confirm(`Delete "${d.label}"?`)) { await del.run(d.id); refetch(); } }}>Delete</button> },
+    { header: '', className: 'text-right', cell: (d) => <button className="text-tiny font-medium text-danger-text hover:underline" onClick={() => confirm({ title: 'Delete custom field?', message: `Are you sure you want to delete "${d.label}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await del.run(d.id); refetch(); } })}>Delete</button> },
   ];
 
   return (

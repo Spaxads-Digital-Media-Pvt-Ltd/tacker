@@ -13,9 +13,11 @@ import { Search, SlidersHorizontal, Pencil, Trash2, MoreVertical } from 'lucide-
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { ReportingAdjustment, Publisher, Offer, AdjustmentMetrics } from '../../types';
+import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedNote';
 
 const ALL_COLUMNS = ['Partner', 'Offer', 'Advertiser', 'Total Clicks', 'Conversions', 'Payout', 'Revenue', 'Gross Sales', 'Impressions', 'Created', 'Modified', 'Last Modified By'] as const;
 
@@ -35,10 +37,14 @@ function RowMenu({ adj, onDeleted }: { adj: ReportingAdjustment; onDeleted: () =
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/reporting-adjustments/${adj.id}`));
 
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm('Delete this adjustment?')) return;
-    if (await del.run(undefined)) onDeleted();
+    void confirm({
+      title: 'Delete adjustment?', message: 'Are you sure you want to delete this reporting adjustment?',
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+    });
   };
 
   return (
@@ -123,6 +129,7 @@ export default function AdjustmentsManage() {
   return (
     <>
       <PageHeader title="Manage Reporting Adjustments" subtitle="Partners › Adjustments › Manage" />
+      <NotEnforcedNote>Adjustments are recorded here for review. They don't change the ledger, payouts, invoices or the main reports.</NotEnforcedNote>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">

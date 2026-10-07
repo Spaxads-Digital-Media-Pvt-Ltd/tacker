@@ -4,10 +4,12 @@ import { useQuery } from '../../../lib/useApi';
 import { Table, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
 import type { Offer } from '../../../types';
 
-/** Real data — offers that belong to this advertiser. */
+/** Real data — offers that belong to this advertiser. "+ Offer" opens the regular Add Offer flow
+ * with this advertiser preselected. */
 export function OffersTab({ advertiserId }: { advertiserId: string }) {
   const { data: offers, loading, error } = useQuery<Offer[]>('/api/offers');
   const rows = (offers ?? []).filter((o) => o.advertiserId === advertiserId);
+  const createHref = `/app/offers/new?advertiserId=${encodeURIComponent(advertiserId)}`;
 
   const columns: Column<Offer>[] = [
     { header: 'Thumbnail', cell: () => <div className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-page text-fg-muted"><ImageIcon size={15} /></div> },
@@ -19,8 +21,15 @@ export function OffersTab({ advertiserId }: { advertiserId: string }) {
     { header: 'Created', cell: (o) => new Date(o.createdAt).toLocaleDateString() },
   ];
 
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  if (error) return <StateBlock>{error}</StateBlock>;
-  if (rows.length === 0) return <StateBlock>No offers yet.</StateBlock>;
-  return <Table columns={columns} rows={rows} rowKey={(o) => o.id} />;
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <Link to={createHref} className="btn-primary">+ Offer</Link>
+      </div>
+      {loading ? <StateBlock><Spinner /></StateBlock>
+        : error ? <StateBlock>{error}</StateBlock>
+        : rows.length === 0 ? <StateBlock>No offers yet. Use “+ Offer” to create this advertiser's first offer.</StateBlock>
+        : <Table columns={columns} rows={rows} rowKey={(o) => o.id} />}
+    </div>
+  );
 }

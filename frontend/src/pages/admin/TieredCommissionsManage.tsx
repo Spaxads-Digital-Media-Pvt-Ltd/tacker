@@ -13,6 +13,7 @@ import { Search, MoreVertical, ChevronDown, SlidersHorizontal, Pencil, Trash2, C
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal, useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { TieredCommission, TieredCommissionSummaryRow, Offer, Publisher, Advertiser } from '../../types';
@@ -75,10 +76,14 @@ function RowMenu({ commission, onChanged }: { commission: TieredCommission; onCh
   const del = useMutation(() => api.del(`/api/tiered-commissions/${commission.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm(`Delete tiered commission "${commission.name}"?`)) return;
-    if (await del.run(undefined)) onChanged();
+    void confirm({
+      title: 'Delete tiered commission?', message: `Are you sure you want to delete tiered commission "${commission.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onChanged(); },
+    });
   };
 
   return (

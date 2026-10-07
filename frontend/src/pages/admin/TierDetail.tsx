@@ -10,6 +10,7 @@ import { Edit2, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Table, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import type { PartnerTier, PartnerTierMember, PartnerTierOffer, Offer } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' };
@@ -59,14 +60,18 @@ function OffersPanel({ tierId }: { tierId: string }) {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<PartnerTierOffer | null | undefined>(undefined);
   const del = useMutation((offerId: string) => api.del(`/api/partner-tiers/${tierId}/offers/${offerId}`));
+  const confirm = useConfirm();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const rows = (data ?? []).filter((o) => !q.trim() || o.offerName.toLowerCase().includes(q.trim().toLowerCase()));
 
   const doRemove = async (o: PartnerTierOffer) => {
     setOpenMenuId(null);
-    if (!confirm(`Remove "${o.offerName}" from this tier?`)) return;
-    if (await del.run(o.offerId)) refetch();
+    void confirm({
+      title: 'Remove offer from tier?', message: `Are you sure you want to remove "${o.offerName}" from this tier?`,
+      confirmLabel: 'Remove', destructive: true,
+      onConfirm: async () => { if (await del.run(o.offerId)) refetch(); },
+    });
   };
 
   const columns: Column<PartnerTierOffer>[] = [

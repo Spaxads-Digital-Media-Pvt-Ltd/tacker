@@ -9,10 +9,10 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../../lib/http/pagination.js';
-import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
-import { accountBalance, createPayoutRun, reverseConversionLedger } from '../../../lib/ledger/ledger.js';
+import { accountBalance, createPayoutRun } from '../../../lib/ledger/ledger.js';
+import { approveConversion, rejectConversion } from './conversion-lifecycle.js';
 import { requireRole } from '../auth.js';
 
 interface LedgerRow {
@@ -99,23 +99,25 @@ export function financeRoutes(): Router {
     }),
   );
 
-  // Reject/reverse an approved conversion — writes offsetting ledger entries (never edits).
+  // Approve a pending conversion (e.g. held by "Manually Approve Conversions" or a postback sent
+  // without status=approved) — writes earning + billing and fires the partner postback.
+  r.post(
+    '/conversions/:conversionId/approve',
+    requireRole('admin', 'finance'),
+    asyncHandler(async (req, res) => {
+      const before = await approveConversion(req.scope!.networkId, req.params.conversionId!);
+      await writeAudit(req, { action: 'conversion.approve', entityType: 'conversion', entityId: req.params.conversionId, after: before });
+      sendOk(res, { conversionId: req.params.conversionId, status: 'approved' });
+    }),
+  );
+
+  // Reject/reverse a conversion — status change + offsetting ledger entries in one transaction.
   r.post(
     '/conversions/:conversionId/reject',
     requireRole('admin', 'finance'),
     asyncHandler(async (req, res) => {
-      const networkId = req.scope!.networkId;
-      const db = dbForRequest(req);
-      const conv = await db.selectOne<{ conversion_id: string; status: string }>('conversions', {
-        conversion_id: req.params.conversionId,
-      });
-      if (!conv) throw notFound('Conversion not found');
-      if (conv.status === 'rejected') throw badRequest('Conversion already rejected');
-
-      // conversions is NOT append-only; flip its status, then write ledger reversals.
-      await db.update('conversions', { status: 'rejected', reason: 'manual_rejection' }, { conversion_id: req.params.conversionId });
-      await reverseConversionLedger(networkId, req.params.conversionId!, 'manual_rejection');
-      await writeAudit(req, { action: 'conversion.reject', entityType: 'conversion', entityId: req.params.conversionId, before: conv });
+      const before = await rejectConversion(req.scope!.networkId, req.params.conversionId!);
+      await writeAudit(req, { action: 'conversion.reject', entityType: 'conversion', entityId: req.params.conversionId, before });
       sendOk(res, { conversionId: req.params.conversionId, status: 'rejected' });
     }),
   );

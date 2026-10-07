@@ -7,9 +7,10 @@ import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { paginationSchema, type PaginationQuery } from '../../../lib/http/pagination.js';
+import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
+import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import type { PublisherRow } from '../../../domain/entities.js';
@@ -52,10 +53,11 @@ export function publishersAdminRoutes(): Router {
     '/',
     validateQuery(paginationSchema),
     asyncHandler(async (req, res) => {
-      const { limit, offset } = res.locals.query as PaginationQuery;
+      const { offset } = res.locals.query as PaginationQuery;
+      const limit = entityListLimit(req.query, res.locals.query as PaginationQuery);
       const db = dbForRequest(req);
       const [rows, total] = await Promise.all([
-        db.selectMany<PublisherRow>(TABLE, { limit, offset, orderBy: 'created_at' }),
+        db.selectMany<PublisherRow>(TABLE, { limit, offset, orderBy: 'created_at', maxLimit: ENTITY_LIST_CAP }),
         db.count(TABLE),
       ]);
       sendOk(res, rows.map(toAdminDTO), { limit, offset, total });
@@ -127,6 +129,10 @@ export function publishersAdminRoutes(): Router {
     validateBody(createPublisherSchema),
     asyncHandler(async (req, res) => {
       const b = req.body as CreatePublisher;
+      const nid = req.scope!.networkId;
+      await assertSameNetwork(nid, 'users', b.partnerManagerId, 'partnerManagerId');
+      await assertSameNetwork(nid, 'users', b.accountExecutiveId, 'accountExecutiveId');
+      await assertSameNetwork(nid, 'publishers', b.referredById, 'referredById');
       const row = await dbForRequest(req).insert<PublisherRow>(TABLE, {
         name: b.name,
         status: b.status,
@@ -162,6 +168,10 @@ export function publishersAdminRoutes(): Router {
       const before = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
       if (!before) throw notFound('Publisher not found');
       const b = req.body as UpdatePublisher;
+      await assertSameNetwork(db.scope.networkId, 'users', b.partnerManagerId, 'partnerManagerId');
+      await assertSameNetwork(db.scope.networkId, 'users', b.accountExecutiveId, 'accountExecutiveId');
+      await assertSameNetwork(db.scope.networkId, 'publishers', b.referredById, 'referredById');
+      if (b.referredById && b.referredById === req.params.id) throw badRequest('A partner cannot refer itself');
       const patch: Record<string, unknown> = {};
       if (b.name !== undefined) patch['name'] = b.name;
       if (b.status !== undefined) patch['status'] = b.status;
@@ -235,6 +245,7 @@ export function publishersAdminRoutes(): Router {
   r.patch('/:id/postbacks/:pbId', requireRole('admin', 'manager'), validateBody(updatePostbackSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as UpdatePostback;
+    await assertSameNetwork(db.scope.networkId, 'offers', b.offerId, 'offerId');
     const patch: Record<string, unknown> = {};
     if (b.url !== undefined) patch['url'] = b.url;
     if (b.method !== undefined) patch['method'] = b.method;
@@ -322,6 +333,7 @@ export function publisherPortalRoutes(): Router {
     asyncHandler(async (req, res) => {
       const ownerId = ownerIdOf(req);
       const b = req.body as CreatePostback;
+      await assertSameNetwork(req.scope!.networkId, 'offers', b.offerId, 'offerId');
       const row = await dbForRequest(req).insert<PostbackRow>(POSTBACKS, {
         publisher_id: ownerId,
         url: b.url,

@@ -13,6 +13,7 @@ import { Plus, Search, MoreVertical, ChevronRight, ArrowUp, ArrowDown } from 'lu
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Modal, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { useFieldSpecs, valueLabel, fmtDateTime, type Template, type FieldSpec } from '../../data/offerTemplateFields';
@@ -117,6 +118,7 @@ export default function OfferTemplates() {
   const [sortAsc, setSortAsc] = useState(false);
   const [page, setPage] = useState(1);
   const del = useMutation((id: string) => api.del(`/api/offer-templates/${id}`));
+  const confirm = useConfirm();
   const setDefault = useMutation((id: string) => api.patch(`/api/offer-templates/${id}`, { isDefault: true }));
 
   const [setDefaultErr, setSetDefaultErr] = useState<string | null>(null);
@@ -213,7 +215,7 @@ export default function OfferTemplates() {
                           <button className="btn-primary !py-1.5 !px-3 text-tiny" onClick={() => applyTemplate(r)}>Use Template</button>
                           <RowMenu isDefault={r.isDefault} onEdit={() => nav(`/app/offers-templates/${r.id}/edit`)}
                             onSetDefault={async () => { setSetDefaultErr(null); try { const ok = await setDefault.run(r.id); if (ok) refetch(); } catch { setSetDefaultErr('Failed to set as default.'); } }}
-                            onDelete={async () => { if (confirm('Delete this template?')) { setDelErr(null); try { const ok = await del.run(r.id); if (ok) refetch(); } catch { setDelErr('Failed to delete template.'); } } }} />
+                            onDelete={() => confirm({ title: 'Delete template?', message: 'Are you sure you want to delete this offer template?', confirmLabel: 'Delete', destructive: true, onConfirm: async () => { setDelErr(null); try { const ok = await del.run(r.id); if (ok) refetch(); } catch { setDelErr('Failed to delete template.'); } } })} />
                         </div>
                       </td>
                     </tr>

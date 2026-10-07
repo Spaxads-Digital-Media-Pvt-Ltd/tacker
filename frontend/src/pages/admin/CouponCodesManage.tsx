@@ -14,10 +14,12 @@ import { Search, SlidersHorizontal, Link2, Pencil, Trash2, Clock } from 'lucide-
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import { resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
 import type { CouponCode, Publisher, Offer, TrackingDomain } from '../../types';
+import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedNote';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', expired: 'bg-fg-muted', disabled: 'bg-warning' };
 const STATUS_LABEL: Record<string, string> = { active: 'Active', expired: 'Expired', disabled: 'Paused' };
@@ -64,10 +66,14 @@ function RowMenu({ coupon, onDeleted }: { coupon: CouponCode; onDeleted: () => v
   const del = useMutation(() => api.del(`/api/coupon-codes/${coupon.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
-    if (!confirm(`Delete coupon code "${coupon.code}"?`)) return;
-    if (await del.run(undefined)) onDeleted();
+    void confirm({
+      title: 'Delete coupon code?', message: `Are you sure you want to delete coupon code "${coupon.code}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+    });
   };
 
   return (
@@ -125,6 +131,7 @@ export default function CouponCodesManage() {
   const [columnOrder, setColumnOrder] = useState<string[]>([...ALL_COLUMNS]);
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const tableActionsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!tableActionsOpen) return;
@@ -167,15 +174,14 @@ export default function CouponCodesManage() {
   const bulkUpdateStatus = async (nextStatus: 'active' | 'expired' | 'disabled') => {
     setTableActionsOpen(false);
     setBulkBusy(true);
+    setBulkError(null);
     try {
-      const result = await api.patch<{ ok: boolean }>('/api/coupon-codes/bulk', {
-        ids: Array.from(selected),
-        status: nextStatus,
-      });
-      if (result?.ok) {
-        setSelected(new Set());
-        refetch();
-      }
+      // api.patch resolves to the unwrapped data (or throws) — there is no `.ok` on it.
+      await api.patch('/api/coupon-codes/bulk', { ids: Array.from(selected), status: nextStatus });
+      setSelected(new Set());
+      refetch();
+    } catch (e) {
+      setBulkError(e instanceof Error ? e.message : 'Could not update the selected coupon codes.');
     } finally {
       setBulkBusy(false);
     }
@@ -223,6 +229,8 @@ export default function CouponCodesManage() {
   return (
     <>
       <PageHeader title="Manage Coupon Codes" subtitle="Partners › Coupon Codes › Manage" />
+      <NotEnforcedNote>Coupon codes are a catalog shared with partners. Conversions are attributed by click id, not by coupon code, so a coupon on its own doesn't credit a conversion.</NotEnforcedNote>
+      {bulkError && <p className="mb-3 rounded-[var(--radius)] bg-danger-bg px-3 py-2 text-small text-danger-text">{bulkError}</p>}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">

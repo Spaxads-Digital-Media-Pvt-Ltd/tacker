@@ -10,7 +10,7 @@
 - Driver: `pg` (raw, no ORM)
 - Max connections: 10 (dev), 20 (prod)
 
-## Schema (62 Migrations)
+## Schema (64 Migrations)
 
 ### Core Tables
 
@@ -268,7 +268,8 @@ Indexes are defined within migration SQL files. Key indexes cover:
 
 ## Migrations
 - Tool: `node-pg-migrate` (SQL-based)
-- 62 migration files, timestamped `1700000000000_*.sql`
+- 64 migration files, timestamped `1700000000000_*.sql`
+- `1700000062000_partition-retention` is an intentional no-op: the original partitioned `clicks`/`conversions`/`postback_logs` without creating partitions and dropped the global unique keys (`click_id`, `conversion_id`, `(offer_id, transaction_id)`) that idempotency depends on. `1700000064000_unpartition-tracking-tables` converts any DB that ran the original back to regular tables (rows preserved). These three tables must stay non-partitioned; retention prunes them with bounded ctid deletes.
 - Run: `npm run migrate` (up), `npm run migrate:down`
 - Create: `npm run migrate:create -j sql`
 

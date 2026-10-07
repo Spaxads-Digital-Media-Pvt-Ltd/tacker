@@ -3,7 +3,7 @@ import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
 import { Badge, Spinner } from '../../../shared-components/primitives/ui';
 import { CopyBox } from '../../../shared-components/panels/CopyBox';
-import { resolveTrackingHost, trackingBase } from '../../../lib/trackingLinks';
+import { advertiserPostbackUrl, resolveTrackingHost } from '../../../lib/trackingLinks';
 import type { Offer, TrackingDomain } from '../../../types';
 
 type Row = { id: string; [k: string]: unknown };
@@ -61,7 +61,9 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
   const offerCode = codeOverride !== undefined ? codeOverride : (offer.securityCode ?? null);
   const regenerateCode = async () => { const r = await regenCode.run(undefined); if (r) setCodeOverride(r.securityCode); };
   const removeCode = async () => { if (await clearCode.run(undefined)) setCodeOverride(null); };
-  const postbackUrl = host ? `${trackingBase(host)}/postback?click_id={click_id}&txn_id={txn_id}&secure_code=${offerCode ?? '{secure_code}'}` : '';
+  // The offer code wins; otherwise the network-wide code is what /postback will demand.
+  const networkCode = useQuery<{ securityCode: string | null }>('/api/settings/security');
+  const postbackUrl = advertiserPostbackUrl(host, offerCode ?? networkCode.data?.securityCode);
 
   const [note, setNote] = useState('');
   const saveNotes = useMutation((notes: string[]) => api.patch(base, { notes }));
@@ -91,12 +93,12 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
           <dl>
             <InfoRow label="Default Landing Page URL"><span className="break-all font-mono text-tiny text-accent-text">{offer.destinationUrl}</span></InfoRow>
             <InfoRow label="Tracking Domain">{host ?? 'Default'}</InfoRow>
-            <InfoRow label="Click Tracking Type">Redirect Linking</InfoRow>
-            <InfoRow label="Support Deep Links"><span className="text-success-text">YES</span></InfoRow>
+            <InfoRow label="Click Tracking Type">{offer.linkingType === 'redirect_direct' ? 'Redirect + Direct Linking' : 'Redirect Linking'}</InfoRow>
+            <InfoRow label="Support Deep Links">{offer.deepLinkEnabled ? <span className="text-success-text">YES</span> : <span className="text-fg-muted">NO</span>}</InfoRow>
           </dl>
           <div className="mt-4 rounded-[var(--radius)] border border-border p-4">
             <p className="mb-2 text-small font-semibold text-fg">Conversion Tracking Method: Server To Server Postback</p>
-            <p className="mb-3 text-tiny text-fg-secondary">The advertiser fires this postback on conversion, substituting the click id.</p>
+            <p className="mb-3 text-tiny text-fg-secondary">The advertiser fires this postback on conversion, replacing {'{click_id}'} and {'{txn_id}'} with their own values.</p>
             <CopyBox value={postbackUrl} />
             <div className="mt-3 flex items-center justify-between gap-2">
               <p className="text-small font-medium text-fg">Security code (secure_code)</p>

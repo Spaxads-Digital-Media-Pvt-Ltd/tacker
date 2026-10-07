@@ -4,17 +4,17 @@ import { Field, Overlay } from '../../../shared-components/primitives/ui';
 import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import { useQuery } from '../../../lib/useApi';
 import { linkId, resolveTrackingHost, trackingBase } from '../../../lib/trackingLinks';
+import { downloadCsv } from '../../../lib/export';
 import type { Offer, Publisher, TrackingDomain, TrafficSource } from '../../../types';
 
 const SUB_KEYS = ['source_id', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'] as const;
 
-interface Creative { id: string; name: string }
-
-/** Everflow's top-right "Offer Tracking Links" button opens this. Matches the reference's two-column
- * Parameters/Link layout (same pattern as the Dashboard's general Tracking Link Generator) — Offer is
- * fixed to the current one. Creative list is real (this offer's own creatives); "Generate All Links"
- * / "Generate Link to All QR codes" / "Advertiser Test Link" have no bulk-generation or QR backend,
- * so they're real, full-color buttons with a tooltip rather than fake-disabled.
+/** Everflow's top-right "Offer Tracking Links" button opens this — Offer is fixed to the current one.
+ * Only options /click actually honours are offered: partner, sub IDs, source id and Traffic Source
+ * presets. (Impression type, creative id and "encrypted" params were removed — /click never read
+ * them, and the encrypted form silently dropped every sub ID.) "Generate All Links" downloads one
+ * link per partner; "Advertiser Test Link" is a partner-less link to check the landing page receives
+ * {click_id}.
  *
  * "Traffic Source" applies a real Partners › Traffic Sources preset — its Parameter/Value pairs
  * (values often containing the partner's own macros like {campaign_id}) are appended verbatim to the
@@ -22,36 +22,36 @@ interface Creative { id: string; name: string }
 export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
   offer: Offer; publishers: Publisher[]; domains: TrackingDomain[]; onClose: () => void;
 }) {
-  const { data: creatives } = useQuery<Creative[]>(`/api/offers/${offer.id}/creatives`);
   const { data: trafficSources } = useQuery<TrafficSource[]>('/api/traffic-sources');
   // The offer's own selected tracking domain (network primary only if it has none).
   const host = resolveTrackingHost(domains, offer.trackingDomainId);
   const trackBase = trackingBase(host);
 
-  const [type, setType] = useState<'Click' | 'Impression'>('Click');
-  const [creativeId, setCreativeId] = useState('');
   const [pubId, setPubId] = useState('');
   const [sourceId, setSourceId] = useState('');
   const [showExtra, setShowExtra] = useState(false);
   const [extras, setExtras] = useState<Record<string, string>>({});
-  const [encrypt, setEncrypt] = useState(false);
+  const [testLink, setTestLink] = useState('');
   const setExtra = (k: string, v: string) => setExtras((s) => ({ ...s, [k]: v }));
 
   const source = (trafficSources ?? []).find((s) => s.id === sourceId);
 
-  const link = useMemo(() => {
-    if (!pubId || !trackBase) return '';
+  const linkFor = (pub: Publisher | { id: string } | null): string => {
+    if (!trackBase) return '';
     const filled = Object.fromEntries(Object.entries(extras).filter(([, v]) => v.trim()));
-    const pub = publishers.find((p) => p.id === pubId);
-    const base: Record<string, string> = { offer_id: linkId(offer), pub_id: linkId(pub ?? { id: pubId }), type: type.toLowerCase() };
-    if (creativeId) base.creative_id = creativeId;
+    const base: Record<string, string> = { offer_id: linkId(offer), ...(pub ? { pub_id: linkId(pub) } : {}) };
     // Traffic Source preset params are appended raw (not URLSearchParams-encoded) so partner macros
     // like {campaign_id} survive; manual "Additional Parameters" come first so they win on collision.
     const preset = source?.trackingLinkParameters ? `&${source.trackingLinkParameters}` : '';
-    if (!encrypt) return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}${preset}`;
-    const packed = btoa(JSON.stringify(filled));
-    return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}${preset}`;
-  }, [pubId, type, creativeId, extras, encrypt, trackBase, offer, publishers, source]);
+    return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}${preset}`;
+  };
+  const link = useMemo(
+    () => (pubId ? linkFor(publishers.find((p) => p.id === pubId) ?? { id: pubId }) : ''),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pubId, extras, trackBase, offer, publishers, source],
+  );
+  const downloadAll = () => downloadCsv(`tracking-links-${linkId(offer)}.csv`,
+    publishers.map((p) => ({ partner: p.name, partnerId: linkId(p), trackingLink: linkFor(p) })));
 
   return (
     <Overlay onClose={onClose}>
@@ -63,24 +63,7 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div>
             <p className="mb-3 text-h3 font-medium text-fg">Parameters</p>
-            <label className="label">Type</label>
-            <div className="mb-3 inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-              {(['Click', 'Impression'] as const).map((t) => (
-                <button key={t} type="button" onClick={() => setType(t)}
-                  className={`px-4 py-2 text-small font-medium transition-colors ${type === t ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-                  {t}
-                </button>
-              ))}
-            </div>
             <Field label="Offer *"><input className="input" value={offer.name} disabled /></Field>
-            <div className="mt-3">
-              <Field label="Creative (Optional)">
-                <select className="input" value={creativeId} onChange={(e) => setCreativeId(e.target.value)}>
-                  <option value="">Select Creative (Optional)…</option>
-                  {(creatives ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </Field>
-            </div>
             <div className="mt-3">
               <Field label="URL"><input className="input" value={offer.destinationUrl} disabled /></Field>
             </div>
@@ -122,15 +105,7 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
           </div>
 
           <div>
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-h3 font-medium text-fg">Link</p>
-              <label className="flex items-center gap-2 text-small text-fg-secondary">
-                Encrypt Parameters
-                <button type="button" onClick={() => setEncrypt((v) => !v)} className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${encrypt ? 'bg-accent' : 'bg-border'}`}>
-                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${encrypt ? 'translate-x-4' : 'translate-x-0'}`} />
-                </button>
-              </label>
-            </div>
+            <p className="mb-3 text-h3 font-medium text-fg">Link</p>
             {!link ? (
               <div className="rounded-[var(--radius)] border border-dashed border-border bg-page p-4 text-small text-fg-secondary">
                 Tracking link will be displayed here as soon as parameters are set
@@ -142,15 +117,21 @@ export function TrackingLinksModal({ offer, publishers, domains, onClose }: {
             <div className="mt-6 space-y-4 text-small">
               <div>
                 <p className="mb-1.5 text-fg-secondary">To generate all partners links with default parameters:</p>
-                <button title="Not available yet" className="btn-ghost !py-1.5">Generate All Links</button>
+                <button type="button" className="btn-ghost !py-1.5" disabled={!trackBase || publishers.length === 0} onClick={downloadAll}>Generate All Links (CSV)</button>
               </div>
               <div className="border-t border-border pt-4">
                 <p className="mb-1.5 text-fg-secondary">To generate all partners QR codes:</p>
-                <button title="Not available yet" className="btn-ghost !py-1.5">Generate Link to All QR codes</button>
+                <button type="button" disabled title="QR code generation isn't available yet" className="btn-ghost !py-1.5 opacity-50">Generate Link to All QR codes</button>
               </div>
               <div className="border-t border-border pt-4">
                 <p className="mb-1.5 text-fg-secondary">To generate an advertiser test tracking link:</p>
-                <button title="Not available yet" className="btn-ghost !py-1.5">Advertiser Test Link</button>
+                <button type="button" className="btn-ghost !py-1.5" disabled={!trackBase} onClick={() => setTestLink(linkFor(null))}>Advertiser Test Link</button>
+                {testLink && (
+                  <div className="mt-2 space-y-1">
+                    <CopyBox value={testLink} />
+                    <p className="text-tiny text-fg-muted">No partner attached — open it to confirm the landing page receives the click_id.</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

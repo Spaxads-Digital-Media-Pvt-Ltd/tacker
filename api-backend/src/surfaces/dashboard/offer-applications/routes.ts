@@ -14,6 +14,7 @@ import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { requireRole } from '../auth.js';
 
 const TABLE = 'offer_publisher_access';
@@ -56,8 +57,8 @@ const SELECT = `
     FROM offer_publisher_access a
     JOIN publishers p ON p.id = a.publisher_id AND p.network_id = a.network_id
     JOIN offers o ON o.id = a.offer_id AND o.network_id = a.network_id
-    LEFT JOIN users u ON u.id = p.partner_manager_id
-    LEFT JOIN questionnaires q ON q.id = o.questionnaire_id
+    LEFT JOIN users u ON u.id = p.partner_manager_id AND u.network_id = a.network_id
+    LEFT JOIN questionnaires q ON q.id = o.questionnaire_id AND q.network_id = a.network_id
 `;
 
 export function offerApplicationsRoutes(): Router {
@@ -77,12 +78,14 @@ export function offerApplicationsRoutes(): Router {
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(decisionSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
-    const before = await db.selectOne<{ id: string }>(TABLE, { id: req.params.id });
+    const before = await db.selectOne<{ id: string; offer_id: string }>(TABLE, { id: req.params.id });
     if (!before) throw notFound('Application not found');
     const b = req.body as z.infer<typeof decisionSchema>;
     const access = b.status === 'approved' ? 'allow' : 'deny';
     const [row] = await db.update(TABLE, { approval_status: b.status, access }, { id: req.params.id });
     if (!row) throw notFound('Application not found');
+    // The click path reads the deny list from the cached offer config — apply the decision now.
+    await invalidateOfferConfig(db.scope.networkId, before.offer_id);
     await writeAudit(req, {
       action: b.status === 'approved' ? 'offer_application.approve' : 'offer_application.reject',
       entityType: 'offer_application', entityId: req.params.id, before, after: row,

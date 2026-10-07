@@ -59,6 +59,12 @@ export interface OfferConfig {
   geoRules: GeoRuleConfig[];
   /** Publisher ids explicitly BLOCKED from this offer (offer_publisher_access.access='deny'). */
   deniedPublishers: string[];
+  /** Per-partner payout overrides (offer_publisher_access.payout_override), publisherId → money string. */
+  partnerPayouts?: Record<string, string>;
+  /** 'public' | 'ask' | 'private'. Non-public offers only run for approvedPublishers. */
+  visibility?: string;
+  /** Publishers with access='allow' AND approval_status='approved' on this offer. */
+  approvedPublishers?: string[];
   /** Per-offer postback secure_code override (null → fall back to the network code). */
   securityCode: string | null;
   /** Network-wide postback secure_code (used when the offer has none). */
@@ -88,6 +94,18 @@ export async function invalidateOfferConfig(networkId: string, offerId: string):
   await getRedis().del(offerCacheKey(networkId, offerId));
 }
 
+/** Bust every cached offer config for a network — for network-wide inputs every entry embeds
+ * (e.g. the network postback secure code). SCAN, never KEYS; dashboard-side only. */
+export async function invalidateNetworkOfferConfigs(networkId: string): Promise<void> {
+  const redis = getRedis();
+  let cursor = '0';
+  do {
+    const [next, keys] = await redis.scan(cursor, 'MATCH', `offercfg:${networkId}:*`, 'COUNT', 500);
+    cursor = next;
+    if (keys.length) await redis.del(...keys);
+  } while (cursor !== '0');
+}
+
 export async function getOfferConfig(networkId: string, offerId: string): Promise<OfferConfig | null> {
   const redis = getRedis();
   const key = offerCacheKey(networkId, offerId);
@@ -113,6 +131,9 @@ interface Row {
   attribution_window_s: number; dedup_window_s: number; allowed_traffic_types: string[];
   geo_rules: GeoRuleConfig[] | null;
   denied_publishers: string[] | null;
+  partner_payouts: Record<string, string> | null;
+  approved_publishers: string[] | null;
+  visibility: string | null;
   security_code: string | null;
   network_security_code: string | null;
   metadata: Record<string, unknown> | null;
@@ -126,7 +147,11 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
               'payoutOverride', g.payout_override, 'revenueOverride', g.revenue_override,
               'destinationOverride', g.destination_override
             )) FILTER (WHERE g.id IS NOT NULL), '[]') AS geo_rules,
-            COALESCE(array_agg(DISTINCT a.publisher_id) FILTER (WHERE a.access = 'deny'), '{}') AS denied_publishers
+            COALESCE(array_agg(DISTINCT a.publisher_id) FILTER (WHERE a.access = 'deny'), '{}') AS denied_publishers,
+            COALESCE(jsonb_object_agg(a.publisher_id::text, a.payout_override::text)
+                       FILTER (WHERE a.access = 'allow' AND a.payout_override IS NOT NULL), '{}'::jsonb) AS partner_payouts,
+            COALESCE(array_agg(DISTINCT a.publisher_id)
+                       FILTER (WHERE a.access = 'allow' AND a.approval_status = 'approved'), '{}') AS approved_publishers
        FROM offers o
        LEFT JOIN networks n ON n.id = o.network_id
        LEFT JOIN offer_geo_rules g ON g.offer_id = o.id
@@ -171,6 +196,9 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     dedupWindowS: r.dedup_window_s, allowedTrafficTypes: r.allowed_traffic_types,
     geoRules: r.geo_rules ?? [],
     deniedPublishers: r.denied_publishers ?? [],
+    partnerPayouts: r.partner_payouts ?? {},
+    visibility: r.visibility ?? 'public',
+    approvedPublishers: r.approved_publishers ?? [],
     securityCode: r.security_code ?? null,
     networkSecurityCode: r.network_security_code ?? null,
     trafficControls: tcRes.rows.map((t) => ({

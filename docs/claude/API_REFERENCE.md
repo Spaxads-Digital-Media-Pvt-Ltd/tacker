@@ -84,6 +84,11 @@
 | PATCH,DELETE | `/api/keys/:id` | Update/revoke API keys | admin |
 | GET,POST | `/api/portal/publisher/keys` | Publisher API keys | portal:publisher |
 | GET,POST | `/api/portal/advertiser/keys` | Advertiser API keys | portal:advertiser |
+| GET,POST | `/api/advertisers/:id/keys` | List/create a given advertiser's API keys (audience `advertiser`, owner = that advertiser; same keys the portal shows) | admin |
+| DELETE | `/api/advertisers/:id/keys/:keyId` | Revoke one of that advertiser's keys | admin |
+| GET | `/api/advertisers/:id/events` | Advertiser's events = goals (`offer_goals`) on its offers, with `offerId`/`offerName`/`offerRef` ("Associated to") | admin (any role) |
+| POST | `/api/advertisers/:id/events` | Create an event: goal body + `offerId` (must be one of this advertiser's offers); currency defaults to the offer's | admin/manager |
+| PATCH,DELETE | `/api/advertisers/:id/events/:eventId` | Edit/delete an event of this advertiser (the offer can't be changed). Same rules, audit and cache invalidation as `/api/offers/:id/goals` | admin/manager |
 
 ### Portal Routes (owner-scoped)
 | Method | Endpoint | Purpose | Auth |
@@ -146,13 +151,30 @@ Three isolated namespaces, API-key authenticated:
 
 ### Postback Parameters
 - `click_id` (required) — The click to attribute to
-- `txn_id` / `transaction_id` / `tid` — External transaction ID
-- `event` / `event_name` / `goal` — Event name
+- `txn_id` / `transaction_id` / `tid` — External transaction ID. Idempotency key: a repeat for the same offer is `duplicate` (Redis guard + DB unique `(offer_id, transaction_id)`), never a second conversion or ledger entry
+- `event` / `event_name` / `goal` — Event name (selects the goal with that event name)
 - `payout` / `amount` — Payout override
 - `revenue` — Revenue override
-- `secure_code` / `security_code` — Secure code verification
-- `status` — Status hint
-- `event` — Event name
+- `sale_amount` / `order_amount` — Sale value for Percentage / Mixed revenue offers (`amount` is NOT read as a sale amount)
+- `secure_code` / `security_code` — Required when the offer or network has a code (offer code wins)
+- `status` — `approved` (also confirmed/sale/success/1), `rejected` (declined/reversed/cancelled), anything else or omitted → `pending` (no ledger, no partner postback until approved)
+
+The advertiser postback URL shown in the dashboard is `…/postback?click_id={click_id}&txn_id={txn_id}&status=approved&secure_code=<real code>`.
+
+### Conversion pricing precedence
+explicit `payout`/`revenue` param → goal matched by event name → partner payout override / country (geo) override frozen on the click → default goal → offer default. Offer and goal conversion caps (daily = UTC day, total) reject conversions past the cap (`reason=*_conversion_cap_reached`).
+
+### Click access rules
+A partner explicitly denied is diverted. Private and Request-access (`ask`) offers only accept clicks from partners with an `allow` + `approved` access row; others are diverted. A partner's payout override is frozen onto their clicks.
+
+### Finance (dashboard)
+- `POST /api/finance/conversions/:conversionId/approve` — pending → approved: tiered commission, earning + billing ledger entries, partner postback (honours "Fire Partner Postback"). Admin/finance.
+- `POST /api/finance/conversions/:conversionId/reject` — status + offsetting ledger entries in one transaction (net per account → 0). Admin/finance.
+
+### Offer access (dashboard)
+- `POST /api/offers/:id/publishers` — grant access (upsert on the partner's existing row)
+- `PATCH /api/offers/:id/publishers/:accessId` — change access / approval / payout override
+- `GET /api/offers/:id/postbacks?level=conversion|event|cpc` — filtered offer postbacks
 
 ## Health & Metrics
 Every surface exposes:

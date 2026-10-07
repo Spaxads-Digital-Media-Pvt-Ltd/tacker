@@ -18,6 +18,7 @@ import type { TrackingDomainRow } from '../../../domain/entities.js';
 import { requireRole } from '../auth.js';
 import { createTrackingDomainSchema, type CreateTrackingDomain } from './schemas.js';
 import { toDTO } from './dto.js';
+import { invalidateHost } from '../../tracking/host-resolver-db.js';
 
 const TABLE = 'tracking_domains';
 
@@ -104,6 +105,8 @@ export function trackingDomainsAdminRoutes(): Router {
       const before = await db.selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
       if (!before) throw notFound('Tracking domain not found');
       await db.delete(TABLE, { id: req.params.id });
+      // Stop the host resolving on the tracking surface now, not after the 5-minute cache TTL.
+      await invalidateHost(before.host);
       await writeAudit(req, { action: 'tracking_domain.delete', entityType: 'tracking_domain', entityId: req.params.id, before });
       sendOk(res, { deleted: true });
     }),

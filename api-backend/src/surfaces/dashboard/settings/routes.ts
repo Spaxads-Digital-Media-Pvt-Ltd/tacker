@@ -20,6 +20,7 @@ import { syncOfferFeed } from '../../../lib/integrations/offer-feed-sync.js';
 import { enqueueOfferFeedSync } from '../../../lib/integrations/enqueue.js';
 import { getIntegrationStatus } from '../../../lib/integrations/status.js';
 import { getCategoryCatalog, getAllCatalogs, categoryFromTab } from '../../../lib/integrations/catalog.js';
+import { invalidateNetworkOfferConfigs } from '../../tracking/offer-cache.js';
 
 interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
@@ -173,12 +174,15 @@ export function settingsRoutes(): Router {
   r.post('/security/regenerate', requireRole('admin'), asyncHandler(async (req, res) => {
     const code = generateSecureCode();
     await query('UPDATE networks SET postback_security_code = $2 WHERE id = $1', [req.scope!.networkId, code]);
+    // Every cached offer config embeds the network code — bust them so the new code applies now.
+    await invalidateNetworkOfferConfigs(req.scope!.networkId);
     await writeAudit(req, { action: 'settings.security.regenerate', entityType: 'network', entityId: req.scope!.networkId });
-    sendOk(res, { securityCode: code }); // takes effect on the tracking hot path within the cache TTL (≤5 min)
+    sendOk(res, { securityCode: code });
   }));
 
   r.delete('/security', requireRole('admin'), asyncHandler(async (req, res) => {
     await query('UPDATE networks SET postback_security_code = NULL WHERE id = $1', [req.scope!.networkId]);
+    await invalidateNetworkOfferConfigs(req.scope!.networkId);
     await writeAudit(req, { action: 'settings.security.clear', entityType: 'network', entityId: req.scope!.networkId });
     sendOk(res, { securityCode: null });
   }));

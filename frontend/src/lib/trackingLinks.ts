@@ -39,6 +39,30 @@ export function trackingBase(host: string | null): string {
   return LOCAL_HOST.test(host) ? `http://${host}:4002` : `https://${host}`;
 }
 
+/**
+ * The S2S postback URL handed to an advertiser. {click_id} / {txn_id} are the advertiser's own
+ * fill-ins; the secure code is the real value (it's our secret, so it can't be a placeholder they
+ * fill). status=approved is included because a postback without a status is recorded as pending,
+ * which earns nothing and fires no partner postback until someone approves it.
+ */
+export function advertiserPostbackUrl(host: string | null, secureCode: string | null | undefined): string {
+  if (!host) return '';
+  const code = secureCode ? `&secure_code=${encodeURIComponent(secureCode)}` : '';
+  return `${trackingBase(host)}/postback?click_id={click_id}&txn_id={txn_id}&status=approved${code}`;
+}
+
+/** What the /postback endpoint actually reads — shown next to the advertiser postback URL. */
+export const POSTBACK_PARAMS: [string, string][] = [
+  ['click_id', 'Required. The click id the landing page received in the redirect.'],
+  ['txn_id', 'Your order / transaction id. Re-sending the same txn_id is ignored, so retries never double-count.'],
+  ['status', 'approved, pending or rejected. If omitted the conversion is recorded as pending and earns nothing until approved.'],
+  ['secure_code', 'Pre-filled above with this offer\'s code (or the network default). Postbacks with a wrong or missing code are rejected.'],
+  ['event', 'Goal / event name, when the offer has more than one goal.'],
+  ['payout', 'Optional. Overrides the partner payout for this conversion.'],
+  ['revenue', 'Optional. Overrides the advertiser revenue for this conversion.'],
+  ['sale_amount', 'Sale value — used when the offer\'s revenue type is Percentage or Mixed.'],
+];
+
 export function linkId(entity: { id: string; ref?: number | null } | null | undefined): string {
   if (!entity) return '';
   return entity.ref != null ? String(entity.ref) : entity.id;

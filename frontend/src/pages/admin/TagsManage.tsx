@@ -7,6 +7,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 
 interface Tag { id: string; name: string; color: string | null }
 
@@ -16,6 +17,7 @@ export default function TagsManage() {
   const [color, setColor] = useState('#3b82f6');
   const create = useMutation((body: Record<string, unknown>) => api.post('/api/tags', body));
   const del = useMutation((id: string) => api.del(`/api/tags/${id}`));
+  const confirm = useConfirm();
 
   const add = async (e: FormEvent) => {
     e.preventDefault();
@@ -48,7 +50,7 @@ export default function TagsManage() {
               <span key={t.id} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-small">
                 <span className="h-3 w-3 rounded-full" style={{ background: t.color ?? '#94a3b8' }} />
                 {t.name}
-                <button className="text-fg-muted hover:text-danger-text" onClick={async () => { if (confirm(`Delete tag "${t.name}"?`)) { await del.run(t.id); refetch(); } }}>×</button>
+                <button className="text-fg-muted hover:text-danger-text" aria-label={`Delete tag ${t.name}`} onClick={() => confirm({ title: 'Delete tag?', message: `Are you sure you want to delete tag "${t.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await del.run(t.id); refetch(); } })}>×</button>
               </span>
             ))}
           </div>

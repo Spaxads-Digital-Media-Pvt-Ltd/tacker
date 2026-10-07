@@ -6,8 +6,8 @@
 import { useMemo, useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { Plus, Trash2, Search } from 'lucide-react';
-import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { patchEach } from '../../lib/bulk';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { Publisher, DashboardUser } from '../../types';
 
@@ -129,12 +129,11 @@ export default function PublishersBulkEdit() {
   const { run, busy, error } = useMutation(async () => {
     const patch: Record<string, unknown> = {};
     for (const c of validChanges) patch[c.field] = c.value;
-    for (const id of selectedIds) await api.patch(`/api/publishers/${id}`, patch);
+    return patchEach(selectedIds, (id) => `/api/publishers/${id}`, patch, (id) => publishers?.find((p) => p.id === id)?.name ?? id);
   });
 
   const apply = async () => {
-    await run(undefined);
-    nav('/app/publishers');
+    if (await run(undefined)) nav('/app/publishers');
   };
 
   if (loading) return <StateBlock><Spinner /></StateBlock>;

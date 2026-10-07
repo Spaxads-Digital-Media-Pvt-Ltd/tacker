@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
 import { Badge, Modal, Field, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
+import { useConfirm } from '../../../shared-components/primitives/confirm';
 import { Accordion } from '../../../shared-components/panels/Accordion';
 import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
 
@@ -64,7 +65,14 @@ export function PostbacksTab({ base }: { base: string }) {
   const { data, loading, error, refetch } = useQuery<Postback[]>(`${base}/postbacks`);
   const [open, setOpen] = useState(false);
   const del = useMutation((id: string) => api.del(`${base}/postbacks/${id}`));
-  const remove = async (id: string) => { if (confirm('Delete this postback?')) { await del.run(id); refetch(); } };
+  const confirm = useConfirm();
+  const remove = (id: string) => confirm({
+    title: 'Delete postback?',
+    message: 'Are you sure you want to delete this postback configuration?',
+    confirmLabel: 'Delete',
+    destructive: true,
+    onConfirm: async () => { await del.run(id); refetch(); },
+  });
 
   const conversions = (data ?? []).filter((p) => !p.event);
   const events = (data ?? []).filter((p) => p.event);
@@ -87,6 +95,7 @@ export function PostbacksTab({ base }: { base: string }) {
       </Accordion>
 
       {open && <AddPostbackModal base={base} onClose={() => setOpen(false)} onDone={() => { setOpen(false); refetch(); }} />}
+      {del.error && <p className="rounded-[var(--radius)] bg-danger-bg px-3 py-2 text-small text-danger-text">Could not delete: {del.error}</p>}
     </div>
   );
 }

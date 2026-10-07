@@ -229,6 +229,12 @@ export function buildTrackingApp(): FastifyInstance {
  if (publisherId && offer.deniedPublishers.includes(publisherId)) {
  return divert(reply, offer.fallbackUrl, offer.id);
  }
+ // 2c. Private / Request-access offers only run for partners an admin approved (allow + approved).
+ // `visibility` is undefined only on a config cached before this check existed (≤ cache TTL).
+ if (offer.visibility && offer.visibility !== 'public'
+ && !(publisherId && (offer.approvedPublishers ?? []).includes(publisherId))) {
+ return divert(reply, offer.fallbackUrl, offer.id);
+ }
 
  // 3. Enrich geo + device in-process.
  const ip = req.ip || null;
@@ -286,8 +292,10 @@ export function buildTrackingApp(): FastifyInstance {
  // 8/9. Cheap fraud pre-signals (datacenter + velocity).
  const fraud = await fraudPreSignals(ip, geo?.isDatacenter ?? false);
 
- // Resolve payout/revenue with geo overrides (frozen onto the click for later attribution).
- const resolvedPayout = geoDecision.payoutOverride ?? offer.defaultPayout;
+ // Resolve payout/revenue (frozen onto the click for later attribution). A partner's own payout
+ // override on this offer is the most specific rate, then the country override, then the default.
+ const partnerPayout = publisherId ? offer.partnerPayouts?.[publisherId] ?? null : null;
+ const resolvedPayout = partnerPayout ?? geoDecision.payoutOverride ?? offer.defaultPayout;
  const resolvedRevenue = geoDecision.revenueOverride ?? offer.defaultRevenue;
 
  // 10. Enqueue durable write (async) — the hot path never blocks on Postgres.
@@ -392,6 +400,9 @@ export function buildTrackingApp(): FastifyInstance {
  const pub = firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']);
  if (pub) params.set('pub_id', pub);
  for (const i of [1, 2, 3, 4, 5]) { const s = firstStr(q[`sub${i}`]); if (s) params.set(`sub${i}`, s); }
+ // Source ID too — Traffic Blocking rules can match on it at /click.
+ const src = firstStr(q['source_id']) ?? firstStr(q['source']) ?? firstStr(q['src']);
+ if (src) params.set('source_id', src);
  return reply.code(302).header('location', `/click?${params.toString()}`).header('cache-control', 'no-store').send();
  });
 

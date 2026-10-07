@@ -20,13 +20,45 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight, ChevronLeft, SlidersHorizontal } from 'lucide-react';
-import { useQuery } from '../../lib/useApi';
+import { useMutation, useQuery } from '../../lib/useApi';
+import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
+
+/**
+ * Approve a pending conversion (writes publisher earning + advertiser billing and fires the partner
+ * postback) or reject one (offsetting ledger entries — history is never edited). Admin/finance only.
+ */
+function ConversionActions({ row, onChanged }: { row: ConvRow; onChanged: () => void }) {
+  const act = useMutation((action: 'approve' | 'reject') => api.post(`/api/finance/conversions/${row.conversion_id}/${action}`, {}));
+  const confirm = useConfirm();
+  if (row.status === 'rejected') return <span className="text-tiny text-fg-muted">—</span>;
+  const go = async (action: 'approve' | 'reject') => {
+    const run = async () => { if (await act.run(action)) onChanged(); };
+    if (action !== 'reject') { await run(); return; }
+    void confirm({
+      title: 'Reject conversion?',
+      message: row.status === 'approved'
+        ? 'Reject this approved conversion? Its payout and billing will be reversed in the ledger.'
+        : 'Reject this pending conversion?',
+      confirmLabel: 'Reject', destructive: true, onConfirm: run,
+    });
+  };
+  return (
+    <div className="flex items-center gap-3 whitespace-nowrap">
+      {row.status === 'pending' && (
+        <button type="button" className="text-tiny font-medium text-success-text hover:underline disabled:opacity-50" disabled={act.busy} onClick={() => go('approve')}>Approve</button>
+      )}
+      <button type="button" className="text-tiny font-medium text-danger-text hover:underline disabled:opacity-50" disabled={act.busy} onClick={() => go('reject')}>Reject</button>
+      {act.error && <span className="max-w-[200px] truncate text-tiny text-danger-text" title={act.error}>{act.error}</span>}
+    </div>
+  );
+}
 
 interface ConvRow {
   conversion_id: string; created_at: string; click_id: string; offer_id: string;
@@ -148,7 +180,7 @@ export default function ConversionReport() {
     offerId: offerIdFilter, publisherId: publisherIdFilter, advertiserId: advertiserIdFilter, status: statusFilter,
     limit: pageSize + 1, offset: (page - 1) * pageSize,
   });
-  const { data, loading, error } = useQuery<ConvRow[]>(hasRun ? `/api/reports/conversions?${tableQs}` : null);
+  const { data, loading, error, refetch } = useQuery<ConvRow[]>(hasRun ? `/api/reports/conversions?${tableQs}` : null);
   const hasNextPage = (data?.length ?? 0) > pageSize;
   const pageRows = (data ?? []).slice(0, pageSize);
 
@@ -307,6 +339,7 @@ export default function ConversionReport() {
                     {shown.has('Sub3') && <th >Sub3</th>}
                     {shown.has('Sub4') && <th >Sub4</th>}
                     {shown.has('Sub5') && <th >Sub5</th>}
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -340,6 +373,7 @@ export default function ConversionReport() {
                       {shown.has('Sub3') && <td className="px-4 py-3">{r.sub3 ?? DASH}</td>}
                       {shown.has('Sub4') && <td className="px-4 py-3">{r.sub4 ?? DASH}</td>}
                       {shown.has('Sub5') && <td className="px-4 py-3">{r.sub5 ?? DASH}</td>}
+                      <td className="px-4 py-3"><ConversionActions row={r} onChanged={refetch} /></td>
                     </tr>
                   ))}
                 </tbody>

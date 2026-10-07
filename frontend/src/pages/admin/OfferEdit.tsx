@@ -12,8 +12,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { groupTrackingDomains, resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
+import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column, Segmented } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
 import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
@@ -58,12 +59,14 @@ interface FormState {
 export default function OfferEdit() {
   const { id = '' } = useParams();
   const nav = useNavigate();
+  const confirm = useConfirm();
   const base = `/api/offers/${id}`;
   const { data: offer, loading, error, refetch } = useQuery<Offer>(base);
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: groups, refetch: refetchGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
   const { data: allOffers } = useQuery<Offer[]>('/api/offers');
+  const { data: networkSecurity } = useQuery<{ securityCode: string | null }>('/api/settings/security');
   const categoryOptions = useMemo(
     () => Array.from(new Set((allOffers ?? []).map((o) => o.category).filter((c): c is string => Boolean(c)))).sort(),
     [allOffers],
@@ -176,19 +179,25 @@ export default function OfferEdit() {
 
     // Sync offer-group membership: drop this offer from any group it's currently in, then add it
     // to the newly selected one (if the toggle is on).
+    // The offer itself is saved by now; a group failure is reported, not silently swallowed.
+    const failedGroups: string[] = [];
     if (groups) {
       for (const g of groups) {
         const has = g.offerIds?.includes(id);
         const shouldHave = assignGroup && g.id === groupId;
-        if (has && !shouldHave) await api.patch(`/api/offer-groups/${g.id}`, { offerIds: g.offerIds.filter((o) => o !== id) });
-        else if (!has && shouldHave) await api.patch(`/api/offer-groups/${g.id}`, { offerIds: [...g.offerIds, id] });
+        try {
+          if (has && !shouldHave) await api.patch(`/api/offer-groups/${g.id}`, { offerIds: g.offerIds.filter((o) => o !== id) });
+          else if (!has && shouldHave) await api.patch(`/api/offer-groups/${g.id}`, { offerIds: [...g.offerIds, id] });
+        } catch { failedGroups.push(g.name); }
       }
       refetchGroups();
     }
+    if (failedGroups.length) await confirm({ title: 'Offer saved with warnings', message: `Offer saved, but its offer-group membership could not be updated for: ${failedGroups.join(', ')}.`, cancelLabel: null });
     nav(`/app/offers/${id}`);
   };
 
   const trackHost = resolveTrackingHost(domains, form.trackingDomainId);
+  const currentDomainId: string | null | undefined = offer?.trackingDomainId;
   const domainGroups = groupTrackingDomains(domains);
 
   return (
@@ -299,12 +308,12 @@ export default function OfferEdit() {
                   <option value="" disabled>Select Tracking Domain…</option>
                   {domainGroups.production.length > 0 && (
                     <optgroup label="Production">
-                      {domainGroups.production.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                      {domainGroups.production.map((d) => <option key={d.id} value={d.id} disabled={(d.status !== 'active' || d.verificationState !== 'verified') && d.id !== currentDomainId}>{d.host}{d.status !== 'active' ? ` (${d.status})` : d.verificationState !== 'verified' ? ' (not verified)' : ''}</option>)}
                     </optgroup>
                   )}
                   {domainGroups.devOnly.length > 0 && (
                     <optgroup label="Local Testing">
-                      {domainGroups.devOnly.map((d) => <option key={d.id} value={d.id}>{d.host}{d.status !== 'active' ? ` (${d.status})` : ''}</option>)}
+                      {domainGroups.devOnly.map((d) => <option key={d.id} value={d.id} disabled={(d.status !== 'active' || d.verificationState !== 'verified') && d.id !== currentDomainId}>{d.host}{d.status !== 'active' ? ` (${d.status})` : d.verificationState !== 'verified' ? ' (not verified)' : ''}</option>)}
                     </optgroup>
                   )}
                 </select>
@@ -349,16 +358,16 @@ export default function OfferEdit() {
           <div className="max-w-2xl space-y-6">
             <p className="text-small text-fg-secondary">Give this URL to the advertiser. They should fire it from their server when a user converts. The click_id is passed automatically via the redirect.</p>
             <div className="space-y-4">
-              <Field label="S2S Postback URL" hint="Advertiser fires this on conversion. Macros in {braces} are filled at conversion time.">
-                <CopyBox value={trackHost ? `${trackingBase(trackHost)}/postback?click_id={click_id}&txn_id={txn_id}&secure_code={secure_code}` : ''} placeholder="No active tracking domain — add one first." />
+              <Field label="S2S Postback URL" hint="The advertiser replaces {click_id} and {txn_id} with their own values. The secure code is already filled in.">
+                <CopyBox value={advertiserPostbackUrl(trackHost, offer.securityCode ?? networkSecurity?.securityCode)} placeholder="No active tracking domain — add one first." />
               </Field>
               <div>
-                <p className="label mb-2 block">Available Macros</p>
+                <p className="label mb-2 block">Postback Parameters</p>
                 <table className="premium-table w-full">
-                  <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Macro</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Description</th></tr></thead>
+                  <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Parameter</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Meaning</th></tr></thead>
                   <tbody>
-                    {[['{click_id}', 'The unique click identifier generated on each redirect'], ['{txn_id}', 'Your order/revenue transaction ID (passes through unchanged)'], ['{secure_code}', 'Per-offer security code — validates the postback is genuine'], ['{event}', 'Conversion event name (if multiple goals exist)'], ['{payout}', 'Resolved publisher payout amount'], ['{revenue}', 'Resolved advertiser revenue amount'], ['{currency}', 'Offer currency (e.g. USD)'], ['{sub1}–{sub5}', 'Sub-ID values carried from the click']].map(([m, d]) => (
-                      <tr key={String(m)}><td className="py-1 font-mono text-tiny text-accent-text">{m}</td><td className="py-1 text-small text-fg-secondary">{d}</td></tr>
+                    {POSTBACK_PARAMS.map(([m, d]) => (
+                      <tr key={m}><td className="py-1 font-mono text-tiny text-accent-text">{m}</td><td className="py-1 text-small text-fg-secondary">{d}</td></tr>
                     ))}
                   </tbody>
                 </table>

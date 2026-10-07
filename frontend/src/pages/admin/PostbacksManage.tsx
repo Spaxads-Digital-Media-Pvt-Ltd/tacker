@@ -12,6 +12,7 @@ import { Search, SlidersHorizontal, ChevronDown, Pencil, Play, Trash2, Clock, Mo
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { useDropdown, ColumnsModal, ApiRequestModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { Postback, Publisher, Offer } from '../../types';
@@ -107,7 +108,7 @@ function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted:
   const [toast, setToast] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const nav = useNavigate();
-  const test = useMutation(() => api.post<{ success: boolean; statusCode?: number }>(`/api/postbacks/${postback.id}/test`, {}));
+  const test = useMutation(() => api.post<{ ok: boolean; status: number | null; error: string | null; body: string | null }>(`/api/postbacks/${postback.id}/test`, {}));
   const del = useMutation(() => api.del(`/api/postbacks/${postback.id}`));
 
   useEffect(() => {
@@ -120,17 +121,26 @@ function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted:
     if (!postback.url) return;
     api.close();
     setErr(null);
-    try {
-      const res = await test.run(undefined);
-      if (res) setToast(res.success ? `Test fired successfully (HTTP ${res.statusCode ?? '—'}).` : 'Test fired but the endpoint returned an error.');
-    } catch { setErr(test.error ?? 'Test failed.'); }
+    const res = await test.run(undefined);
+    if (!res) { setErr(test.error ?? 'Test failed.'); return; }
+    if (res.ok) setToast(`Test fired successfully (HTTP ${res.status}).`);
+    else setErr(res.status != null
+      ? `The endpoint answered HTTP ${res.status}${res.body ? `: ${res.body.slice(0, 160)}` : ''}`
+      : `The test could not reach the endpoint: ${res.error ?? 'unknown error'}`);
   };
+  const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
     api.close();
     setErr(null);
-    if (!confirm('Delete this postback?')) return;
-    try { const ok = await del.run(undefined); if (ok) onDeleted(); }
-    catch { setErr(del.error ?? 'Failed to delete postback.'); }
+    void confirm({
+      title: 'Delete postback?', message: 'Are you sure you want to delete this postback configuration?',
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => {
+        // useMutation.run never throws — it resolves null on failure and sets .error.
+        const ok = await del.run(undefined);
+        if (ok) onDeleted(); else setErr(del.error ?? 'Failed to delete postback.');
+      },
+    });
   };
 
   return (

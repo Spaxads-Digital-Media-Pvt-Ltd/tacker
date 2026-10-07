@@ -9,8 +9,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { pool, query } from '../../../lib/db/pool.js';
+import type { PoolClient } from 'pg';
 import { getRedis } from '../../../lib/redis.js';
-import { normalizeMoney } from '../../../lib/money.js';
+import { addMoney, normalizeMoney, percentOfMoney } from '../../../lib/money.js';
 import { getOfferConfig } from '../offer-cache.js';
 import { getStoredClick, type StoredClick } from '../click-store.js';
 import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
@@ -86,11 +87,44 @@ function safeMoney(v: string | null): string | null {
  }
 }
 
-interface GoalPricing { id: string; payout: string | null; revenue: string | null; currency: string | null; }
+interface GoalPricing {
+ id: string; payout: string | null; revenue: string | null; currency: string | null; event_name: string | null; is_default: boolean;
+ daily_conversion_cap: number | null; total_conversion_cap: number | null;
+}
+
+/**
+ * Offer / goal conversion caps (Edit Offer › Caps, goal caps). Counts this offer's non-rejected
+ * conversions (today in UTC — same day boundary as the click cap — or all-time) inside the insert
+ * transaction, serialized per offer with a transaction-scoped advisory lock so concurrent postbacks
+ * can't overshoot. The lock is only taken when a cap is actually configured. Returns the reject
+ * reason, or null when under every cap.
+ */
+async function conversionCapReached(
+ client: PoolClient, networkId: string, offerId: string,
+ offerCaps: { daily: number | null; total: number | null }, goal: GoalPricing | null,
+): Promise<string | null> {
+ const checks: { reason: string; cap: number | null | undefined; goalId: string | null; daily: boolean }[] = [
+ { reason: 'daily_conversion_cap_reached', cap: offerCaps.daily, goalId: null, daily: true },
+ { reason: 'total_conversion_cap_reached', cap: offerCaps.total, goalId: null, daily: false },
+ { reason: 'goal_daily_conversion_cap_reached', cap: goal?.daily_conversion_cap, goalId: goal?.id ?? null, daily: true },
+ { reason: 'goal_total_conversion_cap_reached', cap: goal?.total_conversion_cap, goalId: goal?.id ?? null, daily: false },
+ ].filter((c) => c.cap != null && c.cap > 0 && (c.goalId !== null || !c.reason.startsWith('goal_')));
+ if (!checks.length) return null;
+ await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`convcap:${offerId}`]);
+ for (const c of checks) {
+ const params: unknown[] = [networkId, offerId];
+ let where = `network_id = $1 AND offer_id = $2 AND status <> 'rejected'`;
+ if (c.goalId) { params.push(c.goalId); where += ` AND goal_id = $${params.length}`; }
+ if (c.daily) where += ` AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`;
+ const { rows } = await client.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM conversions WHERE ${where}`, params);
+ if ((rows[0]?.n ?? 0) >= c.cap!) return c.reason;
+ }
+ return null;
+}
 
 async function resolveGoal(networkId: string, offerId: string, event: string | null): Promise<GoalPricing | null> {
- const { rows } = await query<GoalPricing & { is_default: boolean }>(
- `SELECT id, payout, revenue, currency, is_default FROM offer_goals
+ const { rows } = await query<GoalPricing>(
+ `SELECT id, payout, revenue, currency, event_name, is_default, daily_conversion_cap, total_conversion_cap FROM offer_goals
  WHERE network_id = $1 AND offer_id = $2 AND status = 'active'
  AND (lower(event_name) = lower($3) OR is_default = true)
  ORDER BY (lower(event_name) = lower($3)) DESC NULLS LAST, is_default DESC
@@ -174,16 +208,25 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  }
 
  const goal = await resolveGoal(input.networkId, click.offer_id, input.event);
- let payout = safeMoney(input.payoutParam) ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
- let revenue = safeMoney(input.revenueParam) ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
+ // Pricing precedence: explicit postback param → goal matched BY EVENT NAME → a click-time override
+ // (partner / country rate frozen on the click) → the default goal → the click / offer default.
+ // A default-goal fallback must not wipe out a partner- or country-specific rate.
+ const eventGoal = goal && input.event != null && goal.event_name != null
+ && goal.event_name.toLowerCase() === input.event.toLowerCase() ? goal : null;
+ const clickOverride = (frozen: string | null | undefined, dflt: string | null | undefined): string | null =>
+ frozen != null && dflt != null && safeMoney(frozen) !== safeMoney(dflt) ? frozen : null;
+ let payout = safeMoney(input.payoutParam) ?? eventGoal?.payout ?? clickOverride(click.resolved_payout, offer?.defaultPayout)
+ ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
+ let revenue = safeMoney(input.revenueParam) ?? eventGoal?.revenue ?? clickOverride(click.resolved_revenue, offer?.defaultRevenue)
+ ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
  // Percentage / Mixed revenue: a share of the sale amount the advertiser reports (only when the
- // postback didn't send an explicit revenue).
+ // postback didn't send an explicit revenue). `amount` is NOT read here — it's the documented
+ // payout-override param, so treating it as a sale amount would also set the partner's payout.
  if (!safeMoney(input.revenueParam) && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
- const sale = safeMoney(paramStr(input.rawParams, ['sale_amount', 'amount', 'order_amount']));
+ const sale = safeMoney(paramStr(input.rawParams, ['sale_amount', 'order_amount']));
  if (sale != null) {
- const share = (Number(sale) * revCfg.revenuePct) / 100;
- const base = revCfg.revenueType === 'mixed' ? Number(revenue ?? 0) : 0;
- revenue = (base + share).toFixed(4);
+ const share = percentOfMoney(sale, revCfg.revenuePct);
+ revenue = revCfg.revenueType === 'mixed' ? addMoney(revenue ?? '0', share) : share;
  }
  }
  const eventName = input.event ?? revCfg?.baseEventName ?? null;
@@ -220,11 +263,11 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  if (status === 'approved' && (payout != null || revenue != null)) {
  const adjusted = await applyTieredCommission(input.networkId, {
  offerId: click.offer_id, advertiserId, publisherId: click.publisher_id,
- payout: Number(payout ?? 0), revenue: Number(revenue ?? 0),
+ payout: payout ?? '0', revenue: revenue ?? '0',
  });
  if (adjusted.appliedId) {
- payout = payout != null ? adjusted.payout.toFixed(4) : payout;
- revenue = revenue != null ? adjusted.revenue.toFixed(4) : revenue;
+ if (payout != null) payout = adjusted.payout;
+ if (revenue != null) revenue = adjusted.revenue;
  }
  }
 
@@ -234,11 +277,11 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  const userId = typeof userIdParam === 'string' && userIdParam.length > 0 ? userIdParam : null;
  const cvResult = await evaluateCustomerValueRules({
  networkId: input.networkId, offerId: click.offer_id, advertiserId, publisherId: click.publisher_id,
- userId, payout: Number(payout ?? 0), revenue: Number(revenue ?? 0), rawParams: input.rawParams,
+ userId, payout: payout ?? '0.0000', revenue: revenue ?? '0.0000', rawParams: input.rawParams,
  });
  if (cvResult.appliedId) {
- if (cvResult.payoutOverridden) payout = cvResult.payout.toFixed(4);
- if (cvResult.revenueOverridden) revenue = cvResult.revenue.toFixed(4);
+ if (cvResult.payoutOverridden) payout = cvResult.payout;
+ if (cvResult.revenueOverridden) revenue = cvResult.revenue;
  cvAppliedId = cvResult.appliedId;
  }
  }
@@ -257,6 +300,11 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  let insertedOk = false;
  try {
  await client.query('BEGIN');
+ if (status !== 'rejected') {
+ const capReason = await conversionCapReached(client, input.networkId, click.offer_id,
+ { daily: offer?.dailyConversionCap ?? null, total: offer?.totalConversionCap ?? null }, goal);
+ if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
+ }
  const ins = await client.query<{ conversion_id: string }>(
  `INSERT INTO conversions (
  conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,

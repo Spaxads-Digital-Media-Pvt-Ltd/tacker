@@ -12,6 +12,7 @@ import { Search, MoreVertical, ChevronDown, ChevronRight, SlidersHorizontal } fr
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { PostbackControl, Offer, Publisher, Advertiser } from '../../types';
@@ -122,12 +123,18 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
+  const confirm = useConfirm();
   const doDelete = async () => {
     setOpen(false);
     setDelErr(null);
-    if (!confirm(`Delete postback control "${control.name}"?`)) return;
-    try { const ok = await del.run(undefined); if (ok) onChanged(); }
-    catch { setDelErr('Failed to delete postback control.'); }
+    void confirm({
+      title: 'Delete postback control?', message: `Are you sure you want to delete postback control "${control.name}"?`,
+      confirmLabel: 'Delete', destructive: true,
+      onConfirm: async () => {
+        try { const ok = await del.run(undefined); if (ok) onChanged(); }
+        catch { setDelErr('Failed to delete postback control.'); }
+      },
+    });
   };
 
   const item = (label: string, onClick: () => void) => (

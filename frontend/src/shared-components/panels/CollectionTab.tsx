@@ -11,6 +11,7 @@ import { Search } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { Table, Modal, Field, Spinner, StateBlock, EntitySearchSelect, DurationField, type Column, type EntityOpt } from '../primitives/ui';
+import { useConfirm } from '../primitives/confirm';
 
 export interface FieldDef {
   key: string;
@@ -54,14 +55,19 @@ function formFromRow(fields: FieldDef[], row: Row): Record<string, string | bool
 }
 
 /** Convert the form state into a request body: numbers coerced, `tags`/`multiselect` split into an
- * array, blanks on optional fields dropped. */
-function toBody(fields: FieldDef[], form: Record<string, string | boolean>): Record<string, unknown> {
+ * array, blanks on optional fields dropped — except when editing, where a field the user cleared
+ * (it had a value before) is sent as null so the clear actually saves. */
+function toBody(fields: FieldDef[], form: Record<string, string | boolean>, original?: Row): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const fd of fields) {
     const v = form[fd.key];
     if (fd.type === 'checkbox') { body[fd.key] = Boolean(v); continue; }
     if (isArrayField(fd.type)) { body[fd.key] = String(v).split(',').map((s) => s.trim()).filter(Boolean); continue; }
-    if (v === '' || v === undefined) { if (fd.required) body[fd.key] = v; continue; }
+    if (v === '' || v === undefined) {
+      if (fd.required) body[fd.key] = v;
+      else if (original && original[fd.key] != null && original[fd.key] !== '') body[fd.key] = null;
+      continue;
+    }
     body[fd.key] = fd.type === 'number' ? Number(v) : v;
   }
   return body;
@@ -95,6 +101,7 @@ export function CollectionTab({
   }, [data, searchKeys, q]);
 
   const del = useMutation((id: string) => api.del(`${basePath}/${id}`));
+  const confirm = useConfirm();
   const withActions = useMemo<Column<Row>[]>(() => [
     ...columns,
     {
@@ -103,11 +110,17 @@ export function CollectionTab({
         <span className="flex justify-end gap-3">
           {editable && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setEditRow(row)}>Edit</button>}
           <button className="text-tiny font-medium text-danger-text hover:underline"
-            onClick={async () => { if (confirm('Delete this item?')) { await del.run(row.id); refetch(); } }}>Delete</button>
+            onClick={() => confirm({
+              title: 'Delete item?',
+              message: 'Are you sure you want to delete this item? This cannot be undone.',
+              confirmLabel: 'Delete',
+              destructive: true,
+              onConfirm: async () => { if (await del.run(row.id) !== null) refetch(); },
+            })}>Delete</button>
         </span>
       ),
     },
-  ], [columns, del, refetch, editable]);
+  ], [columns, del, refetch, editable, confirm]);
 
   return (
     <div className="space-y-4">
@@ -120,6 +133,7 @@ export function CollectionTab({
         ) : null}
         <button className="btn-primary" onClick={() => setOpen(true)}>{addLabel}</button>
       </div>
+      {del.error && <p className="rounded-[var(--radius)] bg-danger-bg px-3 py-2 text-small text-danger-text">Could not delete: {del.error}</p>}
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
         : !data || data.length === 0 ? <StateBlock>{emptyText}</StateBlock>
@@ -151,7 +165,7 @@ function FormModal({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const res = await run(toBody(fields, form));
+    const res = await run(toBody(fields, form, initial));
     if (res !== null) onDone();
   };
 

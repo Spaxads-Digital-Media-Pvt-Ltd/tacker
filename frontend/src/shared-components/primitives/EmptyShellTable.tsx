@@ -175,7 +175,8 @@ function AddEntityForm({
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!onSubmit) { onCancel(); return; }
+    // Nothing persists this entity yet — say so instead of closing as if it had been saved.
+    if (!onSubmit) { setError('Not available yet — this record type is not saved in this app, so nothing was created.'); return; }
     setBusy(true);
     setError(null);
     try {

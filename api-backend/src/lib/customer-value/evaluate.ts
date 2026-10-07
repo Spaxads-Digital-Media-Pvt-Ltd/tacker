@@ -47,13 +47,14 @@ export interface CvContext {
   advertiserId: string | null;
   publisherId: string | null;
   userId: string | null;
-  payout: number;
-  revenue: number;
+  /** Decimal money strings, passed through untouched — never converted to floats. */
+  payout: string;
+  revenue: string;
   rawParams: Record<string, unknown>;
 }
 
 export interface CvResult {
-  payout: number; revenue: number; appliedId: string | null; appliedName: string | null;
+  payout: string; revenue: string; appliedId: string | null; appliedName: string | null;
   payoutOverridden: boolean; revenueOverridden: boolean;
 }
 
@@ -232,8 +233,8 @@ export async function evaluateCustomerValueRules(ctx: CvContext): Promise<CvResu
 
     if (await alreadyFired(rule, ctx.userId, window)) continue;
 
-    const payout = rule.payout_value != null ? Number(rule.payout_value) : ctx.payout;
-    const revenue = rule.revenue_value != null ? Number(rule.revenue_value) : ctx.revenue;
+    const payout = rule.payout_value ?? ctx.payout;
+    const revenue = rule.revenue_value ?? ctx.revenue;
     return {
       payout, revenue, appliedId: rule.id, appliedName: rule.name,
       payoutOverridden: rule.payout_value != null, revenueOverridden: rule.revenue_value != null,

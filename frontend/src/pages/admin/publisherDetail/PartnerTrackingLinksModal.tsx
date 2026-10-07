@@ -16,11 +16,9 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
 }) {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
 
-  const [type, setType] = useState<'Click' | 'Impression'>('Click');
   const [offerId, setOfferId] = useState('');
   const [showExtra, setShowExtra] = useState(false);
   const [extras, setExtras] = useState<Record<string, string>>({});
-  const [encrypt, setEncrypt] = useState(false);
   const setExtra = (k: string, v: string) => setExtras((s) => ({ ...s, [k]: v }));
 
   // The selected offer's own tracking domain (network primary only if it has none).
@@ -30,11 +28,10 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
   const link = useMemo(() => {
     if (!selectedOffer || !trackBase) return '';
     const filled = Object.fromEntries(Object.entries(extras).filter(([, v]) => v.trim()));
-    const base: Record<string, string> = { offer_id: linkId(selectedOffer), pub_id: linkId(publisher), type: type.toLowerCase() };
-    if (!encrypt) return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}`;
-    const packed = btoa(JSON.stringify(filled));
-    return `${trackBase}/click?${new URLSearchParams({ ...base, ...(Object.keys(filled).length ? { p: packed } : {}) }).toString()}`;
-  }, [selectedOffer, type, extras, encrypt, trackBase, publisher]);
+    // Only what /click reads: no impression type and no "encrypted" p= token (it silently dropped sub IDs).
+    const base: Record<string, string> = { offer_id: linkId(selectedOffer), pub_id: linkId(publisher) };
+    return `${trackBase}/click?${new URLSearchParams({ ...base, ...filled }).toString()}`;
+  }, [selectedOffer, extras, trackBase, publisher]);
 
   return (
     <Overlay onClose={onClose}>
@@ -46,15 +43,6 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div>
             <p className="mb-3 text-h3 font-medium text-fg">Parameters</p>
-            <label className="label">Type</label>
-            <div className="mb-3 inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-              {(['Click', 'Impression'] as const).map((t) => (
-                <button key={t} type="button" onClick={() => setType(t)}
-                  className={`px-4 py-2 text-small font-medium transition-colors ${type === t ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-                  {t}
-                </button>
-              ))}
-            </div>
             <label className="label">Offer <span className="text-danger-text">*</span></label>
             <select className="input" value={offerId} onChange={(e) => setOfferId(e.target.value)}>
               <option value="">Select Offer…</option>
@@ -78,15 +66,7 @@ export function PartnerTrackingLinksModal({ publisher, domains, onClose }: {
           </div>
 
           <div>
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-h3 font-medium text-fg">Link</p>
-              <label className="flex items-center gap-2 text-small text-fg-secondary">
-                Encrypt Parameters
-                <button type="button" onClick={() => setEncrypt((v) => !v)} className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${encrypt ? 'bg-accent' : 'bg-border'}`}>
-                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${encrypt ? 'translate-x-4' : 'translate-x-0'}`} />
-                </button>
-              </label>
-            </div>
+            <p className="mb-3 text-h3 font-medium text-fg">Link</p>
             {!link ? (
               <div className="rounded-[var(--radius)] border border-dashed border-border bg-page p-4 text-small text-fg-secondary">
                 Tracking link will be displayed here as soon as parameters are set

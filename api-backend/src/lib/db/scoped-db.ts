@@ -42,6 +42,8 @@ export interface SelectOptions {
   offset?: number;
   orderBy?: string;
   orderDir?: 'asc' | 'desc';
+  /** Raise the per-call ceiling above MAX_LIMIT (still bounded) — for whole-entity lists only. */
+  maxLimit?: number;
 }
 
 export class ScopedDb {
@@ -97,7 +99,7 @@ export class ScopedDb {
       params.push(val);
     }
 
-    const limit = Math.min(Math.max(1, opts.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
+    const limit = Math.min(Math.max(1, opts.limit ?? DEFAULT_LIMIT), Math.max(MAX_LIMIT, opts.maxLimit ?? 0));
     const offset = Math.max(0, opts.offset ?? 0);
     const order = opts.orderBy
       ? ` ORDER BY ${assertIdent(opts.orderBy)} ${opts.orderDir === 'asc' ? 'ASC' : 'DESC'}`
