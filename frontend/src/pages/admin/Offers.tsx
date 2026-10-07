@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 
 import { useNavigate, Link } from 'react-router-dom';
-import { Search, SlidersHorizontal, Image as ImageIcon, ChevronDown, Pencil, Copy, Settings, Link as LinkIcon, Eye, FileText } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Pencil, Copy, Settings, Link as LinkIcon, Eye, FileText } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { OfferThumbnail } from '../../shared-components/primitives/OfferThumbnail';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { TableActionsMenu, ALL_COLUMNS } from './OffersTableActions';
 import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
@@ -367,7 +368,7 @@ export default function Offers() {
   const columns: Column<Offer>[] = [
     { header: '', cell: (o) => <input type="checkbox" className="chk" checked={selected.has(o.id)} onChange={() => toggleRow(o.id)} /> },
     { header: 'ID', cell: (o) => <span className="tabular-nums text-fg-secondary">{o.ref ?? '—'}</span> },
-    { header: 'Thumbnail', cell: () => <div className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-page text-fg-muted"><ImageIcon size={15} /></div> },
+    { header: 'Thumbnail', cell: (o) => <OfferThumbnail url={o.thumbnailUrl} name={o.name} /> },
     {
       header: 'Name', cell: (o) => (
         <span className="inline-flex items-center gap-2">

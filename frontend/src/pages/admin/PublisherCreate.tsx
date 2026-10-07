@@ -7,6 +7,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useMutation, useQuery } from '../../lib/useApi';
+import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { PageHeader, Field, Segmented, Spinner } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { Stepper } from '../../shared-components/panels/Stepper';
@@ -81,6 +82,8 @@ export default function PublisherCreate() {
  const { data: users } = useQuery<DashboardUser[]>('/api/users');
  const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
  const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.post<{ id: string }>('/api/publishers', body));
+ // One lock for the whole create flow (POST + label follow-ups) — see useSubmitGuard.
+ const { pending: submitting, guard } = useSubmitGuard();
 
  const validateStep0 = (): boolean => {
  const errs: Partial<Record<keyof FormState, string>> = {};
@@ -98,7 +101,8 @@ export default function PublisherCreate() {
  return Object.keys(errs).length === 0;
  };
 
- const submit = async () => {
+ /** Resolves true once the partner exists and we're navigating to it (keeps the button locked). */
+ const createPartner = async (): Promise<boolean> => {
  const body: Record<string, unknown> = {
  name: form.name.trim(),
  status: form.status,
@@ -117,7 +121,7 @@ export default function PublisherCreate() {
  trafficSource: trafficSourceEnabled ? form.trafficSource || undefined : undefined,
  };
  const res = await run(body);
- if (!res) return;
+ if (!res) return false;
  // The partner exists now — a failed label must not strand the user on the wizard (a resubmit
  // would create a duplicate partner), so report it and carry on to the new partner.
  const failedLabels: string[] = [];
@@ -126,13 +130,15 @@ export default function PublisherCreate() {
  }
  if (failedLabels.length) await confirm({ title: 'Partner created with warnings', message: `Partner created, but these labels could not be added: ${failedLabels.join(', ')}`, cancelLabel: null });
  nav(`/app/publishers/${res.id}`);
+ return true;
  };
 
  const next = (e: FormEvent) => {
  e.preventDefault();
+ if (submitting) return;
  if (step === 0 && !validateStep0()) return;
  if (step < STEPS.length - 1) { setStep(step + 1); }
- else { if (validateStep3()) submit(); }
+ else { if (validateStep3()) void guard(createPartner); }
  };
 
  const fieldClass = (k: keyof FormState) => (fieldErrors[k] ? 'input !border-danger' : 'input');
@@ -319,8 +325,8 @@ export default function PublisherCreate() {
  <button type="button" className="btn-ghost" onClick={() => (step === 0 ? nav('/app/publishers') : setStep(step - 1))}>
  {step === 0 ? 'Cancel' : 'Back'}
  </button>
- <button type="submit" className="btn-primary" disabled={busy}>
- {busy ? <span className="inline-flex items-center gap-2"><Spinner /> Creating…</span> : step === STEPS.length - 1 ? 'Create Partner' : 'Next'}
+ <button type="submit" className="btn-primary" disabled={busy || submitting} aria-busy={busy || submitting}>
+ {busy || submitting ? <span className="inline-flex items-center gap-2"><Spinner /> Creating…</span> : step === STEPS.length - 1 ? 'Create Partner' : 'Next'}
  </button>
  </div>
  </form>

@@ -79,8 +79,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, data?: unknown) =>
-    request<T>(path, { method: 'POST', body: data ? JSON.stringify(data) : undefined }),
+  /** `headers` is for extras such as `Idempotency-Key`; Content-Type/Authorization are set for you. */
+  post: <T>(path: string, data?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'POST', body: data ? JSON.stringify(data) : undefined, headers }),
   patch: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: 'PATCH', body: data ? JSON.stringify(data) : undefined }),
   put: <T>(path: string, data?: unknown) =>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
+import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { Modal } from '../../shared-components/primitives/ui';
 
 interface Options {
@@ -21,10 +22,14 @@ export function CopyOfferModal({ offerId, onClose, onDone }: { offerId: string; 
   const { run, busy, error } = useMutation((body: Options) => api.post<{ id: string }>(`/api/offers/${offerId}/duplicate`, body));
   const toggle = (k: keyof Options) => setOpts((o) => ({ ...o, [k]: !o[k] }));
 
-  const submit = async () => {
+  // Ref-gated so two clicks in the same tick can't send two /duplicate requests (two copies).
+  const { pending, guard } = useSubmitGuard();
+  const submit = () => guard(async () => {
     const res = await run(opts);
-    if (res) onDone(res.id);
-  };
+    if (!res) return false;
+    onDone(res.id);
+    return true;
+  });
 
   const check = (key: keyof Options, label: string) => (
     <label className="flex flex-col gap-2">
@@ -49,7 +54,7 @@ export function CopyOfferModal({ offerId, onClose, onDone }: { offerId: string; 
         </div>
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Copying…' : 'Confirm'}</button>
+          <button type="button" className="btn-primary" disabled={busy || pending} aria-busy={busy || pending} onClick={submit}>{busy || pending ? 'Copying…' : 'Confirm'}</button>
         </div>
       </div>
     </Modal>

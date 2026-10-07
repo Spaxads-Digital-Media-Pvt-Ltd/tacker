@@ -12,6 +12,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column, Segmented } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
@@ -80,6 +81,8 @@ export default function OfferEdit() {
   const [catNew, setCatNew] = useState(false);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const { run, busy, error: saveError } = useMutation((body: Record<string, unknown>) => api.patch(base, body));
+  // One lock for the whole save (PATCH + offer-group sync), not just the PATCH — see useSubmitGuard.
+  const { pending: saving, guard } = useSubmitGuard();
   const regenCode = useMutation(() => api.post<{ securityCode: string }>(`${base}/security-code/regenerate`));
   const clearCode = useMutation(async (_args: void) => { await api.del(`${base}/security-code`); });
 
@@ -133,15 +136,20 @@ export default function OfferEdit() {
     await refetch();
   };
 
-  const submit = async (e: FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
+    void guard(saveOffer);
+  };
+
+  /** Resolves true once saved and navigating back to the offer (keeps the button locked). */
+  const saveOffer = async (): Promise<boolean> => {
     const tErrors = targetingErrors(form.targeting);
     const sErrors = settingsErrors(form.attribution, form.revenue, form.email);
     if (failTrafficEnabled && !form.fallbackUrl.trim()) sErrors.push('Fail Traffic: enter a Fallback URL or turn Fail Traffic off.');
     if (tErrors.length || sErrors.length) {
       setFormErrors([...tErrors.map((m) => `Targeting: ${m}`), ...sErrors]);
       if (tErrors.length) setTab('Targeting');
-      return;
+      return false;
     }
     setFormErrors([]);
     const normalizeUrl = (v: string) => (v && !/^https?:\/\//i.test(v) ? 'https://' + v : v);
@@ -175,7 +183,7 @@ export default function OfferEdit() {
     if (form.trackingDomainId) body.trackingDomainId = form.trackingDomainId;
     if (form.attributionWindowS) body.attributionWindowS = Number(form.attributionWindowS);
     if (form.dedupWindowS) body.dedupWindowS = Number(form.dedupWindowS);
-    if (!(await run(body))) return;
+    if (!(await run(body))) return false;
 
     // Sync offer-group membership: drop this offer from any group it's currently in, then add it
     // to the newly selected one (if the toggle is on).
@@ -194,6 +202,7 @@ export default function OfferEdit() {
     }
     if (failedGroups.length) await confirm({ title: 'Offer saved with warnings', message: `Offer saved, but its offer-group membership could not be updated for: ${failedGroups.join(', ')}.`, cancelLabel: null });
     nav(`/app/offers/${id}`);
+    return true;
   };
 
   const trackHost = resolveTrackingHost(domains, form.trackingDomainId);
@@ -472,7 +481,7 @@ export default function OfferEdit() {
 
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <button type="button" className="btn-ghost" onClick={() => nav(`/app/offers/${id}`)}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+          <button type="submit" className="btn-primary" disabled={busy || saving} aria-busy={busy || saving}>{busy || saving ? 'Saving…' : 'Save'}</button>
         </div>
       </form>
       </div>

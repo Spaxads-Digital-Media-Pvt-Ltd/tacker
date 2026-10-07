@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { api } from '../../../lib/api';
 import { useQuery, useMutation } from '../../../lib/useApi';
 import { Badge, Spinner } from '../../../shared-components/primitives/ui';
+import { OfferThumbnail } from '../../../shared-components/primitives/OfferThumbnail';
 import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import { advertiserPostbackUrl, resolveTrackingHost } from '../../../lib/trackingLinks';
 import type { Offer, TrackingDomain } from '../../../types';
@@ -79,6 +80,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
           <dl>
             <InfoRow label="ID">{offer.ref ?? '—'}</InfoRow>
             <InfoRow label="Name">{offer.name}</InfoRow>
+            <InfoRow label="Thumbnail"><OfferThumbnail url={offer.thumbnailUrl} name={offer.name} size="lg" /></InfoRow>
             <InfoRow label="Advertiser"><span className="text-accent-text">{advName}</span></InfoRow>
             <InfoRow label="Category">{offer.category ?? '—'}</InfoRow>
             <InfoRow label="Currency">{offer.currency}</InfoRow>
