@@ -17,7 +17,8 @@ import type { Session, User } from '@supabase/supabase-js';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody } from '../../lib/http/validate.js';
-import { unauthorized, tooMany } from '../../lib/http/errors.js';
+import { unauthorized, tooMany, serviceUnavailable } from '../../lib/http/errors.js';
+import { withTimeout, TimeoutError } from '../../lib/timeout.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { isProd } from '../../config/env.js';
 import { recordLoginEvent } from './control-center/routes.js';
@@ -30,6 +31,8 @@ import { passwordSchema } from '../../lib/auth/password-policy.js';
 
 const REFRESH_COOKIE = 'tracker_rt';
 const COOKIE_PATH = '/api/auth';
+/** Upper bound on the Supabase password sign-in call. */
+export const LOGIN_TIMEOUT_MS = 5_000;
 
 const loginSchema = z.object({
  email: z.string().email(),
@@ -96,7 +99,21 @@ export function authRoutes(): Router {
  throw tooMany(reason, { retryAfter: preCheck.retryAfterSeconds });
  }
 
- const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({ email, password });
+ // Cap the wait on Supabase Auth so a hung upstream can't leave the login request (and the
+ // user) spinning indefinitely. A timeout is the auth service's fault, not a wrong password, so
+ // it is NOT recorded as a failed attempt (no lockout) — the user gets a 503 and can retry.
+ let signIn: Awaited<ReturnType<ReturnType<typeof getSupabaseAdmin>['auth']['signInWithPassword']>>;
+ try {
+ signIn = await withTimeout(
+ getSupabaseAdmin().auth.signInWithPassword({ email, password }),
+ LOGIN_TIMEOUT_MS,
+ 'Authentication service timed out.',
+ );
+ } catch (err) {
+ if (err instanceof TimeoutError) throw serviceUnavailable('The sign-in service is slow to respond. Please try again in a moment.');
+ throw err;
+ }
+ const { data, error } = signIn;
 
  if (error || !data.session || !data.user) {
  await recordLoginFailure(ip, normalizedEmail);
