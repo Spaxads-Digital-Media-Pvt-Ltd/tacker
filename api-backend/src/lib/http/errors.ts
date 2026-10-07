@@ -12,6 +12,7 @@ export type ErrorCode =
  | 'rate_limited'
  | 'payload_too_large'
  | 'validation_failed'
+ | 'service_unavailable'
  | 'internal';
 
 const STATUS: Record<ErrorCode, number> = {
@@ -23,6 +24,7 @@ const STATUS: Record<ErrorCode, number> = {
  rate_limited: 429,
  payload_too_large: 413,
  validation_failed: 422,
+ service_unavailable: 503,
  internal: 500,
 };
 
@@ -54,3 +56,6 @@ export const payloadTooLarge = (msg = 'Payload too large') =>
 
 export const tooMany = (msg = 'Too many requests', details?: unknown) =>
  new AppError('rate_limited', msg, details);
+
+export const serviceUnavailable = (msg = 'Service temporarily unavailable') =>
+ new AppError('service_unavailable', msg);

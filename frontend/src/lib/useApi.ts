@@ -23,8 +23,30 @@ function classifyError(e: unknown): { message: string; code: string } {
   return { message: 'Request failed', code: 'unknown' };
 }
 
-/** Pass `null` for `path` to skip fetching (e.g. a dependent query waiting on an id). */
-export function useQuery<T>(path: string | null): QueryState<T> {
+export type QueryParams = Record<string, string | number | boolean | null | undefined>;
+
+/**
+ * Append `params` to `path` as a query string. `null`/`undefined`/'' values are dropped, so optional
+ * filters can be passed as-is; joins with `&` if `path` already has a query; no params → `path`.
+ */
+export function withQueryParams(path: string, params?: QueryParams): string {
+  if (!params) return path;
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === null || v === undefined || v === '') continue;
+    qs.append(k, String(v));
+  }
+  const s = qs.toString();
+  return s ? `${path}${path.includes('?') ? '&' : '?'}${s}` : path;
+}
+
+/**
+ * Pass `null` for `path` to skip fetching (e.g. a dependent query waiting on an id). Optional
+ * `params` are URL-encoded onto the path (see `withQueryParams`); the request refetches whenever the
+ * resulting URL changes, so passing a fresh object each render is fine.
+ */
+export function useQuery<T>(rawPath: string | null, params?: QueryParams): QueryState<T> {
+  const path = rawPath === null ? null : withQueryParams(rawPath, params);
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(path !== null);
   const [error, setError] = useState<string | null>(null);
