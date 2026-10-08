@@ -32,6 +32,7 @@ import {
   type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
+import { countryLabel } from '../../../data/geo';
 
 interface SmartLink { id: string; name: string }
 
@@ -240,7 +241,7 @@ export default function VarianceReport() {
   const { data: countryAgg } = useQuery<AggResult>('/api/reports?groupBy=country&metrics=clicks&limit=200');
   const countryOptions = useMemo(() => (countryAgg?.rows ?? [])
     .map((r) => r.dimensions['country']).filter((c): c is string => Boolean(c)).sort()
-    .map((c) => ({ value: c, label: c })), [countryAgg]);
+    .map((c) => ({ value: c, label: countryLabel(c) })).sort((a, b) => a.label.localeCompare(b.label)), [countryAgg]);
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },

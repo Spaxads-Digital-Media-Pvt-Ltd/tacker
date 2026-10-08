@@ -170,6 +170,15 @@ The frontend has a comprehensive reporting system mirroring Trackog:
 - **`ReportPageKit.tsx`** — Shared scaffold for all report pages
 - **`export.ts`** — Excel (XLSX) export
 - Default report types: Offer, Partner, Advertiser, Smart Link, Daily, Hourly, Impression, Click, Conversion, Event, Pacing, Click-to-Conversion, Partner Postback, Advertiser Postback, Partner Referrals, Custom Metrics, Products, Refunds, Conversion Imports, Saved/Scheduled
+- **Display timezone** (Click + Conversion reports): `lib/useReportTimeZone.ts` + `<TimeZoneSelect>` (`shared-components/primitives/ReportTimeZone.tsx`). Auto zone = filtered Country's primary zone → network `settings.general.timezone` → browser; user can override. Timestamps are re-formatted with `lib/datetime.ts` (`YYYY-MM-DD HH:mm:ss`), never refetched. The From/To date range is still sent as **UTC** days (`ReportPageKit.toIso`) — labelled "(UTC)".
+
+## Geo Reference Data
+
+`src/data/geo/` is the single source for countries, regions, cities and timezones — import from `data/geo`, don't add local country lists.
+- Values stay ISO codes (country alpha-2; region top-level ISO 3166-2 stored as `CC-XX`, which the tracking matcher accepts). Names are display-only; country names come from `Intl.DisplayNames`.
+- `generated/` is produced by `frontend/scripts/generate-geo-data.mjs` from Debian iso-codes + GeoNames (sources and licences in the script header). Regions/timezones and the per-country city files load lazily (`useRegions`, `useTimezones`, `useCities`) as separate chunks.
+- Device Characteristics (Platform / Browser / Device Brand / OS Version / Language) use the same picker with lists from `src/data/userAgent.ts` — the names ua-parser-js 1.0.x (api-backend `lib/ua.ts`) actually emits, since the tracker matches them exactly. Refresh it when that library is upgraded. OS Version options follow the included Platforms.
+- Offer › Targeting uses `<SearchablePicker>` (`shared-components/primitives/SearchablePicker.tsx`) for Country/Region/City; Region and City follow the included Countries, DMA is disabled unless the US is included, and un-including a country offers to remove its now-orphaned Region/City/DMA values.
 
 ## Key Patterns
 

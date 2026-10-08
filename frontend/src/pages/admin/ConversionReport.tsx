@@ -29,6 +29,10 @@ import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitive
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
+import { countryName, regionName, useRegions } from '../../data/geo';
+import { formatDateTime } from '../../lib/datetime';
+import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZone';
+import { useReportTimeZone } from '../../lib/useReportTimeZone';
 
 /**
  * Approve a pending conversion (writes publisher earning + advertiser billing and fires the partner
@@ -79,12 +83,6 @@ const ALL_COLUMNS = [
   'Sub1', 'Sub2', 'Sub3', 'Sub4', 'Sub5',
 ] as const;
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const date = `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${d.getUTCFullYear()}`;
-  const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
-  return `${date} ${time}`;
-}
 function formatDelta(seconds: number | null): string {
   if (seconds == null) return DASH;
   if (seconds < 60) return `${seconds}s`;
@@ -168,6 +166,11 @@ export default function ConversionReport() {
   const advertiserIdFilter = appliedFilters['advertiser']?.[0];
   const publisherIdFilter = appliedFilters['partner']?.[0];
   const statusFilter = appliedFilters['status']?.[0];
+  // No Country filter here, so the zone is the network's (else the browser's) unless overridden.
+  const zone = useReportTimeZone(null);
+  const regions = useRegions();
+  const formatDate = (iso: string) => formatDateTime(iso, zone.tz);
+  const regionLabel = (r: ConvRow) => (r.region ? (regionName(regions, r.region, r.country) ?? r.region) : DASH);
 
   const qs = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
@@ -190,7 +193,7 @@ export default function ConversionReport() {
     const offerName = offerMap.get(r.offer_id) ?? '';
     const pubName = r.publisher_id ? (pubMap.get(r.publisher_id) ?? '') : '';
     const advName = r.advertiser_id ? (advMap.get(r.advertiser_id) ?? '') : '';
-    return [offerName, pubName, advName, r.transaction_id, r.country, r.city, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
+    return [offerName, pubName, advName, r.transaction_id, r.country, r.country ? countryName(r.country) : null, r.city, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
       .some((v) => (v ?? '').toLowerCase().includes(needle));
   }), [pageRows, q, offerMap, pubMap, advMap]);
 
@@ -213,7 +216,8 @@ export default function ConversionReport() {
     revenue: money(r.revenue), payout: money(r.payout), currency: r.currency ?? DASH,
     transactionId: r.transaction_id ?? DASH,
     clickDate: r.click_created_at ? formatDate(r.click_created_at) : DASH, delta: formatDelta(r.delta_seconds),
-    country: r.country ?? DASH, region: r.region ?? DASH, city: r.city ?? DASH, isp: r.isp ?? DASH,
+    timezone: zone.tz,
+    country: r.country ? countryName(r.country) : DASH, region: regionLabel(r), city: r.city ?? DASH, isp: r.isp ?? DASH,
     device: r.device ?? DASH, os: r.os ?? DASH, browser: r.browser ?? DASH, fraud: r.fraud_score,
     sub1: r.sub1 ?? DASH, sub2: r.sub2 ?? DASH, sub3: r.sub3 ?? DASH, sub4: r.sub4 ?? DASH, sub5: r.sub5 ?? DASH,
   }));
@@ -239,11 +243,11 @@ export default function ConversionReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label">From</label>
+            <label className="label">From (UTC)</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label">To</label>
+            <label className="label">To (UTC)</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <div className="relative">
@@ -270,7 +274,8 @@ export default function ConversionReport() {
       <div className="card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <TimeZoneSelect zone={zone} />
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
               <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -311,7 +316,7 @@ export default function ConversionReport() {
               <table className="premium-table">
                 <thead>
                   <tr>
-                    <th >Date</th>
+                    <th title={zone.tz}>Date <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
                     {shown.has('Status') && <th >Status</th>}
                     {shown.has('Reason') && <th >Reason</th>}
                     {shown.has('Offer') && <th >Offer</th>}
@@ -360,8 +365,8 @@ export default function ConversionReport() {
                       {shown.has('Transaction ID') && <td className="font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
                       {shown.has('Click Date') && <td >{r.click_created_at ? formatDate(r.click_created_at) : DASH}</td>}
                       {shown.has('Delta') && <td >{formatDelta(r.delta_seconds)}</td>}
-                      {shown.has('Country') && <td className="px-4 py-3">{r.country ?? DASH}</td>}
-                      {shown.has('Region') && <td className="px-4 py-3">{r.region ?? DASH}</td>}
+                      {shown.has('Country') && <td className="px-4 py-3" title={r.country ?? undefined}>{r.country ? countryName(r.country) : DASH}</td>}
+                      {shown.has('Region') && <td className="px-4 py-3" title={r.region ?? undefined}>{regionLabel(r)}</td>}
                       {shown.has('City') && <td className="px-4 py-3">{r.city ?? DASH}</td>}
                       {shown.has('ISP') && <td className="px-4 py-3">{r.isp ?? DASH}</td>}
                       {shown.has('Device') && <td className="px-4 py-3 capitalize">{r.device ?? DASH}</td>}
