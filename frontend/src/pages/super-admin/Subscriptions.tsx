@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { useAllNetworks } from './useAllNetworks';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import type { NetworkRow } from '../../types';
 
@@ -15,7 +16,7 @@ interface Plan {
 
 export default function Subscriptions() {
   const plans = useQuery<Plan[]>('/platform/plans');
-  const networks = useQuery<NetworkRow[]>('/platform/networks');
+  const networks = useAllNetworks();
   const [newPlan, setNewPlan] = useState(false);
   const [assignTo, setAssignTo] = useState<NetworkRow | null>(null);
 

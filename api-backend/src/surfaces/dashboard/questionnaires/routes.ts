@@ -8,7 +8,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -56,11 +57,11 @@ const toHistoryDTO = (r: AuditLogRow) => {
   };
 };
 
-async function fieldsFor(questionnaireId: string): Promise<FieldRow[]> {
+async function fieldsFor(networkId: string, questionnaireId: string): Promise<FieldRow[]> {
   const { rows } = await query<FieldRow>(
     `SELECT id, position, label, required, tooltip, data_field, options
-       FROM questionnaire_fields WHERE questionnaire_id = $1 ORDER BY position`,
-    [questionnaireId],
+       FROM questionnaire_fields WHERE network_id = $1 AND questionnaire_id = $2 ORDER BY position`,
+    [networkId, questionnaireId],
   );
   return rows;
 }
@@ -87,16 +88,22 @@ async function replaceFields(db: ReturnType<typeof dbForRequest>, questionnaireI
 export function questionnairesRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  const listQuery = z.object({ status: z.enum(['all', 'active', 'inactive']).default('active') });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
-    const statusParam = String(req.query['status'] ?? 'active');
-    const rows = await db.selectMany<Row>(TABLE, { limit: 500, orderBy: 'created_at', orderDir: 'desc' });
-    const filtered = statusParam === 'all' ? rows : rows.filter((r2) => r2.status === statusParam);
-    const out = await Promise.all(filtered.map(async (row) => {
-      const [fields, offers] = await Promise.all([fieldsFor(row.id), offersFor(req.scope!.networkId, row.id)]);
+    const { status: statusParam } = res.locals.query as z.infer<typeof listQuery>;
+    // Filter in SQL (not after the LIMIT) so a status page can't be starved by other-status rows.
+    const rows = await db.selectMany<Row>(TABLE, {
+      where: statusParam === 'all' ? {} : { status: statusParam },
+      limit: LIST_CAP, maxLimit: LIST_CAP, orderBy: 'created_at', orderDir: 'desc',
+    });
+    warnIfCapped(rows, LIST_CAP, 'questionnaires.list');
+    const out = await Promise.all(rows.map(async (row) => {
+      const [fields, offers] = await Promise.all([fieldsFor(req.scope!.networkId, row.id), offersFor(req.scope!.networkId, row.id)]);
       return {
         id: row.id, name: row.name, status: row.status,
         questions: fields.map((f) => f.label), offers: offers.map((o) => o.name),
+        offerIds: offers.map((o) => o.id), // for filtering by offer (names aren't unique)
         createdAt: row.created_at, updatedAt: row.updated_at,
       };
     }));
@@ -116,7 +123,7 @@ export function questionnairesRoutes(): Router {
     const db = dbForRequest(req);
     const row = await db.selectOne<Row>(TABLE, { id: req.params.id });
     if (!row) throw notFound('Questionnaire not found');
-    const fields = await fieldsFor(row.id);
+    const fields = await fieldsFor(req.scope!.networkId, row.id);
     sendOk(res, { id: row.id, name: row.name, status: row.status, fields: fields.map(fieldDTO), createdAt: row.created_at, updatedAt: row.updated_at });
   }));
 
@@ -132,7 +139,7 @@ export function questionnairesRoutes(): Router {
     if (!row) throw notFound('Questionnaire not found');
     if (b.fields !== undefined) await replaceFields(db, row.id, b.fields);
     await writeAudit(req, { action: 'questionnaire.update', entityType: 'questionnaire', entityId: req.params.id, before, after: row });
-    const fields = await fieldsFor(row.id);
+    const fields = await fieldsFor(req.scope!.networkId, row.id);
     sendOk(res, { id: row.id, name: row.name, status: row.status, fields: fields.map(fieldDTO), createdAt: row.created_at, updatedAt: row.updated_at });
   }));
 

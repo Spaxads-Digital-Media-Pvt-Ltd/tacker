@@ -14,6 +14,10 @@ export const pool = new Pool(config);
 
 pool.on('error', (err) => logger.error({ err }, 'pg pool error'));
 
+// Report day/hour buckets are computed with an explicit zone — date_trunc(..., 'UTC') in the SQL —
+// rather than a per-session SET TIME ZONE, which transaction-mode poolers (Supavisor/PgBouncer)
+// don't preserve across queries.
+
 export async function getPoolStats(): Promise<{ total: number; idle: number; waiting: number }> {
  return {
  total: pool.totalCount,

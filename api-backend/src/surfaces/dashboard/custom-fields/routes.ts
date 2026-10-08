@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
@@ -44,8 +45,9 @@ export function customFieldRoutes(): Router {
   r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const q = res.locals.query as z.infer<typeof listQuery>;
     const rows = await dbForRequest(req).selectMany<DefRow>(TABLE, {
-      where: q.entity ? { entity_type: q.entity } : {}, orderBy: 'sort_order', limit: 500,
+      where: q.entity ? { entity_type: q.entity } : {}, orderBy: 'sort_order', limit: LIST_CAP, maxLimit: LIST_CAP,
     });
+    warnIfCapped(rows, LIST_CAP, 'custom-fields.list');
     sendOk(res, rows.map(toDTO));
   }));
 

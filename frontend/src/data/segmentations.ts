@@ -2,7 +2,6 @@
  * Business Unit. Each is its own real network-scoped table now (previously Categories/Channels were
  * derived from Offer.category/Publisher.trafficSource free text with no backing catalog). */
 export interface OfferCategory { id: string; ref: number; name: string; status: 'active' | 'inactive'; createdAt: string; updatedAt: string }
-export interface PartnerChannel { id: string; ref: number; name: string; status: 'active' | 'inactive'; offerCount: number; createdAt: string; updatedAt: string }
 export interface BusinessUnit { id: string; ref: number; name: string; createdAt: string; updatedAt: string }
 
 export const LABEL_ENTITY_TYPES = ['offer', 'advertiser', 'publisher', 'smart_link', 'offer_group', 'partner_tier'] as const;

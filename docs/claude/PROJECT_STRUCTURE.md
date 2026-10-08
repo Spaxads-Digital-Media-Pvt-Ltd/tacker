@@ -160,8 +160,6 @@ dashboard/
 ├── users/
 ├── postbacks/
 ├── partner-tiers/
-├── partner-channels/
-├── offer-categories/
 ├── business-units/
 ├── offer-applications/
 ├── questionnaires/

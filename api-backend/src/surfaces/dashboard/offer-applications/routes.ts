@@ -9,11 +9,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { requireRole } from '../auth.js';
 
@@ -64,13 +65,15 @@ const SELECT = `
 export function offerApplicationsRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  const listQuery = z.object({ status: z.enum(['all', 'approved', 'pending', 'rejected']).default('pending') });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'pending');
+    const { status: statusParam } = res.locals.query as z.infer<typeof listQuery>;
     const params: unknown[] = [networkId];
     let where = 'a.network_id = $1';
     if (statusParam !== 'all') { where += ` AND a.approval_status = $2`; params.push(statusParam); }
-    const { rows } = await query<ListRow>(`${SELECT} WHERE ${where} ORDER BY a.created_at DESC LIMIT 1000`, params);
+    const { rows } = await query<ListRow>(`${SELECT} WHERE ${where} ORDER BY a.created_at DESC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'offer-applications.list');
     sendOk(res, rows.map(dto));
   }));
 

@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
@@ -62,7 +63,8 @@ export function trafficControlsRoutes(): Router {
   const r = Router();
 
   r.get('/', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where: {}, orderBy: 'created_at', limit: 500 });
+    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where: {}, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'traffic-controls.list');
     sendOk(res, rows.map(dto));
   }));
 

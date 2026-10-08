@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, StatCard, Spinner, StateBlock } from '../../shared-components/primitives/ui';
-import type { NetworkRow } from '../../types';
+import { useAllNetworks } from './useAllNetworks';
 
 interface UsageResponse {
   networkId: string;
@@ -12,10 +12,10 @@ interface UsageResponse {
 const METRICS = ['clicks', 'conversions', 'api_calls', 'storage'];
 
 export default function Usage() {
-  const networks = useQuery<NetworkRow[]>('/platform/networks');
+  const networks = useAllNetworks();
   const [networkId, setNetworkId] = useState('');
   const selected = networkId || networks.data?.[0]?.id || '';
-  const usage = useQuery<UsageResponse>(selected ? `/platform/networks/${selected}/usage` : '/platform/networks');
+  const usage = useQuery<UsageResponse>(selected ? `/platform/networks/${selected}/usage` : null);
 
   const totals = new Map((usage.data?.metrics ?? []).map((m) => [m.metric, m.total]));
 
@@ -28,6 +28,7 @@ export default function Usage() {
           </select>
         } />
       {networks.loading ? <StateBlock><Spinner /></StateBlock>
+        : networks.error ? <StateBlock>{networks.error}</StateBlock>
         : !selected ? <StateBlock>No networks.</StateBlock>
         : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

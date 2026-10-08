@@ -9,30 +9,23 @@ import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '.
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { TableActionsMenu } from './PublishersTableActions';
 import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
-import type { Publisher, DashboardUser } from '../../types';
+import { countryLabel, isCountryCode } from '../../data/geo';
+import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../lib/filterChips';
+import { pagedPath, fetchAllPages, useDebounced, sortParams, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
+import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
+import type { Publisher, DashboardUser, PagedList } from '../../types';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
 interface TagAssignment { tagId: string; entityId: string }
-interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
+interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[]; total?: number }
 
 const STATUS_OPTS = ['active', 'pending', 'inactive'] as const;
 const STATUS_LABEL: Record<string, string> = { active: 'Active', pending: 'Pending', inactive: 'Inactive' };
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', pending: 'bg-warning', inactive: 'bg-fg-muted' };
-const PAYMENT_METHODS = ['Wire', 'Paypal', 'Webmoney', 'Direct Deposit', 'None'];
 const BILLING_FREQUENCIES = ['Weekly', 'Bi-Weekly', 'Monthly', 'Net 15', 'Net 30'];
-
-// Coarse, real (not fabricated) geographic bucketing over the free-text Country field — Everflow's
-// own "Region" filter category, built from the only geography this app actually stores.
-const COUNTRY_REGION: Record<string, string> = {
-  'US': 'North America', CA: 'North America', MX: 'North America',
-  'GB': 'Europe', DE: 'Europe', FR: 'Europe', ES: 'Europe', IT: 'Europe', NL: 'Europe', IE: 'Europe',
-  IN: 'Asia', CN: 'Asia', JP: 'Asia', SG: 'Asia', PH: 'Asia', 'KR': 'Asia',
-  AU: 'Oceania', 'NZ': 'Oceania',
-  BR: 'South America', AR: 'South America',
-  'AE': 'Middle East', IL: 'Middle East', 'SA': 'Middle East',
-  'ZA': 'Africa', NG: 'Africa', EG: 'Africa',
-};
-const regionOf = (country: string | null | undefined): string => (country ? (COUNTRY_REGION[country] ?? 'Other') : 'Unknown');
+// Region buckets, Payable, Has Run Traffic and every other filter are evaluated server-side
+// (api-backend/src/surfaces/dashboard/publishers/list-query.ts) with the same semantics.
 
 /** "Is Payable" — a real, derived readiness flag (not stored): has a linked portal account, a
  * payment method on file, and an active status. Matches the reference column's own mostly-empty
@@ -51,9 +44,9 @@ function todayStartIso(): string {
 
 const PAGE_SIZE = 12;
 
-function StatusFilterSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; onChange: (v: string) => void; statusOpts: readonly string[] }) {
   const { open, setOpen, ref } = useDropdown();
-  const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...STATUS_OPTS.map((s) => ({ value: s, label: STATUS_LABEL[s], dot: STATUS_DOT[s] }))];
+  const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...statusOpts.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s, dot: STATUS_DOT[s] ?? 'bg-fg-muted' }))];
   const current = options.find((o) => o.value === value) ?? options[0]!;
   return (
     <div ref={ref} className="relative">
@@ -97,7 +90,7 @@ function RowActionMenu({ publisher }: { publisher: Publisher }) {
         <>
           <MenuItem icon={Pencil} onSelect={() => go(api, `/app/publishers/${publisher.id}/edit`)}>Edit</MenuItem>
           <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/partner?publisherId=${publisher.id}`)}>View Partner Report</MenuItem>
-          <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/conversions?publisherId=${publisher.id}`)}>View Conversion Report</MenuItem>
+          <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/conversion?publisherId=${publisher.id}`)}>View Conversion Report</MenuItem>
           {publisher.hasPortalAccount ? (
             <MenuItem icon={User} onSelect={() => doImpersonate(api)}>{impersonate.busy ? 'Impersonating…' : 'Impersonate'}</MenuItem>
           ) : (
@@ -113,12 +106,31 @@ function RowActionMenu({ publisher }: { publisher: Publisher }) {
 
 type Tab = 'existing' | 'pending' | 'unverified';
 
+/** Distinct stored values for the drawer (GET /api/publishers/filter-options) — complete regardless
+ * of paging. */
+interface PublisherFilterOptions { countries: string[]; regions: string[]; tiers: string[]; paymentMethods: string[]; paymentTerms: string[] }
+interface Channel { id: string; name: string; status: string }
+
+const SORT_OPTIONS: SortOption[] = [
+  { value: 'createdAt:desc', label: 'Newest first' },
+  { value: 'createdAt:asc', label: 'Oldest first' },
+  { value: 'name:asc', label: 'Name A–Z' },
+  { value: 'name:desc', label: 'Name Z–A' },
+  { value: 'id:desc', label: 'ID (high → low)' },
+  { value: 'id:asc', label: 'ID (low → high)' },
+  { value: 'country:asc', label: 'Country A–Z' },
+  { value: 'updatedAt:desc', label: 'Recently modified' },
+];
+const DEFAULT_SORT = 'createdAt:desc';
+/** Free-text country → readable label: ISO-2 codes get their full name ("India (IN)"). */
+const countryValueLabel = (v: string) => (v.trim().length === 2 && isCountryCode(v.trim()) ? countryLabel(v.trim()) : v);
+
 export default function Publishers() {
-  const { data, loading, error, refetch } = useQuery<Publisher[]>('/api/publishers');
   const { data: users } = useQuery<DashboardUser[]>('/api/users');
   const { data: tags } = useQuery<Tag[]>('/api/tags');
   const { data: tagAssignments } = useQuery<TagAssignment[]>('/api/tags/assignments?entityType=publisher');
-  const { data: allTimeClicks } = useQuery<AggResult>('/api/reports?groupBy=publisher&metrics=clicks');
+  const { data: options } = useQuery<PublisherFilterOptions>('/api/publishers/filter-options');
+  const { data: channels } = useQuery<Channel[]>('/api/control-center/channels?status=active');
   const today = useQuery<AggResult>(`/api/reports?groupBy=publisher&metrics=revenue&from=${encodeURIComponent(todayStartIso())}&to=${encodeURIComponent(new Date().toISOString())}`);
 
   const todayRevenueByPub = useMemo(() => {
@@ -129,86 +141,94 @@ export default function Publishers() {
     }
     return m;
   }, [today.data]);
-  const hasTrafficSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const r of allTimeClicks?.rows ?? []) {
-      const id = r.dimensions['publisher'];
-      if (id && Number(r.metrics['clicks'] ?? 0) > 0) s.add(id);
-    }
-    return s;
-  }, [allTimeClicks]);
   const tagIdsByPub = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const a of tagAssignments ?? []) m.set(a.entityId, [...(m.get(a.entityId) ?? []), a.tagId]);
     return m;
   }, [tagAssignments]);
   const userName = (id: string | null | undefined) => users?.find((u) => u.id === id)?.name;
-  const pubName = (id: string | null | undefined) => (data ?? []).find((p) => p.id === id)?.name;
 
   const [tab, setTab] = useState<Tab>('existing');
   const [statuses, setStatuses] = useState<string[]>([]);
   const [nameQ, setNameQ] = useState('');
+  const searchQ = useDebounced(nameQ.trim());
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
   const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
+  const [sort, setSort] = useState(DEFAULT_SORT);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exportNote, setExportNote] = useState<string | null>(null);
+  // Selection is per page: any filter/search/sort/tab change → page 1 and an empty selection; a page
+  // change also clears it, so bulk actions only ever see rows the current view shows.
+  const resetView = () => { setPage(1); setSelected(new Set()); };
+  const goPage = (p: number) => { setPage(p); setSelected(new Set()); };
+  // Existing / Unverified tabs exclude pending partners, so "Pending" is only offered on its own tab.
+  const tabStatusOpts = tab === 'pending' ? STATUS_OPTS : STATUS_OPTS.filter((s) => s !== 'pending');
 
-  const tabbed = useMemo(() => {
-    const rows = data ?? [];
-    if (tab === 'pending') return rows.filter((p) => p.status === 'pending');
-    if (tab === 'unverified') return rows.filter((p) => p.status !== 'pending' && !p.hasPortalAccount);
-    return rows.filter((p) => p.status !== 'pending' && p.hasPortalAccount);
-  }, [data, tab]);
-  const unverifiedCount = useMemo(() => (data ?? []).filter((p) => p.status !== 'pending' && !p.hasPortalAccount).length, [data]);
-  const pendingCount = useMemo(() => (data ?? []).filter((p) => p.status === 'pending').length, [data]);
+  // The server does tab/status/search/drawer filters, sort and paging (GET /api/publishers?paged=1).
+  const listParams = useMemo<PagedParams>(() => {
+    const f = (k: string) => (filters[k]?.length ? filters[k] : undefined);
+    return {
+      tab, status: statuses.join(',') || undefined, search: searchQ || undefined, ...sortParams(sort),
+      accountExecutiveId: f('accountExecutive')?.join(','), partnerManagerId: f('partnerManager')?.join(','),
+      channelId: f('channel')?.join(','), label: f('label')?.join(','), region: f('region')?.join(','),
+      payable: f('payable')?.join(','),
+      billingFrequency: f('billingFrequency'), country: f('country'), tier: f('partnerTiers'),
+      paymentMethod: f('paymentMethod'), paymentTerms: f('paymentTerms'),
+      hasRunTraffic: f('hasRunTraffic') ? 'true' : undefined, noTraffic: f('noTraffic') ? 'true' : undefined,
+    };
+  }, [tab, statuses, searchQ, sort, filters]);
+  const { data, loading, error, refetch } = useQuery<PagedList<Publisher>>(pagedPath('/api/publishers', { ...listParams, page, pageSize: PAGE_SIZE }));
+  const rows = useMemo(() => data?.rows ?? [], [data]);
+  const total = data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  useEffect(() => { if (data && page > pageCount) setPage(pageCount); }, [data, page, pageCount]);
+  const unverifiedCount = data?.counts['tabs']?.['unverified'] ?? 0;
+  const pendingCount = data?.counts['tabs']?.['pending'] ?? 0;
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'accountExecutive', label: 'Account Executive', options: (users ?? []).map((u) => ({ value: u.id, label: u.name })) },
     { key: 'billingFrequency', label: 'Billing Frequency', options: BILLING_FREQUENCIES.map((v) => ({ value: v, label: v })) },
-    { key: 'country', label: 'Country', options: Array.from(new Set((data ?? []).map((p) => p.country).filter((c): c is string => Boolean(c)))).sort().map((v) => ({ value: v, label: v })) },
+    { key: 'channel', label: 'Channel', options: (channels ?? []).map((c) => ({ value: c.id, label: c.name })) },
+    { key: 'country', label: 'Country', options: (options?.countries ?? []).map((v) => ({ value: v, label: countryValueLabel(v) })) },
     { key: 'hasRunTraffic', label: 'Has Run Traffic', options: [{ value: 'yes', label: 'Yes' }] },
     { key: 'label', label: 'Label', options: (tags ?? []).map((t) => ({ value: t.id, label: t.name })) },
     { key: 'noTraffic', label: 'No Traffic', options: [{ value: 'yes', label: 'Yes' }] },
     { key: 'partnerManager', label: 'Partner Manager', options: (users ?? []).map((u) => ({ value: u.id, label: u.name })) },
-    { key: 'partnerTiers', label: 'Partner Tiers', options: Array.from(new Set((data ?? []).map((p) => p.tier).filter((t): t is string => Boolean(t)))).sort().map((v) => ({ value: v, label: v })) },
+    { key: 'partnerTiers', label: 'Partner Tiers', options: (options?.tiers ?? []).map((v) => ({ value: v, label: v })) },
     { key: 'payable', label: 'Payable', options: [{ value: 'yes', label: 'Payable' }, { value: 'no', label: 'Not Payable' }] },
-    { key: 'paymentMethod', label: 'Payment Method', options: PAYMENT_METHODS.map((v) => ({ value: v, label: v })) },
-    { key: 'paymentTerms', label: 'Payment Terms', options: Array.from(new Set((data ?? []).map((p) => p.payoutTerms).filter((t): t is string => Boolean(t)))).sort().map((v) => ({ value: v, label: v })) },
-    { key: 'region', label: 'Region', options: Array.from(new Set((data ?? []).map((p) => regionOf(p.country)))).sort().map((v) => ({ value: v, label: v })) },
-  ], [users, tags, data]);
+    // Free text in the DB ("PayPal", "Payoneer", "ACH", …) — options are the distinct stored values,
+    // de-duplicated case-insensitively server-side; matching is case-insensitive too.
+    { key: 'paymentMethod', label: 'Payment Method', options: (options?.paymentMethods ?? []).map((v) => ({ value: v, label: v })) },
+    { key: 'paymentTerms', label: 'Payment Terms', options: (options?.paymentTerms ?? []).map((v) => ({ value: v, label: v })) },
+    { key: 'region', label: 'Region', options: (options?.regions ?? []).map((v) => ({ value: v, label: v })) },
+  ], [users, tags, options, channels]);
+  // Display label for an applied filter value (user / label UUIDs → names) for the API-request modal.
+  const filterValueLabel = (key: string, value: string) =>
+    FILTER_CATEGORIES.find((c) => c.key === key)?.options.find((o) => o.value === value)?.label ?? value;
 
-  const filtered = useMemo(() => {
-    let rows = tabbed;
-    if (statuses.length) rows = rows.filter((p) => statuses.includes(p.status));
-    if (nameQ.trim()) {
-      const q = nameQ.trim().toLowerCase();
-      rows = rows.filter((p) => p.name.toLowerCase().includes(q));
-    }
-    const has = (key: string) => (filters[key]?.length ?? 0) > 0;
-    if (has('accountExecutive')) rows = rows.filter((p) => p.accountExecutiveId && filters['accountExecutive']!.includes(p.accountExecutiveId));
-    if (has('billingFrequency')) rows = rows.filter((p) => p.billingFrequency && filters['billingFrequency']!.includes(p.billingFrequency));
-    if (has('country')) rows = rows.filter((p) => p.country && filters['country']!.includes(p.country));
-    if (has('hasRunTraffic')) rows = rows.filter((p) => hasTrafficSet.has(p.id));
-    if (has('label')) rows = rows.filter((p) => (tagIdsByPub.get(p.id) ?? []).some((t) => filters['label']!.includes(t)));
-    if (has('noTraffic')) rows = rows.filter((p) => !hasTrafficSet.has(p.id));
-    if (has('partnerManager')) rows = rows.filter((p) => p.partnerManagerId && filters['partnerManager']!.includes(p.partnerManagerId));
-    if (has('partnerTiers')) rows = rows.filter((p) => p.tier && filters['partnerTiers']!.includes(p.tier));
-    if (has('payable')) rows = rows.filter((p) => filters['payable']!.includes(isPayable(p) ? 'yes' : 'no'));
-    if (has('paymentMethod')) rows = rows.filter((p) => p.paymentMethod && filters['paymentMethod']!.includes(p.paymentMethod));
-    if (has('paymentTerms')) rows = rows.filter((p) => p.payoutTerms && filters['paymentTerms']!.includes(p.payoutTerms));
-    if (has('region')) rows = rows.filter((p) => filters['region']!.includes(regionOf(p.country)));
-    return rows;
-  }, [tabbed, statuses, nameQ, filters, tagIdsByPub, hasTrafficSet]);
+  // Applied-filter chips: status + search + every drawer value, with names instead of uuids/codes.
+  const chips = useMemo<FilterChip[]>(() => [
+    ...statuses.map((s) => ({ key: '__status', value: s, label: 'Status', valueLabel: STATUS_LABEL[s] ?? s })),
+    ...(searchQ ? [{ key: '__search', value: searchQ, label: 'Search', valueLabel: searchQ }] : []),
+    ...chipsFromValues(FILTER_CATEGORIES, filters),
+  ], [statuses, searchQ, filters, FILTER_CATEGORIES]);
+  const removeChip = (c: FilterChip) => {
+    if (c.key === '__status') setStatuses((s) => s.filter((x) => x !== c.value));
+    else if (c.key === '__search') setNameQ('');
+    else setFilters((f) => withoutValue(f, c.key, c.value));
+    resetView();
+  };
+  const clearAll = () => { setStatuses([]); setNameQ(''); setFilters({}); resetView(); };
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const allOnPageSelected = paged.length > 0 && paged.every((p) => selected.has(p.id));
+  // Bulk actions / export only ever act on selected rows of the current page (selection is per page).
+  const visibleSelected = useMemo(() => rows.filter((p) => selected.has(p.id)), [rows, selected]);
+  const allOnPageSelected = rows.length > 0 && rows.every((p) => selected.has(p.id));
   const toggleAllOnPage = () => setSelected((s) => {
     const next = new Set(s);
-    if (allOnPageSelected) paged.forEach((p) => next.delete(p.id));
-    else paged.forEach((p) => next.add(p.id));
+    if (allOnPageSelected) rows.forEach((p) => next.delete(p.id));
+    else rows.forEach((p) => next.add(p.id));
     return next;
   });
   const toggleRow = (id: string) => setSelected((s) => {
@@ -229,7 +249,7 @@ export default function Publishers() {
   const idCol: Column<Publisher> = { header: 'ID', cell: (p) => <span className="tabular-nums text-fg-secondary">{p.ref ?? '—'}</span> };
   const partnerManagerCol: Column<Publisher> = { header: 'Partner Manager', cell: (p) => userName(p.partnerManagerId) ?? dash };
   const countryCol: Column<Publisher> = { header: 'Country', cell: (p) => p.country ?? dash };
-  const referredByCol: Column<Publisher> = { header: 'Referred By', cell: (p) => pubName(p.referredById) ?? dash };
+  const referredByCol: Column<Publisher> = { header: 'Referred By', cell: (p) => p.referredByName ?? dash };
   const createdCol: Column<Publisher> = { header: 'Created', cell: (p) => new Date(p.createdAt).toLocaleDateString() };
   const userNameCol: Column<Publisher> = { header: 'User Name', cell: (p) => userDisplayName(p) ?? dash };
   const userEmailCol: Column<Publisher> = { header: 'User Email', cell: (p) => p.contactEmail ?? dash };
@@ -278,7 +298,7 @@ export default function Publishers() {
     const ordered = columnOrder.map((h) => columnsByHeader[h]).filter((c): c is Column<Publisher> => Boolean(c && shownColumns.has(c.header)));
     return [...(showCheckboxCol ? [checkboxCol] : []), ...ordered, actionsCol];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnOrder, shownColumns, showCheckboxCol, tagIdsByPub, todayRevenueByPub, users, data]);
+  }, [columnOrder, shownColumns, showCheckboxCol, selected, tagIdsByPub, todayRevenueByPub, users, data]);
 
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
@@ -287,13 +307,26 @@ export default function Publishers() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const exportRows = (kind: 'partners' | 'emails', format: 'csv' | 'json') => {
-    const rows = selected.size > 0 ? filtered.filter((p) => selected.has(p.id)) : filtered;
+  // Export = the selected rows, or EVERY row matching the current filters (walked page by page on
+  // the server, capped at EXPORT_MAX_ROWS with a visible note).
+  const exportRows = async (kind: 'partners' | 'emails', format: 'csv' | 'json') => {
+    setExportNote(null);
+    let rowsOut: Publisher[] = visibleSelected;
+    if (rowsOut.length === 0) {
+      try {
+        const all = await fetchAllPages<Publisher>('/api/publishers', listParams);
+        rowsOut = all.rows;
+        if (all.capped) setExportNote(`Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} of ${all.total.toLocaleString()} matching partners — narrow the filters to export the rest.`);
+      } catch (e) {
+        setExportNote(`Export failed: ${e instanceof Error ? e.message : 'request error'}`);
+        return;
+      }
+    }
     const mapped = kind === 'emails'
-      ? rows.map((p) => ({ id: p.ref ?? p.id, name: p.name, email: p.contactEmail ?? '' }))
-      : rows.map((p) => ({
+      ? rowsOut.map((p) => ({ id: p.ref ?? p.id, name: p.name, email: p.contactEmail ?? '' }))
+      : rowsOut.map((p) => ({
         id: p.ref ?? p.id, name: p.name, status: p.status, country: p.country ?? '',
-        partnerManager: userName(p.partnerManagerId) ?? '', referredBy: pubName(p.referredById) ?? '',
+        partnerManager: userName(p.partnerManagerId) ?? '', referredBy: p.referredByName ?? '',
         paymentMethod: p.paymentMethod ?? '', createdAt: p.createdAt, modifiedAt: p.updatedAt ?? '',
       }));
     let blob: Blob;
@@ -321,7 +354,10 @@ export default function Publishers() {
 
       <div className="mb-4 flex items-center gap-6 border-b border-border">
         {([['existing', 'Existing', 0], ['pending', 'Pending', pendingCount], ['unverified', 'Unverified', unverifiedCount]] as const).map(([key, label, count]) => (
-          <button key={key} type="button" onClick={() => { setTab(key); setPage(1); setSelected(new Set()); }}
+          <button key={key} type="button" onClick={() => {
+            setTab(key); resetView();
+            if (key !== 'pending') setStatuses((s) => s.filter((x) => x !== 'pending'));
+          }}
             className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-small font-medium transition-colors ${tab === key ? 'border-accent text-fg' : 'border-transparent text-fg-secondary hover:text-fg'}`}>
             {label}
             {count > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-fg px-1.5 text-tiny font-bold text-surface">{count}</span>}
@@ -334,9 +370,10 @@ export default function Publishers() {
         <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
           <div className="relative max-sm:w-full">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-full sm:!w-56 !pl-8" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); setPage(1); }} />
+            <input className="input !w-full sm:!w-56 !pl-8" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
           </div>
-          <StatusFilterSelect value={statuses[0] ?? ''} onChange={(v) => { setStatuses(v ? [v] : []); setPage(1); }} />
+          <StatusFilterSelect statusOpts={tabStatusOpts} value={statuses[0] ?? ''} onChange={(v) => { setStatuses(v ? [v] : []); resetView(); }} />
+          <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
           <div className="relative">
             <button type="button" onClick={() => setFilterOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
@@ -349,11 +386,11 @@ export default function Publishers() {
             </button>
             {filterOpen && (
               <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
-                onApply={(v) => { setFilters(v); setPage(1); }} onClose={() => setFilterOpen(false)} />
+                onApply={(v) => { setFilters(v); resetView(); }} onClose={() => setFilterOpen(false)} />
             )}
           </div>
           <TableActionsMenu
-            selectedIds={[...selected]}
+            selectedIds={visibleSelected.map((p) => p.id)}
             allColumns={allColumnsForTab}
             columnOrder={columnOrder}
             hiddenColumns={hiddenColumns}
@@ -361,33 +398,31 @@ export default function Publishers() {
               setOrderByTab((s) => ({ ...s, [tab]: order }));
               setHiddenByTab((s) => ({ ...s, [tab]: hidden }));
             }}
-            onExport={exportRows}
+            onExport={(kind, format) => { void exportRows(kind, format); }}
             onBalancesRequested={(msg) => { setToast(msg); refetch(); }}
-            appliedFilters={{ status: statuses[0], ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v.length).map(([k, v]) => [k, v.join(', ')])) }}
+            appliedFilters={{ status: statuses.join(', ') || undefined, search: searchQ || undefined, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v.length).map(([k, v]) => [k, v.map((x) => filterValueLabel(k, x)).join(', ')])) }}
           />
         </div>
       </div>
 
-      {loading ? <StateBlock><Spinner /></StateBlock>
+      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-3" />
+      <ExportNotice message={exportNote} onDismiss={() => setExportNote(null)} />
+
+      {loading && !data ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
-        : !filtered.length ? <StateBlock>No partners match these filters.</StateBlock>
+        : !rows.length ? <StateBlock>{loading ? <Spinner /> : 'No partners match these filters.'}</StateBlock>
         : (
           <>
             {showCheckboxCol && (
               <div className="mb-2 flex items-center gap-2 text-tiny text-fg-secondary">
                 <input type="checkbox" className="chk" checked={allOnPageSelected} onChange={toggleAllOnPage} />
-                {selected.size > 0 ? `${selected.size} selected` : 'Select all on page'}
+                {visibleSelected.length > 0 ? `${visibleSelected.length} selected on this page` : 'Select all on page'}
               </div>
             )}
-            <Table columns={displayedColumns} rows={paged} rowKey={(p) => p.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
-            <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
-              <span>{filtered.length} Total</span>
-              <div className="flex items-center gap-1">
-                <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-[var(--radius)] border border-border px-2 py-1 disabled:opacity-40">‹</button>
-                <span className="px-1 tabular-nums">{page} / {pageCount}</span>
-                <button disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))} className="rounded-[var(--radius)] border border-border px-2 py-1 disabled:opacity-40">›</button>
-              </div>
+            <div className={loading ? 'opacity-60 transition-opacity' : undefined}>
+              <Table columns={displayedColumns} rows={rows} rowKey={(p) => p.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
             </div>
+            <PagerFooter total={total} page={page} pageSize={PAGE_SIZE} onPage={goPage} loading={loading} />
           </>
         )}
 

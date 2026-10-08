@@ -28,6 +28,8 @@ interface FormState {
  country: string;
  tier: string;
  partnerManagerId: string;
+ /** Control Center channel id ('' = none). */
+ channelId: string;
  accountExecutiveId: string;
  referredById: string;
  billingFrequency: string;
@@ -47,6 +49,7 @@ const INITIAL_FORM: FormState = {
  country: '',
  tier: '',
  partnerManagerId: '',
+ channelId: '',
  accountExecutiveId: '',
  referredById: '',
  billingFrequency: '',
@@ -81,6 +84,7 @@ export default function PublisherCreate() {
 
  const { data: users } = useQuery<DashboardUser[]>('/api/users');
  const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
+ const { data: channels } = useQuery<Array<{ id: string; name: string }>>('/api/control-center/channels?status=active');
  const { run, busy, error } = useMutation((body: Record<string, unknown>) => api.post<{ id: string }>('/api/publishers', body));
  // One lock for the whole create flow (POST + label follow-ups) — see useSubmitGuard.
  const { pending: submitting, guard } = useSubmitGuard();
@@ -112,6 +116,7 @@ export default function PublisherCreate() {
  country: form.country || undefined,
  tier: partnerTier ? form.tier.trim() || undefined : undefined,
  partnerManagerId: form.partnerManagerId || undefined,
+ channelId: form.channelId || null,
  accountExecutiveId: accountExec ? form.accountExecutiveId || undefined : undefined,
  referredById: referredBy ? form.referredById || undefined : undefined,
  billingFrequency: form.billingFrequency || undefined,
@@ -168,6 +173,12 @@ export default function PublisherCreate() {
  <select className="input" value={form.partnerManagerId} onChange={(e) => set('partnerManagerId', e.target.value)}>
  <option value="">— Select —</option>
  {(users ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+ </select>
+ </Field>
+ <Field label="Channel">
+ <select className="input" value={form.channelId} onChange={(e) => set('channelId', e.target.value)}>
+ <option value="">None</option>
+ {(channels ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
  </select>
  </Field>
  <div>

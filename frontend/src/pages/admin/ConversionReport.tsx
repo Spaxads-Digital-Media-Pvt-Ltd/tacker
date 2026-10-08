@@ -17,7 +17,7 @@
  * Pagination is "has more" (overfetch by one row), matching Click Report — the shared API client
  * discards response pagination metadata app-wide.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight, ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
@@ -26,13 +26,15 @@ import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
-import { countryName, regionName, useRegions } from '../../data/geo';
+import { countryName, countryOptions, regionName, useRegions } from '../../data/geo';
+import { readUrlDate, readUrlIds, reportLink } from '../../lib/reportFilterState';
 import { formatDateTime } from '../../lib/datetime';
 import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZone';
 import { useReportTimeZone } from '../../lib/useReportTimeZone';
+import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../lib/filterChips';
 
 /**
  * Approve a pending conversion (writes publisher earning + advertiser billing and fires the partner
@@ -101,13 +103,37 @@ const STATUS_OPTIONS = [
   { value: 'rejected', label: 'Rejected' },
 ];
 
+interface SmartLink { id: string; name: string }
+
+/**
+ * Filter-drawer category ⇄ URL/API param. Every param here is an accepted `/api/reports/conversions`
+ * key (Smart Link / Country / Device are matched on the originating click server-side).
+ */
+const URL_FILTER_PARAMS: [category: string, param: string][] = [
+  ['offer', 'offerId'], ['advertiser', 'advertiserId'], ['partner', 'publisherId'], ['status', 'status'],
+  ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
+];
+
+/** Applied report state from the URL (Copy Link / legacy deep links). */
+function readInitialState() {
+  const sp = new URLSearchParams(window.location.search);
+  const filters: FilterValues = {};
+  for (const [cat, param] of URL_FILTER_PARAMS) {
+    const ids = readUrlIds(sp, param).slice(0, 1); // single-select per category
+    if (cat === 'status' && !STATUS_OPTIONS.some((o) => o.value === ids[0])) continue;
+    if (ids.length) filters[cat] = ids;
+  }
+  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+}
+
 export default function ConversionReport() {
-  const [from, setFrom] = useState(daysAgo(7));
-  const [to, setTo] = useState(todayStr());
-  const [appliedFrom, setAppliedFrom] = useState(from);
-  const [appliedTo, setAppliedTo] = useState(to);
-  const [filters, setFilters] = useState<FilterValues>({});
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>({});
+  const [init] = useState(readInitialState);
+  const [from, setFrom] = useState(init.from);
+  const [to, setTo] = useState(init.to);
+  const [appliedFrom, setAppliedFrom] = useState(init.from);
+  const [appliedTo, setAppliedTo] = useState(init.to);
+  const [filters, setFilters] = useState<FilterValues>(init.filters);
+  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
   const [filterOpen, setFilterOpen] = useState(false);
   const [hasRun, setHasRun] = useState(true);
   const [q, setQ] = useState('');
@@ -119,37 +145,13 @@ export default function ConversionReport() {
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const stripTime = (v: string | null) => (v ? v.split('T')[0] : null);
-    const f = stripTime(sp.get('from'));
-    const t = stripTime(sp.get('to'));
-    const offerId = sp.get('offerId');
-    const pubId = sp.get('publisherId');
-    const advId = sp.get('advertiserId');
-    const status = sp.get('status');
-    const hasParams = f || t || offerId || pubId || advId || status;
-    if (!hasParams) return;
-    const newFrom = f ?? daysAgo(7);
-    const newTo = t ?? todayStr();
-    const initial: FilterValues = {
-      ...(offerId ? { offer: [offerId] } : {}),
-      ...(pubId ? { partner: [pubId] } : {}),
-      ...(advId ? { advertiser: [advId] } : {}),
-      ...(status ? { status: [status] } : {}),
-    };
-    setFrom(newFrom);
-    setTo(newTo);
-    setAppliedFrom(newFrom);
-    setAppliedTo(newTo);
-    setFilters(initial);
-    setAppliedFilters(initial);
-  }, []);
+  const exp = useReportExport();
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
+  const { data: smartLinks } = useQuery<SmartLink[]>('/api/smart-links');
+  const allCountryOptions = useMemo(() => countryOptions(), []);
 
   const offerMap = useMemo(() => new Map((offers ?? []).map((o) => [o.id, o.name])), [offers]);
   const pubMap = useMemo(() => new Map((publishers ?? []).map((p) => [p.id, p.name])), [publishers]);
@@ -160,14 +162,21 @@ export default function ConversionReport() {
     { key: 'advertiser', label: 'Advertiser', options: (advertisers ?? []).map((a) => ({ value: a.id, label: a.name })) },
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'status', label: 'Status', options: STATUS_OPTIONS },
-  ], [offers, advertisers, publishers]);
+    // Click-side filters — applied server-side via the conversion's originating click.
+    { key: 'smartLink', label: 'Smart Link', options: (smartLinks ?? []).map((s) => ({ value: s.id, label: s.name })) },
+    { key: 'country', label: 'Country', options: allCountryOptions },
+    { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
+  ], [offers, advertisers, publishers, smartLinks, allCountryOptions]);
 
   const offerIdFilter = appliedFilters['offer']?.[0];
   const advertiserIdFilter = appliedFilters['advertiser']?.[0];
   const publisherIdFilter = appliedFilters['partner']?.[0];
   const statusFilter = appliedFilters['status']?.[0];
-  // No Country filter here, so the zone is the network's (else the browser's) unless overridden.
-  const zone = useReportTimeZone(null);
+  const smartLinkIdFilter = appliedFilters['smartLink']?.[0];
+  const countryFilter = appliedFilters['country']?.[0];
+  const deviceFilter = appliedFilters['device']?.[0];
+  // Timestamps follow the filtered country's zone (else network/browser) — re-formatting only.
+  const zone = useReportTimeZone(countryFilter);
   const regions = useRegions();
   const formatDate = (iso: string) => formatDateTime(iso, zone.tz);
   const regionLabel = (r: ConvRow) => (r.region ? (regionName(regions, r.region, r.country) ?? r.region) : DASH);
@@ -178,11 +187,13 @@ export default function ConversionReport() {
     return params.toString();
   };
 
-  const tableQs = qs({
+  // Only accepted /api/reports/conversions keys (the endpoint rejects anything else with 422).
+  const baseParams = {
     from: toIso(appliedFrom), to: toIso(appliedTo, true),
     offerId: offerIdFilter, publisherId: publisherIdFilter, advertiserId: advertiserIdFilter, status: statusFilter,
-    limit: pageSize + 1, offset: (page - 1) * pageSize,
-  });
+    smartLinkId: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
+  };
+  const tableQs = qs({ ...baseParams, limit: pageSize + 1, offset: (page - 1) * pageSize });
   const { data, loading, error, refetch } = useQuery<ConvRow[]>(hasRun ? `/api/reports/conversions?${tableQs}` : null);
   const hasNextPage = (data?.length ?? 0) > pageSize;
   const pageRows = (data ?? []).slice(0, pageSize);
@@ -208,7 +219,7 @@ export default function ConversionReport() {
   };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const exportRows = () => rows.map((r) => ({
+  const toExportRow = (r: ConvRow) => ({
     date: formatDate(r.created_at), status: r.status, reason: r.reason ?? DASH,
     offer: offerMap.get(r.offer_id) ?? r.offer_id, partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
@@ -220,10 +231,22 @@ export default function ConversionReport() {
     country: r.country ? countryName(r.country) : DASH, region: regionLabel(r), city: r.city ?? DASH, isp: r.isp ?? DASH,
     device: r.device ?? DASH, os: r.os ?? DASH, browser: r.browser ?? DASH, fraud: r.fraud_score,
     sub1: r.sub1 ?? DASH, sub2: r.sub2 ?? DASH, sub3: r.sub3 ?? DASH, sub4: r.sub4 ?? DASH, sub5: r.sub5 ?? DASH,
-  }));
+  });
+  // Every conversion matching the applied filters, not just the visible page.
+  const runExport = (format: 'csv' | 'xlsx') => {
+    void exp.run(format, 'conversion-report', async () => {
+      const res = await fetchAllPages<ConvRow>((limit, offset) => `/api/reports/conversions?${qs({ ...baseParams, limit, offset })}`, 500);
+      return { ...res, rows: res.rows.map(toExportRow) };
+    });
+  };
 
   const copyLink = async () => {
-    await navigator.clipboard?.writeText(window.location.href);
+    // The applied report (not the address bar, which never reflects Run Report) — read back on load.
+    const link = reportLink({
+      from: appliedFrom, to: appliedTo,
+      ...Object.fromEntries(URL_FILTER_PARAMS.map(([cat, param]) => [param, appliedFilters[cat]?.[0]])),
+    });
+    await navigator.clipboard?.writeText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
@@ -261,7 +284,7 @@ export default function ConversionReport() {
               )}
             </button>
             {filterOpen && (
-              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
+              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters} singleSelectKeys={FILTER_CATEGORIES.map((c) => c.key)}
                 onApply={setFilters} onClose={() => setFilterOpen(false)} />
             )}
           </div>
@@ -272,13 +295,18 @@ export default function ConversionReport() {
       </div>
 
       <div className="card">
+        <ActiveFilterChips className="mb-3"
+          chips={chipsFromValues(FILTER_CATEGORIES, appliedFilters)}
+          onRemove={(c) => { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); setPage(1); }}
+          onClearAll={() => { setFilters({}); setAppliedFilters({}); setPage(1); }} />
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
           <div className="flex flex-wrap items-center gap-2">
             <TimeZoneSelect zone={zone} />
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page"
+                value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div className="relative">
               <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
@@ -295,8 +323,8 @@ export default function ConversionReport() {
                     </button>
                     {exportOpen && (
                       <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button onClick={() => { downloadCsv('conversion-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                        <button onClick={() => { downloadXlsx('conversion-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                        <button disabled={exp.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                        <button disabled={exp.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
                       </div>
                     )}
                   </div>
@@ -307,6 +335,7 @@ export default function ConversionReport() {
           </div>
         </div>
 
+        <ExportStatus {...exp} onDismiss={exp.dismiss} />
         {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>
@@ -385,7 +414,7 @@ export default function ConversionReport() {
               </table>
             </div>
           )}
-        {hasRun && rows.length > 0 && (
+        {hasRun && !error && rows.length > 0 && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">
@@ -405,6 +434,7 @@ export default function ConversionReport() {
       {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/conversions?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, status: statusFilter,
+        smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
       }} />}
     </>
   );

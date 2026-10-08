@@ -14,8 +14,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
-import { notFound, badRequest } from '../../../lib/http/errors.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
+import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
@@ -51,14 +52,14 @@ const updateSchema = createSchema.partial();
 export function offerCustomSettingsRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
-    const category = typeof req.query['category'] === 'string' ? req.query['category'] : undefined;
-    if (category && !(CATEGORIES as readonly string[]).includes(category)) throw badRequest('Invalid category');
-    const offerId = typeof req.query['offerId'] === 'string' ? req.query['offerId'] : undefined;
+  const listQuery = z.object({ category: z.enum(CATEGORIES).optional(), offerId: z.string().uuid().optional() });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
+    const { category, offerId } = res.locals.query as z.infer<typeof listQuery>;
     const where: Record<string, unknown> = {};
     if (category) where['category'] = category;
     if (offerId) where['offer_id'] = offerId;
-    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where, orderBy: 'created_at', limit: 500 });
+    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'offer-custom-settings.list');
     sendOk(res, rows.map(dto));
   }));
 

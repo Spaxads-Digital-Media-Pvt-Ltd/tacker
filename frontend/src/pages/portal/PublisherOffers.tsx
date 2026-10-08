@@ -9,12 +9,10 @@ import type { PublisherOffer } from '../../types';
 
 const PAGE_SIZE = 50;
 
+// The partner API only ever returns active offers, so Draft/Paused/Archived could never match.
 const STATUS_OPTS = [
  { value: '', label: 'All' },
  { value: 'active', label: 'Active', dot: 'bg-success-text' },
- { value: 'draft', label: 'Draft', dot: 'bg-fg-muted' },
- { value: 'paused', label: 'Paused', dot: 'bg-warning-text' },
- { value: 'archived', label: 'Archived', dot: 'bg-fg-muted' },
 ];
 
 const VISIBILITY_OPTS = [

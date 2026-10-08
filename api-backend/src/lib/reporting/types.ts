@@ -37,12 +37,13 @@ export interface ReportFilters {
   sub4?: FilterValue;
   sub5?: FilterValue;
   // "Exclusions" (Everflow's own term) — same dimensions as above, inverted.
-  excludeOfferId?: string;
-  excludePublisherId?: string;
-  excludeAdvertiserId?: string;
-  excludeSmartLinkId?: string;
-  excludeCountry?: string;
-  excludeDevice?: string;
+  // One value or several; a row whose value is NULL (e.g. no smart link) is never excluded.
+  excludeOfferId?: FilterValue;
+  excludePublisherId?: FilterValue;
+  excludeAdvertiserId?: FilterValue;
+  excludeSmartLinkId?: FilterValue;
+  excludeCountry?: FilterValue;
+  excludeDevice?: FilterValue;
   // "Others › Ignore Fail Traffic" — drop fraud-flagged clicks from click-side metrics entirely,
   // rather than just counting them separately (which invalid_clicks already does).
   excludeInvalid?: boolean;

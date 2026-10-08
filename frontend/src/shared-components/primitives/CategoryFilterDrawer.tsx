@@ -10,13 +10,18 @@ interface CategoryFilterDrawerProps {
   onApply: (v: FilterValues) => void;
   onClose: () => void;
   singleSelectKeys?: string[];
-  inertLabels?: string[];
 }
 
-export function CategoryFilterDrawer({ categories, values, onApply, onClose, singleSelectKeys = [], inertLabels = [] }: CategoryFilterDrawerProps) {
+/** "any" / empty values are the no-filter choice, not a real selection. */
+const isRealSelection = (v: string) => v !== '' && v !== 'any';
+
+export function CategoryFilterDrawer({ categories, values, onApply, onClose, singleSelectKeys = [] }: CategoryFilterDrawerProps) {
   const [draft, setDraft] = useState<FilterValues>(values);
 
-  useEffect(() => { setDraft(values); }, [values]);
+  // Re-seed the draft only when the applied values actually change — callers often pass a fresh
+  // object every render, and resetting on identity would wipe the user's in-progress edits.
+  const valuesKey = JSON.stringify(values);
+  useEffect(() => { setDraft(JSON.parse(valuesKey) as FilterValues); }, [valuesKey]);
 
   const toggle = (key: string, value: string) => {
     const current = draft[key] ?? [];
@@ -40,21 +45,16 @@ export function CategoryFilterDrawer({ categories, values, onApply, onClose, sin
   const clearAll = () => setDraft({});
   const apply = () => { onApply(draft); onClose(); };
 
-  const total = Object.values(draft).reduce((n, arr) => n + (arr?.length ?? 0), 0);
+  // The header pill says "N filters applied" — count what IS applied (`values`), not the draft
+  // the user is still editing (which only takes effect on Apply).
+  const appliedTotal = Object.values(values).reduce((n, arr) => n + (arr ?? []).filter(isRealSelection).length, 0);
 
   return (
-    <SearchFilterDrawer appliedCount={total} onClose={onClose} onApply={apply}>
+    <SearchFilterDrawer appliedCount={appliedTotal} onClose={onClose} onApply={apply}>
       <div className="mb-3 flex justify-end">
         <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
       </div>
       {categories.map((cat) => {
-        if (inertLabels.includes(cat.label)) {
-          return (
-            <FieldBlock key={cat.key} label={cat.label}>
-              <p className="text-tiny text-fg-muted">No options.</p>
-            </FieldBlock>
-          );
-        }
         const selected = draft[cat.key] ?? [];
         const isSingle = singleSelectKeys.includes(cat.key);
         return (

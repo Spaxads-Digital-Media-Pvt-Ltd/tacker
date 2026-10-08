@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
-import { useQuery, useMutation } from '../../lib/useApi';
+import { useMutation } from '../../lib/useApi';
+import { useAllPages } from '../../hooks/useAllPages';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import { isDevOnlyHost } from '../../lib/trackingLinks';
 import type { TrackingDomain } from '../../types';
@@ -20,7 +21,8 @@ const columns: Column<TrackingDomain>[] = [
 ];
 
 export default function TrackingDomains() {
-  const { data, loading, error, refetch } = useQuery<TrackingDomain[]>('/api/tracking-domains');
+  // The endpoint defaults to 50 rows; walk every page so no domain is silently dropped.
+  const { data, loading, error, refetch } = useAllPages<TrackingDomain>('/api/tracking-domains');
   const [open, setOpen] = useState(false);
 
   return (

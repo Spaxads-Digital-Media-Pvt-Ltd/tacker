@@ -162,6 +162,7 @@ export default function OfferTemplates() {
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
         : !data || data.length === 0 ? <StateBlock>No offer templates yet.</StateBlock>
+        : rows.length === 0 ? <StateBlock>No templates match your search.</StateBlock>
         : (
           <>
             <TableScroll>

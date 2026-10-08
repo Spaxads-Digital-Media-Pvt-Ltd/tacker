@@ -15,8 +15,9 @@
  */
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Search, Filter, MoreVertical, CheckCircle2, AlertCircle, ShieldAlert, ChevronDown } from 'lucide-react';
+import { Bell, Search, Filter, Check, MoreVertical, CheckCircle2, AlertCircle, ShieldAlert, ChevronDown } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { useAllPages } from '../../hooks/useAllPages';
 import { api } from '../../lib/api';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column, MenuPopover } from '../../shared-components/primitives/ui';
 import { Accordion } from '../../shared-components/panels/Accordion';
@@ -77,12 +78,14 @@ function TabBar({ tabs, active, onChange, badges, right }: { tabs: readonly stri
   );
 }
 
-/** Small toolbar shared by the Configurations accordions: search + status/filter + 3-dot menu. */
-function AccordionToolbar({ addLabel, onAdd, filterOptions, onFilter }: {
+/** Small toolbar for the Configurations accordions: add button + a status filter showing the current choice. */
+function AccordionToolbar({ addLabel, onAdd, filterOptions, filterValue, onFilter }: {
   addLabel?: string; onAdd?: () => void;
   filterOptions?: { value: string; label: string }[];
+  filterValue?: string;
   onFilter?: (value: string) => void;
 }) {
+  const current = filterOptions?.find((o) => o.value === filterValue) ?? filterOptions?.[0];
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       {addLabel ? (
@@ -96,30 +99,22 @@ function AccordionToolbar({ addLabel, onAdd, filterOptions, onFilter }: {
             width="w-36"
             button={
               <span className="input flex !w-auto items-center gap-2 !py-1.5">
-                <Filter size={14} className="text-fg-muted" /> All<ChevronDown size={14} className="text-fg-muted" />
+                <Filter size={14} className="text-fg-muted" /> {current?.label ?? 'All'}<ChevronDown size={14} className="text-fg-muted" />
               </span>
             }
           >
             {({ close }) => (
               <div className="py-1">
                 {filterOptions.map((o) => (
-                  <button key={o.value} type="button" onClick={() => { onFilter(o.value); close(); }}
+                  <button key={o.value} type="button" role="menuitemradio" aria-checked={o.value === current?.value} onClick={() => { onFilter(o.value); close(); }}
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-page">
-                    <span className="w-3.5" />{o.label}
+                    <span className="w-3.5 text-accent-text">{o.value === current?.value && <Check size={14} />}</span>{o.label}
                   </button>
                 ))}
               </div>
             )}
           </MenuPopover>
-        ) : (
-          <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input title="Not available yet" placeholder="Search…" className="input !w-56 !pl-8" />
-          </div>
-        )}
-        {filterOptions && (
-          <button title="Not available yet" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -308,7 +303,6 @@ function OverviewTab({ domains, loading, refetch }: { domains: TrackingDomain[];
                   <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
                   <input placeholder="Search…" className="input !pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
-                <button className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Filter size={15} /></button>
               </div>
               <div className="space-y-1">
                 {filtered.map((d) => (
@@ -499,7 +493,8 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
     { value: 'all', label: 'All' },
     { value: 'active', label: 'Active' },
     { value: 'pending', label: 'Pending' },
-    { value: 'inactive', label: 'Inactive' },
+    // tracking_domains.status CHECK: pending | active | disabled
+    { value: 'disabled', label: 'Disabled' },
   ];
   return (
     <div className="space-y-4">
@@ -531,7 +526,7 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
       </div>
 
       <Accordion title="Domains" count={filteredDomains.length} defaultOpen>
-        <AccordionToolbar addLabel="Domain" onAdd={() => setAdding(true)} filterOptions={filterOpts} onFilter={setDomainFilter} />
+        <AccordionToolbar addLabel="Domain" onAdd={() => setAdding(true)} filterOptions={filterOpts} filterValue={domainFilter} onFilter={setDomainFilter} />
         {domains.length === 0 ? <p className="text-small text-fg-muted">No tracking domains yet.</p> : <Table columns={domainColumns} rows={filteredDomains} rowKey={(d) => d.id} />}
       </Accordion>
 
@@ -555,7 +550,8 @@ function ConfigurationsTab({ domains, loading, refetch }: { domains: TrackingDom
 export default function TrafficHealth() {
   const nav = useNavigate();
   const [tab, setTab] = useState<string>('Overview');
-  const { data, loading, refetch } = useQuery<TrackingDomain[]>('/api/tracking-domains?limit=200');
+  // Walk every page (max 200 per request, total in the meta) so domain counts are never truncated.
+  const { data, loading, refetch } = useAllPages<TrackingDomain>('/api/tracking-domains');
   const domains = useMemo(() => data ?? [], [data]);
   const allUp = domains.length > 0 && domains.every((d) => d.status === 'active');
 

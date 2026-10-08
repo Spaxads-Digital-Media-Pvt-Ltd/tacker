@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { badRequest } from '../../../lib/http/errors.js';
 import { pool, query } from '../../../lib/db/pool.js';
@@ -35,9 +36,10 @@ export function offlineRoutes(): Router {
     const { rows } = await query(
       `SELECT conversion_id, created_at, offer_id, publisher_id, event_name, status, payout, revenue, currency, transaction_id
          FROM conversions WHERE network_id = $1 AND source = 'manual'
-        ORDER BY created_at DESC LIMIT 500`,
+        ORDER BY created_at DESC LIMIT ${LIST_CAP}`,
       [req.scope!.networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'offline.conversions');
     sendOk(res, rows);
   }));
 

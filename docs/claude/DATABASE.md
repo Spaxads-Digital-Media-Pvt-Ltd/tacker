@@ -236,8 +236,8 @@ API keys for the Public REST API.
 | `notification_preferences` | Per-user notification settings |
 | `segmentations` | Segmentation options |
 | `business_units` | Business unit assignments |
-| `offer_categories` | Offer category definitions |
-| `partner_channels` | Partner channel definitions |
+| `segmentation_categories` | Category catalog (Control Center); source for offer category options — `offers.category` stays free text. 055's `offer_categories` was merged in and dropped by migration 065 |
+| `segmentation_channels` | Channel catalog (Control Center); `publishers.channel_id` → here (repointed from 055's `partner_channels`, dropped by migration 065) |
 
 ### Relationships (simplified)
 ```

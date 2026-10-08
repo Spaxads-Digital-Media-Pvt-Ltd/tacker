@@ -3,7 +3,7 @@
  * `/reporting/advertisers/postbacks`, 236 real rows: Date | Partner | Offer | Advertiser | Postback
  * URL | Conversion ID | Transaction ID | Status | CV Method | Revenue | Payout, no Summary/graph).
  * Reuses the same `GET /api/reports/conversions` endpoint as Conversion Report (already extended
- * with `raw_params` for this page), filtered client-side to `source !== 'manual'` — an inbound
+ * with `raw_params` for this page), excluding `source = 'manual'` server-side (excludeSource) — an inbound
  * advertiser postback/pixel/iframe hit IS a conversion row in this schema, so this report is that
  * same data read as "what advertisers sent us" rather than "what we recorded."
  *
@@ -25,11 +25,13 @@ import { Link } from 'react-router-dom';
 import { Search, SlidersHorizontal, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
-import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
+import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, fetchAllPages, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
+import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../lib/filterChips';
+import { readUrlDate, readUrlIds, reportLink } from '../../lib/reportFilterState';
 
 interface ConvRow {
   conversion_id: string; created_at: string; offer_id: string;
@@ -61,13 +63,31 @@ const METHOD_OPTIONS = [
   { value: 'iframe', label: 'iFrame' },
 ];
 
+/** Filter-drawer category ⇄ URL/API param (accepted `/api/reports/conversions` keys). */
+const URL_FILTER_PARAMS: [category: string, param: string][] = [
+  ['offer', 'offerId'], ['advertiser', 'advertiserId'], ['partner', 'publisherId'], ['method', 'source'],
+];
+
+/** Applied report state from the URL (Copy Link / deep links). */
+function readInitialState() {
+  const sp = new URLSearchParams(window.location.search);
+  const filters: FilterValues = {};
+  for (const [cat, param] of URL_FILTER_PARAMS) {
+    const ids = readUrlIds(sp, param).slice(0, 1); // single-select per category
+    if (cat === 'method' && !METHOD_OPTIONS.some((o) => o.value === ids[0])) continue; // never 'manual'
+    if (ids.length) filters[cat] = ids;
+  }
+  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+}
+
 export default function AdvertiserPostbackReport() {
-  const [from, setFrom] = useState(daysAgo(7));
-  const [to, setTo] = useState(todayStr());
-  const [appliedFrom, setAppliedFrom] = useState(from);
-  const [appliedTo, setAppliedTo] = useState(to);
-  const [filters, setFilters] = useState<Record<string, string[]>>({});
-  const [appliedFilters, setAppliedFilters] = useState<Record<string, string[]>>({});
+  const [init] = useState(readInitialState);
+  const [from, setFrom] = useState(init.from);
+  const [to, setTo] = useState(init.to);
+  const [appliedFrom, setAppliedFrom] = useState(init.from);
+  const [appliedTo, setAppliedTo] = useState(init.to);
+  const [filters, setFilters] = useState<Record<string, string[]>>(init.filters);
+  const [appliedFilters, setAppliedFilters] = useState<Record<string, string[]>>(init.filters);
   const [filterOpen, setFilterOpen] = useState(false);
   const [hasRun, setHasRun] = useState(true);
   const [q, setQ] = useState('');
@@ -79,6 +99,7 @@ export default function AdvertiserPostbackReport() {
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [copied, setCopied] = useState(false);
+  const exp = useReportExport();
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
@@ -105,15 +126,17 @@ export default function AdvertiserPostbackReport() {
     return params.toString();
   };
 
-  const tableQs = qs({
+  // Only accepted /api/reports/conversions keys (the endpoint rejects anything else with 422).
+  const baseParams = {
     from: toIso(appliedFrom), to: toIso(appliedTo, true),
     offerId: offerIdFilter, publisherId: publisherIdFilter, advertiserId: advertiserIdFilter, source: methodFilter,
-    limit: pageSize + 1, offset: (page - 1) * pageSize,
-  });
+    // Manual (admin-entered) conversions aren't advertiser postbacks — excluded server-side so paging stays exact.
+    excludeSource: methodFilter ? undefined : 'manual',
+  };
+  const tableQs = qs({ ...baseParams, limit: pageSize + 1, offset: (page - 1) * pageSize });
   const { data, loading, error } = useQuery<ConvRow[]>(hasRun ? `/api/reports/conversions?${tableQs}` : null);
-  const advertiserSourced = useMemo(() => (data ?? []).filter((r) => r.source !== 'manual'), [data]);
-  const hasNextPage = advertiserSourced.length > pageSize;
-  const pageRows = advertiserSourced.slice(0, pageSize);
+  const hasNextPage = (data?.length ?? 0) > pageSize;
+  const pageRows = useMemo(() => (data ?? []).slice(0, pageSize), [data]);
 
   const rows = useMemo(() => pageRows.filter((r) => {
     if (!q.trim()) return true;
@@ -136,7 +159,7 @@ export default function AdvertiserPostbackReport() {
   };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const exportRows = () => rows.map((r) => ({
+  const toExportRow = (r: ConvRow) => ({
     date: formatDate(r.created_at),
     partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     offer: offerMap.get(r.offer_id) ?? r.offer_id,
@@ -144,10 +167,22 @@ export default function AdvertiserPostbackReport() {
     payload: payloadPreview(r.raw_params), conversionId: r.conversion_id, transactionId: r.transaction_id ?? DASH,
     status: r.status, cvMethod: METHOD_OPTIONS.find((m) => m.value === r.source)?.label ?? r.source,
     revenue: money(r.revenue), payout: money(r.payout),
-  }));
+  });
+  // Every row matching the applied filters, not just the visible page.
+  const runExport = (format: 'csv' | 'xlsx') => {
+    void exp.run(format, 'advertiser-postback-report', async () => {
+      const res = await fetchAllPages<ConvRow>((limit, offset) => `/api/reports/conversions?${qs({ ...baseParams, limit, offset })}`, 500);
+      return { ...res, rows: res.rows.map(toExportRow) };
+    });
+  };
 
   const copyLink = async () => {
-    await navigator.clipboard?.writeText(window.location.href);
+    // The applied report (the address bar never reflects Run Report) — read back on load.
+    const link = reportLink({
+      from: appliedFrom, to: appliedTo,
+      ...Object.fromEntries(URL_FILTER_PARAMS.map(([cat, param]) => [param, appliedFilters[cat]?.[0]])),
+    });
+    await navigator.clipboard?.writeText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
@@ -185,7 +220,7 @@ export default function AdvertiserPostbackReport() {
               )}
             </button>
             {filterOpen && (
-              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
+              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters} singleSelectKeys={FILTER_CATEGORIES.map((c) => c.key)}
                 onApply={setFilters} onClose={() => setFilterOpen(false)} />
             )}
           </div>
@@ -196,12 +231,17 @@ export default function AdvertiserPostbackReport() {
       </div>
 
       <div className="card">
+        <ActiveFilterChips className="mb-3"
+          chips={chipsFromValues(FILTER_CATEGORIES, appliedFilters)}
+          onRemove={(c) => { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); setPage(1); }}
+          onClearAll={() => { setFilters({}); setAppliedFilters({}); setPage(1); }} />
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page"
+                value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div className="relative">
               <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
@@ -218,8 +258,8 @@ export default function AdvertiserPostbackReport() {
                     </button>
                     {exportOpen && (
                       <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button onClick={() => { downloadCsv('advertiser-postback-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                        <button onClick={() => { downloadXlsx('advertiser-postback-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                        <button disabled={exp.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                        <button disabled={exp.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
                       </div>
                     )}
                   </div>
@@ -230,6 +270,7 @@ export default function AdvertiserPostbackReport() {
           </div>
         </div>
 
+        <ExportStatus {...exp} onDismiss={exp.dismiss} />
         {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>
@@ -272,7 +313,7 @@ export default function AdvertiserPostbackReport() {
               </table>
             </div>
           )}
-        {hasRun && rows.length > 0 && (
+        {hasRun && !error && rows.length > 0 && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">

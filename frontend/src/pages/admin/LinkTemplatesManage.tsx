@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, Pencil, Trash2, Clock } from 'lucide-react';
+import { Search, SlidersHorizontal, Pencil, Trash2, Clock, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
@@ -152,7 +152,7 @@ export default function LinkTemplatesManage() {
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-              
+              <MoreVertical size={15} />
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">

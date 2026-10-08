@@ -148,8 +148,8 @@ export default function Investigator() {
 
   const rows = useMemo(() => {
     const list = data ?? [];
-    if (!q.trim()) return list;
-    const needle = q.toLowerCase();
+    const needle = q.trim().toLowerCase();
+    if (!needle) return list;
     return list.filter((r) =>
       String(r.ref).includes(needle) ||
       r.target.toLowerCase().includes(needle) ||
@@ -194,7 +194,7 @@ export default function Investigator() {
         </div>
       </div>
       {loading ? <StateBlock><Spinner /></StateBlock>
-        : rows.length === 0 ? <StateBlock>No investigations yet. Create one to search clicks and conversions.</StateBlock>
+        : rows.length === 0 ? <StateBlock>{q.trim() ? 'No Record Found' : 'No investigations yet. Create one to search clicks and conversions.'}</StateBlock>
         : <Table columns={columns} rows={rows} rowKey={(r) => r.id} />}
       <AddInvestigationModal
         open={adding}

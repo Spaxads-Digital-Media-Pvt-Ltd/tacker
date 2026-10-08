@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, Link2, Pencil, Trash2, Clock } from 'lucide-react';
+import { Search, SlidersHorizontal, Link2, Pencil, Trash2, Clock, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
@@ -27,7 +27,10 @@ const STATUS_OPTIONS = [
   { value: 'all', label: 'All', dot: 'bg-fg-muted' },
   { value: 'active', label: 'Active', dot: STATUS_DOT['active']! },
   { value: 'paused', label: 'Paused', dot: STATUS_DOT['disabled']! },
+  { value: 'expired', label: 'Expired', dot: STATUS_DOT['expired']! },
 ] as const;
+/** PATCH /api/coupon-codes/bulk accepts at most this many ids per request. */
+const BULK_CHUNK = 500;
 const ALL_COLUMNS = ['ID', 'Coupon Code', 'Partner', 'Offer', 'Start Date', 'End Date', 'Description', 'Created', 'Modified'] as const;
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -156,6 +159,9 @@ export default function CouponCodesManage() {
     if (has('partner')) rows = rows.filter((c) => c.publisherId && filters['partner']!.includes(c.publisherId));
     return rows;
   }, [data, q, filters]);
+  // Bulk actions only ever act on selected rows the current status/search/filters still show.
+  const visibleSelectedIds = useMemo(() => filtered.filter((c) => selected.has(c.id)).map((c) => c.id), [filtered, selected]);
+  const clearSelection = () => setSelected(new Set());
 
   const copyTrackingLink = async (c: CouponCode) => {
     if (!c.publisherId) return;
@@ -169,22 +175,33 @@ export default function CouponCodesManage() {
   };
 
   const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleSelectAll = () => setSelected((s) => (s.size === filtered.length ? new Set() : new Set(filtered.map((c) => c.id))));
+  const allVisibleSelected = filtered.length > 0 && visibleSelectedIds.length === filtered.length;
+  const toggleSelectAll = () => setSelected(allVisibleSelected ? new Set() : new Set(filtered.map((c) => c.id)));
 
   const bulkUpdateStatus = async (nextStatus: 'active' | 'expired' | 'disabled') => {
     setTableActionsOpen(false);
     setBulkBusy(true);
     setBulkError(null);
-    try {
-      // api.patch resolves to the unwrapped data (or throws) — there is no `.ok` on it.
-      await api.patch('/api/coupon-codes/bulk', { ids: Array.from(selected), status: nextStatus });
-      setSelected(new Set());
-      refetch();
-    } catch (e) {
-      setBulkError(e instanceof Error ? e.message : 'Could not update the selected coupon codes.');
-    } finally {
-      setBulkBusy(false);
+    // The endpoint caps a request at BULK_CHUNK ids but the selection can be larger, so send it in
+    // sequential chunks and aggregate. api.patch resolves to the unwrapped data (or throws).
+    const ids = visibleSelectedIds;
+    let updated = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+    for (let i = 0; i < ids.length; i += BULK_CHUNK) {
+      const chunk = ids.slice(i, i + BULK_CHUNK);
+      try {
+        const res = await api.patch<{ updated?: number }>('/api/coupon-codes/bulk', { ids: chunk, status: nextStatus });
+        updated += res?.updated ?? chunk.length;
+      } catch (e) {
+        failed += chunk.length;
+        firstError ??= e instanceof Error ? e.message : 'Request failed';
+      }
     }
+    if (failed > 0) setBulkError(`Updated ${updated.toLocaleString()} of ${ids.length.toLocaleString()} selected coupon codes; ${failed.toLocaleString()} could not be updated (${firstError}).`);
+    else setSelected(new Set());
+    refetch();
+    setBulkBusy(false);
   };
 
   const columnsByHeader: Record<string, Column<CouponCode>> = {
@@ -240,9 +257,9 @@ export default function CouponCodesManage() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => { setQ(e.target.value); clearSelection(); }} />
           </div>
-          <StatusSelect value={status} onChange={setStatus} />
+          <StatusSelect value={status} onChange={(v) => { setStatus(v); clearSelection(); }} />
           <div className="relative">
             <button type="button" onClick={() => setFilterOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
@@ -255,24 +272,24 @@ export default function CouponCodesManage() {
             </button>
             {filterOpen && (
               <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
-                onApply={setFilters} onClose={() => setFilterOpen(false)} />
+                onApply={(v) => { setFilters(v); clearSelection(); }} onClose={() => setFilterOpen(false)} />
             )}
           </div>
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-              
+              <MoreVertical size={15} />
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-card border border-border bg-elevated py-1 shadow-elevated">
                 <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
-                <button disabled={selected.size === 0 || bulkBusy} onClick={() => bulkUpdateStatus('active')}
+                <button disabled={visibleSelectedIds.length === 0 || bulkBusy} onClick={() => bulkUpdateStatus('active')}
                   className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
-                  Bulk Update Coupon Codes → Active {selected.size > 0 ? `(${selected.size})` : ''}
+                  Bulk Update Coupon Codes → Active {visibleSelectedIds.length > 0 ? `(${visibleSelectedIds.length})` : ''}
                 </button>
-                <button disabled={selected.size === 0 || bulkBusy} onClick={() => bulkUpdateStatus('disabled')}
+                <button disabled={visibleSelectedIds.length === 0 || bulkBusy} onClick={() => bulkUpdateStatus('disabled')}
                   className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
-                  Bulk Update Coupon Codes → Paused {selected.size > 0 ? `(${selected.size})` : ''}
+                  Bulk Update Coupon Codes → Paused {visibleSelectedIds.length > 0 ? `(${visibleSelectedIds.length})` : ''}
                 </button>
                 <div className="my-1 border-t border-border" />
                 <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
@@ -290,9 +307,9 @@ export default function CouponCodesManage() {
             <Table columns={displayedColumns} rows={filtered} rowKey={(c) => c.id} />
             <div className="mt-3 flex items-center justify-between text-tiny text-fg-secondary">
               <button type="button" onClick={toggleSelectAll} className="text-accent-text hover:underline">
-                {selected.size === filtered.length ? 'Deselect all' : `Select all ${filtered.length}`}
+                {allVisibleSelected ? 'Deselect all' : `Select all ${filtered.length}`}
               </button>
-              <span>{selected.size > 0 ? `${selected.size} selected · ` : ''}{filtered.length} Total</span>
+              <span>{visibleSelectedIds.length > 0 ? `${visibleSelectedIds.length} selected · ` : ''}{filtered.length} Total</span>
             </div>
           </>
         )}

@@ -13,15 +13,25 @@ import { validateQuery } from '../../../lib/http/validate.js';
 import { query } from '../../../lib/db/pool.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
 import { badRequest } from '../../../lib/http/errors.js';
+import { csvList, queryDate } from '../../../lib/http/query-params.js';
+import { addMoney } from '../../../lib/money.js';
+import { inclusiveTo, utcDayStart } from '../../../lib/reporting/request.js';
 
-const filterSchema = z.object({
-  from: z.string().optional(),
-  to: z.string().optional(),
-  offerId: z.string().uuid().optional(),
-  publisherId: z.string().uuid().optional(),
-  advertiserId: z.string().uuid().optional(),
-  smartLinkId: z.string().uuid().optional(),
-  country: z.string().max(3).optional(),
+// Date bounds: a date-only `from` is the start of that UTC day and a date-only `to` the END of it
+// (inclusive) — as a bare date `to` meant midnight and silently dropped the last day.
+const fromDate = queryDate.transform((s) => utcDayStart(s)!);
+const toDate = queryDate.transform((s) => inclusiveTo(s));
+const uuid = z.string().uuid().optional();
+const DETAIL_PAGE_MAX = 500;
+const pageKeys = {
+  limit: z.coerce.number().int().min(1).max(DETAIL_PAGE_MAX).default(100),
+  offset: z.coerce.number().int().min(0).default(0),
+};
+/** Attributes of the originating click (stored on `clicks`, not on conversions). */
+const clickAttrKeys = {
+  smartLinkId: uuid,
+  // Stored upper-case (ISO alpha-2) — accept any case from the URL.
+  country: z.string().max(3).transform((s) => s.toUpperCase()).optional(),
   region: z.string().max(100).optional(),
   city: z.string().max(100).optional(),
   device: z.string().max(40).optional(),
@@ -32,27 +42,67 @@ const filterSchema = z.object({
   sub3: z.string().max(200).optional(),
   sub4: z.string().max(200).optional(),
   sub5: z.string().max(200).optional(),
-  event: z.string().max(100).optional(),
-  source: z.enum(['postback', 'pixel', 'iframe', 'manual']).optional(),
-  currency: z.string().max(3).optional(),
-  status: z.enum(['pending', 'approved', 'rejected']).optional(),
-  success: z.enum(['true', 'false']).optional(),
+};
+const CONV_SOURCE = z.enum(['postback', 'pixel', 'iframe', 'manual']);
+
+// Each row-level endpoint gets its OWN schema listing exactly the filters it applies, and `.strict()`
+// turns any other key into a 422 — a filter that's accepted but silently ignored reads as "applied"
+// to the caller while returning unfiltered data.
+const clicksSchema = z.object({
+  from: fromDate.optional(), to: toDate.optional(),
+  offerId: uuid, publisherId: uuid, advertiserId: uuid,
+  ...clickAttrKeys,
   isUnique: z.enum(['true', 'false']).optional(),
   fraudMin: z.coerce.number().int().min(0).max(100).optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(100),
+  ...pageKeys,
+}).strict();
+type ClicksFilters = z.infer<typeof clicksSchema>;
+
+const conversionsSchema = z.object({
+  from: fromDate.optional(), to: toDate.optional(),
+  offerId: uuid, publisherId: uuid, advertiserId: uuid,
+  status: z.enum(['pending', 'approved', 'rejected']).optional(),
+  event: z.string().max(100).optional(),
+  source: CONV_SOURCE.optional(),
+  // e.g. the Advertiser Postback report = every source except admin-entered 'manual' conversions.
+  excludeSource: CONV_SOURCE.optional(),
+  currency: z.string().max(3).optional(),
+  // Applied to the originating click (LEFT JOIN clicks k) — a conversion with no click can't match.
+  ...clickAttrKeys,
+  ...pageKeys,
+}).strict();
+type ConversionsFilters = z.infer<typeof conversionsSchema>;
+
+const postbackLogsSchema = z.object({
+  from: fromDate.optional(), to: toDate.optional(),
+  offerId: uuid, publisherId: uuid,
+  success: z.enum(['true', 'false']).optional(),
+  ...pageKeys,
+}).strict();
+type PostbackLogsFilters = z.infer<typeof postbackLogsSchema>;
+
+/** Aggregated endpoints page their groups; default = the max so the common case is one request. */
+const groupPageKeys = {
+  limit: z.coerce.number().int().min(1).max(DETAIL_PAGE_MAX).default(DETAIL_PAGE_MAX),
   offset: z.coerce.number().int().min(0).default(0),
-});
-type Filters = z.infer<typeof filterSchema>;
+};
+const goalsSchema = z.object({
+  from: fromDate.optional(), to: toDate.optional(),
+  offerId: uuid, publisherId: uuid,
+  ...groupPageKeys,
+}).strict();
 
 /** One filter → SQL column mapping. `op` defaults to '='; `bool` coerces 'true'/'false'. */
-interface FilterSpec { key: keyof Filters; col: string; op?: '=' | '>=' | '<='; bool?: boolean }
+interface FilterSpec<F> { key: keyof F & string; col: string; op?: '=' | '<>' | '>=' | '<='; bool?: boolean }
 
-/** Assemble a parameterized WHERE from a report's allowed filter specs. */
-function buildWhere(networkId: string, f: Filters, specs: FilterSpec[]) {
-  const where: string[] = ['network_id = $1'];
-  const params: unknown[] = [networkId];
+/**
+ * Assemble a parameterized WHERE from a report's allowed filter specs. `params` continues an
+ * existing list when given (so a second WHERE — e.g. on the joined click — shares the numbering).
+ */
+function buildWhere<F extends object>(networkId: string, f: F, specs: FilterSpec<F>[], params: unknown[] = [networkId], first = 'network_id = $1') {
+  const where: string[] = first ? [first] : [];
   for (const s of specs) {
-    const raw = f[s.key];
+    const raw = (f as Record<string, unknown>)[s.key];
     if (raw == null || raw === '') continue;
     const val = s.bool ? raw === 'true' : raw;
     params.push(val);
@@ -61,32 +111,48 @@ function buildWhere(networkId: string, f: Filters, specs: FilterSpec[]) {
   return { where: where.join(' AND '), params };
 }
 
+/** `{ rows, total, truncated }` for an aggregated endpoint paged by limit/offset. */
+function pagedGroups<T>(rows: T[], total: number, f: { offset: number }) {
+  return { rows, total, truncated: f.offset + rows.length < total };
+}
+
 // ── Grouped performance report (Everflow/Spaxads Offer/Affiliate/Advertiser/Daily reports) ──
 const groupedSchema = z.object({
   groupBy: z.enum(['offer', 'publisher', 'advertiser', 'day', 'country', 'device']).default('offer'),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  offerIds: z.string().optional(),      // csv of offer UUIDs
-  publisherIds: z.string().optional(),
-  advertiserIds: z.string().optional(),
-  country: z.string().max(3).optional(),
+  from: fromDate.optional(),
+  to: toDate.optional(),
+  // Comma lists (or repeated params). `offerId`/`publisherId`/… singular aliases are what the
+  // row-level Click report sends, so the same query string works for both modes.
+  offerIds: csvList(z.string().uuid()), offerId: csvList(z.string().uuid()),
+  publisherIds: csvList(z.string().uuid()), publisherId: csvList(z.string().uuid()),
+  advertiserIds: csvList(z.string().uuid()), advertiserId: csvList(z.string().uuid()),
+  smartLinkIds: csvList(z.string().uuid()), smartLinkId: csvList(z.string().uuid()),
+  country: csvList(z.string().regex(/^[A-Za-z]{2}$/).transform((s) => s.toUpperCase())),
+  device: csvList(z.string().max(40)),
 });
 type Grouped = z.infer<typeof groupedSchema>;
-const csv = (v?: string) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+const merge = (...lists: (string[] | undefined)[]) => Array.from(new Set(lists.flatMap((l) => l ?? [])));
 
-/** Build the shared filter WHERE for clicks (alias c) / conversions (alias v). Returns fragments + params. */
+/**
+ * Shared filter WHERE for clicks (alias c) / conversions (alias v). Click attributes on the
+ * conversion side (country, device, smart link) come from the joined click `k` — conversions
+ * don't store them. Advertiser on the click side comes from the joined offer `o`.
+ */
 function groupedFilters(networkId: string, f: Grouped, isClicks: boolean) {
   const a = isClicks ? 'c' : 'v';
+  const click = isClicks ? 'c' : 'k';
   const where: string[] = [`${a}.network_id = $1`];
   const params: unknown[] = [networkId];
   if (!isClicks) where.push(`v.status = 'approved'`);
   const push = (val: unknown, expr: string, op = '=') => { if (val == null || val === '') return; params.push(val); where.push(`${expr} ${op} $${params.length}`); };
-  const pushIn = (vals: string[], expr: string) => { if (vals.length === 0) return; params.push(vals); where.push(`${expr} = ANY($${params.length}::uuid[])`); };
+  const pushIn = (vals: string[], expr: string, type: 'uuid' | 'text') => { if (vals.length === 0) return; params.push(vals); where.push(`${expr} = ANY($${params.length}::${type}[])`); };
   push(f.from, `${a}.created_at`, '>='); push(f.to, `${a}.created_at`, '<=');
-  pushIn(csv(f.offerIds), `${a}.offer_id`);
-  pushIn(csv(f.publisherIds), `${a}.publisher_id`);
-  if (!isClicks) pushIn(csv(f.advertiserIds), `v.advertiser_id`);
-  push(f.country, `${a}.country`);
+  pushIn(merge(f.offerIds, f.offerId), `${a}.offer_id`, 'uuid');
+  pushIn(merge(f.publisherIds, f.publisherId), `${a}.publisher_id`, 'uuid');
+  pushIn(merge(f.advertiserIds, f.advertiserId), isClicks ? 'o.advertiser_id' : 'v.advertiser_id', 'uuid');
+  pushIn(merge(f.smartLinkIds, f.smartLinkId), `${click}.smart_link_id`, 'uuid');
+  pushIn(f.country ?? [], `${click}.country`, 'text');
+  pushIn(f.device ?? [], `${click}.device`, 'text');
   return { where: where.join(' AND '), params };
 }
 
@@ -101,12 +167,16 @@ export function mountDetailReports(r: Router): void {
         case 'offer': return `COALESCE(${alias}.offer_id::text, '~none~')`;
         case 'publisher': return `COALESCE(${alias}.publisher_id::text, '~none~')`;
         case 'advertiser': return alias === 'c' ? `COALESCE(o.advertiser_id::text, '~none~')` : `COALESCE(v.advertiser_id::text, '~none~')`;
-        case 'day': return `to_char(date_trunc('day', ${alias}.created_at), 'YYYY-MM-DD')`;
-        case 'country': return `COALESCE(${alias}.country, '—')`;
-        case 'device': return `COALESCE(${alias}.device, '—')`;
+        case 'day': return `to_char(date_trunc('day', ${alias}.created_at, 'UTC'), 'YYYY-MM-DD')`;
+        case 'country': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.country, '—')`;
+        case 'device': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.device, '—')`;
       }
     };
-    const clicksJoin = f.groupBy === 'advertiser' ? 'JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id' : '';
+    const needsOffers = f.groupBy === 'advertiser' || merge(f.advertiserIds, f.advertiserId).length > 0;
+    const clicksJoin = needsOffers ? 'JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id' : '';
+    const needsClick = f.groupBy === 'country' || f.groupBy === 'device' || (f.country?.length ?? 0) > 0
+      || (f.device?.length ?? 0) > 0 || merge(f.smartLinkIds, f.smartLinkId).length > 0;
+    const convJoin = needsClick ? 'LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id' : '';
     const cf = groupedFilters(nid, f, true);
     const vf = groupedFilters(nid, f, false);
     // conversions params come after clicks params; shift their $ placeholders.
@@ -123,7 +193,7 @@ export function mountDetailReports(r: Router): void {
         SELECT ${dim('v')} AS k, COUNT(*)::int AS conversions,
                COALESCE(SUM(v.payout),0)::numeric(14,4) AS payout,
                COALESCE(SUM(v.revenue),0)::numeric(14,4) AS revenue
-        FROM conversions v WHERE ${vWhere} GROUP BY 1
+        FROM conversions v ${convJoin} WHERE ${vWhere} GROUP BY 1
       )
       SELECT COALESCE(cl.k, cv.k) AS k,
              COALESCE(cl.clicks,0) AS clicks, COALESCE(cv.conversions,0) AS conversions,
@@ -160,10 +230,11 @@ export function mountDetailReports(r: Router): void {
       };
     }).sort((a, b) => b.clicks - a.clicks);
 
+    // Money stays exact decimal text (never float sums).
     const totals = out.reduce((t, r) => ({
       clicks: t.clicks + r.clicks, conversions: t.conversions + r.conversions,
-      payout: t.payout + Number(r.payout), revenue: t.revenue + Number(r.revenue), profit: t.profit + Number(r.profit),
-    }), { clicks: 0, conversions: 0, payout: 0, revenue: 0, profit: 0 });
+      payout: addMoney(t.payout, r.payout), revenue: addMoney(t.revenue, r.revenue), profit: addMoney(t.profit, r.profit),
+    }), { clicks: 0, conversions: 0, payout: '0', revenue: '0', profit: '0' });
 
     sendOk(res, { rows: out, totals });
   }));
@@ -178,11 +249,11 @@ export function mountDetailReports(r: Router): void {
     const nid = req.scope!.networkId;
     // Period buckets via FILTER (one scan each over the current+previous month window).
     const P = (col: string) => `
-      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('day', now())),0) AS today,
-      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('day', now()) - interval '1 day' AND created_at < date_trunc('day', now())),0) AS yesterday,
-      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('month', now())),0) AS month,
-      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('month', now()) - interval '1 month' AND created_at < date_trunc('month', now())),0) AS last_month`;
-    const since = `created_at >= date_trunc('month', now()) - interval '1 month'`;
+      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('day', now(), 'UTC')),0) AS today,
+      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('day', now(), 'UTC') - interval '1 day' AND created_at < date_trunc('day', now(), 'UTC')),0) AS yesterday,
+      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('month', now(), 'UTC')),0) AS month,
+      COALESCE(${col} FILTER (WHERE created_at >= date_trunc('month', now(), 'UTC') - interval '1 month' AND created_at < date_trunc('month', now(), 'UTC')),0) AS last_month`;
+    const since = `created_at >= date_trunc('month', now(), 'UTC') - interval '1 month'`;
 
     const [clk, cv, ser] = await Promise.all([
       query<Record<string, string>>(`SELECT ${P('COUNT(*)')} FROM clicks WHERE network_id = $1 AND ${since}`, [nid]),
@@ -199,10 +270,10 @@ export function mountDetailReports(r: Router): void {
                 COALESCE(SUM(payout),0)::text AS payout
            FROM (
              SELECT created_at, 'click' AS src, 0::numeric revenue, 0::numeric payout FROM clicks
-              WHERE network_id = $1 AND created_at >= date_trunc('day', now())
+              WHERE network_id = $1 AND created_at >= date_trunc('day', now(), 'UTC')
              UNION ALL
              SELECT created_at, 'conv' AS src, revenue, payout FROM conversions
-              WHERE network_id = $1 AND status = 'approved' AND created_at >= date_trunc('day', now())
+              WHERE network_id = $1 AND status = 'approved' AND created_at >= date_trunc('day', now(), 'UTC')
            ) h GROUP BY 1`, [nid]),
     ]);
 
@@ -246,9 +317,9 @@ export function mountDetailReports(r: Router): void {
   }));
 
   // ── Clicks report — row-level click log (IP, geo, device, subs, fraud) ──
-  r.get('/clicks', validateQuery(filterSchema), asyncHandler(async (req, res) => {
-    const f = res.locals.query as Filters;
-    const { where, params } = buildWhere(req.scope!.networkId, f, [
+  r.get('/clicks', validateQuery(clicksSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as ClicksFilters;
+    const { where, params } = buildWhere<ClicksFilters>(req.scope!.networkId, f, [
       { key: 'from', col: 'created_at', op: '>=' }, { key: 'to', col: 'created_at', op: '<=' },
       { key: 'offerId', col: 'offer_id' }, { key: 'publisherId', col: 'publisher_id' },
       { key: 'smartLinkId', col: 'smart_link_id' },
@@ -258,12 +329,18 @@ export function mountDetailReports(r: Router): void {
       { key: 'sub4', col: 'sub4' }, { key: 'sub5', col: 'sub5' },
       { key: 'isUnique', col: 'is_unique', bool: true }, { key: 'fraudMin', col: 'fraud_score', op: '>=' },
     ]);
+    // Clicks don't store the advertiser — resolve it through the (same-network) offer.
+    let clickWhere = where;
+    if (f.advertiserId) {
+      params.push(f.advertiserId);
+      clickWhere += ` AND offer_id IN (SELECT id FROM offers WHERE network_id = $1 AND advertiser_id = $${params.length})`;
+    }
     params.push(f.limit, f.offset);
     const { rows } = await query(
       `SELECT click_id, created_at, offer_id, publisher_id, smart_link_id, ip::text AS ip, country, region, city, isp,
               device, os, browser, is_unique, fraud_score, fraud_flags, sub1, sub2, sub3, sub4, sub5,
               EXISTS(SELECT 1 FROM conversions cv WHERE cv.click_id = clicks.click_id AND cv.network_id = clicks.network_id) AS converted
-         FROM clicks WHERE ${where}
+         FROM clicks WHERE ${clickWhere}
         ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
@@ -273,14 +350,23 @@ export function mountDetailReports(r: Router): void {
   // ── Conversions report — row-level conversion log, incl. click-time context (geo/device/subs)
   // for the originating click via a LEFT JOIN on click_id. Filtering runs on the `conversions`-only
   // subquery first (avoids column-name ambiguity with `clicks` on the outer join) before joining.
-  r.get('/conversions', validateQuery(filterSchema), asyncHandler(async (req, res) => {
-    const f = res.locals.query as Filters;
-    const { where, params } = buildWhere(req.scope!.networkId, f, [
+  r.get('/conversions', validateQuery(conversionsSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as ConversionsFilters;
+    const { where, params } = buildWhere<ConversionsFilters>(req.scope!.networkId, f, [
       { key: 'from', col: 'created_at', op: '>=' }, { key: 'to', col: 'created_at', op: '<=' },
       { key: 'offerId', col: 'offer_id' }, { key: 'publisherId', col: 'publisher_id' },
       { key: 'advertiserId', col: 'advertiser_id' }, { key: 'status', col: 'status' },
       { key: 'event', col: 'event_name' }, { key: 'source', col: 'source' }, { key: 'currency', col: 'currency' },
+      { key: 'excludeSource', col: 'source', op: '<>' },
     ]);
+    // Click-side filters run on the joined originating click (same numbering as `params`).
+    const { where: clickWhere } = buildWhere<ConversionsFilters>(req.scope!.networkId, f, [
+      { key: 'smartLinkId', col: 'k.smart_link_id' },
+      { key: 'country', col: 'k.country' }, { key: 'region', col: 'k.region' }, { key: 'city', col: 'k.city' },
+      { key: 'device', col: 'k.device' }, { key: 'os', col: 'k.os' }, { key: 'browser', col: 'k.browser' },
+      { key: 'sub1', col: 'k.sub1' }, { key: 'sub2', col: 'k.sub2' }, { key: 'sub3', col: 'k.sub3' },
+      { key: 'sub4', col: 'k.sub4' }, { key: 'sub5', col: 'k.sub5' },
+    ], params, '');
     params.push(f.limit, f.offset);
     const { rows } = await query(
       `SELECT v.conversion_id, v.created_at, v.click_id, v.offer_id, v.publisher_id, v.advertiser_id,
@@ -292,6 +378,7 @@ export function mountDetailReports(r: Router): void {
          FROM (SELECT * FROM conversions WHERE ${where}) v
          LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id
          LEFT JOIN offer_goals og ON og.id = v.goal_id AND og.network_id = v.network_id
+        ${clickWhere ? `WHERE ${clickWhere}` : ''}
         ORDER BY v.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
@@ -301,9 +388,9 @@ export function mountDetailReports(r: Router): void {
   // ── Postback logs report — outbound delivery attempts ──
   // Partner Postback report — real delivery log, extended with a LEFT JOIN to the conversion it fired
   // for (via conversion_id) so Offer/Event Name/Advertiser can be shown honestly rather than omitted.
-  r.get('/postback-logs', validateQuery(filterSchema), asyncHandler(async (req, res) => {
-    const f = res.locals.query as Filters;
-    const { where, params } = buildWhere(req.scope!.networkId, f, [
+  r.get('/postback-logs', validateQuery(postbackLogsSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as PostbackLogsFilters;
+    const { where, params } = buildWhere<PostbackLogsFilters>(req.scope!.networkId, f, [
       { key: 'from', col: 'created_at', op: '>=' }, { key: 'to', col: 'created_at', op: '<=' },
       { key: 'publisherId', col: 'publisher_id' }, { key: 'success', col: 'success', bool: true },
     ]);
@@ -325,20 +412,18 @@ export function mountDetailReports(r: Router): void {
   // ── Goals/Event report — approved conversions aggregated per offer goal, plus each offer's real
   // click count (clicks aren't tied to a specific goal, so it's queried per-offer and merged in) —
   // together these back CVR (Total (from Clicks) / Clicks) on the Event Report.
-  r.get('/goals', validateQuery(filterSchema), asyncHandler(async (req, res) => {
-    const f = res.locals.query as Filters;
+  r.get('/goals', validateQuery(goalsSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as z.infer<typeof goalsSchema>;
     const params: unknown[] = [req.scope!.networkId];
     const where = ["c.network_id = $1", "c.status = 'approved'"];
     const push = (val: unknown, expr: string, op = '=') => { if (val == null || val === '') return; params.push(val); where.push(`${expr} ${op} $${params.length}`); };
-    push(f.from, 'c.created_at', '>='); push(f.to, 'c.created_at', '<='); push(f.offerId, 'c.offer_id');
+    push(f.from, 'c.created_at', '>='); push(f.to, 'c.created_at', '<='); push(f.offerId, 'c.offer_id'); push(f.publisherId, 'c.publisher_id');
     const clickParams: unknown[] = [req.scope!.networkId];
     const clickWhere = ['network_id = $1'];
     const pushClick = (val: unknown, expr: string, op = '=') => { if (val == null || val === '') return; clickParams.push(val); clickWhere.push(`${expr} ${op} $${clickParams.length}`); };
-    pushClick(f.from, 'created_at', '>='); pushClick(f.to, 'created_at', '<='); pushClick(f.offerId, 'offer_id');
+    pushClick(f.from, 'created_at', '>='); pushClick(f.to, 'created_at', '<='); pushClick(f.offerId, 'offer_id'); pushClick(f.publisherId, 'publisher_id');
 
-    const [goalRes, clickRes] = await Promise.all([
-      query<{ goal: string; offer_id: string; conversions: number; payout: string; revenue: string; margin: string }>(
-        `SELECT COALESCE(og.name, c.event_name, '(default)') AS goal,
+    const groupsSql = `SELECT COALESCE(og.name, c.event_name, '(default)') AS goal,
                 c.offer_id,
                 COUNT(*)::int AS conversions,
                 COALESCE(SUM(c.payout),0)::numeric(14,4) AS payout,
@@ -347,9 +432,15 @@ export function mountDetailReports(r: Router): void {
            FROM conversions c
            LEFT JOIN offer_goals og ON og.id = c.goal_id AND og.network_id = c.network_id
           WHERE ${where.join(' AND ')}
-          GROUP BY 1, 2 ORDER BY conversions DESC LIMIT 500`,
-        params,
+          GROUP BY 1, 2`;
+    const n = params.length;
+    const [goalRes, countRes, clickRes] = await Promise.all([
+      query<{ goal: string; offer_id: string; conversions: number; payout: string; revenue: string; margin: string }>(
+        `${groupsSql} ORDER BY conversions DESC, goal, c.offer_id LIMIT $${n + 1} OFFSET $${n + 2}`,
+        [...params, f.limit, f.offset],
       ),
+      // Real group count, so a page that stops at `limit` is reported as such (never a silent cap).
+      query<{ total: number }>(`SELECT COUNT(*)::int AS total FROM (${groupsSql}) g`, params),
       query<{ offer_id: string; clicks: number }>(
         `SELECT offer_id, COUNT(*)::int AS clicks FROM clicks WHERE ${clickWhere.join(' AND ')} GROUP BY 1`,
         clickParams,
@@ -365,16 +456,17 @@ export function mountDetailReports(r: Router): void {
         marginPct: Number(r.revenue) > 0 ? Number(((Number(r.margin) / Number(r.revenue)) * 100).toFixed(2)) : 0,
       };
     });
-    sendOk(res, rows);
+    sendOk(res, pagedGroups(rows, Number(countRes.rows[0]?.total ?? 0), f));
   }));
 
   // ── Smart Link report — clicks & conversions attributed to each smart link ──
   r.get('/smart-links', asyncHandler(async (req, res) => {
     const { rows } = await query(
       `SELECT sl.id, sl.name, sl.status,
-              (SELECT COUNT(*) FROM clicks c WHERE c.smart_link_id = sl.id)::int AS clicks,
-              (SELECT COUNT(*) FROM conversions cv WHERE cv.click_id IN
-                 (SELECT click_id FROM clicks c2 WHERE c2.smart_link_id = sl.id) AND cv.status = 'approved')::int AS conversions
+              (SELECT COUNT(*) FROM clicks c WHERE c.network_id = sl.network_id AND c.smart_link_id = sl.id)::int AS clicks,
+              (SELECT COUNT(*) FROM conversions cv WHERE cv.network_id = sl.network_id AND cv.click_id IN
+                 (SELECT click_id FROM clicks c2 WHERE c2.network_id = sl.network_id AND c2.smart_link_id = sl.id)
+                 AND cv.status = 'approved')::int AS conversions
          FROM smart_links sl
         WHERE sl.network_id = $1
         ORDER BY sl.created_at DESC`,
@@ -389,10 +481,12 @@ export function mountDetailReports(r: Router): void {
   // omitted rather than faked). Summary is a network-wide snapshot (today + all-time); Detail is a
   // real per-day, per-entity breakdown for the requested date range and category.
   const pacingSchema = z.object({
-    from: z.string().optional(),
-    to: z.string().optional(),
+    from: fromDate.optional(),
+    to: toDate.optional(),
     category: z.enum(['click', 'conversion', 'payout', 'revenue']).default('conversion'),
-  });
+    // Detail rows for one offer (payout/revenue: the offer groups that contain it).
+    offerId: uuid,
+  }).strict();
   r.get('/pacing', validateQuery(pacingSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof pacingSchema>;
@@ -400,13 +494,13 @@ export function mountDetailReports(r: Router): void {
     const [clickCap, convCap, groupCap] = await Promise.all([
       query<{ id: string; name: string; daily_click_cap: number; clicks_today: number }>(
         `SELECT o.id, o.name, o.daily_click_cap,
-                (SELECT COUNT(*) FROM clicks cl WHERE cl.offer_id = o.id AND cl.created_at >= date_trunc('day', now()))::int AS clicks_today
+                (SELECT COUNT(*) FROM clicks cl WHERE cl.offer_id = o.id AND cl.created_at >= date_trunc('day', now(), 'UTC'))::int AS clicks_today
            FROM offers o WHERE o.network_id = $1 AND o.daily_click_cap IS NOT NULL`,
         [nid],
       ),
       query<{ id: string; name: string; daily_conversion_cap: number | null; total_conversion_cap: number | null; conversions_today: number; conversions_total: number }>(
         `SELECT o.id, o.name, o.daily_conversion_cap, o.total_conversion_cap,
-                (SELECT COUNT(*) FROM conversions c WHERE c.offer_id = o.id AND c.status = 'approved' AND c.created_at >= date_trunc('day', now()))::int AS conversions_today,
+                (SELECT COUNT(*) FROM conversions c WHERE c.offer_id = o.id AND c.status = 'approved' AND c.created_at >= date_trunc('day', now(), 'UTC'))::int AS conversions_today,
                 (SELECT COUNT(*) FROM conversions c WHERE c.offer_id = o.id AND c.status = 'approved')::int AS conversions_total
            FROM offers o WHERE o.network_id = $1 AND (o.daily_conversion_cap IS NOT NULL OR o.total_conversion_cap IS NOT NULL)`,
         [nid],
@@ -414,9 +508,9 @@ export function mountDetailReports(r: Router): void {
       query<{ id: string; name: string; daily_payout_cap: string | null; daily_revenue_cap: string | null; payout_today: string; revenue_today: string }>(
         `SELECT og.id, og.name, og.caps->'payout'->>'daily' AS daily_payout_cap, og.caps->'revenue'->>'daily' AS daily_revenue_cap,
                 COALESCE((SELECT SUM(c.payout) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now()) AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS payout_today,
+                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS payout_today,
                 COALESCE((SELECT SUM(c.revenue) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now()) AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS revenue_today
+                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS revenue_today
            FROM offer_groups og WHERE og.network_id = $1 AND og.caps_enabled
              AND (og.caps->'payout'->>'daily' IS NOT NULL OR og.caps->'revenue'->>'daily' IS NOT NULL)`,
         [nid],
@@ -442,6 +536,12 @@ export function mountDetailReports(r: Router): void {
       const params: unknown[] = [nid];
       if (f.from) { params.push(f.from); where.push(`${alias}.created_at >= $${params.length}`); }
       if (f.to) { params.push(f.to); where.push(`${alias}.created_at <= $${params.length}`); }
+      if (f.offerId) {
+        params.push(f.offerId);
+        where.push(f.category === 'payout' || f.category === 'revenue'
+          ? `og.offer_ids ? $${params.length}::text`
+          : `${alias}.offer_id = $${params.length}`);
+      }
       return { where: where.join(' AND '), params };
     };
 
@@ -449,7 +549,7 @@ export function mountDetailReports(r: Router): void {
     if (f.category === 'click') {
       const { where, params } = dateWhereFor('cl');
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
-        `SELECT date_trunc('day', cl.created_at) AS day, cl.offer_id, COUNT(*)::int AS actual
+        `SELECT date_trunc('day', cl.created_at, 'UTC') AS day, cl.offer_id, COUNT(*)::int AS actual
            FROM clicks cl JOIN offers o ON o.id = cl.offer_id AND o.network_id = cl.network_id
           WHERE cl.network_id = $1 AND o.daily_click_cap IS NOT NULL AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
@@ -463,7 +563,7 @@ export function mountDetailReports(r: Router): void {
     } else if (f.category === 'conversion') {
       const { where, params } = dateWhereFor('c');
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
-        `SELECT date_trunc('day', c.created_at) AS day, c.offer_id, COUNT(*)::int AS actual
+        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, c.offer_id, COUNT(*)::int AS actual
            FROM conversions c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
           WHERE c.network_id = $1 AND c.status = 'approved' AND o.daily_conversion_cap IS NOT NULL AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
@@ -478,7 +578,7 @@ export function mountDetailReports(r: Router): void {
       const col = f.category === 'payout' ? 'payout' : 'revenue';
       const { where, params } = dateWhereFor('c');
       const { rows } = await query<{ day: string; group_id: string; group_name: string; cap: string | null; actual: string }>(
-        `SELECT date_trunc('day', c.created_at) AS day, og.id AS group_id, og.name AS group_name, og.caps->'${col}'->>'daily' AS cap,
+        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, og.id AS group_id, og.name AS group_name, og.caps->'${col}'->>'daily' AS cap,
                 COALESCE(SUM(c.${col}),0)::numeric(14,4) AS actual
            FROM conversions c
            JOIN offer_groups og ON og.network_id = c.network_id AND og.offer_ids ? c.offer_id::text
@@ -499,8 +599,8 @@ export function mountDetailReports(r: Router): void {
   // nonzero) and a cell renders as "—" (not 0) when day N hasn't happened yet relative to today —
   // e.g., a cohort from yesterday can only ever show a real Day 1 value so far.
   const cohortSchema = z.object({
-    from: z.string(),
-    to: z.string(),
+    from: fromDate,
+    to: toDate,
     topLevelMetric: z.enum(['clicks', 'unique_clicks']).default('clicks'),
     metric: z.enum(['conversions', 'payout', 'revenue']).default('conversions'),
     offerId: z.string().uuid().optional(),
@@ -523,7 +623,7 @@ export function mountDetailReports(r: Router): void {
     if (f.advertiserId) { advertiserJoin = 'JOIN offers o ON o.id = cl.offer_id AND o.network_id = cl.network_id'; params.push(f.advertiserId); clickWhere.push(`o.advertiser_id = $${params.length}`); }
 
     const { rows: clickRows } = await query<{ cohort_day: string; clicks: number; unique_clicks: number }>(
-      `SELECT date_trunc('day', cl.created_at) AS cohort_day, COUNT(*)::int AS clicks,
+      `SELECT date_trunc('day', cl.created_at, 'UTC') AS cohort_day, COUNT(*)::int AS clicks,
               COUNT(*) FILTER (WHERE cl.is_unique)::int AS unique_clicks
          FROM clicks cl ${advertiserJoin}
         WHERE ${clickWhere.join(' AND ')}
@@ -533,7 +633,7 @@ export function mountDetailReports(r: Router): void {
 
     const convCol = f.metric === 'payout' ? 'SUM(c.payout)' : f.metric === 'revenue' ? 'SUM(c.revenue)' : 'COUNT(*)';
     const { rows: convRows } = await query<{ cohort_day: string; day_offset: number; value: string }>(
-      `SELECT date_trunc('day', k.created_at) AS cohort_day,
+      `SELECT date_trunc('day', k.created_at, 'UTC') AS cohort_day,
               (floor(EXTRACT(EPOCH FROM (c.created_at - k.created_at)) / 86400)::int + 1) AS day_offset,
               COALESCE(${convCol}, 0)::numeric(14,4) AS value
          FROM conversions c
@@ -555,7 +655,9 @@ export function mountDetailReports(r: Router): void {
     }
 
     const now = Date.now();
-    const maxDay = Math.max(1, Math.min(31, Math.ceil((new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000) + 1));
+    // One column per calendar day in the range: 2026-10-01T00:00Z → 2026-10-07T23:59:59.999Z is 7
+    // days (ceil of the span) — the old `+ 1` showed an 8th column that could never fill in.
+    const maxDay = Math.max(1, Math.min(31, Math.ceil((new Date(f.to).getTime() - new Date(f.from).getTime()) / 86400000)));
     const rows = clickRows.map((r) => {
       const cohortMs = dayKey(r.cohort_day);
       const dayOffsets = byDay.get(cohortMs) ?? new Map<number, number>();
@@ -576,11 +678,12 @@ export function mountDetailReports(r: Router): void {
   // (INNER JOIN on click_id) — an offline/manual conversion has no click to measure a delta from,
   // so it's honestly excluded rather than bucketed as instant.
   const mttiSchema = z.object({
-    from: z.string().optional(),
-    to: z.string().optional(),
+    from: fromDate.optional(),
+    to: toDate.optional(),
     groupBy: z.enum(['offer', 'publisher']).default('offer'),
     offerId: z.string().uuid().optional(),
-  });
+    ...groupPageKeys,
+  }).strict();
   r.get('/click-to-conversion-time', validateQuery(mttiSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof mttiSchema>;
@@ -588,11 +691,14 @@ export function mountDetailReports(r: Router): void {
     const params: unknown[] = [nid];
     if (f.from) { params.push(f.from); where.push(`c.created_at >= $${params.length}`); }
     if (f.to) { params.push(f.to); where.push(`c.created_at <= $${params.length}`); }
-    if (f.groupBy === 'publisher' && f.offerId) { params.push(f.offerId); where.push(`c.offer_id = $${params.length}`); }
+    // The Offer filter applies in both groupings (it used to be silently ignored when grouped by offer).
+    if (f.offerId) { params.push(f.offerId); where.push(`c.offer_id = $${params.length}`); }
     const groupCol = f.groupBy === 'publisher' ? 'c.publisher_id' : 'c.offer_id';
 
-    const { rows } = await query<{
-      key: string; b0: number; b1: number; b2: number; b3: number; b4: number; b5: number; b6: number; total: number;
+    const n = params.length;
+    // `groups` = real group count (window over the grouped rows), so the page reports truncation.
+    const { rows: raw } = await query<{
+      key: string; b0: number; b1: number; b2: number; b3: number; b4: number; b5: number; b6: number; total: number; groups: number;
     }>(
       `WITH deltas AS (
          SELECT ${groupCol} AS grp, EXTRACT(EPOCH FROM (c.created_at - k.created_at)) AS delta
@@ -608,12 +714,25 @@ export function mountDetailReports(r: Router): void {
               COUNT(*) FILTER (WHERE delta > 120 AND delta <= 180)::int AS b4,
               COUNT(*) FILTER (WHERE delta > 180 AND delta <= 300)::int AS b5,
               COUNT(*) FILTER (WHERE delta > 300)::int AS b6,
-              COUNT(*)::int AS total
+              COUNT(*)::int AS total,
+              (COUNT(*) OVER ())::int AS groups
          FROM deltas WHERE grp IS NOT NULL
-        GROUP BY 1 ORDER BY total DESC LIMIT 500`,
-      params,
+        GROUP BY 1 ORDER BY total DESC, grp LIMIT $${n + 1} OFFSET $${n + 2}`,
+      [...params, f.limit, f.offset],
     );
-    sendOk(res, rows);
+    let groups = Number(raw[0]?.groups ?? 0);
+    if (raw.length === 0 && f.offset > 0) {
+      // Paged past the end — the window has no row to report the count on.
+      const c = await query<{ groups: number }>(
+        `SELECT COUNT(DISTINCT ${groupCol})::int AS groups FROM conversions c
+           JOIN clicks k ON k.click_id = c.click_id AND k.network_id = c.network_id
+          WHERE ${where.join(' AND ')} AND ${groupCol} IS NOT NULL`,
+        params,
+      );
+      groups = Number(c.rows[0]?.groups ?? 0);
+    }
+    const rows = raw.map(({ groups: _g, ...r }) => r);
+    sendOk(res, pagedGroups(rows, groups, f));
   }));
 
   // ── Funnel report — real per-goal conversion counts for one offer (spec feature-depth: multi-goal
@@ -629,8 +748,8 @@ export function mountDetailReports(r: Router): void {
   };
   const funnelSchema = z.object({
     offerId: z.string().uuid(),
-    goalIds: z.string().min(1),
-    from: z.string(), to: z.string(),
+    goalIds: z.string().min(1).refine((v) => v.split(',').map((s) => s.trim()).filter(Boolean).every((s) => z.string().uuid().safeParse(s).success), { message: 'must be comma-separated event UUIDs' }),
+    from: fromDate, to: toDate,
     childDim: z.enum(funnelChildDims).optional(),
     publisherId: z.string().uuid().optional(),
     country: z.string().max(3).optional(),
@@ -683,10 +802,10 @@ export function mountDetailReports(r: Router): void {
       `SELECT o.id, o.name, o.status, o.currency,
               o.daily_conversion_cap, o.total_conversion_cap, o.daily_click_cap,
               (SELECT COUNT(*) FROM conversions c WHERE c.offer_id = o.id AND c.status = 'approved'
-                 AND c.created_at >= date_trunc('day', now()))::int AS conversions_today,
+                 AND c.created_at >= date_trunc('day', now(), 'UTC'))::int AS conversions_today,
               (SELECT COUNT(*) FROM conversions c WHERE c.offer_id = o.id AND c.status = 'approved')::int AS conversions_total,
               (SELECT COUNT(*) FROM clicks cl WHERE cl.offer_id = o.id
-                 AND cl.created_at >= date_trunc('day', now()))::int AS clicks_today
+                 AND cl.created_at >= date_trunc('day', now(), 'UTC'))::int AS clicks_today
          FROM offers o
         WHERE o.network_id = $1
           AND (o.daily_conversion_cap IS NOT NULL OR o.total_conversion_cap IS NOT NULL OR o.daily_click_cap IS NOT NULL)

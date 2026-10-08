@@ -16,7 +16,7 @@ import { ColumnsModal } from '../../../shared-components/primitives/TableActions
 import { Pagination, daysAgo, todayStr, toIso, DASH } from '../../../shared-components/primitives/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../../lib/export';
 import { api } from '../../../lib/api';
-import { useQuery } from '../../../lib/useApi';
+import { useQuery, withQueryParams } from '../../../lib/useApi';
 import type { DashboardUser } from '../../../types';
 
 const ACCOUNT_COLUMNS = [
@@ -25,6 +25,11 @@ const ACCOUNT_COLUMNS = [
 ];
 const HISTORY_COLUMNS = ['ID', 'Operation Time', 'Service', 'Changes', 'Employee', 'Method', 'Portal', 'User IP', 'User Agent'];
 const PAGE_SIZE = 25;
+/** History Log export pulls every filtered page in batches of EXPORT_PAGE, up to EXPORT_CAP rows. */
+const EXPORT_PAGE = 500;
+const EXPORT_CAP = 10_000;
+
+interface ServiceOption { key: string; label: string }
 
 interface HistoryRow {
   id: string; ref: number; operationTime: string; service: string; changes: string; isNew: boolean;
@@ -181,19 +186,20 @@ function DateRangeChip({ from, to, onApply }: { from: string; to: string; onAppl
   );
 }
 
-function ServiceSelect({ services, value, onChange }: { services: string[]; value: string; onChange: (v: string) => void }) {
+function ServiceSelect({ services, value, onChange }: { services: ServiceOption[]; value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useOutsideClose(open, () => setOpen(false));
+  const current = services.find((s) => s.key === value);
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)} className="input flex !w-auto items-center gap-1.5">
-        {value || 'Service'} <ChevronDown size={13} className="text-fg-muted" />
+        {value ? (current?.label ?? value) : 'Service'} <ChevronDown size={13} className="text-fg-muted" />
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 max-h-72 w-56 overflow-y-auto rounded-card border border-border bg-elevated py-1 shadow-elevated">
           <button type="button" onClick={() => { onChange(''); setOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">All Services</button>
           {services.map((s) => (
-            <button key={s} type="button" onClick={() => { onChange(s); setOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{s}</button>
+            <button key={s.key} type="button" onClick={() => { onChange(s.key); setOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{s.label}</button>
           ))}
         </div>
       )}
@@ -261,29 +267,62 @@ function HistoryLog() {
   const [exportOpen, setExportOpen] = useState(false);
   const tableActionsRef = useOutsideClose(tableActionsOpen, () => { setTableActionsOpen(false); setExportOpen(false); });
 
-  const qs = `from=${toIso(from)}&to=${toIso(to, true)}`;
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/audit-log?${qs}`);
-  const allRows = data ?? [];
+  // Search is debounced so every keystroke doesn't hit the API; all filters + paging run server-side
+  // (the endpoint used to return a capped 200 rows that were then filtered client-side).
+  const [debouncedQ, setDebouncedQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  const filterParams = useMemo(() => ({
+    from: toIso(from), to: toIso(to, true), service, portal, method, q: debouncedQ,
+  }), [from, to, service, portal, method, debouncedQ]);
+  const { data, loading, error } = useQuery<HistoryRow[]>('/api/audit-log', {
+    ...filterParams, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE,
+  });
+  const { data: serviceData } = useQuery<ServiceOption[]>('/api/audit-log/services');
+  const services = serviceData ?? [];
+  const pageRows = data ?? [];
+  const total = (data as { pagination?: { total?: number } } | null)?.pagination?.total ?? pageRows.length;
+  const hasFilters = Boolean(service || portal || method || debouncedQ);
 
-  const services = useMemo(() => [...new Set(allRows.map((r) => r.service))].sort(), [allRows]);
-  const filtered = useMemo(() => allRows.filter((r) => {
-    if (service && r.service !== service) return false;
-    if (portal && r.portal !== portal) return false;
-    if (method && r.method !== method) return false;
-    if (q.trim()) {
-      const needle = q.trim().toLowerCase();
-      if (![r.employee, r.service, r.changes, r.userIp ?? ''].some((v) => v.toLowerCase().includes(needle))) return false;
-    }
-    return true;
-  }), [allRows, service, portal, method, q]);
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Keep the page in range when the filtered total shrinks (e.g. a narrower search).
+  useEffect(() => {
+    if (loading) return;
+    const last = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (page > last) setPage(last);
+  }, [loading, total, page]);
 
   const shown = useMemo(() => new Set(HISTORY_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const orderedShown = useMemo(() => columnOrder.filter((c) => shown.has(c)), [columnOrder, shown]);
-  const exportRows = () => filtered.map((r) => ({
-    id: r.ref, operationTime: r.operationTime, service: r.service, changes: r.changes,
-    employee: r.employee, method: r.method, portal: r.portal, userIp: r.userIp ?? DASH, userAgent: r.userAgent ?? DASH,
-  }));
+
+  // Export walks every filtered page (not just the visible one), capped so a huge log can't hang the tab.
+  const [exporting, setExporting] = useState(false);
+  const [exportNote, setExportNote] = useState<string | null>(null);
+  const exportAll = async (kind: 'csv' | 'xlsx') => {
+    setExporting(true);
+    setExportNote(null);
+    try {
+      const rows: HistoryRow[] = [];
+      let serverTotal = 0;
+      for (let offset = 0; offset < EXPORT_CAP; offset += EXPORT_PAGE) {
+        const batch = await api.get<HistoryRow[]>(withQueryParams('/api/audit-log', { ...filterParams, limit: EXPORT_PAGE, offset }));
+        serverTotal = (batch as { pagination?: { total?: number } }).pagination?.total ?? serverTotal;
+        rows.push(...batch);
+        if (batch.length < EXPORT_PAGE || rows.length >= serverTotal) break;
+      }
+      const out = rows.slice(0, EXPORT_CAP).map((r) => ({
+        id: r.ref, operationTime: r.operationTime, service: r.service, changes: r.changes,
+        employee: r.employee, method: r.method, portal: r.portal, userIp: r.userIp ?? DASH, userAgent: r.userAgent ?? DASH,
+      }));
+      if (kind === 'csv') downloadCsv('history-log.csv', out); else downloadXlsx('history-log.xlsx', out);
+      if (serverTotal > out.length) setExportNote(`Exported the newest ${out.length.toLocaleString()} of ${serverTotal.toLocaleString()} matching entries (export cap). Narrow the date range or filters to export the rest.`);
+    } catch (e) {
+      setExportNote(e instanceof Error ? `Export failed: ${e.message}` : 'Export failed.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const cellFor = (header: string, r: HistoryRow) => {
     switch (header) {
@@ -338,8 +377,8 @@ function HistoryLog() {
                   </button>
                   {exportOpen && (
                     <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                      <button onClick={() => { downloadCsv('history-log.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                      <button onClick={() => { downloadXlsx('history-log.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                      <button disabled={exporting} onClick={() => { void exportAll('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                      <button disabled={exporting} onClick={() => { void exportAll('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
                     </div>
                   )}
                 </div>
@@ -350,9 +389,12 @@ function HistoryLog() {
         </div>
       </div>
 
+      {(exporting || exportNote) && (
+        <div className="mb-3 text-small text-fg-secondary" role="status">{exporting ? 'Preparing export of all matching entries…' : exportNote}</div>
+      )}
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
-        : filtered.length === 0 ? <StateBlock>No activity recorded in this period.</StateBlock>
+        : pageRows.length === 0 ? <StateBlock>{hasFilters ? 'No activity matches these filters.' : 'No activity recorded in this period.'}</StateBlock>
         : (
           <div className="overflow-x-auto rounded-card border border-border">
             <table className="premium-table">
@@ -369,7 +411,7 @@ function HistoryLog() {
             </table>
           </div>
         )}
-      <div className="mt-3"><Pagination total={filtered.length} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} /></div>
+      <div className="mt-3"><Pagination total={total} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} /></div>
 
       {showColumns && (
         <ColumnsModal allColumns={HISTORY_COLUMNS} order={columnOrder} hidden={hiddenColumns}

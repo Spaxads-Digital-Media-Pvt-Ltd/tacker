@@ -9,9 +9,12 @@
  * Key design decisions vs PostgresReportingProvider:
  *
  * 1. `advertiser` dimension: ClickHouse `clicks` does NOT carry `advertiser_id` (it lives on
- * the `offers` Postgres table). Clicks without conversions therefore show NULL in the
- * advertiser dimension. This is a known, documented limitation. For advertiser-heavy
- * reports the Postgres provider remains the more accurate fallback.
+ * the `offers` Postgres table — the source of truth). When a report filters, excludes or groups
+ * by advertiser, the network's offer→advertiser mapping is read from Postgres first and passed
+ * in as parameter arrays: filters become `toString(c.offer_id) IN {offer ids of those
+ * advertisers}`, grouping maps each click's offer through `transform(...)`. Conversions carry
+ * `advertiser_id` themselves. (Referencing `c.advertiser_id` made every advertiser-scoped report —
+ * incl. the advertiser portal / public API, which always force advertiserId — fail.)
  *
  * 2. Date/time semantics: ClickHouse `timestamp` is DateTime64(3) stored in UTC. We truncate
  * with `toStartOfDay` / `toStartOfHour` (ClickHouse equivalents of Postgres `date_trunc`).
@@ -26,6 +29,7 @@
  * conversion-side metrics. No row from either table is counted in the other's metrics.
  */
 import { getClickHouse } from '../clickhouse/client.js';
+import { query as pgQuery } from '../db/pool.js';
 import type { ClickHouseClient } from '@clickhouse/client';
 import type {
  Dimension,
@@ -38,13 +42,11 @@ import type {
 
 // --- dimension → SQL fragments -------------------------------------------
 
-// ClickHouse clicks table has all the needed columns directly (no offers JOIN needed).
-const DIM_SQL_CLICK: Record<Dimension, string> = {
+// ClickHouse clicks table has every needed column directly — except advertiser (see header §1):
+// it has no column, so it's resolved per query from the Postgres offer mapping (ADVERTISER_CLICK).
+const DIM_SQL_CLICK: Record<Exclude<Dimension, 'advertiser'>, string> = {
  offer: 'c.offer_id',
  publisher: 'c.publisher_id',
- // advertiser on clicks requires the offers table which is NOT in ClickHouse.
- // We expose it but it will be NULL for click-only rows (known limitation).
- advertiser: 'c.advertiser_id',
  smartLink: 'c.smart_link_id',
  country: 'c.country',
  device: 'c.device',
@@ -65,7 +67,8 @@ const DIM_SQL_CLICK: Record<Dimension, string> = {
 const DIM_SQL_CONV: Record<Dimension, string> = {
  offer: 'k.offer_id',
  publisher: 'k.publisher_id',
- advertiser: 'k.advertiser_id',
+ // Text, to match the click side's offer→advertiser mapping (COALESCE needs one common type).
+ advertiser: 'toString(k.advertiser_id)',
  smartLink: 'k.smart_link_id',
  country: 'k.country',
  device: 'k.device',
@@ -113,15 +116,17 @@ const METRIC_CONV: Record<Metric, string> = {
  avg_fraud_score: 'AVG(k.fraud_score)',
 };
 
+// ORDER BY expressions over the outer select's aliases. cr/epc order by the derived ratio itself
+// (computed the same way as `derivedExpr` below) — not by clicks.
 const ORDER_COL: Record<Metric, string> = {
  clicks: 'clicks',
  unique_clicks: 'unique_clicks',
  conversions: 'conversions',
- cr: 'clicks',
+ cr: 'if(clicks > 0, conversions / clicks, 0)',
  payout: 'payout',
  revenue: 'revenue',
  margin: 'margin',
- epc: 'clicks',
+ epc: 'if(clicks > 0, payout / clicks, 0)',
  invalid_clicks: 'invalid_clicks',
  total_conversions: 'total_conversions',
  avg_fraud_score: 'avg_fraud_score',
@@ -129,17 +134,31 @@ const ORDER_COL: Record<Metric, string> = {
 
 // --- provider ------------------------------------------------------------
 
+/** One offer → its advertiser, for the network (Postgres is the source of truth). */
+export interface OfferAdvertiser { id: string; advertiser_id: string }
+export type OfferAdvertiserLookup = (networkId: string) => Promise<OfferAdvertiser[]>;
+
+const pgOfferAdvertisers: OfferAdvertiserLookup = async (networkId) => (
+ await pgQuery<OfferAdvertiser>(
+ 'SELECT id::text AS id, advertiser_id::text AS advertiser_id FROM offers WHERE network_id = $1 AND advertiser_id IS NOT NULL',
+ [networkId],
+ )
+).rows;
+
+const asList = (v: unknown): string[] => (v == null || v === '' ? [] : (Array.isArray(v) ? v : [v]).map(String));
+
 export class ClickHouseReportingProvider implements ReportingProvider {
  private readonly client: ClickHouseClient;
+ private readonly offerAdvertisers: OfferAdvertiserLookup;
 
- constructor(client?: ClickHouseClient) {
+ constructor(client?: ClickHouseClient, offerAdvertisers: OfferAdvertiserLookup = pgOfferAdvertisers) {
  this.client = client ?? getClickHouse();
+ this.offerAdvertisers = offerAdvertisers;
  }
 
  async runReport(req: ReportRequest): Promise<ReportResult> {
  const gb = req.groupBy;
  const params: Array<unknown | unknown[]> = [req.networkId];
- const ph = (v: unknown) => { params.push(v); return `{p${params.length}:String}`; };
  const phArr = (v: unknown[]) => { params.push(v); return `{p${params.length}:Array(String)}`; };
  const phTs = (v: unknown) => { params.push(v); return `parseDateTime64BestEffort({p${params.length}:String}, 3)`; };
 
@@ -150,22 +169,41 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  if (f.from) { clickWhere.push(`c.timestamp >= ${phTs(f.from)}`); convWhere.push(`k.timestamp >= ${phTs(f.from)}`); }
  if (f.to) { clickWhere.push(`c.timestamp <= ${phTs(f.to)}`); convWhere.push(`k.timestamp <= ${phTs(f.to)}`); }
 
+ // Values are bound as Array(String), so the column is compared as text — UUID/Nullable columns
+ // alike (same as the exclusions below; a bare UUID IN Array(String) is a type error).
  const addIn = (val: unknown, clickCol: string, convCol: string) => {
  if (val == null || val === '') return;
  const arr = Array.isArray(val) ? val : [val];
  if (arr.length === 0) return;
- clickWhere.push(`${clickCol} IN ${phArr(arr as unknown[])}`);
- convWhere.push(`${convCol} IN ${phArr(arr as unknown[])}`);
+ clickWhere.push(`toString(${clickCol}) IN ${phArr(arr as unknown[])}`);
+ convWhere.push(`toString(${convCol}) IN ${phArr(arr as unknown[])}`);
  };
+ // Exclusions keep rows whose value is NULL — same semantics as the Postgres provider.
  const addNe = (val: unknown, clickCol: string, convCol: string) => {
  if (val == null || val === '') return;
- clickWhere.push(`${clickCol} != ${ph(val)}`);
- convWhere.push(`${convCol} != ${ph(val)}`);
+ const arr = Array.isArray(val) ? val : [val];
+ if (arr.length === 0) return;
+ clickWhere.push(`(isNull(${clickCol}) OR toString(${clickCol}) NOT IN ${phArr(arr as unknown[])})`);
+ convWhere.push(`(isNull(${convCol}) OR toString(${convCol}) NOT IN ${phArr(arr as unknown[])})`);
+ };
+
+ // Advertiser on the click side: resolved through the network's offers (header §1).
+ const needsAdvertiser = gb.includes('advertiser') || asList(f.advertiserId).length > 0 || asList(f.excludeAdvertiserId).length > 0;
+ const offerAdv = needsAdvertiser ? await this.offerAdvertisers(req.networkId) : [];
+ const offersOf = (advertiserIds: string[]) => {
+ const want = new Set(advertiserIds);
+ return offerAdv.filter((o) => want.has(o.advertiser_id)).map((o) => o.id);
  };
 
  addIn(f.offerId, 'c.offer_id', 'k.offer_id');
  addIn(f.publisherId, 'c.publisher_id', 'k.publisher_id');
- addIn(f.advertiserId, 'c.advertiser_id', 'k.advertiser_id');
+ const advIn = asList(f.advertiserId);
+ if (advIn.length) {
+ const offerIds = offersOf(advIn);
+ // No offer of those advertisers → no click can match (an empty IN-list is not portable SQL).
+ clickWhere.push(offerIds.length ? `toString(c.offer_id) IN ${phArr(offerIds)}` : '0 = 1');
+ convWhere.push(`toString(k.advertiser_id) IN ${phArr(advIn)}`);
+ }
  addIn(f.smartLinkId, 'c.smart_link_id', 'k.smart_link_id');
  addIn(f.country, 'c.country', 'k.country');
  addIn(f.device, 'c.device', 'k.device');
@@ -182,12 +220,32 @@ export class ClickHouseReportingProvider implements ReportingProvider {
 
  addNe(f.excludeOfferId, 'c.offer_id', 'k.offer_id');
  addNe(f.excludePublisherId, 'c.publisher_id', 'k.publisher_id');
- addNe(f.excludeAdvertiserId, 'c.advertiser_id', 'k.advertiser_id');
+ const advOut = asList(f.excludeAdvertiserId);
+ if (advOut.length) {
+ // Clicks on offers of an excluded advertiser go; clicks whose offer has no advertiser stay.
+ const offerIds = offersOf(advOut);
+ if (offerIds.length) clickWhere.push(`toString(c.offer_id) NOT IN ${phArr(offerIds)}`);
+ convWhere.push(`(isNull(k.advertiser_id) OR toString(k.advertiser_id) NOT IN ${phArr(advOut)})`);
+ }
  addNe(f.excludeSmartLinkId, 'c.smart_link_id', 'k.smart_link_id');
  addNe(f.excludeCountry, 'c.country', 'k.country');
  addNe(f.excludeDevice, 'c.device', 'k.device');
 
- if (f.excludeInvalid) clickWhere.push('length(c.fraud_flags) = 0');
+ // "Ignore Fail Traffic": drop fraud-flagged clicks AND the conversions they produced (same as the
+ // Postgres provider). A conversion whose click isn't in ClickHouse has nothing flagged and stays.
+ if (f.excludeInvalid) {
+ clickWhere.push('length(c.fraud_flags) = 0');
+ convWhere.push('k.click_id NOT IN (SELECT ic.click_id FROM tracker.clicks ic WHERE ic.network_id = {p1:String} AND length(ic.fraud_flags) > 0)');
+ }
+
+ // Click-side advertiser grouping: map offer → advertiser via the Postgres mapping (NULL when the
+ // offer has none, matching the Postgres provider's LEFT JOIN offers).
+ const clickDim = (d: Dimension): string => {
+ if (d !== 'advertiser') return DIM_SQL_CLICK[d];
+ const from = phArr(offerAdv.map((o) => o.id));
+ const to = phArr(offerAdv.map((o) => o.advertiser_id));
+ return `nullIf(transform(toString(c.offer_id), ${from}, ${to}, ''), '')`;
+ };
 
  const gbHas = gb.length > 0;
  const groupIdx = gb.map((_, i) => `d${i}`).join(', ');
@@ -197,7 +255,7 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  'conversions','total_conversions','payout','revenue',
  ];
 
- const clickSel = gb.map((d, i) => `${DIM_SQL_CLICK[d]} AS d${i}`).join(', ');
+ const clickSel = gb.map((d, i) => `${clickDim(d)} AS d${i}`).join(', ');
  const clickMetrics = ALL_METRICS.map(m => `${METRIC_CLICKS[m]} AS ${m}`).join(', ');
  const clicksCte =
  `SELECT ${gbHas ? clickSel + ',' : ''}${clickMetrics}
@@ -221,15 +279,13 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  ? gb.map((_, i) => `toString(COALESCE(cl.d${i}, cv.d${i})) AS d${i}`).join(', ') + ','
  : '';
 
+ // margin is already a base column below — re-aliasing it here made ClickHouse reject the query
+ // ("multiple expressions for alias margin"); base metrics need no outer re-select either.
  const derivedExpr: Record<string, string> = {
  cr: 'if(clicks > 0, round(conversions / clicks, 4), 0)',
  epc: 'if(clicks > 0, round(payout / clicks, 4), 0)',
- margin: 'revenue - payout',
  };
- const outerMetrics = req.metrics.map(m => {
- if (derivedExpr[m]) return `${derivedExpr[m]} AS ${m}`;
- return `${m}`;
- }).join(', ');
+ const outerMetrics = req.metrics.filter((m) => derivedExpr[m]).map((m) => `${derivedExpr[m]} AS ${m}`).join(', ');
 
  const chronological = gbHas && gb.length === 1 && (gb[0] === 'day' || gb[0] === 'hour');
  const orderCol = req.orderBy ? ORDER_COL[req.orderBy] : (chronological ? 'd0' : 'clicks');
@@ -248,8 +304,8 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  COALESCE(cv.total_conversions, 0) AS total_conversions,
  COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0) AS payout,
  COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) AS revenue,
- COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) - (COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0)) AS margin,
- ${outerMetrics}
+ COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) - (COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0)) AS margin${outerMetrics ? `,
+ ${outerMetrics}` : ''}
  FROM cl ${joinType} cv ${onClause}`;
 
  const qp: Record<string, unknown> = Object.fromEntries(
@@ -260,7 +316,9 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  const total = Number(((await countRes.json<{ total: number }>()) as { data: { total: number }[] }).data[0]?.total ?? 0);
 
  const pageParams = [...params, req.limit, req.offset];
- const pageSql = `${baseSql} ORDER BY ${orderCol} ${orderDir} LIMIT {p${params.length + 1}:UInt32} OFFSET {p${params.length + 2}:UInt32}`;
+ // Stable tie-break on the group key so paging never repeats/skips rows with equal metrics.
+ const tieBreak = gb.map((_, i) => `d${i}`).filter((d) => d !== orderCol).join(', ');
+ const pageSql = `${baseSql} ORDER BY ${orderCol} ${orderDir}${tieBreak ? `, ${tieBreak}` : ''} LIMIT {p${params.length + 1}:UInt32} OFFSET {p${params.length + 2}:UInt32}`;
  const pageQp = Object.fromEntries(pageParams.map((v, i) => [`p${i + 1}`, v]));
  const res = await this.client.query({ query: pageSql, query_params: pageQp, format: 'JSON' });
  const rows = ((await res.json<Record<string, unknown>>()) as { data: Record<string, unknown>[] }).data;

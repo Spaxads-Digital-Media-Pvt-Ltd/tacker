@@ -62,8 +62,13 @@ function RowMenu({ adj, onDeleted }: { adj: ReportingAdjustment; onDeleted: () =
 export default function AdjustmentsManage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const path = dateFrom && dateTo ? `/api/reporting-adjustments?dateFrom=${dateFrom}&dateTo=${dateTo}` : '/api/reporting-adjustments';
-  const { data, loading, error, refetch } = useQuery<ReportingAdjustment[]>(path);
+  // Either bound alone is a valid filter (the API accepts dateFrom / dateTo independently). A reversed
+  // range is flagged inline and not fetched (the API would 422 it).
+  const rangeError = dateFrom && dateTo && dateFrom > dateTo ? '"From" date must be on or before "To" date.' : null;
+  const { data, loading, error, refetch } = useQuery<ReportingAdjustment[]>(
+    rangeError ? null : '/api/reporting-adjustments',
+    { dateFrom, dateTo },
+  );
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const { data: offers } = useQuery<Offer[]>('/api/offers');
 
@@ -134,9 +139,10 @@ export default function AdjustmentsManage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Link to="/app/aff-adjustments/new" className="btn-primary">+ Adjustment</Link>
-          <input type="date" className="input !w-auto" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <input type="date" aria-label="From date" className="input !w-auto" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} />
           <span className="text-small text-fg-secondary">to</span>
-          <input type="date" className="input !w-auto" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <input type="date" aria-label="To date" className="input !w-auto" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} />
+          {rangeError && <span role="alert" className="text-small text-danger-text">{rangeError}</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">

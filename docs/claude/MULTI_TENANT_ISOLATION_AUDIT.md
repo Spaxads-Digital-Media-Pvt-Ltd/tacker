@@ -75,8 +75,6 @@ Even within a correctly-scoped query, field-level filtering prevents data from l
 | `offline/routes.ts` | `req.scope!.networkId` + validates offer/publisher belong to network | PASS |
 | `control-center/config.ts` | `networks WHERE id = $1` — id IS the network_id | PASS |
 | `business-units/routes.ts` | `dbForRequest(req)` throughout | PASS |
-| `offer-categories/routes.ts` | `dbForRequest(req)` throughout | PASS |
-| `partner-channels/routes.ts` | `dbForRequest(req)` + explicit `network_id = $1` in offer count | PASS |
 
 **Full list of audited dashboard route modules (46):**
 1. advertiser-invoices/routes.ts
@@ -102,13 +100,13 @@ Even within a correctly-scoped query, field-level filtering prevents data from l
 21. link-templates/routes.ts
 22. marketplace-profile/routes.ts
 23. offer-applications/routes.ts
-24. offer-categories/routes.ts
+24. (offer-categories — removed in migration 065; catalog served by control-center)
 25. offer-custom-settings/routes.ts
 26. offer-groups/routes.ts
 27. offer-templates/routes.ts
 28. offers/routes.ts
 29. offline/routes.ts
-30. partner-channels/routes.ts
+30. (partner-channels — removed in migration 065; catalog served by control-center)
 31. partner-invoices/routes.ts
 32. partner-tiers/routes.ts
 33. postback-controls/routes.ts

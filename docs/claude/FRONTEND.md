@@ -170,6 +170,11 @@ The frontend has a comprehensive reporting system mirroring Trackog:
 - **`ReportPageKit.tsx`** — Shared scaffold for all report pages
 - **`export.ts`** — Excel (XLSX) export
 - Default report types: Offer, Partner, Advertiser, Smart Link, Daily, Hourly, Impression, Click, Conversion, Event, Pacing, Click-to-Conversion, Partner Postback, Advertiser Postback, Partner Referrals, Custom Metrics, Products, Refunds, Conversion Imports, Saved/Scheduled
+- **Filters on report pages:**
+  - `/api/reports` pages (Offer, Partner, Advertiser, Smart Link, Daily, Hourly, Flex, Nested, Variance) send every selected value (`appliedFilters[x]?.join(',')`), incl. exclusions. Detail-endpoint pages (Click, Conversion, Event, Click-to-Conversion, Postback reports, Cohort, Funnel) are **single-select** (`singleSelectKeys` / `ReportingFiltersFlyout singleSelect sections={['filters']}`) because those endpoints take one value — never show a control the API ignores.
+  - Applied filters/exclusions round-trip through the URL (`f.<key>=a,b` / `x.<key>=a,b`) via `lib/reportFilterState.ts`, so Copy Link / reload / back keep them. Saved presets are shape-checked on load (`loadSavedReports`).
+  - Summary tiles use `groupBy=none` (exact grand total); expanded child rows always reuse the page's date range + filters, with the row's own id set last.
+  - The legacy `/app/reports/:type` hub redirects to the dedicated pages (only `offline` and `import-export` still render there).
 - **Display timezone** (Click + Conversion reports): `lib/useReportTimeZone.ts` + `<TimeZoneSelect>` (`shared-components/primitives/ReportTimeZone.tsx`). Auto zone = filtered Country's primary zone → network `settings.general.timezone` → browser; user can override. Timestamps are re-formatted with `lib/datetime.ts` (`YYYY-MM-DD HH:mm:ss`), never refetched. The From/To date range is still sent as **UTC** days (`ReportPageKit.toIso`) — labelled "(UTC)".
 
 ## Geo Reference Data

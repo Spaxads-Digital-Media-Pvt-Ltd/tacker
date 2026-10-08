@@ -15,6 +15,8 @@ export const createPublisherSchema = z.object({
   partnerManagerId: z.string().uuid().nullable().optional(),
   accountExecutiveId: z.string().uuid().nullable().optional(),
   referredById: z.string().uuid().nullable().optional(),
+  // Control Center channel (segmentation_channels) — verified to be in the caller's network.
+  channelId: z.string().uuid().nullable().optional(),
   contactName: z.string().max(200).nullable().optional(),
   taxId: z.string().max(100).nullable().optional(),
   website: z.string().max(300).nullable().optional(),

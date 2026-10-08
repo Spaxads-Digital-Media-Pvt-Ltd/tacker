@@ -132,9 +132,6 @@ function CustomizeCards({ visible, onChange }: { visible: Record<SectionId, bool
 function AdminDashboard({ name }: { name: string }) {
   const navigate = useNavigate();
   const { data, loading, error } = withMock(useQuery<Dashboard>('/api/reports/dashboard'), MOCK_DASHBOARD);
-  const topOffers = withMock(useQuery<AggResult>('/api/reports?groupBy=offer&metrics=clicks,conversions,revenue'), mockTopRows('offer'));
-  const topPubs = withMock(useQuery<AggResult>('/api/reports?groupBy=publisher&metrics=clicks,conversions,revenue'), mockTopRows('publisher'));
-  const topAdvs = withMock(useQuery<AggResult>('/api/reports?groupBy=advertiser&metrics=clicks,conversions,revenue'), mockTopRows('advertiser'));
   const offers = useQuery<Offer[]>('/api/offers');
   const pubs = useQuery<Publisher[]>('/api/publishers');
   const advs = useQuery<Advertiser[]>('/api/advertisers');
@@ -263,9 +260,9 @@ function AdminDashboard({ name }: { name: string }) {
                   <p className="mt-1 text-sm text-fg-muted">Overview of your highest grossing offers, partners, and advertisers</p>
                 </div>
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                  {visible.offers && <ScrollReveal animation="animate-slide-in-left" delay={300}><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" q={topOffers} nameMap={offerMap} viewAll="/app/reports/offer" /></ScrollReveal>}
-                  {visible.publishers && <ScrollReveal animation="animate-slide-in-left" delay={410}><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" q={topPubs} nameMap={pubMap} viewAll="/app/reports/partner" /></ScrollReveal>}
-                  {visible.advertisers && <ScrollReveal animation="animate-slide-in-left" delay={520}><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" q={topAdvs} nameMap={advMap} viewAll="/app/reports/advertiser" /></ScrollReveal>}
+                  {visible.offers && <ScrollReveal animation="animate-slide-in-left" delay={300}><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" nameMap={offerMap} viewAll="/app/reports/offer" /></ScrollReveal>}
+                  {visible.publishers && <ScrollReveal animation="animate-slide-in-left" delay={410}><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" nameMap={pubMap} viewAll="/app/reports/partner" /></ScrollReveal>}
+                  {visible.advertisers && <ScrollReveal animation="animate-slide-in-left" delay={520}><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" nameMap={advMap} viewAll="/app/reports/advertiser" /></ScrollReveal>}
                 </div>
               </ScrollReveal>
             )}
@@ -336,15 +333,34 @@ function todayRangeISO(): { from: string; to: string } {
   return { from: from.toISOString(), to: new Date().toISOString() };
 }
 
-/** Ranking card with an entity picker + live per-entity hourly mini chart (top-5 by revenue). */
-function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
-  title: string; dimKey: string; filterKey: string;
-  q: { data: AggResult | null; loading: boolean; error: string | null };
+/** The Top offers/publishers/advertisers ranking window (UTC days, today inclusive). */
+const TOP_WINDOW_DAYS = 30;
+function topWindowISO(): { from: string; to: string } {
+  const from = new Date();
+  from.setUTCHours(0, 0, 0, 0);
+  from.setUTCDate(from.getUTCDate() - (TOP_WINDOW_DAYS - 1));
+  return { from: from.toISOString(), to: new Date().toISOString() };
+}
+
+/**
+ * Ranking card with an entity picker + live per-entity hourly mini chart. The top 5 are ranked by
+ * the SERVER (orderBy=<selected metric>) over the last TOP_WINDOW_DAYS days — re-sorting the API's
+ * default top-50-by-clicks page client-side missed entities ranked lower by clicks.
+ */
+function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll }: {
+  title: string; dimKey: 'offer' | 'publisher' | 'advertiser'; filterKey: string;
   nameMap: RefMap; viewAll: string;
 }) {
   const [selectedId, setSelectedId] = useState('');
   const [metric, setMetric] = useState<MetricKey>('revenue');
+  const win = useMemo(topWindowISO, []);
+  const topQs = new URLSearchParams({
+    groupBy: dimKey, metrics: 'clicks,conversions,revenue', orderBy: metric, orderDir: 'desc', limit: '6', from: win.from, to: win.to,
+  });
+  const q = withMock(useQuery<AggResult>(`/api/reports?${topQs.toString()}`), mockTopRows(dimKey));
+  // Server-ranked; the local sort only orders the mock rows the same way in dev/demo mode.
   const rows = [...(q.data?.rows ?? [])]
+    .filter((r) => r.dimensions[dimKey])
     .sort((a, b) => Number(b.metrics[metric] ?? 0) - Number(a.metrics[metric] ?? 0))
     .slice(0, 5);
   const id = selectedId || rows[0]?.dimensions[dimKey] || '';
@@ -364,6 +380,7 @@ function EntityPanel({ title, dimKey, filterKey, q, nameMap, viewAll }: {
         <div className="flex items-center gap-2.5">
           <PiPulseDuotone size={20} className="text-indigo-500" />
           <h2 className="text-h3 font-medium text-fg">{title}</h2>
+          <span className="text-tiny text-fg-muted">Last {TOP_WINDOW_DAYS} days</span>
         </div>
         <Link to={viewAll} title="View all" className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius)] text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
           <ExternalLink size={15} />

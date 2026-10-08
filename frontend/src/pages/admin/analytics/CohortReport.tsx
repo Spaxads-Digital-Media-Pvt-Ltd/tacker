@@ -26,11 +26,14 @@ import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import {
-  DASH, DEVICES, money, toIso, daysAgo, todayStr,
+  DASH, DEVICE_OPTIONS, money, toIso, daysAgo, todayStr,
   type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
 } from '../../../shared-components/primitives/ReportPageKit';
+import { readUrlFilters, readUrlDate, reportLink, urlFilterParams } from '../../../lib/reportFilterState';
 import { useReportOpts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
+import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 
 interface SmartLink { id: string; name: string }
 interface CohortRow { date: string; topLevel: number; days: (number | null)[] }
@@ -80,18 +83,33 @@ function SingleSelect<T extends string>({ label, value, options, onChange }: { l
   );
 }
 
+/** Initial report state from the URL — what "Copy Link to Report" writes. */
+function readCohortUrl() {
+  const sp = new URLSearchParams(window.location.search);
+  let from = readUrlDate(sp, 'from', daysAgo(6));
+  const to = readUrlDate(sp, 'to', todayStr());
+  if (from > to) from = to;
+  const tl = TOP_LEVEL_OPTIONS.find((o) => o.key === sp.get('topLevelMetric'))?.key ?? 'clicks';
+  const m = METRIC_OPTIONS.find((o) => o.key === sp.get('metric'))?.key ?? 'conversions';
+  // The cohort endpoint takes one value per filter (the flyout is single-select here).
+  const filters: FilterValues = {};
+  for (const [k, vals] of Object.entries(readUrlFilters(sp, 'f'))) if (vals[0]) filters[k] = [vals[0]];
+  return { from, to, topLevel: tl as TopLevelKey, metric: m as MetricKey, filters };
+}
+
 export default function CohortReport() {
   useReportOpts();
-  const [from, setFrom] = useState(daysAgo(6));
-  const [to, setTo] = useState(todayStr());
+  const [init] = useState(readCohortUrl);
+  const [from, setFrom] = useState(init.from);
+  const [to, setTo] = useState(init.to);
   const [appliedFrom, setAppliedFrom] = useState(from);
   const [appliedTo, setAppliedTo] = useState(to);
-  const [topLevel, setTopLevel] = useState<TopLevelKey>('clicks');
-  const [metric, setMetric] = useState<MetricKey>('conversions');
+  const [topLevel, setTopLevel] = useState<TopLevelKey>(init.topLevel);
+  const [metric, setMetric] = useState<MetricKey>(init.metric);
   const [appliedTopLevel, setAppliedTopLevel] = useState<TopLevelKey>(topLevel);
   const [appliedMetric, setAppliedMetric] = useState<MetricKey>(metric);
-  const [filters, setFilters] = useState<FilterValues>({});
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>({});
+  const [filters, setFilters] = useState<FilterValues>(init.filters);
+  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
   const [exclusions, setExclusions] = useState<FilterValues>({});
   const [metricFilters, setMetricFilters] = useState<MetricFilters>({});
   const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(false);
@@ -115,7 +133,7 @@ export default function CohortReport() {
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'smartLink', label: 'Smart Link', options: (smartLinksList ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: countryOptions },
-    { key: 'device', label: 'Device', options: DEVICES.map((d) => ({ value: d, label: d.charAt(0).toUpperCase() + d.slice(1) })) },
+    { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [offers, advertisers, publishers, smartLinksList, countryOptions]);
 
   const qs = (extra: Record<string, string | number | undefined>) => {
@@ -141,7 +159,10 @@ export default function CohortReport() {
     setAppliedFrom(daysAgo(6)); setAppliedTo(todayStr()); setAppliedTopLevel('clicks'); setAppliedMetric('conversions'); setAppliedFilters({});
   };
   const copyLink = async () => {
-    await navigator.clipboard?.writeText(window.location.href);
+    await navigator.clipboard?.writeText(reportLink({
+      from: appliedFrom, to: appliedTo, topLevelMetric: appliedTopLevel, metric: appliedMetric,
+      ...urlFilterParams('f', appliedFilters),
+    }));
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
@@ -190,6 +211,7 @@ export default function CohortReport() {
             </button>
             {filterOpen && (
               <ReportingFiltersFlyout
+                sections={['filters']} singleSelect
                 dimCategories={FILTER_CATEGORIES}
                 value={{ filters, exclusions, metricFilters, ignoreFailTraffic }}
                 onApply={(v) => { setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic); }}
@@ -204,6 +226,9 @@ export default function CohortReport() {
       </div>
 
       <div className="card">
+        <ActiveFilterChips className="mb-3" chips={chipsFromValues(FILTER_CATEGORIES, appliedFilters)}
+          onRemove={(c) => { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); }}
+          onClearAll={() => { setFilters({}); setAppliedFilters({}); }} />
         {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>

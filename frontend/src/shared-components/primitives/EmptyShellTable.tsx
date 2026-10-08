@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, Info } from 'lucide-react';
 import { Field, MenuPopover, Modal, ScrollReveal, TableScroll } from './ui';
 import { Pagination } from './ReportPageKit';
@@ -21,19 +21,20 @@ const STANDARD_STATUS_OPTIONS = ['All', 'Active', 'Inactive', 'Deleted'] as cons
 const SYSTEM_COLUMNS = new Set(['ID', 'Created', 'Modified', 'Status', 'Created By']);
 
 function StatusFilter({
-  initial, value, onChange,
+  initial, value, onChange, choices,
 }: {
   initial: string;
   value?: string;
   onChange?: (next: string) => void;
+  /** Override the standard All/Active/Inactive/Deleted set when a resource can't support them all. */
+  choices?: readonly string[];
 }) {
   const [internal, setInternal] = useState(initial);
   const selected = value ?? internal;
   const setSelected = onChange ?? setInternal;
 
-  const options = (STANDARD_STATUS_OPTIONS as readonly string[]).includes(initial)
-    ? [...STANDARD_STATUS_OPTIONS]
-    : Array.from(new Set([...STANDARD_STATUS_OPTIONS, initial]));
+  const base: readonly string[] = choices ?? STANDARD_STATUS_OPTIONS;
+  const options = base.includes(initial) ? [...base] : Array.from(new Set([...base, initial]));
 
   return (
     <MenuPopover
@@ -215,18 +216,21 @@ function AddEntityForm({
   );
 }
 
+const SHELL_PAGE_SIZE = 25;
+
 export interface ShellRow {
   id: string;
   cells: Record<string, string>;
 }
 
 export function EmptyShellTable({
-  columns, addLabel, entityName, search = true, status, statusFilter, onStatusFilterChange, left,
+  columns, addLabel, entityName, search = true, status, statusFilter, onStatusFilterChange, statusOptions, left,
   rows, loading, error: tableError, onAddSubmit, onDelete,
 }: {
   columns: string[]; addLabel?: string; entityName?: string; search?: boolean; status?: string; left?: ReactNode;
   statusFilter?: string;
   onStatusFilterChange?: (next: string) => void;
+  statusOptions?: readonly string[];
   rows?: ShellRow[];
   loading?: boolean;
   error?: string | null;
@@ -239,11 +243,19 @@ export function EmptyShellTable({
   const shown = visibleColumns.length ? visibleColumns : columns;
   const wired = Boolean(onAddSubmit || rows);
 
+  const needle = q.trim().toLowerCase();
   const filtered = (rows ?? []).filter((row) => {
-    if (!q.trim()) return true;
-    const needle = q.toLowerCase();
-    return Object.values(row.cells).some((v) => v.toLowerCase().includes(needle));
+    if (!needle) return true;
+    return Object.values(row.cells).some((v) => (v ?? '').toLowerCase().includes(needle));
   });
+
+  // Real client-side paging: back to page 1 when the search/status changes, and clamp when the row
+  // count shrinks (delete / refetch) so we never sit on an empty page.
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [needle, statusFilter]);
+  const lastPage = Math.max(1, Math.ceil(filtered.length / SHELL_PAGE_SIZE));
+  useEffect(() => { if (page > lastPage) setPage(lastPage); }, [page, lastPage]);
+  const pageRows = filtered.slice((page - 1) * SHELL_PAGE_SIZE, page * SHELL_PAGE_SIZE);
 
   return (
     <ScrollReveal>
@@ -270,6 +282,7 @@ export function EmptyShellTable({
                 initial={status}
                 value={statusFilter}
                 onChange={onStatusFilterChange}
+                choices={statusOptions}
               />
             )}
             <TableActionsMenu columns={columns} visibleColumns={shown} onColumnsChange={setVisibleColumns} resourceName={entityName ?? addLabel ?? 'table'} />
@@ -289,7 +302,7 @@ export function EmptyShellTable({
                 <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">Loading…</td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">No Record Found</td></tr>
-              ) : filtered.map((row) => (
+              ) : pageRows.map((row) => (
                 <tr key={row.id}>
                   {shown.map((c) => (
                     <td key={c}>{row.cells[c] ?? '—'}</td>
@@ -307,7 +320,7 @@ export function EmptyShellTable({
         )}
       </TableScroll>
       <div className="mt-2 flex justify-end">
-        <Pagination total={wired ? filtered.length : 0} page={1} pageSize={25} onPageChange={() => {}} />
+        <Pagination total={wired ? filtered.length : 0} page={page} pageSize={SHELL_PAGE_SIZE} onPageChange={setPage} />
       </div>
     </ScrollReveal>
   );

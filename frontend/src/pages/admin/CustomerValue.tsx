@@ -124,7 +124,9 @@ export default function CustomerValue() {
   const [dCycle, setDCycle] = useState<string[]>([]);
   const [dMetricType, setDMetricType] = useState<string[]>([]);
 
-  const activeFilterCount = [dAdvertisers, dOffers, dPartners, dGrouping, dDataPoints, dCycle, dMetricType]
+  // Toolbar badge reflects the APPLIED filters; the drawer header reflects the draft.
+  const activeFilterCount = Object.values(filters).filter((a) => a.length > 0).length;
+  const draftFilterCount = [dAdvertisers, dOffers, dPartners, dGrouping, dDataPoints, dCycle, dMetricType]
     .filter((a) => a.length > 0).length;
 
   const applyFilters = () => {
@@ -145,7 +147,9 @@ export default function CustomerValue() {
     setDDataPoints([]); setDCycle([]); setDMetricType([]);
   };
 
-  useEffect(() => {
+  // Seed the drafts from the applied filters each time the drawer opens, so Cancel / close discards
+  // any unapplied edits.
+  const openFilterDrawer = () => {
     const f = filters;
     setDAdvertisers(f.advertiser ?? []);
     setDOffers(f.offer ?? []);
@@ -154,7 +158,8 @@ export default function CustomerValue() {
     setDDataPoints(f.dataPoint ?? []);
     setDCycle(f.cycleDuration ?? []);
     setDMetricType(f.metricType ?? []);
-  }, [filters]);
+    setFilterOpen(true);
+  };
 
   const mSel = (sel: string[], set: (v: string[]) => void, opts: { value: string; label: string }[]) => {
     const toggle = (v: string) => sel.includes(v) ? set(sel.filter((x) => x !== v)) : set([...sel, v]);
@@ -245,7 +250,7 @@ export default function CustomerValue() {
           <input className="input !w-56 !pl-8" placeholder="Search by name…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         </div>
         <StatusSelect value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
-        <button type="button" onClick={() => setFilterOpen((o) => !o)}
+        <button type="button" onClick={() => (filterOpen ? setFilterOpen(false) : openFilterDrawer())}
           className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
           <SlidersHorizontal size={15} />
           {activeFilterCount > 0 && (
@@ -255,7 +260,7 @@ export default function CustomerValue() {
           )}
         </button>
         {filterOpen && (
-          <SearchFilterDrawer appliedCount={activeFilterCount} onClose={() => setFilterOpen(false)} onApply={applyFilters}>
+          <SearchFilterDrawer appliedCount={draftFilterCount} onClose={() => setFilterOpen(false)} onApply={applyFilters}>
             <div className="mb-3 flex justify-end">
               <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={clearDraft}>Clear</button>
             </div>

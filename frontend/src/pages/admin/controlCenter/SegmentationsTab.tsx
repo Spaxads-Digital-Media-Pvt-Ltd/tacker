@@ -3,7 +3,7 @@
  * /api/control-center/* CRUD and /api/tags.
  */
 import { useState, type ReactNode } from 'react';
-import { Search, MoreVertical, ChevronDown } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { cc } from '../../../lib/controlCenter';
 import { useQuery } from '../../../lib/useApi';
@@ -24,24 +24,30 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
-function Toolbar({ addLabel, status, onAdd, onStatusChange, moreVertical, onSearch }: {
-  addLabel: string; status?: string; onAdd?: () => void; onStatusChange?: (s: string) => void; moreVertical?: boolean; onSearch?: (q: string) => void;
+const STATUS_OPTIONS = ['All', 'Active', 'Inactive', 'Deleted'] as const;
+const STATUS_DOT: Record<string, string> = { All: 'bg-fg-muted', Active: 'bg-success', Inactive: 'bg-warning', Deleted: 'bg-danger' };
+
+/** Search is controlled by the parent, so the visible box and the applied filter can never diverge
+ *  (the sub-tab shows a spinner while refetching, which remounts this toolbar). */
+function Toolbar({ addLabel, status, onAdd, onStatusChange, search, onSearch }: {
+  addLabel: string; status?: string; onAdd?: () => void; onStatusChange?: (s: string) => void; search: string; onSearch: (q: string) => void;
 }) {
-  const [q, setQ] = useState('');
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <button className="btn-primary" onClick={onAdd}>+ {addLabel}</button>
       <div className="flex items-center gap-2">
         <div className="relative">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-          <input placeholder="Search…" className="input !pl-8 !w-56" value={q} onChange={(e) => { setQ(e.target.value); onSearch?.(e.target.value); }} />
+          <input placeholder="Search…" aria-label="Search" className="input !pl-8 !w-56" value={search} onChange={(e) => onSearch(e.target.value)} />
         </div>
         {status && onStatusChange && (
-          <button className="input flex !w-auto items-center gap-2 !py-1.5" onClick={() => onStatusChange(status === 'Active' ? 'Inactive' : 'Active')}>
-            <span className="h-2 w-2 shrink-0 rounded-full bg-success" />{status}<ChevronDown size={14} className="text-fg-muted" />
-          </button>
+          <div className="relative">
+            <span className={`pointer-events-none absolute left-2.5 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full ${STATUS_DOT[status] ?? 'bg-fg-muted'}`} />
+            <select aria-label="Status" className="input !w-auto !pl-7" value={status} onChange={(e) => onStatusChange(e.target.value)}>
+              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
         )}
-        {moreVertical && <button className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><MoreVertical size={15} /></button>}
       </div>
     </div>
   );
@@ -106,7 +112,7 @@ function CrudSub({ resource, addLabel, columns, desc }: {
           <button className="btn-primary" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
       )}
-      <Toolbar addLabel={addLabel} status={status} onAdd={() => setAdding(true)} onStatusChange={(next) => setStatus(next)} moreVertical={resource === 'channels'} onSearch={setSearch} />
+      <Toolbar addLabel={addLabel} status={status} onAdd={() => setAdding(true)} onStatusChange={(next) => setStatus(next)} search={search} onSearch={setSearch} />
       {filtered.length === 0 ? (
         <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">No Record Found</p>
       ) : (
@@ -142,7 +148,10 @@ function LabelsSub() {
     id: string; name: string; color: string | null;
     advertisers: number; partners: number; offers: number; partnerTiers: number;
   }>>('/api/control-center/tags-with-usage');
-  const tags = data ?? [];
+  const [search, setSearch] = useState('');
+  const allTags = data ?? [];
+  const needle = search.trim().toLowerCase();
+  const tags = needle ? allTags.filter((t) => t.name.toLowerCase().includes(needle)) : allTags;
 
   const submit = async () => {
     setBusy(true);
@@ -176,9 +185,9 @@ function LabelsSub() {
           <button className="btn-primary" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
       )}
-      <Toolbar addLabel="Label" onAdd={() => setAdding(true)} moreVertical />
+      <Toolbar addLabel="Label" onAdd={() => setAdding(true)} search={search} onSearch={setSearch} />
       {tags.length === 0 ? (
-        <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">No labels yet.</p>
+        <p className="rounded-card border border-dashed border-border py-10 text-center text-small italic text-fg-muted">{allTags.length > 0 ? 'No Record Found' : 'No labels yet.'}</p>
       ) : (
         <SegTable columns={['Name', 'Advertisers', 'Partners', 'Smart Links', 'Offers', 'Offer Groups', 'Partner Tiers', '']}>
           {tags.map((t) => (

@@ -25,6 +25,8 @@ import {
 } from './schemas.js';
 import { GOAL_ASSET, goalDTO, createAsset, updateAsset, deleteAsset } from '../offers/asset-routes.js';
 import { toAdminDTO, toSelfDTO } from './dto.js';
+import { isPagedRequest, runPagedList } from '../../../lib/http/paged-list.js';
+import { advertiserListQuerySchema, buildAdvertiserListQuery, type AdvertiserListQuery } from './list-query.js';
 import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
@@ -50,6 +52,20 @@ const toHistoryDTO = (r: AuditLogRow) => {
 
 export function advertisersAdminRoutes(): Router {
   const r = Router();
+
+  // Paged mode (`?paged=1`) for the Manage Advertisers page: tabs/filters/search/sort/paging in SQL,
+  // returns { rows, total, page, pageSize, counts: { tabs, statuses } }. Every other caller (the
+  // advertiser pickers) falls through to the plain array below via next('route').
+  r.get(
+    '/',
+    (req, _res, next) => next(isPagedRequest(req.query) ? undefined : 'route'),
+    validateQuery(advertiserListQuerySchema),
+    asyncHandler(async (req, res) => {
+      const q = res.locals.query as AdvertiserListQuery;
+      const built = buildAdvertiserListQuery(req.scope!.networkId, q);
+      sendOk(res, await runPagedList(built, q, (row: AdvertiserRow) => toAdminDTO(row)));
+    }),
+  );
 
   // List (paginated, bounded).
   r.get(

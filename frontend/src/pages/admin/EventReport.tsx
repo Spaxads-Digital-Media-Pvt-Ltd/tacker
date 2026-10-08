@@ -11,24 +11,40 @@
  * VT)/EVR/Gross Sales (from Clicks & VT) all depend on view-through/impression tracking or a "sale
  * amount" concept this app doesn't have — shown as "—" rather than faked.
  *
- * No true server-side pagination: `/goals` returns every matching (offer, goal) row up to a 500-row
- * cap in one shot (the dataset is bounded by offers × goals, not click/conversion volume), so the
- * "N Total" footer here is a real count of the full result set, paginated client-side for display.
+ * Server-side pagination: `/goals` returns `{ rows, total, truncated }` for one limit/offset page of
+ * (goal × offer) groups, so the "N Total" footer is the real group count of the full result set.
  */
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
-import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
+import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { daysAgo, todayStr, toIso, DASH, Pagination, RowKebabMenu } from '../../shared-components/primitives/ReportPageKit';
-import type { Offer } from '../../types';
+import { daysAgo, todayStr, toIso, DASH, Pagination, RowKebabMenu, fetchAllPages, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
+import type { Offer, Publisher } from '../../types';
+import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../lib/filterChips';
+import { readUrlDate, readUrlIds, reportLink } from '../../lib/reportFilterState';
 
 interface GoalRow {
   goal: string; offer_id: string; conversions: number; payout: string; revenue: string; margin: string;
   clicks: number; cvr: number; marginPct: number;
+}
+interface GoalsResult { rows: GoalRow[]; total: number; truncated: boolean }
+
+/** Filter-drawer category ⇄ URL/API param (accepted `/api/reports/goals` keys). */
+const URL_FILTER_PARAMS: [category: string, param: string][] = [['offer', 'offerId'], ['partner', 'publisherId']];
+
+/** Applied report state from the URL (Copy Link / "Open … Report" deep links). */
+function readInitialState() {
+  const sp = new URLSearchParams(window.location.search);
+  const filters: FilterValues = {};
+  for (const [cat, param] of URL_FILTER_PARAMS) {
+    const ids = readUrlIds(sp, param).slice(0, 1); // single-select per category
+    if (ids.length) filters[cat] = ids;
+  }
+  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
 }
 
 const ALL_COLUMNS = [
@@ -54,12 +70,13 @@ function RowActionMenu({ offerId }: { offerId: string }) {
 }
 
 export default function EventReport() {
-  const [from, setFrom] = useState(daysAgo(7));
-  const [to, setTo] = useState(todayStr());
-  const [appliedFrom, setAppliedFrom] = useState(from);
-  const [appliedTo, setAppliedTo] = useState(to);
-  const [filters, setFilters] = useState<Record<string, string[]>>({});
-  const [appliedFilters, setAppliedFilters] = useState<Record<string, string[]>>({});
+  const [init] = useState(readInitialState);
+  const [from, setFrom] = useState(init.from);
+  const [to, setTo] = useState(init.to);
+  const [appliedFrom, setAppliedFrom] = useState(init.from);
+  const [appliedTo, setAppliedTo] = useState(init.to);
+  const [filters, setFilters] = useState<Record<string, string[]>>(init.filters);
+  const [appliedFilters, setAppliedFilters] = useState<Record<string, string[]>>(init.filters);
   const [filterOpen, setFilterOpen] = useState(false);
   const [hasRun, setHasRun] = useState(true);
   const [q, setQ] = useState('');
@@ -71,14 +88,18 @@ export default function EventReport() {
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [copied, setCopied] = useState(false);
+  const exp = useReportExport();
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
+  const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const offerMap = useMemo(() => new Map((offers ?? []).map((o) => [o.id, o.name])), [offers]);
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
-  ], [offers]);
+    { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
+  ], [offers, publishers]);
   const offerIdFilter = appliedFilters['offer']?.[0];
+  const publisherIdFilter = appliedFilters['partner']?.[0];
 
   const qs = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
@@ -86,16 +107,19 @@ export default function EventReport() {
     return params.toString();
   };
 
-  const tableQs = qs({ from: toIso(appliedFrom), to: toIso(appliedTo, true), offerId: offerIdFilter });
-  const { data, loading, error } = useQuery<GoalRow[]>(hasRun ? `/api/reports/goals?${tableQs}` : null);
+  const baseParams = { from: toIso(appliedFrom), to: toIso(appliedTo, true), offerId: offerIdFilter, publisherId: publisherIdFilter };
+  const tableQs = qs({ ...baseParams, limit: pageSize, offset: (page - 1) * pageSize });
+  const { data, loading, error } = useQuery<GoalsResult>(hasRun ? `/api/reports/goals?${tableQs}` : null);
+  // A failed request keeps the previous `data` in useQuery — never present it as the current result.
+  const result = error ? null : data;
+  const total = result?.total ?? 0;
 
-  const filteredRows = useMemo(() => (data ?? []).filter((r) => {
+  const rows = useMemo(() => (result?.rows ?? []).filter((r) => {
     if (!q.trim()) return true;
     const needle = q.trim().toLowerCase();
     const offerName = offerMap.get(r.offer_id) ?? '';
     return [offerName, r.goal].some((v) => (v ?? '').toLowerCase().includes(needle));
-  }), [data, q, offerMap]);
-  const rows = useMemo(() => filteredRows.slice((page - 1) * pageSize, page * pageSize), [filteredRows, page]);
+  }), [result, q, offerMap]);
 
   const runReport = () => {
     setAppliedFrom(from); setAppliedTo(to); setAppliedFilters(filters);
@@ -108,15 +132,24 @@ export default function EventReport() {
   };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const exportRows = () => filteredRows.map((r) => ({
+  const toExportRow = (r: GoalRow) => ({
     offer: offerMap.get(r.offer_id) ?? r.offer_id, impressions: DASH, clicks: r.clicks, ctr: DASH,
     totalFromVt: DASH, events: r.goal, totalFromClicks: r.conversions, cvr: pct(r.cvr), evr: DASH,
     revenue: money(r.revenue), payout: money(r.payout), profit: money(r.margin), margin: pct(r.marginPct),
     grossSalesClicks: DASH, grossSalesVt: DASH,
-  }));
+  });
+  // Every (goal × offer) group matching the applied filters, not just the visible page.
+  const runExport = (format: 'csv' | 'xlsx') => {
+    void exp.run(format, 'event-report', async () => {
+      const res = await fetchAllPages<GoalRow>((limit, offset) => `/api/reports/goals?${qs({ ...baseParams, limit, offset })}`, 500);
+      return { ...res, rows: res.rows.map(toExportRow) };
+    });
+  };
 
   const copyLink = async () => {
-    await navigator.clipboard?.writeText(window.location.href);
+    // The applied report (the address bar never reflects Run Report) — read back on load.
+    const link = reportLink({ from: appliedFrom, to: appliedTo, offerId: offerIdFilter, publisherId: publisherIdFilter });
+    await navigator.clipboard?.writeText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
@@ -154,7 +187,7 @@ export default function EventReport() {
               )}
             </button>
             {filterOpen && (
-              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
+              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters} singleSelectKeys={FILTER_CATEGORIES.map((c) => c.key)}
                 onApply={setFilters} onClose={() => setFilterOpen(false)} />
             )}
           </div>
@@ -165,12 +198,17 @@ export default function EventReport() {
       </div>
 
       <div className="card">
+        <ActiveFilterChips className="mb-3"
+          chips={chipsFromValues(FILTER_CATEGORIES, appliedFilters)}
+          onRemove={(c) => { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); setPage(1); }}
+          onClearAll={() => { setFilters({}); setAppliedFilters({}); setPage(1); }} />
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page"
+                value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div className="relative">
               <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
@@ -187,8 +225,8 @@ export default function EventReport() {
                     </button>
                     {exportOpen && (
                       <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button onClick={() => { downloadCsv('event-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                        <button onClick={() => { downloadXlsx('event-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                        <button disabled={exp.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                        <button disabled={exp.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
                       </div>
                     )}
                   </div>
@@ -199,6 +237,7 @@ export default function EventReport() {
           </div>
         </div>
 
+        <ExportStatus {...exp} onDismiss={exp.dismiss} />
         {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>
@@ -251,16 +290,16 @@ export default function EventReport() {
               </table>
             </div>
           )}
-        {hasRun && filteredRows.length > 0 && (
+        {hasRun && !loading && total > 0 && (
           <div className="mt-3 flex justify-end">
-            <Pagination total={filteredRows.length} page={page} pageSize={pageSize} onPageChange={setPage} />
+            <Pagination total={total} page={page} pageSize={pageSize} onPageChange={setPage} />
           </div>
         )}
       </div>
 
       {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/goals?${tableQs}`} appliedFilters={{
-        from: appliedFrom, to: appliedTo, offer: offerIdFilter,
+        from: appliedFrom, to: appliedTo, offer: offerIdFilter, partner: publisherIdFilter,
       }} />}
     </>
   );

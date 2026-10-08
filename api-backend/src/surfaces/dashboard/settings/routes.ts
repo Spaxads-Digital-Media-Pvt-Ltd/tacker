@@ -9,7 +9,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
@@ -141,8 +141,10 @@ export function settingsRoutes(): Router {
   }));
 
   // Everflow-style catalog with Connected / Not connected card lists per category.
-  r.get('/integrations/catalog', asyncHandler(async (req, res) => {
-    const tab = req.query['category'] as string | undefined;
+  const catalogQuery = z.object({ category: z.string().max(100).optional() });
+  r.get('/integrations/catalog', validateQuery(catalogQuery), asyncHandler(async (req, res) => {
+    // Unknown categories still return empty lists (categoryFromTab → null), as before.
+    const tab = (res.locals.query as z.infer<typeof catalogQuery>).category || undefined;
     const networkId = req.scope!.networkId;
     if (tab) {
       const cat = categoryFromTab(tab);

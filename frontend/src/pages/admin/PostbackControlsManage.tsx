@@ -101,7 +101,7 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
-  const del = useMutation(() => api.del(`/api/postback-controls/${control.id}`));
+  const del = useMutation(async () => { await api.del(`/api/postback-controls/${control.id}`); return true; });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [delErr, setDelErr] = useState<string | null>(null);
 
@@ -131,8 +131,10 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
       title: 'Delete postback control?', message: `Are you sure you want to delete postback control "${control.name}"?`,
       confirmLabel: 'Delete', destructive: true,
       onConfirm: async () => {
-        try { const ok = await del.run(undefined); if (ok) onChanged(); }
-        catch { setDelErr('Failed to delete postback control.'); }
+        // useMutation.run never throws — it resolves null and records the error on failure.
+        const ok = await del.run(undefined);
+        if (ok) onChanged();
+        else setDelErr('Failed to delete postback control.');
       },
     });
   };
@@ -146,7 +148,10 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
   return (
     <>
       {delErr && createPortal(
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">{delErr}</div>,
+        <div role="alert" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">
+          {delErr}{del.error ? ` ${del.error}` : ''}
+          <button type="button" className="ml-3 font-medium underline" onClick={() => setDelErr(null)}>Dismiss</button>
+        </div>,
         document.body,
       )}
       <button ref={btnRef} title="Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
@@ -194,10 +199,14 @@ export default function PostbackControlsManage() {
   const offerName = (id: string) => offers?.find((o) => o.id === id)?.name ?? id.slice(0, 8);
   const advertiserName = (id: string) => advertisers?.find((a) => a.id === id)?.name ?? id.slice(0, 8);
 
+  // Labels spell out the semantics: a filter returns every control that APPLIES to the selection,
+  // including network-wide ones (no target / no partners) and advertiser-level ones for an offer.
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
-    { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
-    { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
-  ], [offers, publishers]);
+    { key: 'advertiser', label: 'Advertiser (includes controls for all advertisers)', options: (advertisers ?? []).map((a) => ({ value: a.id, label: a.name })) },
+    { key: 'offer', label: 'Offer (includes controls for all offers or its advertiser)', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
+    { key: 'partner', label: 'Partner (includes controls for all partners)', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
+  ], [advertisers, offers, publishers]);
+  const offerAdvertiser = useMemo(() => new Map((offers ?? []).map((o) => [o.id, o.advertiserId])), [offers]);
 
   const filtered = useMemo(() => {
     let rows = data ?? [];
@@ -206,10 +215,24 @@ export default function PostbackControlsManage() {
       rows = rows.filter((c) => c.name.toLowerCase().includes(qq));
     }
     const has = (key: string) => (filters[key]?.length ?? 0) > 0;
-    if (has('offer')) rows = rows.filter((c) => c.targetType === 'offer' && c.targetIds.some((id) => filters['offer']!.includes(id)));
-    if (has('partner')) rows = rows.filter((c) => c.partnerIds.some((id) => filters['partner']!.includes(id)));
+    const appliesToAll = (c: PostbackControl) => !c.targetType || c.targetIds.length === 0;
+    if (has('offer')) {
+      const sel = filters['offer']!;
+      const selAdvertisers = new Set(sel.map((id) => offerAdvertiser.get(id)).filter(Boolean));
+      rows = rows.filter((c) => appliesToAll(c)
+        || (c.targetType === 'offer' && c.targetIds.some((id) => sel.includes(id)))
+        || (c.targetType === 'advertiser' && c.targetIds.some((id) => selAdvertisers.has(id))));
+    }
+    if (has('advertiser')) {
+      const sel = filters['advertiser']!;
+      rows = rows.filter((c) => appliesToAll(c)
+        || (c.targetType === 'advertiser' && c.targetIds.some((id) => sel.includes(id)))
+        || (c.targetType === 'offer' && c.targetIds.some((id) => sel.includes(offerAdvertiser.get(id) ?? ''))));
+    }
+    // Empty partnerIds = applies to all partners.
+    if (has('partner')) rows = rows.filter((c) => c.partnerIds.length === 0 || c.partnerIds.some((id) => filters['partner']!.includes(id)));
     return rows;
-  }, [data, q, filters]);
+  }, [data, q, filters, offerAdvertiser]);
 
   const targetCell = (c: PostbackControl) => {
     if (!c.targetType || c.targetIds.length === 0) return <span className="text-fg-muted">All</span>;

@@ -31,6 +31,7 @@ import { Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { daysAgo, todayStr, toIso, DASH, money, num } from '../../../shared-components/primitives/ReportPageKit';
 import { METRIC_KEYS, METRIC_LABELS, type MetricKey } from '../../../lib/customMetrics';
 import { useReportOpts, type Opts } from '../Reports';
+import { countryLabel } from '../../../data/geo';
 
 interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
 interface AggResult { rows: AggRow[] }
@@ -78,19 +79,25 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'publisher') { const m = opts.pubMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
+  if (dim === 'country') return countryLabel(id);
   return id;
 }
 
-/** Build the query-string filter params from every OTHER dimension's active selection — a dimension
- * never filters its own table (so you can keep picking more rows from the full list). */
-function otherDimParams(filters: DimFilters, exclude?: DimKey): Record<string, string> {
-  const out: Record<string, string> = {};
+/** Add the query-string filter params from every OTHER dimension's active selection — a dimension
+ * never filters its own table (so you can keep picking more rows from the full list).
+ * Uuid dims (offer/publisher/advertiser/smartLink) go as comma lists. Text values can contain commas
+ * ("Comcast Cable, LLC") and the API splits a plain comma list, so a text selection with any
+ * comma-bearing value is sent as repeated `key[]=value` params, which the API takes literally (the `[]`
+ * form also keeps a lone comma-bearing value intact). Comma-free text values go as one comma list —
+ * read identically by the API, with no repeat-count limit. */
+function appendOtherDimParams(params: URLSearchParams, filters: DimFilters, exclude?: DimKey): void {
   for (const opt of DIM_OPTIONS) {
     if (opt.key === exclude) continue;
     const vals = filters[opt.key];
-    if (vals && vals.length) out[opt.filterParam] = vals.join(',');
+    if (!vals || !vals.length) continue;
+    if (/Id$/.test(opt.filterParam) || !vals.some((v) => v.includes(','))) params.set(opt.filterParam, vals.join(','));
+    else for (const v of vals) params.append(`${opt.filterParam}[]`, v);
   }
-  return out;
 }
 
 function DimensionCard({
@@ -109,7 +116,7 @@ function DimensionCard({
     from: toIso(from), to: toIso(to, true),
     orderBy: sortMetric, orderDir: sortDir, limit: '200',
   });
-  for (const [k, v] of Object.entries(otherDimParams(filters, dim))) params.set(k, v);
+  appendOtherDimParams(params, filters, dim);
   const { data, loading, error } = useQuery<AggResult>(`/api/reports?${params.toString()}`);
 
   const selected = new Set(filters[dim] ?? []);
@@ -129,7 +136,7 @@ function DimensionCard({
         <button type="button" onClick={onRemove} className="text-fg-muted hover:text-danger-text" title="Remove dimension"><X size={14} /></button>
       </div>
       <div className="flex items-center justify-between gap-2 px-4 pt-3">
-        <input className="input !py-1.5 text-tiny" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="input !py-1.5 text-tiny" placeholder="Search this page…" title="Filters only the rows on the current page (the top 200 loaded here)" value={q} onChange={(e) => setQ(e.target.value)} />
         {selected.size > 0 && <button type="button" onClick={() => onClearDim(dim)} className="whitespace-nowrap text-tiny font-medium text-accent-text hover:underline">Clear filter</button>}
       </div>
       <div className="p-4">
@@ -269,7 +276,7 @@ export function DimensionalReport() {
     groupBy: chartGroupBy, metrics: charts.join(',') || 'clicks',
     from: toIso(from), to: toIso(to, true), limit: '200',
   });
-  for (const [k, v] of Object.entries(otherDimParams(filters))) chartsParams.set(k, v);
+  appendOtherDimParams(chartsParams, filters);
   const chartsQ = useQuery<AggResult>(`/api/reports?${chartsParams.toString()}`);
   const chartRows = [...(chartsQ.data?.rows ?? [])].sort((a, b) => (a.dimensions[chartGroupBy] ?? '').localeCompare(b.dimensions[chartGroupBy] ?? ''));
   const chartLabels = chartRows.map((r) => {
@@ -353,7 +360,7 @@ export function DimensionalReport() {
             <MultiSelectDropdown label="Select Chart(s)" allOptions={CHART_METRICS.map((c) => c.key)} optionLabels={Object.fromEntries(CHART_METRICS.map((c) => [c.key, c.label])) as Record<MetricKey, string>} selected={charts} onChange={setCharts} />
           </div>
           <div className="space-y-5 p-4">
-            {chartsQ.loading ? <Spinner /> : charts.length === 0 ? <p className="text-small text-fg-muted">No charts selected.</p> : CHART_METRICS.filter((c) => charts.includes(c.key)).map((c) => (
+            {chartsQ.loading ? <Spinner /> : chartsQ.error ? <p className="text-small text-danger-text">{chartsQ.error}</p> : charts.length === 0 ? <p className="text-small text-fg-muted">No charts selected.</p> : CHART_METRICS.filter((c) => charts.includes(c.key)).map((c) => (
               <LabeledChart key={c.key} label={c.label} labels={chartLabels} values={chartRows.map((r) => num(r.metrics[c.key] ?? 0))} />
             ))}
           </div>

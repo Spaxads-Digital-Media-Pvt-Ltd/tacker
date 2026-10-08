@@ -11,6 +11,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, Check, X, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { downloadCsv } from '../../lib/export';
 import { PageHeader, Tabs, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
@@ -153,11 +154,10 @@ function OfferApplicationsTab() {
     'Latest Update': { header: 'Latest Update', cell: (a) => new Date(a.latestUpdate).toLocaleString() },
   };
   const actionsCol: Column<OfferApplication> = { header: '', className: 'text-right', cell: (a) => <AppRowMenu app={a} onChanged={refetch} /> };
-  const checkboxCol: Column<OfferApplication> = { header: '', cell: () => <input type="checkbox" className="chk" /> };
   const shownColumns = useMemo<Set<string>>(() => new Set(APP_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const displayedColumns = useMemo(() => {
     const ordered = columnOrder.map((h) => columnsByHeader[h]).filter((c): c is Column<OfferApplication> => Boolean(c && shownColumns.has(c.header)));
-    return [checkboxCol, ...ordered, actionsCol];
+    return [...ordered, actionsCol];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnOrder, shownColumns]);
 
@@ -241,11 +241,17 @@ function QuestionnairesTab() {
     let rows = data ?? [];
     if (q.trim()) rows = rows.filter((r) => r.name.toLowerCase().includes(q.trim().toLowerCase()));
     if ((filters['offer']?.length ?? 0) > 0) {
-      const wanted = new Set((offers ?? []).filter((o) => filters['offer']!.includes(o.id)).map((o) => o.name));
-      rows = rows.filter((r) => r.offers.some((n) => wanted.has(n)));
+      // Match by offer id (two offers can share a name).
+      const wanted = new Set(filters['offer']!);
+      rows = rows.filter((r) => (r.offerIds ?? []).some((id) => wanted.has(id)));
     }
     return rows;
-  }, [data, q, filters, offers]);
+  }, [data, q, filters]);
+
+  const exportCsv = () => downloadCsv(`questionnaires-${new Date().toISOString().slice(0, 10)}.csv`, filtered.map((r) => ({
+    id: r.id, name: r.name, status: r.status, questions: r.questions.join('; '), offers: r.offers.join('; '),
+    createdAt: r.createdAt, modifiedAt: r.updatedAt,
+  })));
 
   const doDelete = async (item: QuestionnaireListItem) => {
     setOpenMenuId(null);
@@ -331,7 +337,8 @@ function QuestionnairesTab() {
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                <button onClick={() => setTableActionsOpen(false)} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Export</button>
+                <button disabled={filtered.length === 0} onClick={() => { setTableActionsOpen(false); exportCsv(); }}
+                  className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">Export CSV</button>
                 <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
               </div>
             )}

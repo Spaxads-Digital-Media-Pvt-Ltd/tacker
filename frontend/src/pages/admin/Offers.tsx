@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useNavigate, Link } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, Pencil, Copy, Settings, Link as LinkIcon, Eye, FileText } from 'lucide-react';
@@ -12,7 +12,11 @@ import { CopyOfferModal } from './CopyOfferModal';
 import { CopyOfferSettingsModal } from './CopyOfferSettingsModal';
 import { TrackingLinksModal } from './offerDetail/TrackingLinksModal';
 import { groupTrackingDomains } from '../../lib/trackingLinks';
-import type { Offer, Advertiser, Publisher, TrackingDomain } from '../../types';
+import { countryLabel, countryName } from '../../data/geo';
+import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
+import { pagedPath, fetchAllPages, useDebounced, sortParams, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
+import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
+import type { Offer, Advertiser, Publisher, TrackingDomain, PagedList } from '../../types';
 
 /** Row action menu (Everflow-style), verified item-by-item against the live reference: Edit, Copy
  * Offer, Copy Offer Settings (onto an existing offer), and Copy Landing Page URL are real. View
@@ -53,7 +57,7 @@ function RowActionMenu({
             <MenuItem icon={LinkIcon} onSelect={() => copyUrl(api)}>{copied ? 'Copied!' : 'Copy Landing Page URL'}</MenuItem>
             <MenuItem icon={Eye} onSelect={() => go(api, `/app/offers/${offer.id}?tab=Postbacks`)}>View Postbacks</MenuItem>
             <MenuItem icon={Eye} onSelect={() => go(api, `/app/offers/${offer.id}?tab=${encodeURIComponent('Offer Applications')}`)}>View Offer Applications</MenuItem>
-            <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/conversions?offerId=${offer.id}`)}>View Conversion Report</MenuItem>
+            <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/conversion?offerId=${offer.id}`)}>View Conversion Report</MenuItem>
             <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/offer?offerId=${offer.id}`)}>View Offer Report</MenuItem>
             <MenuItem icon={LinkIcon} onSelect={() => openTrackingLink(api)}>Get Tracking Link</MenuItem>
           </>
@@ -83,16 +87,8 @@ const DEVICE_TYPES: { value: string; label: string }[] = [
   { value: 'tablet', label: 'Tablet' },
   { value: 'mobile', label: 'Mobile' },
 ];
-// Reference "Table Filters" panel lists these too, but this app's schema has no field to back them
-// (offers carry no channel / platform / business-unit classification, and "Marketplace Advertisers"
-// is a multi-tenant concept). Shown for 1:1 parity with the reference, rendered inert with a note
-// rather than fabricating options. (Country IS backed — see the geo-rules bulk fetch.)
-const UNBACKED_FILTERS: Record<string, string> = {
-  'Business Unit': 'No business-unit concept in this app.',
-  Channel: 'Offers carry no traffic-channel field.',
-  'Marketplace Advertisers': 'Single-tenant — same set as the Advertiser filter.',
-  Platform: 'Offers carry no OS/platform targeting field.',
-};
+// Platform filter — always offer the common OSes, plus any platform named in an offer's targeting.
+const BASE_PLATFORMS = ['Windows', 'Android', 'iOS', 'Mac OS', 'Linux'] as const;
 
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
 const nfmt = new Intl.NumberFormat('en-US');
@@ -115,12 +111,6 @@ interface TagAssignment { tagId: string; entityId: string }
  * geo rules are absent from the response — treated as "allows every country". */
 interface OfferCountries { offerId: string; mode: 'allow' | 'deny'; countries: string[] }
 
-/** Mirrors tracking/geo-rules.ts: no entry → allows all; allow-list → only those; deny-list → all but those. */
-function offerAllowsCountry(g: OfferCountries | undefined, cc: string): boolean {
-  if (!g) return true;
-  return g.mode === 'allow' ? g.countries.includes(cc) : !g.countries.includes(cc);
-}
-
 /** Short, readable countries summary for the list column. */
 function countriesLabel(g: OfferCountries | undefined): string {
   if (!g || g.countries.length === 0) return g?.mode === 'allow' ? '—' : 'All';
@@ -135,20 +125,6 @@ const SEARCH_FIELDS = [
   { value: 'id', label: 'ID' },
 ] as const;
 type SearchField = (typeof SEARCH_FIELDS)[number]['value'];
-
-/** A "Table Filters" row the reference has but this app's schema can't back — rendered as a real,
- * disabled control with a one-line reason, rather than fabricating options (same honesty convention
- * used for the inert filter facets on the Marketplace/Advertisers pages). */
-function InertFilter({ label }: { label: string }) {
-  return (
-    <FieldBlock label={label}>
-      <select className="input cursor-not-allowed opacity-60" disabled>
-        <option>Not available in this app</option>
-      </select>
-      <p className="mt-1 text-[11px] text-fg-muted">{UNBACKED_FILTERS[label]}</p>
-    </FieldBlock>
-  );
-}
 
 function SearchFieldSelect({ value, onChange }: { value: SearchField; onChange: (v: SearchField) => void }) {
   const { open, setOpen, ref } = useDropdown();
@@ -172,10 +148,15 @@ function SearchFieldSelect({ value, onChange }: { value: SearchField; onChange: 
   );
 }
 
-function StatusFilterSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/** Toolbar status quick-pick. Picks a single status; when the drawer has several selected it shows
+ * "N statuses" instead of pretending only the first one applies. */
+function StatusFilterSelect({ statuses, onChange }: { statuses: string[]; onChange: (v: string) => void }) {
   const { open, setOpen, ref } = useDropdown();
   const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...STATUS_OPTS.map((s) => ({ value: s, label: STATUS_LABEL[s], dot: STATUS_DOT[s] }))];
-  const current = options.find((o) => o.value === value) ?? options[0]!;
+  const value = statuses.length === 1 ? statuses[0]! : '';
+  const current = statuses.length > 1
+    ? { value: '', label: `${statuses.length} statuses`, dot: 'bg-accent' }
+    : options.find((o) => o.value === value) ?? options[0]!;
   return (
     <div ref={ref} className="relative">
       <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
@@ -187,7 +168,7 @@ function StatusFilterSelect({ value, onChange }: { value: string; onChange: (v: 
             <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
               <span className={`h-2 w-2 rounded-full ${o.dot}`} /> {o.label}
-              {o.value === value && <span className="ml-auto text-accent-text">✓</span>}
+              {statuses.length <= 1 && o.value === value && <span className="ml-auto text-accent-text">✓</span>}
             </button>
           ))}
         </div>
@@ -196,8 +177,29 @@ function StatusFilterSelect({ value, onChange }: { value: string; onChange: (v: 
   );
 }
 
+/** Distinct values in use (GET /api/offers/filter-options) — complete regardless of paging. */
+interface OfferFilterOptions { categories: string[]; countries: string[]; platforms: string[] }
+interface CatalogEntry { id: string; name: string; status: string }
+
+const SORT_OPTIONS: SortOption[] = [
+  { value: 'createdAt:desc', label: 'Newest first' },
+  { value: 'createdAt:asc', label: 'Oldest first' },
+  { value: 'name:asc', label: 'Name A–Z' },
+  { value: 'name:desc', label: 'Name Z–A' },
+  { value: 'id:desc', label: 'ID (high → low)' },
+  { value: 'id:asc', label: 'ID (low → high)' },
+  { value: 'advertiser:asc', label: 'Advertiser A–Z' },
+  { value: 'payout:desc', label: 'Payout (high → low)' },
+  { value: 'revenue:desc', label: 'Revenue (high → low)' },
+  { value: 'updatedAt:desc', label: 'Recently modified' },
+];
+const DEFAULT_SORT = 'createdAt:desc';
+const OBJECTIVE_LABEL: Record<string, string> = {
+  conversions: 'Conversions', sale: 'Sale', app_installs: 'App Installs', leads: 'Leads', impressions: 'Impressions', clicks: 'Clicks',
+};
+const DEFAULT_STATUSES = ['active'];
+
 export default function Offers() {
-  const { data, loading, error, refetch } = useQuery<Offer[]>('/api/offers');
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
@@ -206,18 +208,38 @@ export default function Offers() {
   const { data: tags } = useQuery<Tag[]>('/api/tags');
   const { data: tagAssignments } = useQuery<TagAssignment[]>('/api/tags/assignments?entityType=offer');
   const { data: offerCountries } = useQuery<OfferCountries[]>('/api/offers/geo-rules');
+  const { data: filterOptions } = useQuery<OfferFilterOptions>('/api/offers/filter-options');
+  const { data: ccCategories } = useQuery<CatalogEntry[]>('/api/control-center/categories?status=active');
   const tagIdsByOffer = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const a of tagAssignments ?? []) m.set(a.entityId, [...(m.get(a.entityId) ?? []), a.tagId]);
     return m;
   }, [tagAssignments]);
   const geoByOffer = useMemo(() => new Map((offerCountries ?? []).map((g) => [g.offerId, g])), [offerCountries]);
-  // Country options — every country named in any offer's allow-list or deny-list.
+  // Country options — every country named in any offer's geo-rule allow/deny list or in its
+  // targeting.country include/exclude list (server-side distinct), sorted by full name.
   const countryOptions = useMemo(
-    () => Array.from(new Set((offerCountries ?? []).flatMap((g) => g.countries))).sort(),
-    [offerCountries],
+    () => [...(filterOptions?.countries ?? [])].sort((a, b) => countryName(a).localeCompare(countryName(b))),
+    [filterOptions],
   );
-  const categories = useMemo(() => Array.from(new Set((data ?? []).map((o) => o.category).filter((c): c is string => Boolean(c)))).sort(), [data]);
+  // Platform options — the common OSes plus every platform named in any offer's targeting rule.
+  const platformOptions = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const p of [...BASE_PLATFORMS, ...(filterOptions?.platforms ?? [])]) {
+      if (!byKey.has(p.toLowerCase())) byKey.set(p.toLowerCase(), p);
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
+  }, [filterOptions]);
+  // Category options — the Control Center catalog plus every category actually in use on an offer
+  // (offers.category is free text), de-duplicated case-insensitively; matching is case-insensitive.
+  const categories = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const c of [...(ccCategories ?? []).map((x) => x.name), ...(filterOptions?.categories ?? [])]) {
+      const v = c.trim();
+      if (v && !byKey.has(v.toLowerCase())) byKey.set(v.toLowerCase(), v);
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
+  }, [ccCategories, filterOptions]);
   const today = useQuery<AggResult>(`/api/reports?groupBy=offer&metrics=clicks,revenue&from=${encodeURIComponent(todayStartIso())}&to=${encodeURIComponent(new Date().toISOString())}`);
   const todayByOffer = useMemo(() => {
     const m = new Map<string, { clicks: number; revenue: number }>();
@@ -234,7 +256,11 @@ export default function Offers() {
     const a = advById.get(id);
     return a ? (a.ref != null ? `(${a.ref}) ${a.name}` : a.name) : id.slice(0, 8) + '…';
   };
-  const mgrOf = (advertiserId: string, key: 'accountManagerId' | 'salesManagerId') => advById.get(advertiserId)?.[key] ?? null;
+  // Paged rows carry their advertiser's name/ref/managers (joined server-side), so a row never
+  // depends on the advertiser picker list being complete.
+  const offerAdvName = (o: Offer) => (o.advertiserName != null
+    ? (o.advertiserRef != null ? `(${o.advertiserRef}) ${o.advertiserName}` : o.advertiserName)
+    : advName(o.advertiserId));
   // Account / Sales manager live on the offer's advertiser (advertisers.account_manager_id /
   // sales_manager_id → users). Options = managers actually assigned to at least one advertiser.
   const [acctManagers, salesManagers] = useMemo(() => {
@@ -246,9 +272,11 @@ export default function Offers() {
   }, [advertisers, users]);
 
   // Applied filters (Trackog Manage Offer defaults: Active checked)
-  const [statuses, setStatuses] = useState<string[]>(['active']);
+  const [statuses, setStatuses] = useState<string[]>(DEFAULT_STATUSES);
   const [offerIdsText, setOfferIdsText] = useState('');
-  const [nameQ, setNameQ] = useState('');
+  const [nameQ, setNameQ] = useState(''); // toolbar search (matches under `searchField`)
+  const searchQ = useDebounced(nameQ.trim());
+  const [offerNameQ, setOfferNameQ] = useState(''); // drawer "Offer Name" filter (always by name)
   const [searchField, setSearchField] = useState<SearchField>('name');
   const [advertiserId, setAdvertiserId] = useState('');
   const [objective, setObjective] = useState('');
@@ -263,16 +291,23 @@ export default function Offers() {
   const [trackingDomainId, setTrackingDomainId] = useState('');
   const [deviceType, setDeviceType] = useState('');
   const [country, setCountry] = useState('');
+  const [platform, setPlatform] = useState('');
+  const [sort, setSort] = useState(DEFAULT_SORT);
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exportNote, setExportNote] = useState<string | null>(null);
+  // Selection is per page: any filter/search/sort change → page 1 and an empty selection; a page
+  // change also clears it, so bulk actions only ever see rows the current view shows.
+  const resetView = () => { setPage(1); setSelected(new Set()); };
+  const goPage = (p: number) => { setPage(p); setSelected(new Set()); };
 
   const { data: offerGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
 
   // Draft while drawer open
   const [dStatuses, setDStatuses] = useState(statuses);
   const [dIds, setDIds] = useState(offerIdsText);
-  const [dName, setDName] = useState(nameQ);
+  const [dName, setDName] = useState(offerNameQ);
   const [dAdv, setDAdv] = useState(advertiserId);
   const [dObj, setDObj] = useState(objective);
   const [dVis, setDVis] = useState(visibility);
@@ -286,77 +321,108 @@ export default function Offers() {
   const [dDomain, setDDomain] = useState(trackingDomainId);
   const [dDevice, setDDevice] = useState(deviceType);
   const [dCountry, setDCountry] = useState(country);
+  const [dPlatform, setDPlatform] = useState(platform);
 
   const openDrawer = () => {
-    setDStatuses(statuses); setDIds(offerIdsText); setDName(nameQ);
+    setDStatuses(statuses); setDIds(offerIdsText); setDName(offerNameQ);
     setDAdv(advertiserId); setDObj(objective); setDVis(visibility); setDTag(tagId); setDCat(category);
     setDPayout(payoutType); setDRev(revenueType); setDGroup(offerGroupId);
     setDAcct(accountManagerId); setDSales(salesManagerId); setDDomain(trackingDomainId); setDDevice(deviceType);
-    setDCountry(country);
+    setDCountry(country); setDPlatform(platform);
     setOpen(true);
   };
   const applyDrawer = () => {
-    setStatuses(dStatuses); setOfferIdsText(dIds); setNameQ(dName);
+    setStatuses(dStatuses); setOfferIdsText(dIds); setOfferNameQ(dName);
     setAdvertiserId(dAdv); setObjective(dObj); setVisibility(dVis); setTagId(dTag); setCategory(dCat);
     setPayoutType(dPayout); setRevenueType(dRev); setOfferGroupId(dGroup);
     setAccountManagerId(dAcct); setSalesManagerId(dSales); setTrackingDomainId(dDomain); setDeviceType(dDevice);
-    setCountry(dCountry);
-    setOpen(false); setPage(1);
+    setCountry(dCountry); setPlatform(dPlatform);
+    setOpen(false); resetView();
   };
   const clearDraft = () => {
     setDStatuses([]); setDIds(''); setDName(''); setDAdv(''); setDObj(''); setDVis(''); setDTag(''); setDCat('');
     setDPayout(''); setDRev(''); setDGroup(''); setDAcct(''); setDSales(''); setDDomain(''); setDDevice(''); setDCountry('');
+    setDPlatform('');
   };
 
-  const filtered = useMemo(() => {
-    let rows = data ?? [];
-    if (statuses.length) rows = rows.filter((o) => statuses.includes(o.status));
-    if (nameQ.trim()) {
-      const q = nameQ.trim().toLowerCase();
-      if (searchField === 'name') rows = rows.filter((o) => o.name.toLowerCase().includes(q));
-      else if (searchField === 'advertiser') rows = rows.filter((o) => advName(o.advertiserId).toLowerCase().includes(q));
-      else rows = rows.filter((o) => String(o.ref ?? '').includes(q) || o.id.toLowerCase().includes(q));
-    }
-    if (offerIdsText.trim()) {
-      const ids = offerIdsText.split(',').map((s) => s.trim()).filter(Boolean);
-      rows = rows.filter((o) => ids.includes(String(o.ref)) || ids.includes(o.id));
-    }
-    if (advertiserId) rows = rows.filter((o) => o.advertiserId === advertiserId);
-    if (objective) rows = rows.filter((o) => (o.objective ?? o.payoutModel) === objective);
-    if (visibility) rows = rows.filter((o) => (o.visibility ?? 'public') === visibility);
-    if (tagId) rows = rows.filter((o) => (tagIdsByOffer.get(o.id) ?? []).includes(tagId));
-    if (category) rows = rows.filter((o) => o.category === category);
-    if (payoutType) rows = rows.filter((o) => o.payoutModel === payoutType);
-    if (revenueType) rows = rows.filter((o) => (REV_PREFIX[o.payoutModel] ?? o.payoutModel) === revenueType);
-    if (accountManagerId) rows = rows.filter((o) => mgrOf(o.advertiserId, 'accountManagerId') === accountManagerId);
-    if (salesManagerId) rows = rows.filter((o) => mgrOf(o.advertiserId, 'salesManagerId') === salesManagerId);
-    if (trackingDomainId) rows = rows.filter((o) => o.trackingDomainId === trackingDomainId);
-    if (deviceType) rows = rows.filter((o) => {
-      const t = o.allowedTrafficTypes ?? [];
-      return t.length === 0 || t.includes(deviceType); // no restriction = allows every device
-    });
-    if (country) rows = rows.filter((o) => offerAllowsCountry(geoByOffer.get(o.id), country));
-    if (offerGroupId) {
-      const group = (offerGroups ?? []).find((g) => g.id === offerGroupId);
-      rows = rows.filter((o) => group?.offerIds.includes(o.id));
-    }
-    return rows;
-  }, [data, statuses, nameQ, searchField, offerIdsText, advertiserId, objective, visibility, tagId, category, payoutType, revenueType, accountManagerId, salesManagerId, trackingDomainId, deviceType, country, geoByOffer, offerGroupId, offerGroups, tagIdsByOffer, advertisers, advById]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // The server does every filter, the search, sort and paging (GET /api/offers?paged=1).
+  const offerIdList = useMemo(() => offerIdsText.split(',').map((s) => s.trim()).filter(Boolean), [offerIdsText]);
+  const listParams = useMemo<PagedParams>(() => ({
+    ...sortParams(sort),
+    search: searchQ || undefined, searchField: searchQ ? searchField : undefined,
+    name: offerNameQ.trim() || undefined, offerIds: offerIdList.join(',') || undefined,
+    status: statuses.join(',') || undefined, advertiserId, category, tagId, offerGroupId,
+    accountManagerId, salesManagerId, trackingDomainId, visibility, payoutType, revenueType, objective,
+    deviceType, country, platform,
+  }), [sort, searchQ, searchField, offerNameQ, offerIdList, statuses, advertiserId, category, tagId, offerGroupId,
+    accountManagerId, salesManagerId, trackingDomainId, visibility, payoutType, revenueType, objective, deviceType, country, platform]);
+  const { data, loading, error, refetch } = useQuery<PagedList<Offer>>(pagedPath('/api/offers', { ...listParams, page, pageSize: PAGE_SIZE }));
+  const rows = useMemo(() => data?.rows ?? [], [data]);
+  const total = data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  useEffect(() => { if (data && page > pageCount) setPage(pageCount); }, [data, page, pageCount]);
 
   const boolCount = (...vals: unknown[]) => vals.reduce<number>((n, v) => n + (v ? 1 : 0), 0);
-  const appliedCount = statuses.length + boolCount(offerIdsText, nameQ, advertiserId, objective, visibility, tagId, category,
-    payoutType, revenueType, offerGroupId, accountManagerId, salesManagerId, trackingDomainId, deviceType, country);
+  const appliedCount = statuses.length + boolCount(offerIdsText, offerNameQ, advertiserId, objective, visibility, tagId, category,
+    payoutType, revenueType, offerGroupId, accountManagerId, salesManagerId, trackingDomainId, deviceType, country, platform);
   const draftCount = dStatuses.length + boolCount(dIds, dName, dAdv, dObj, dVis, dTag, dCat,
-    dPayout, dRev, dGroup, dAcct, dSales, dDomain, dDevice, dCountry);
+    dPayout, dRev, dGroup, dAcct, dSales, dDomain, dDevice, dCountry, dPlatform);
 
-  const allOnPageSelected = paged.length > 0 && paged.every((o) => selected.has(o.id));
+  // Applied-filter chips (names, never uuids/ISO codes). Removing one applies immediately.
+  const chips = useMemo<FilterChip[]>(() => {
+    const out: FilterChip[] = [];
+    const add = (key: string, label: string, value: string, valueLabel?: string | null) => {
+      if (value) out.push({ key, value, label, valueLabel: valueLabel || value });
+    };
+    for (const s of statuses) add('status', 'Status', s, STATUS_LABEL[s]);
+    add('search', `Search (${SEARCH_FIELDS.find((f) => f.value === searchField)?.label ?? searchField})`, searchQ);
+    for (const id of offerIdList) add('offerIds', 'Offer ID', id);
+    add('offerName', 'Offer Name', offerNameQ.trim());
+    add('advertiserId', 'Advertiser', advertiserId, advertiserId ? advName(advertiserId) : null);
+    add('category', 'Category', category);
+    add('country', 'Country', country, country ? countryLabel(country) : null);
+    add('deviceType', 'Device Type', deviceType, DEVICE_TYPES.find((d) => d.value === deviceType)?.label);
+    add('tagId', 'Label', tagId, tags?.find((t) => t.id === tagId)?.name);
+    add('offerGroupId', 'Offer Group', offerGroupId, offerGroups?.find((g) => g.id === offerGroupId)?.name);
+    add('payoutType', 'Payout Type', payoutType);
+    add('revenueType', 'Revenue Type', revenueType);
+    add('platform', 'Platform', platform);
+    add('accountManagerId', 'Account Manager', accountManagerId, userName(accountManagerId));
+    add('salesManagerId', 'Sales Manager', salesManagerId, userName(salesManagerId));
+    add('trackingDomainId', 'Tracking Domain', trackingDomainId, domains?.find((d) => d.id === trackingDomainId)?.host);
+    add('visibility', 'Visibility', visibility, visibility ? visibility[0]!.toUpperCase() + visibility.slice(1) : null);
+    add('objective', 'Objective', objective, OBJECTIVE_LABEL[objective]);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statuses, searchQ, searchField, offerIdList, offerNameQ, advertiserId, category, country, deviceType, tagId, offerGroupId,
+    payoutType, revenueType, platform, accountManagerId, salesManagerId, trackingDomainId, visibility, objective,
+    tags, offerGroups, domains, users, advById]);
+  const removeChip = (c: FilterChip) => {
+    const setters: Record<string, (v: string) => void> = {
+      search: setNameQ, offerName: setOfferNameQ, advertiserId: setAdvertiserId, category: setCategory, country: setCountry,
+      deviceType: setDeviceType, tagId: setTagId, offerGroupId: setOfferGroupId, payoutType: setPayoutType,
+      revenueType: setRevenueType, platform: setPlatform, accountManagerId: setAccountManagerId,
+      salesManagerId: setSalesManagerId, trackingDomainId: setTrackingDomainId, visibility: setVisibility, objective: setObjective,
+    };
+    if (c.key === 'status') setStatuses((s) => s.filter((x) => x !== c.value));
+    else if (c.key === 'offerIds') setOfferIdsText(offerIdList.filter((x) => x !== c.value).join(', '));
+    else setters[c.key]?.('');
+    resetView();
+  };
+  const clearAll = () => {
+    setStatuses([]); setOfferIdsText(''); setNameQ(''); setOfferNameQ(''); setAdvertiserId(''); setObjective('');
+    setVisibility(''); setTagId(''); setCategory(''); setPayoutType(''); setRevenueType(''); setOfferGroupId('');
+    setAccountManagerId(''); setSalesManagerId(''); setTrackingDomainId(''); setDeviceType(''); setCountry(''); setPlatform('');
+    resetView();
+  };
+
+  // Bulk actions / export only ever act on selected rows of the current page (selection is per page).
+  const visibleSelected = useMemo(() => rows.filter((o) => selected.has(o.id)), [rows, selected]);
+  const allOnPageSelected = rows.length > 0 && rows.every((o) => selected.has(o.id));
   const toggleAllOnPage = () => setSelected((s) => {
     const next = new Set(s);
-    if (allOnPageSelected) paged.forEach((o) => next.delete(o.id));
-    else paged.forEach((o) => next.add(o.id));
+    if (allOnPageSelected) rows.forEach((o) => next.delete(o.id));
+    else rows.forEach((o) => next.add(o.id));
     return next;
   });
   const toggleRow = (id: string) => setSelected((s) => {
@@ -378,9 +444,9 @@ export default function Offers() {
       ),
     },
     { header: 'Visibility', cell: (o) => <span className="capitalize text-fg-secondary">{o.visibility ?? 'public'}</span> },
-    { header: 'Advertiser', cell: (o) => <span className="text-accent-text">{advName(o.advertiserId)}</span> },
+    { header: 'Advertiser', cell: (o) => <span className="text-accent-text">{offerAdvName(o)}</span> },
     { header: 'Sales Manager', cell: (o) => {
-      const n = userName(mgrOf(o.advertiserId, 'salesManagerId'));
+      const n = userName(o.advertiserSalesManagerId ?? advById.get(o.advertiserId)?.salesManagerId ?? null);
       return n ? <span className="text-fg-secondary">{n}</span> : <span className="text-fg-muted">—</span>;
     } },
     { header: 'Category', cell: (o) => o.category ?? '—' },
@@ -418,11 +484,24 @@ export default function Offers() {
     return [checkboxCol, ...ordered, actionsCol];
   }, [columns, columnOrder, shownColumns]);
 
-  const exportRows = (format: 'csv' | 'json') => {
-    const rows = selected.size > 0 ? filtered.filter((o) => selected.has(o.id)) : filtered;
-    const mapped = rows.map((o) => ({
+  // Export = the selected rows, or EVERY offer matching the current filters (walked page by page on
+  // the server, capped at EXPORT_MAX_ROWS with a visible note).
+  const exportRows = async (format: 'csv' | 'json') => {
+    setExportNote(null);
+    let rowsOut: Offer[] = visibleSelected;
+    if (rowsOut.length === 0) {
+      try {
+        const all = await fetchAllPages<Offer>('/api/offers', listParams);
+        rowsOut = all.rows;
+        if (all.capped) setExportNote(`Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} of ${all.total.toLocaleString()} matching offers — narrow the filters to export the rest.`);
+      } catch (e) {
+        setExportNote(`Export failed: ${e instanceof Error ? e.message : 'request error'}`);
+        return;
+      }
+    }
+    const mapped = rowsOut.map((o) => ({
       id: o.ref ?? o.id, name: o.name, status: o.status, visibility: o.visibility ?? 'public',
-      advertiser: advName(o.advertiserId), category: o.category ?? '', currency: o.currency,
+      advertiser: offerAdvName(o), category: o.category ?? '', currency: o.currency,
       payoutModel: o.payoutModel, revenue: o.defaultRevenue, payout: o.defaultPayout,
       countries: countriesLabel(geoByOffer.get(o.id)),
       createdAt: o.createdAt, modifiedAt: o.updatedAt ?? '',
@@ -455,12 +534,13 @@ export default function Offers() {
         subtitle="Create, manage and optimize your affiliate Offer."
         action={
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center max-sm:w-full">
-            <SearchFieldSelect value={searchField} onChange={setSearchField} />
+            <SearchFieldSelect value={searchField} onChange={(v) => { setSearchField(v); resetView(); }} />
             <div className="relative max-sm:w-full">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-full sm:!w-56 !pl-8" placeholder={`Search by ${searchField}…`} value={nameQ} onChange={(e) => { setNameQ(e.target.value); setPage(1); }} />
+              <input className="input !w-full sm:!w-56 !pl-8" placeholder={`Search by ${searchField}…`} value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
             </div>
-            <StatusFilterSelect value={statuses[0] ?? ''} onChange={(v) => { setStatuses(v ? [v] : []); setPage(1); }} />
+            <StatusFilterSelect statuses={statuses} onChange={(v) => { setStatuses(v ? [v] : []); resetView(); }} />
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
             <button type="button" className="btn-ghost relative" onClick={openDrawer}>
               <SlidersHorizontal size={15} /> Filters
               {appliedCount > 0 && (
@@ -471,13 +551,15 @@ export default function Offers() {
             </button>
             <Link to="/app/offers/new" className="btn-primary max-sm:w-full">+ Offer</Link>
             <TableActionsMenu
-              selectedIds={[...selected]}
+              selectedIds={visibleSelected.map((o) => o.id)}
               columnOrder={columnOrder}
               hiddenColumns={hiddenColumns}
               onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
-              onExport={exportRows}
+              onExport={(f) => { void exportRows(f); }}
               appliedFilters={{
-                status: statuses[0] ?? undefined, search: nameQ || undefined, searchField,
+                status: statuses.length ? statuses.join(',') : undefined, search: searchQ || undefined, searchField,
+                offerName: offerNameQ || undefined,
+                country: country || undefined, platform: platform || undefined,
                 advertiser: advertiserId ? advName(advertiserId) : undefined, category: category || undefined,
                 label: tagId ? tags?.find((t) => t.id === tagId)?.name : undefined, payoutType: payoutType || undefined,
                 revenueType: revenueType || undefined,
@@ -491,24 +573,21 @@ export default function Offers() {
           </div>
         }
       />
-      {loading ? <StateBlock><Spinner /></StateBlock>
+      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-3" />
+      <ExportNotice message={exportNote} onDismiss={() => setExportNote(null)} />
+      {loading && !data ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
-        : !filtered.length ? <StateBlock>No offers match these filters.</StateBlock>
+        : !rows.length ? <StateBlock>{loading ? <Spinner /> : 'No offers match these filters.'}</StateBlock>
         : (
           <>
             <div className="mb-2 flex items-center gap-2 text-tiny text-fg-secondary">
               <input type="checkbox" className="chk" checked={allOnPageSelected} onChange={toggleAllOnPage} />
-              {selected.size > 0 ? `${selected.size} selected` : 'Select all on page'}
+              {visibleSelected.length > 0 ? `${visibleSelected.length} selected on this page` : 'Select all on page'}
             </div>
-            <Table columns={displayedColumns} rows={paged} rowKey={(o) => o.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
-            <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
-              <span>{filtered.length} Total</span>
-              <div className="flex items-center gap-1">
-                <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-[var(--radius)] border border-border px-2 py-1 disabled:opacity-40">‹</button>
-                <span className="px-1 tabular-nums">{page} / {pageCount}</span>
-                <button disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))} className="rounded-[var(--radius)] border border-border px-2 py-1 disabled:opacity-40">›</button>
-              </div>
+            <div className={loading ? 'opacity-60 transition-opacity' : undefined}>
+              <Table columns={displayedColumns} rows={rows} rowKey={(o) => o.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
             </div>
+            <PagerFooter total={total} page={page} pageSize={PAGE_SIZE} onPage={goPage} loading={loading} />
           </>
         )}
 
@@ -537,7 +616,7 @@ export default function Offers() {
           </div>
 
           {/* Everflow's "Table Filters" panel, field-for-field. Alphabetical, like the reference.
-              Filters with a real backing column are live; the rest are shown inert (see below). */}
+              Only filters with a real backing field are shown. */}
           <p className="mb-2 mt-1 border-t border-border pt-3 text-tiny font-semibold uppercase tracking-wide text-fg-muted">Table Filters</p>
 
           <FieldBlock label="Account Manager">
@@ -557,8 +636,6 @@ export default function Offers() {
             </select>
           </FieldBlock>
 
-          <InertFilter label="Business Unit" />
-
           <FieldBlock label="Category">
             <select className="input" value={dCat} onChange={(e) => setDCat(e.target.value)}>
               <option value="">All Categories</option>
@@ -566,14 +643,12 @@ export default function Offers() {
             </select>
           </FieldBlock>
 
-          <InertFilter label="Channel" />
-
           <FieldBlock label="Country">
             <select className="input" value={dCountry} onChange={(e) => setDCountry(e.target.value)}>
               <option value="">All Countries</option>
-              {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+              {countryOptions.map((c) => <option key={c} value={c}>{countryLabel(c)}</option>)}
             </select>
-            <p className="mt-1 text-[11px] text-fg-muted">From each offer's geo rules — an offer with no rules matches every country.</p>
+            <p className="mt-1 text-[11px] text-fg-muted">From each offer's geo rules and country targeting — an offer with no country rule matches every country.</p>
           </FieldBlock>
 
           <FieldBlock label="Device Type">
@@ -590,8 +665,6 @@ export default function Offers() {
               {(tags ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </FieldBlock>
-
-          <InertFilter label="Marketplace Advertisers" />
 
           <FieldBlock label="Offer Group">
             <select className="input" value={dGroup} onChange={(e) => setDGroup(e.target.value)}>
@@ -615,7 +688,13 @@ export default function Offers() {
             </FieldBlock>
           </div>
 
-          <InertFilter label="Platform" />
+          <FieldBlock label="Platform">
+            <select className="input" value={dPlatform} onChange={(e) => setDPlatform(e.target.value)}>
+              <option value="">All Platforms</option>
+              {platformOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-fg-muted">From each offer's platform targeting — an offer with no platform rule matches every platform.</p>
+          </FieldBlock>
 
           <FieldBlock label="Sales Manager">
             <select className="input" value={dSales} onChange={(e) => setDSales(e.target.value)}>

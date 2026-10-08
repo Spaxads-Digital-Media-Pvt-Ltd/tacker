@@ -21,7 +21,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Filter, MoreVertical, Pencil, ChevronRight, HelpCircle, Info, FileCheck } from 'lucide-react';
+import { Search, MoreVertical, Pencil, ChevronRight, HelpCircle, Info, FileCheck } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, StateBlock, Spinner, Modal } from '../../shared-components/primitives/ui';
@@ -370,7 +370,6 @@ function FeedsTab() {
             <option value="active">Active</option>
             <option value="paused">Paused</option>
           </select>
-          <button type="button" title="Filter by status" className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setStatusFilter('active')}><Filter size={15} /></button>
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg">

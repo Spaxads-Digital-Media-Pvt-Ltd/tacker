@@ -82,7 +82,7 @@ Each exports a function returning an Express Router.
 - `POST /api/auth/logout` — Clear cookie
 
 **50+ feature route modules** mounted in `app.ts`, all under `/api/`:
-- offers, publishers, advertisers, reports, alerts, ai, tags, custom-fields, settings, smart-links, offline, import-export, catalog, invoices, offer-templates, offer-groups, creatives, custom-metrics, marketplace-profile, communication-hub, customer-value, traffic-health, investigator, automation, audit-log, conversion-imports, traffic-controls, offer-custom-settings, smartswitch, users, postbacks, partner-tiers, partner-channels, offer-categories, business-units, offer-applications, questionnaires, traffic-blocking, traffic-sources, reporting-adjustments, coupon-codes, partner-invoices, link-templates, postback-controls, advertiser-invoices, tiered-commissions, control-center, api-keys
+- offers, publishers, advertisers, reports, alerts, ai, tags, custom-fields, settings, smart-links, offline, import-export, catalog, invoices, offer-templates, offer-groups, creatives, custom-metrics, marketplace-profile, communication-hub, customer-value, traffic-health, investigator, automation, audit-log, conversion-imports, traffic-controls, offer-custom-settings, smartswitch, users, postbacks, partner-tiers, business-units, offer-applications, questionnaires, traffic-blocking, traffic-sources, reporting-adjustments, coupon-codes, partner-invoices, link-templates, postback-controls, advertiser-invoices, tiered-commissions, control-center, api-keys
 
 Each admin route is gated by:
 ```ts

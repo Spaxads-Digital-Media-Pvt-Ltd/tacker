@@ -31,5 +31,8 @@ export function validateQuery<S extends ZodTypeAny>(schema: S) {
 }
 
 function flatten(err: z.ZodError): Record<string, string[]> {
-  return err.flatten().fieldErrors as Record<string, string[]>;
+  const { fieldErrors, formErrors } = err.flatten();
+  // Object-level errors (e.g. `.strict()` "Unrecognized key(s) in object: 'foo'", cross-field
+  // refinements) have no field — surface them under `_errors` instead of returning empty details.
+  return { ...(fieldErrors as Record<string, string[]>), ...(formErrors.length ? { _errors: formErrors } : {}) };
 }

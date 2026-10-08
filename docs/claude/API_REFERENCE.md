@@ -61,8 +61,6 @@
 | GET,POST,PATCH,DELETE | `/api/users/*` | Users | admin |
 | GET,POST,PATCH,DELETE | `/api/postbacks/*` | Postbacks | admin |
 | GET,POST,PATCH,DELETE | `/api/partner-tiers/*` | Partner tiers | admin |
-| GET,POST,PATCH,DELETE | `/api/partner-channels/*` | Partner channels | admin |
-| GET,POST,PATCH,DELETE | `/api/offer-categories/*` | Offer categories | admin |
 | GET,POST,PATCH,DELETE | `/api/business-units/*` | Business units | admin |
 | GET,POST,PATCH,DELETE | `/api/offer-applications/*` | Offer applications | admin |
 | GET,POST,PATCH,DELETE | `/api/questionnaires/*` | Questionnaires | admin |
@@ -75,7 +73,27 @@
 | GET,POST,PATCH,DELETE | `/api/postback-controls/*` | Postback controls | admin |
 | GET,POST,PATCH,DELETE | `/api/advertiser-invoices/*` | Advertiser invoices | admin |
 | GET,POST,PATCH,DELETE | `/api/tiered-commissions/*` | Tiered commissions | admin |
-| GET,POST,PATCH,DELETE | `/api/control-center/*` | Control center | admin |
+| GET,POST,PATCH,DELETE | `/api/control-center/*` | Control center (incl. the Category / Channel catalogs: `/api/control-center/categories`, `/api/control-center/channels`) | admin |
+
+### Filter query parameters (all list/report endpoints)
+
+Every filter param is zod-validated (`validateQuery`); bad input is a **422 validation error**, never a Postgres 500, and values are always bound as `$n`. Shared parsers live in `api-backend/src/lib/http/query-params.ts` (`csvList`, `queryBool`, `queryDate`); free-text search uses `escapeLike` (`lib/db/like.ts`) with `ILIKE … ESCAPE '\'`.
+
+`GET /api/reports` (and the portal `/stats` + public-API reports, via `lib/reporting/request.ts`):
+- Include filters `offerId|publisherId|advertiserId|smartLinkId` = one UUID or a comma list; text dims (`country`, `device`, `city`, `region`, `isp`, `browser`, `os`, `sub1-5`) = comma list, or repeated/`key[]=` params taken literally (for values containing commas). Lists are OR within a dimension, AND across dimensions.
+- Exclusions `exclude{OfferId,PublisherId,AdvertiserId,SmartLinkId,Country,Device}` accept lists too and **keep NULL rows** (excluding a smart link doesn't drop traffic without one).
+- `excludeInvalid=true|false|1|0`, `from`/`to` = ISO date/datetime (real calendar day, `from <= to`).
+- `groupBy=none` → one grand-total row (summary tiles). `orderBy=cr|epc` sorts by the real ratio.
+- Filters on a dimension the audience can't see are dropped (advertiser keys/portal can't filter by publisher, smart link or subs; publishers can't filter by advertiser). Forced owner filters always win.
+
+Server-paged entity lists — `GET /api/offers|publishers|advertisers?paged=1` (without `paged=1` the endpoints keep returning the plain array other pickers use):
+- Response `data: { rows, total, page, pageSize, counts }` (`counts.statuses`, and `counts.tabs` for partners/advertisers). Params `page` (≥1), `pageSize` (≤200), `sort` (per-endpoint whitelist), `dir` (`asc|desc`; ties broken by id).
+- Offers: `search` + `searchField` (`name|advertiser|id`), `name`, `offerIds`, `status`, `advertiserId`, `category` (case-insensitive name), `tagId`, `offerGroupId`, `accountManagerId`, `salesManagerId`, `trackingDomainId`, `visibility`, `payoutType`, `revenueType`, `objective`, `deviceType`, `country`, `platform`. Partners: `tab`, `status`, `search`, `accountExecutiveId`, `partnerManagerId`, `channelId`, `label`, `billingFrequency`, `country`, `region`, `tier`, `paymentMethod`, `paymentTerms`, `payable`, `hasRunTraffic`, `noTraffic`. Advertisers: `tab`, `status`, `search`, `accountManagerId`, `salesManagerId`, `billingFrequency`, `label`. Free-text values are sent as repeated params (taken literally); ids/enums accept comma lists.
+- Option lists: `GET /api/offers/filter-options`, `GET /api/publishers/filter-options` (distinct values in use).
+
+Other paged/limited lists: `/api/audit-log` (server filters `service|portal|method|q|from|to`, `limit`/`offset`, `pagination.total`; `GET /api/audit-log/services`), `/api/alerts` (`pagination.total`), `/api/reports/goals` and `/api/reports/click-to-conversion-time` return `{ rows, total, truncated }` with `limit`/`offset`. Whole-entity management lists are bounded by `LIST_CAP` (10,000, `lib/http/list-cap.ts`) and log a warning if it is ever reached.
+
+Detail reports (`/api/reports/clicks|conversions|postback-logs|goals|grouped|…`) each have a **strict** schema (an unknown key is a 422 listing it under `details._errors`) and take single values per filter (the UI drawers are single-select there); `/clicks` supports `advertiserId`, `/conversions` supports `excludeSource`, `/grouped` accepts both `offerId` and `offerIds` style lists plus `country`/`device`/`smartLinkId`.
 
 ### API Key Management
 | Method | Endpoint | Purpose | Auth |

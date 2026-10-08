@@ -7,7 +7,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
+import { csvList, queryDate } from '../../../lib/http/query-params.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -118,12 +120,33 @@ function ruleToColumns(b: z.infer<typeof ruleSchema>): Record<string, unknown> {
   };
 }
 
+/** GET /rules filters — all optional, comma-separated lists; unknown values are a 400, not SQL. */
+const rulesQuery = z.object({
+  status: z.enum(['all', 'active', 'inactive']).optional(),
+  advertiser: csvList(z.string().uuid()),
+  offer: csvList(z.string().uuid()),
+  partner: csvList(z.string().uuid()),
+  dataPoint: csvList(z.string().uuid()),
+  grouping: csvList(z.enum(['all_together', 'separately_by'])),
+  metricType: csvList(z.enum(['text', 'number'])),
+  cycleDuration: csvList(z.enum(['continuous', 'daily', 'weekly', 'monthly', 'quarterly'])),
+});
+
+const conversionEventsQuery = z.object({
+  userId: z.string().max(500).optional(),
+  from: z.union([queryDate, z.literal('')]).optional(),
+  to: z.union([queryDate, z.literal('')]).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(26),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 export function customerValueRoutes(): Router {
   const r = Router();
 
   // Custom Data Points
   r.get('/data-points', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<DataPointRow>(DATA_POINTS_TABLE, { orderBy: 'ref', orderDir: 'asc', limit: 500 });
+    const rows = await dbForRequest(req).selectMany<DataPointRow>(DATA_POINTS_TABLE, { orderBy: 'ref', orderDir: 'asc', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'customer-value.data-points');
     sendOk(res, rows.map(dataPointDto));
   }));
   r.post('/data-points', requireRole('admin', 'manager'), validateBody(dataPointSchema), asyncHandler(async (req, res) => {
@@ -151,68 +174,40 @@ export function customerValueRoutes(): Router {
   }));
 
   // Payout & Revenue Rules
-  r.get('/rules', asyncHandler(async (req, res) => {
+  r.get('/rules', validateQuery(rulesQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'all');
+    const f = res.locals.query as z.infer<typeof rulesQuery>;
     const params: unknown[] = [networkId];
     let where = 'network_id = $1';
-    if (statusParam !== 'all') { params.push(statusParam); where += ` AND status = $${params.length}`; }
-
-    // Client-side filters — build a boolean expression for each optional filter.
-    const has = (key: string): boolean => {
-      const v = req.query[key];
-      return typeof v === 'string' && v.length > 0;
-    };
-    if (has('advertiser')) {
-      const ids = String(req.query['advertiser']!).split(',').filter(Boolean);
-      const placeholders = ids.map((_, i) => `$${params.length + i + 1}`).join(',');
-      where += ` AND apply_advertisers_mode = 'specific' AND apply_advertiser_ids && ARRAY[${placeholders}]`;
-      params.push(...ids);
-    }
-    if (has('offer')) {
-      const ids = String(req.query['offer']!).split(',').filter(Boolean);
-      const placeholders = ids.map((_, i) => `$${params.length + i + 1}`).join(',');
-      where += ` AND apply_offers_mode = 'specific' AND apply_offer_ids && ARRAY[${placeholders}]`;
-      params.push(...ids);
-    }
-    if (has('partner')) {
-      const ids = String(req.query['partner']!).split(',').filter(Boolean);
-      const placeholders = ids.map((_, i) => `$${params.length + i + 1}`).join(',');
-      where += ` AND apply_partners_mode = 'specific' AND apply_partner_ids && ARRAY[${placeholders}]`;
-      params.push(...ids);
-    }
-    if (has('grouping')) {
-      const vals = String(req.query['grouping']!).split(',');
-      const placeholders = vals.map((_, i) => `$${params.length + i + 1}`).join(',');
-      where += ` AND conversion_event_grouping IN (${placeholders})`;
-      params.push(...vals);
-    }
-    if (has('dataPoint')) {
-      const dpIds = String(req.query['dataPoint']!).split(',').filter(Boolean);
-      const placeholders = dpIds.map((_, i) => `$${params.length + i + 1}`).join(',');
-      params.push(...dpIds);
+    const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
+    // Every value below is zod-validated (uuids / enums) and bound as a parameter — never inlined.
+    if (f.status && f.status !== 'all') where += ` AND status = ${p(f.status)}`;
+    if (f.advertiser) where += ` AND apply_advertisers_mode = 'specific' AND apply_advertiser_ids && ${p(f.advertiser)}::uuid[]`;
+    if (f.offer) where += ` AND apply_offers_mode = 'specific' AND apply_offer_ids && ${p(f.offer)}::uuid[]`;
+    if (f.partner) where += ` AND apply_partners_mode = 'specific' AND apply_partner_ids && ${p(f.partner)}::uuid[]`;
+    if (f.grouping) where += ` AND conversion_event_grouping = ANY (${p(f.grouping)}::text[])`;
+    if (f.dataPoint) {
       where += ` AND EXISTS (SELECT 1 FROM jsonb_array_elements(conditions) AS cond
-                           WHERE cond->>'dataPointId' = ANY (ARRAY[${placeholders}]::uuid[]))`;
+                           WHERE cond->>'dataPointId' = ANY (${p(f.dataPoint)}::text[]))`;
     }
-    if (has('metricType')) {
-      const types = String(req.query['metricType']!).split(',');
-      const typePlaceholders = types.map((_, i) => `$${params.length + i + 1}`).join(',');
-      params.push(...types);
+    if (f.metricType) {
       where += ` AND EXISTS (SELECT 1 FROM customer_data_points dp
                            WHERE dp.network_id = customer_value_rules.network_id
-                             AND dp.data_type = ANY (ARRAY[${typePlaceholders}])
+                             AND dp.data_type = ANY (${p(f.metricType)}::text[])
                              AND EXISTS (SELECT 1 FROM jsonb_array_elements(customer_value_rules.conditions) AS cond
-                                         WHERE cond->>'dataPointId' = dp.id))`;
+                                         WHERE cond->>'dataPointId' = dp.id::text))`;
     }
-    if (has('cycleDuration')) {
-      const vals = String(req.query['cycleDuration']!).split(',');
-      const parts = vals.map((v) => {
-        if (v === 'continuous') return "goal_cycle = 'continuous'";
-        return `goal_cycle = 'recurring' AND recurring_duration = '${v}'`;
-      }).join(' OR ');
-      where += ` AND (${parts})`;
+    if (f.cycleDuration) {
+      const continuous = f.cycleDuration.includes('continuous');
+      const durations = f.cycleDuration.filter((v) => v !== 'continuous');
+      const parts = [
+        ...(continuous ? ["goal_cycle = 'continuous'"] : []),
+        ...(durations.length ? [`(goal_cycle = 'recurring' AND recurring_duration = ANY (${p(durations)}::text[]))`] : []),
+      ];
+      where += ` AND (${parts.join(' OR ')})`;
     }
-    const { rows } = await query<RuleRow>(`SELECT * FROM ${RULES_TABLE} WHERE ${where} ORDER BY ref ASC LIMIT 1000`, params);
+    const { rows } = await query<RuleRow>(`SELECT * FROM ${RULES_TABLE} WHERE ${where} ORDER BY ref ASC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'customer-value.rules');
     sendOk(res, rows.map(ruleDto));
   }));
   r.post('/rules', requireRole('admin', 'manager'), validateBody(ruleSchema), asyncHandler(async (req, res) => {
@@ -242,14 +237,15 @@ export function customerValueRoutes(): Router {
 
   // Conversion Events Report — real debugging tool: enter a User ID, see every conversion that
   // carried it, the Custom Data Point values found on each, and which rule (if any) fired.
-  r.get('/conversion-events', asyncHandler(async (req, res) => {
-    const userId = typeof req.query['userId'] === 'string' ? req.query['userId'] : '';
+  r.get('/conversion-events', validateQuery(conversionEventsQuery), asyncHandler(async (req, res) => {
+    const q = res.locals.query as z.infer<typeof conversionEventsQuery>;
+    const userId = q.userId ?? '';
     if (!userId) return sendOk(res, { userId: '', events: [] });
     const networkId = req.scope!.networkId;
-    const from = typeof req.query['from'] === 'string' ? req.query['from'] : null;
-    const to = typeof req.query['to'] === 'string' ? req.query['to'] : null;
-    const limit = Math.min(Math.max(Number(req.query['limit']) || 26, 1), 500);
-    const offset = Math.max(Number(req.query['offset']) || 0, 0);
+    const from = q.from || null;
+    const to = q.to || null;
+    const limit = q.limit;
+    const offset = q.offset;
 
     const { rows: dataPoints } = await query<DataPointRow>(
       `SELECT id, name, data_type, parameter_key FROM ${DATA_POINTS_TABLE} WHERE network_id = $1`, [networkId],
@@ -269,7 +265,7 @@ export function customerValueRoutes(): Router {
          FROM conversions c
          JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
          LEFT JOIN customer_value_rule_firings f ON f.conversion_id = c.conversion_id AND f.network_id = c.network_id
-         LEFT JOIN customer_value_rules cvr ON cvr.id = f.rule_id
+         LEFT JOIN customer_value_rules cvr ON cvr.id = f.rule_id AND cvr.network_id = c.network_id
         WHERE ${where}
         ORDER BY c.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,

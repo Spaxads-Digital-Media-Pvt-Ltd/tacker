@@ -9,7 +9,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -69,15 +70,20 @@ const updateSchema = baseSchema.partial();
 export function couponCodesRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  // UI label 'paused' maps to the DB's 'disabled'; 'expired' is stored as-is (offer_coupons CHECK
+  // allows active|expired|disabled). An unknown status is a 422 (it used to mean "all").
+  const listQuery = z.object({ status: z.enum(['all', 'active', 'paused', 'expired']).default('active') });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'active');
+    const { status: statusParam } = res.locals.query as z.infer<typeof listQuery>;
     const params: unknown[] = [networkId];
     let where = 'c.network_id = $1';
     if (statusParam === 'active') { where += ` AND c.status = 'active'`; }
     else if (statusParam === 'paused') { where += ` AND c.status = 'disabled'`; }
+    else if (statusParam === 'expired') { where += ` AND c.status = 'expired'`; }
     // 'all' → no extra filter
-    const { rows } = await query<JoinedRow>(`${SELECT} WHERE ${where} ORDER BY c.created_at DESC LIMIT 1000`, params);
+    const { rows } = await query<JoinedRow>(`${SELECT} WHERE ${where} ORDER BY c.created_at DESC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'coupon-codes.list');
     sendOk(res, rows.map(dto));
   }));
 

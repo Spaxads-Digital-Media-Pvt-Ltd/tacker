@@ -16,6 +16,8 @@ import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { assertSameNetwork, assertAllSameNetwork } from '../../../lib/db/ownership.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 
 const LINKS = 'smart_links';
@@ -80,7 +82,8 @@ export function smartLinksRoutes(): Router {
   const r = Router();
 
   r.get('/', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<LinkRow>(LINKS, { where: {}, orderBy: 'created_at', limit: 500 });
+    const rows = await dbForRequest(req).selectMany<LinkRow>(LINKS, { where: {}, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'smart-links.list');
     const { rows: revRows } = await query<{ smart_link_id: string; revenue: string }>(
       `SELECT cl.smart_link_id, COALESCE(SUM(c.revenue), 0)::text AS revenue
        FROM clicks cl JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
@@ -103,6 +106,10 @@ export function smartLinksRoutes(): Router {
   r.post('/', requireRole('admin', 'manager'), validateBody(createLinkSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof createLinkSchema>;
+    const networkId = req.scope!.networkId;
+    await assertSameNetwork(networkId, 'offers', b.catchAllOfferId, 'catchAllOfferId');
+    await assertSameNetwork(networkId, 'tracking_domains', b.trackingDomainId, 'trackingDomainId');
+    await assertAllSameNetwork(networkId, 'offers', b.items.map((i) => i.offerId), 'items.offerId');
     const row = await db.insert<LinkRow>(LINKS, {
       name: b.name, status: b.status, labels: b.labels ?? null, force_ssl: b.forceSsl, show_to_partners: b.showToPartners,
       tracking_domain_id: b.trackingDomainId ?? null, redirect_mechanism: b.redirectMechanism, catch_all_offer_id: b.catchAllOfferId ?? null,
@@ -140,6 +147,10 @@ export function smartLinksRoutes(): Router {
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateLinkSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof updateLinkSchema>;
+    const networkId = req.scope!.networkId;
+    await assertSameNetwork(networkId, 'offers', b.catchAllOfferId, 'catchAllOfferId');
+    await assertSameNetwork(networkId, 'tracking_domains', b.trackingDomainId, 'trackingDomainId');
+    await assertAllSameNetwork(networkId, 'offers', b.items?.map((i) => i.offerId), 'items.offerId');
     const patch: Record<string, unknown> = {};
     if (b.name !== undefined) patch['name'] = b.name;
     if (b.status !== undefined) patch['status'] = b.status;

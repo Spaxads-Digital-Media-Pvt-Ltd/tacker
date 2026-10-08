@@ -6,7 +6,7 @@
  * a real Supabase magic-link for the advertiser's OWN linked portal account, mirroring the same
  * pattern already shipped for Partners.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Link, useNavigate } from 'react-router-dom';
@@ -18,7 +18,11 @@ import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { TableActionsMenu, } from './AdvertisersTableActions';
 import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
-import type { Advertiser, DashboardUser } from '../../types';
+import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../lib/filterChips';
+import { pagedPath, fetchAllPages, useDebounced, sortParams, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
+import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
+import type { Advertiser, DashboardUser, PagedList } from '../../types';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
 interface TagAssignment { tagId: string; entityId: string }
@@ -37,9 +41,9 @@ function todayStartIso(): string {
   return d.toISOString();
 }
 
-function StatusFilterSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; onChange: (v: string) => void; statusOpts: readonly string[] }) {
   const { open, setOpen, ref } = useDropdown();
-  const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...STATUS_OPTS.map((s) => ({ value: s, label: STATUS_LABEL[s], dot: STATUS_DOT[s] }))];
+  const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...statusOpts.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s, dot: STATUS_DOT[s] ?? 'bg-fg-muted' }))];
   const current = options.find((o) => o.value === value) ?? options[0]!;
   return (
     <div ref={ref} className="relative">
@@ -139,8 +143,18 @@ function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onCh
 
 type Tab = 'existing' | 'pending' | 'unverified';
 
+const SORT_OPTIONS: SortOption[] = [
+  { value: 'createdAt:desc', label: 'Newest first' },
+  { value: 'createdAt:asc', label: 'Oldest first' },
+  { value: 'name:asc', label: 'Name A–Z' },
+  { value: 'name:desc', label: 'Name Z–A' },
+  { value: 'id:desc', label: 'ID (high → low)' },
+  { value: 'id:asc', label: 'ID (low → high)' },
+  { value: 'updatedAt:desc', label: 'Recently modified' },
+];
+const DEFAULT_SORT = 'createdAt:desc';
+
 export default function Advertisers() {
-  const { data, loading, error, refetch } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: users } = useQuery<DashboardUser[]>('/api/users');
   const { data: tags } = useQuery<Tag[]>('/api/tags');
   const { data: tagAssignments } = useQuery<TagAssignment[]>('/api/tags/assignments?entityType=advertiser');
@@ -164,19 +178,34 @@ export default function Advertisers() {
   const [tab, setTab] = useState<Tab>('existing');
   const [status, setStatus] = useState('');
   const [nameQ, setNameQ] = useState('');
+  const searchQ = useDebounced(nameQ.trim());
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
+  const [sort, setSort] = useState(DEFAULT_SORT);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exportNote, setExportNote] = useState<string | null>(null);
+  // Selection is per page: any filter/search/sort/tab change → page 1 and an empty selection; a page
+  // change also clears it, so bulk actions only ever see rows the current view shows.
+  const resetView = () => { setPage(1); setSelected(new Set()); };
+  const goPage = (p: number) => { setPage(p); setSelected(new Set()); };
+  // Existing / Unverified tabs exclude pending advertisers, so "Pending" is only offered on its own tab.
+  const tabStatusOpts = tab === 'pending' ? STATUS_OPTS : STATUS_OPTS.filter((s) => s !== 'pending');
 
-  const tabbed = useMemo<Advertiser[]>(() => {
-    const rows = data ?? [];
-    if (tab === 'pending') return rows.filter((a) => a.status === 'pending');
-    if (tab === 'unverified') return rows.filter((a) => a.status !== 'pending' && !a.hasPortalAccount);
-    return rows.filter((a) => a.status !== 'pending' && a.hasPortalAccount);
-  }, [data, tab]);
-  const pendingCount = useMemo(() => (data ?? []).filter((a) => a.status === 'pending').length, [data]);
-  const unverifiedCount = useMemo(() => (data ?? []).filter((a) => a.status !== 'pending' && !a.hasPortalAccount).length, [data]);
+  // The server does tab/status/search/drawer filters, sort and paging (GET /api/advertisers?paged=1).
+  const listParams = useMemo<PagedParams>(() => ({
+    tab, status: status || undefined, search: searchQ || undefined, ...sortParams(sort),
+    accountManagerId: filters['accountManager']?.join(','), salesManagerId: filters['salesManager']?.join(','),
+    billingFrequency: filters['billingFrequency'], label: filters['label']?.join(','),
+  }), [tab, status, searchQ, sort, filters]);
+  const { data, loading, error, refetch } = useQuery<PagedList<Advertiser>>(pagedPath('/api/advertisers', { ...listParams, page, pageSize: PAGE_SIZE }));
+  const rows = useMemo(() => data?.rows ?? [], [data]);
+  const total = data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // A delete can shrink the set under the current page — step back to the last real page.
+  useEffect(() => { if (data && page > pageCount) setPage(pageCount); }, [data, page, pageCount]);
+  const pendingCount = data?.counts['tabs']?.['pending'] ?? 0;
+  const unverifiedCount = data?.counts['tabs']?.['unverified'] ?? 0;
 
   const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
 
@@ -187,28 +216,27 @@ export default function Advertisers() {
     { key: 'label', label: 'Label', options: (tags ?? []).map((t) => ({ value: t.id, label: t.name })) },
   ], [users, tags]);
 
-  const filtered = useMemo(() => {
-    let rows = tabbed;
-    if (status) rows = rows.filter((a: Advertiser) => a.status === status);
-    if (nameQ.trim()) {
-      const q = nameQ.trim().toLowerCase();
-      rows = rows.filter((a: Advertiser) => a.name.toLowerCase().includes(q));
-    }
-    const has = (key: string) => (filters[key]?.length ?? 0) > 0;
-    if (has('accountManager')) rows = rows.filter((a: Advertiser) => a.accountManagerId && filters['accountManager']!.includes(a.accountManagerId));
-    if (has('salesManager')) rows = rows.filter((a: Advertiser) => a.salesManagerId && filters['salesManager']!.includes(a.salesManagerId));
-    if (has('billingFrequency')) rows = rows.filter((a: Advertiser) => a.billingFrequency && filters['billingFrequency']!.includes(a.billingFrequency));
-    if (has('label')) rows = rows.filter((a: Advertiser) => (tagIdsByAdv.get(a.id) ?? []).some((t) => filters['label']!.includes(t)));
-    return rows;
-  }, [tabbed, status, nameQ, filters, tagIdsByAdv]);
+  // Applied-filter chips: status + search + every drawer value, with names instead of uuids.
+  const chips = useMemo<FilterChip[]>(() => [
+    ...(status ? [{ key: '__status', value: status, label: 'Status', valueLabel: STATUS_LABEL[status] ?? status }] : []),
+    ...(searchQ ? [{ key: '__search', value: searchQ, label: 'Search', valueLabel: searchQ }] : []),
+    ...chipsFromValues(FILTER_CATEGORIES, filters),
+  ], [status, searchQ, filters, FILTER_CATEGORIES]);
+  const removeChip = (c: FilterChip) => {
+    if (c.key === '__status') setStatus('');
+    else if (c.key === '__search') setNameQ('');
+    else setFilters((f) => withoutValue(f, c.key, c.value));
+    resetView();
+  };
+  const clearAll = () => { setStatus(''); setNameQ(''); setFilters({}); resetView(); };
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const allOnPageSelected = paged.length > 0 && paged.every((a) => selected.has(a.id));
+  // Bulk actions / export only ever act on selected rows of the current page (selection is per page).
+  const visibleSelected = useMemo(() => rows.filter((a) => selected.has(a.id)), [rows, selected]);
+  const allOnPageSelected = rows.length > 0 && rows.every((a) => selected.has(a.id));
   const toggleAllOnPage = () => setSelected((s) => {
     const next = new Set(s);
-    if (allOnPageSelected) paged.forEach((a) => next.delete(a.id));
-    else paged.forEach((a) => next.add(a.id));
+    if (allOnPageSelected) rows.forEach((a) => next.delete(a.id));
+    else rows.forEach((a) => next.add(a.id));
     return next;
   });
   const toggleRow = (id: string) => setSelected((s) => {
@@ -260,9 +288,22 @@ export default function Advertisers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnOrder, shownColumns, selected, tagIdsByAdv, todayRevenueByAdv, users]);
 
-  const exportRows = (format: 'csv' | 'json') => {
-    const rows = selected.size > 0 ? filtered.filter((a) => selected.has(a.id)) : filtered;
-    const mapped = rows.map((a) => ({
+  // Export = the selected rows, or EVERY row matching the current filters (walked page by page on
+  // the server, capped at EXPORT_MAX_ROWS with a visible note).
+  const exportRows = async (format: 'csv' | 'json') => {
+    setExportNote(null);
+    let rowsOut: Advertiser[] = visibleSelected;
+    if (rowsOut.length === 0) {
+      try {
+        const all = await fetchAllPages<Advertiser>('/api/advertisers', listParams);
+        rowsOut = all.rows;
+        if (all.capped) setExportNote(`Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} of ${all.total.toLocaleString()} matching advertisers — narrow the filters to export the rest.`);
+      } catch (e) {
+        setExportNote(`Export failed: ${e instanceof Error ? e.message : 'request error'}`);
+        return;
+      }
+    }
+    const mapped = rowsOut.map((a) => ({
       id: a.ref ?? a.id, name: a.name, status: a.status, accountManager: userName(a.accountManagerId) ?? '',
       salesManager: userName(a.salesManagerId) ?? '', billingFrequency: a.billingFrequency ?? '',
       currency: a.defaultCurrency, contactEmail: a.contactEmail ?? '', createdAt: a.createdAt, modifiedAt: a.updatedAt ?? '',
@@ -292,7 +333,10 @@ export default function Advertisers() {
 
       <div className="mb-4 flex items-center gap-6 border-b border-border">
         {([['existing', 'Existing', 0], ['pending', 'Pending', pendingCount], ['unverified', 'Unverified', unverifiedCount]] as const).map(([key, label, count]) => (
-          <button key={key} type="button" onClick={() => { setTab(key); setPage(1); setSelected(new Set()); }}
+          <button key={key} type="button" onClick={() => {
+            setTab(key); resetView();
+            if (key !== 'pending' && status === 'pending') setStatus('');
+          }}
             className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-small font-medium transition-colors ${tab === key ? 'border-accent text-fg' : 'border-transparent text-fg-secondary hover:text-fg'}`}>
             {label}
             {count > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-fg px-1.5 text-tiny font-bold text-surface">{count}</span>}
@@ -305,9 +349,10 @@ export default function Advertisers() {
         <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
           <div className="relative max-sm:w-full">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-full sm:!w-56 !pl-8" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); setPage(1); }} />
+            <input className="input !w-full sm:!w-56 !pl-8" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
           </div>
-          <StatusFilterSelect value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
+          <StatusFilterSelect statusOpts={tabStatusOpts} value={status} onChange={(v) => { setStatus(v); resetView(); }} />
+          <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
           <div className="relative">
             <button type="button" onClick={() => setFilterOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
@@ -320,39 +365,42 @@ export default function Advertisers() {
             </button>
             {filterOpen && (
               <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
-                onApply={(v) => { setFilters(v); setPage(1); }} onClose={() => setFilterOpen(false)} />
+                onApply={(v) => { setFilters(v); resetView(); }} onClose={() => setFilterOpen(false)} />
             )}
           </div>
           <TableActionsMenu
-            selectedIds={[...selected]}
+            selectedIds={visibleSelected.map((a) => a.id)}
             allColumns={ALL_COLUMNS}
             columnOrder={columnOrder}
             hiddenColumns={hiddenColumns}
             onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
-            onExport={exportRows}
-            appliedFilters={{ status: status || undefined, search: nameQ || undefined }}
+            onExport={(f) => { void exportRows(f); }}
+            appliedFilters={{
+              status: status || undefined, search: searchQ || undefined,
+              // Drawer filters too, with user / label UUIDs shown by name.
+              ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v.length).map(([k, v]) => [k, v.map((x) =>
+                FILTER_CATEGORIES.find((c) => c.key === k)?.options.find((o) => o.value === x)?.label ?? x).join(', ')])),
+            }}
           />
         </div>
       </div>
 
-      {loading ? <StateBlock><Spinner /></StateBlock>
+      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-3" />
+      <ExportNotice message={exportNote} onDismiss={() => setExportNote(null)} />
+
+      {loading && !data ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
-        : !filtered.length ? <StateBlock>No advertisers match these filters.</StateBlock>
+        : !rows.length ? <StateBlock>{loading ? <Spinner /> : 'No advertisers match these filters.'}</StateBlock>
         : (
           <>
             <div className="mb-2 flex items-center gap-2 text-tiny text-fg-secondary">
               <input type="checkbox" className="chk" checked={allOnPageSelected} onChange={toggleAllOnPage} />
-              {selected.size > 0 ? `${selected.size} selected` : 'Select all on page'}
+              {visibleSelected.length > 0 ? `${visibleSelected.length} selected on this page` : 'Select all on page'}
             </div>
-            <Table columns={displayedColumns} rows={paged} rowKey={(a) => a.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
-            <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
-              <span>{filtered.length} Total</span>
-              <div className="flex items-center gap-1">
-                <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="rounded-[var(--radius)] border border-border px-2 py-1 disabled:opacity-40">‹</button>
-                <span className="px-1 tabular-nums">{page} / {pageCount}</span>
-                <button disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))} className="rounded-[var(--radius)] border border-border px-2 py-1 disabled:opacity-40">›</button>
-              </div>
+            <div className={loading ? 'opacity-60 transition-opacity' : undefined}>
+              <Table columns={displayedColumns} rows={rows} rowKey={(a) => a.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
             </div>
+            <PagerFooter total={total} page={page} pageSize={PAGE_SIZE} onPage={goPage} loading={loading} />
           </>
         )}
     </>

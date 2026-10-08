@@ -120,6 +120,8 @@ export default function MarketplaceConnections() {
   }, [tab, connected, awaiting, q, appliedFilters, sortDir]);
 
   const pagedRows = useMemo(() => rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [rows, page]);
+  // Clamp after a refetch/delete/filter shrinks the list so we never sit on an empty last page.
+  useEffect(() => { const last = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); if (page > last) setPage(last); }, [rows.length, page]);
 
   const decide = async (id: string, status: 'active' | 'inactive', name: string) => {
     setApplyingId(id);

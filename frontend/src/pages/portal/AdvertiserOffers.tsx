@@ -80,7 +80,7 @@ export default function AdvertiserOffers() {
  </div>
  {loading ? <StateBlock><Spinner /></StateBlock>
  : error ? <StateBlock>{error}</StateBlock>
- : rows.length === 0 ? <StateBlock>You have no offers yet.</StateBlock>
+ : rows.length === 0 ? <StateBlock>{q.trim() || status ? 'No offers match your search or filters.' : 'You have no offers yet.'}</StateBlock>
  : (
  <>
  <Table columns={columns} rows={rows} rowKey={(o) => o.id} />

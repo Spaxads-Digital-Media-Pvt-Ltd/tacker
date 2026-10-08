@@ -8,11 +8,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
+import { containsPattern } from '../../../lib/db/like.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { findOrCreateTag } from '../../../lib/db/tags.js';
 import { requireRole } from '../auth.js';
 
 const TABLE = 'partner_tiers';
@@ -22,13 +25,16 @@ interface Row {
   margin_pct: string; is_default: boolean; created_at: string; updated_at: string;
 }
 interface PartnerPreview { id: string; ref: number; name: string }
-interface ListRow extends Row { partners_preview: PartnerPreview[]; partners_total: number; labels: string[] }
+interface ListRow extends Row { partners_preview: PartnerPreview[]; partners_total: number; labels: string[]; member_ids?: string[] }
 
 const dto = (r: ListRow) => ({
   id: r.id, name: r.name, status: r.status, description: r.description,
   marginPct: Number(r.margin_pct), isDefault: r.is_default,
   labels: r.labels ?? [],
   partners: r.partners_preview ?? [], partnersTotal: Number(r.partners_total ?? 0),
+  // Only the list query selects every member id (for the frontend Partner filter); single-row
+  // responses keep their existing shape.
+  ...(r.member_ids ? { memberIds: r.member_ids } : {}),
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
@@ -57,14 +63,9 @@ const updateSchema = baseSchema.partial();
 
 /** Replace a partner_tier's label set with `labels` (find-or-create each tag, then diff taggings). */
 async function setLabels(db: ReturnType<typeof dbForRequest>, tierId: string, labels: string[]): Promise<void> {
-  const existingTags = await db.selectMany<{ id: string; name: string }>('tags', { where: {}, limit: 1000 });
+  // Indexed per-name lookup (the old load-500-and-search missed tags past the list ceiling).
   const tagIds: string[] = [];
-  for (const name of labels) {
-    const hit = existingTags.find((t) => t.name.toLowerCase() === name.toLowerCase());
-    if (hit) { tagIds.push(hit.id); continue; }
-    const created = await db.insert<{ id: string }>('tags', { name, color: null });
-    tagIds.push(created.id);
-  }
+  for (const name of labels) tagIds.push((await findOrCreateTag(db.scope.networkId, name)).id);
   await db.delete('taggings', { entity_type: 'partner_tier', entity_id: tierId });
   for (const tagId of tagIds) {
     await db.insert('taggings', { tag_id: tagId, entity_type: 'partner_tier', entity_id: tierId });
@@ -102,18 +103,22 @@ async function labelsFor(networkId: string, tierId: string): Promise<string[]> {
 export function partnerTiersRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  const listQuery = z.object({ status: z.enum(['all', 'active', 'paused', 'deleted']).default('active') });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'active');
+    const { status: statusParam } = res.locals.query as z.infer<typeof listQuery>;
     const statuses = statusParam === 'all' ? ['active', 'paused', 'deleted'] : [statusParam];
     const { rows } = await query<ListRow>(
       `SELECT t.*,
               COALESCE((
                 SELECT json_agg(json_build_object('id', p.id, 'ref', p.ref, 'name', p.name) ORDER BY m.created_at)
-                FROM (SELECT * FROM partner_tier_members WHERE tier_id = t.id ORDER BY created_at LIMIT 2) m
-                JOIN publishers p ON p.id = m.publisher_id
+                FROM (SELECT * FROM partner_tier_members WHERE tier_id = t.id AND network_id = t.network_id ORDER BY created_at LIMIT 2) m
+                JOIN publishers p ON p.id = m.publisher_id AND p.network_id = t.network_id
               ), '[]') AS partners_preview,
-              (SELECT COUNT(*) FROM partner_tier_members WHERE tier_id = t.id) AS partners_total,
+              (SELECT COUNT(*) FROM partner_tier_members WHERE tier_id = t.id AND network_id = t.network_id) AS partners_total,
+              (SELECT COALESCE(array_agg(m.publisher_id::text ORDER BY m.created_at), '{}')
+                 FROM partner_tier_members m
+                WHERE m.tier_id = t.id AND m.network_id = t.network_id) AS member_ids,
               COALESCE((
                 SELECT json_agg(tg.name ORDER BY tg.name)
                 FROM taggings tgg JOIN tags tg ON tg.id = tgg.tag_id
@@ -121,9 +126,10 @@ export function partnerTiersRoutes(): Router {
               ), '[]') AS labels
          FROM partner_tiers t
         WHERE t.network_id = $1 AND t.status = ANY($2::text[])
-        ORDER BY t.created_at DESC LIMIT 500`,
+        ORDER BY t.created_at DESC LIMIT ${LIST_CAP}`,
       [networkId, statuses],
     );
+    warnIfCapped(rows, LIST_CAP, 'partner-tiers.list');
     sendOk(res, rows.map(dto));
   }));
 
@@ -147,7 +153,7 @@ export function partnerTiersRoutes(): Router {
     if (!row) throw notFound('Tier not found');
     const labels = await labelsFor(req.scope!.networkId, row.id);
     const { rows: countRows } = await query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM partner_tier_members WHERE tier_id = $1`, [row.id],
+      `SELECT COUNT(*)::text AS count FROM partner_tier_members WHERE tier_id = $1 AND network_id = $2`, [row.id, req.scope!.networkId],
     );
     sendOk(res, dto({ ...row, partners_preview: [], partners_total: Number(countRows[0]?.count ?? 0), labels }));
   }));
@@ -169,7 +175,7 @@ export function partnerTiersRoutes(): Router {
     await writeAudit(req, { action: 'partner_tier.update', entityType: 'partner_tier', entityId: req.params.id, before, after: row });
     const labels = await labelsFor(req.scope!.networkId, row.id);
     const { rows: countRows } = await query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM partner_tier_members WHERE tier_id = $1`, [row.id],
+      `SELECT COUNT(*)::text AS count FROM partner_tier_members WHERE tier_id = $1 AND network_id = $2`, [row.id, req.scope!.networkId],
     );
     sendOk(res, dto({ ...row, partners_preview: [], partners_total: Number(countRows[0]?.count ?? 0), labels }));
   }));
@@ -184,22 +190,28 @@ export function partnerTiersRoutes(): Router {
     sendOk(res, dto({ ...(updated ?? row), partners_preview: [], partners_total: 0, labels: [] }));
   }));
 
-  r.get('/:id/members', asyncHandler(async (req, res) => {
+  const membersQuery = z.object({
+    status: z.enum(['all', 'active', 'pending', 'inactive']).default('active'),
+    search: z.string().max(200).optional(),
+  });
+  r.get('/:id/members', validateQuery(membersQuery), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const tier = await db.selectOne(TABLE, { id: req.params.id });
     if (!tier) throw notFound('Tier not found');
-    const search = String(req.query['search'] ?? '').trim();
-    const status = String(req.query['status'] ?? 'active');
-    const conditions = [`m.tier_id = $1`, `p.network_id = $2`];
+    const f = res.locals.query as z.infer<typeof membersQuery>;
+    const search = (f.search ?? '').trim();
+    const status = f.status;
+    const conditions = [`m.tier_id = $1`, `m.network_id = $2`, `p.network_id = $2`];
     const params: unknown[] = [req.params.id, req.scope!.networkId];
     if (status !== 'all') { conditions.push(`p.status = $${params.length + 1}`); params.push(status); }
-    if (search) { conditions.push(`p.name ILIKE $${params.length + 1}`); params.push(`%${search}%`); }
+    if (search) { conditions.push(`p.name ILIKE $${params.length + 1} ESCAPE '\\'`); params.push(containsPattern(search)); }
     const { rows } = await query<{ id: string; ref: number; name: string; status: string }>(
       `SELECT p.id, p.ref, p.name, p.status FROM partner_tier_members m
          JOIN publishers p ON p.id = m.publisher_id
-        WHERE ${conditions.join(' AND ')} ORDER BY p.name LIMIT 500`,
+        WHERE ${conditions.join(' AND ')} ORDER BY p.name LIMIT ${LIST_CAP}`,
       params,
     );
+    warnIfCapped(rows, LIST_CAP, 'partner-tiers.members');
     sendOk(res, rows.map((p) => ({ id: p.id, ref: p.ref, name: p.name, status: p.status })));
   }));
 
@@ -209,10 +221,11 @@ export function partnerTiersRoutes(): Router {
     if (!tier) throw notFound('Tier not found');
     const { rows } = await query<{ id: string; offer_id: string; ref: number; name: string; apply_margin: boolean; auto_approve_partners: boolean }>(
       `SELECT tof.id, tof.offer_id, o.ref, o.name, tof.apply_margin, tof.auto_approve_partners
-         FROM partner_tier_offers tof JOIN offers o ON o.id = tof.offer_id
-        WHERE tof.tier_id = $1 AND tof.network_id = $2 ORDER BY o.name LIMIT 500`,
+         FROM partner_tier_offers tof JOIN offers o ON o.id = tof.offer_id AND o.network_id = tof.network_id
+        WHERE tof.tier_id = $1 AND tof.network_id = $2 ORDER BY o.name LIMIT ${LIST_CAP}`,
       [req.params.id, req.scope!.networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'partner-tiers.offers');
     sendOk(res, rows.map((o) => ({ id: o.id, offerId: o.offer_id, offerRef: o.ref, offerName: o.name, applyMargin: o.apply_margin, autoApprovePartners: o.auto_approve_partners })));
   }));
 

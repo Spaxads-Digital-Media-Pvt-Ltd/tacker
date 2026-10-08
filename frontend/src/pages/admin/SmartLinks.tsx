@@ -74,8 +74,6 @@ function TableActionsMenu({ rows, offerName }: { rows: SmartLink[]; offerName: (
               </div>
             )}
           </div>
-          <button type="button" title="Not available yet" onClick={close}
-            className="block w-full whitespace-nowrap px-3 py-1.5 text-left text-small text-fg-muted hover:bg-page">Columns Customization</button>
         </>
       )}
     </MenuPopover>
@@ -109,7 +107,7 @@ export default function SmartLinks() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'all' | (typeof STATUSES)[number]>('active');
   const [page, setPage] = useState(1);
-  const copy = useMutation((id: string) => api.post(`/api/smart-links/${id}/copy`, {}));
+  const copy = useMutation(async (id: string) => { await api.post(`/api/smart-links/${id}/copy`, {}); return true; });
   const [copyErr, setCopyErr] = useState<string | null>(null);
   const [copyErrRowId, setCopyErrRowId] = useState<string | null>(null);
 
@@ -181,6 +179,8 @@ export default function SmartLinks() {
     return out;
   }, [data, status, q, fMech, fPartners, fCatch, fRoutes, fDomain, fLabel, itemsByLink]);
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Clamp after a refetch/delete/filter shrinks the list so we never sit on an empty last page.
+  useEffect(() => { const last = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); if (page > last) setPage(last); }, [rows.length, page]);
 
   return (
     <>
@@ -213,8 +213,8 @@ export default function SmartLinks() {
         : (
           <>
             {copyErr && (
-              <div className="mb-3 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">
-                {copyErr}
+              <div role="alert" className="mb-3 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">
+                {copyErr}{copy.error ? ` ${copy.error}` : ''}
               </div>
             )}
             <TableScroll>
@@ -270,7 +270,7 @@ export default function SmartLinks() {
                         <td className="px-4 py-3">
                           <div className="flex justify-end">
                             <RowMenu onEdit={() => nav(`/app/smart-links/${r.id}/edit`)}
-                              onCopy={async () => { setCopyErr(null); setCopyErrRowId(null); try { await copy.run(r.id); refetch(); } catch { setCopyErr(copy.error ?? 'Failed to copy smart link.'); setCopyErrRowId(r.id); } }}
+                              onCopy={async () => { setCopyErr(null); setCopyErrRowId(null); /* run() never throws: null = failed */ if (await copy.run(r.id)) refetch(); else { setCopyErr('Failed to copy smart link.'); setCopyErrRowId(r.id); } }}
                               onReport={() => nav(`/app/reports/smartlink?smartLinkId=${r.id}`)} />
                           </div>
                         </td>

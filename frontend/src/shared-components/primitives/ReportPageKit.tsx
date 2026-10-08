@@ -12,17 +12,26 @@
  * as "—" rather than a fabricated 0, so the tile/column is structurally present but honestly marked
  * untracked.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreVertical, Search } from 'lucide-react';
 import type { FilterCategory, FilterValues } from './CategorizedFilters';
+import { chipsFromValues, withoutValue, type ChipCategory, type FilterChip } from '../../lib/filterChips';
+import { cleanFilterValues } from '../../lib/reportFilterState';
+import { api } from '../../lib/api';
+import { downloadCsv, downloadXlsx } from '../../lib/export';
 
 export interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
 export interface AggResult { rows: AggRow[]; total?: number }
 
 export const METRICS_PARAM = 'clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score,epc';
 export const DASH = '—';
-export const DEVICES = ['desktop', 'mobile', 'tablet'] as const;
+// Every device class the tracker records (ua-parser-js `device.type`, 'desktop' when absent — see
+// api-backend/src/lib/ua.ts).
+export const DEVICES = ['desktop', 'mobile', 'tablet', 'console', 'smarttv', 'wearable', 'embedded'] as const;
+const DEVICE_LABEL: Record<string, string> = { smarttv: 'Smart TV' };
+export const deviceLabel = (d: string): string => DEVICE_LABEL[d] ?? d.charAt(0).toUpperCase() + d.slice(1);
+export const DEVICE_OPTIONS: { value: string; label: string }[] = DEVICES.map((d) => ({ value: d, label: deviceLabel(d) }));
 
 export const money = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
@@ -170,6 +179,113 @@ export function reportingFiltersCount(v: ReportingFiltersValue): number {
   return dimCount(v.filters) + dimCount(v.exclusions) + Object.values(v.metricFilters).filter((m) => m?.value).length + (v.ignoreFailTraffic ? 1 : 0);
 }
 
+/** Chip keys for the non-dimension parts of the applied report filters. */
+const METRIC_CHIP_PREFIX = 'metric:';
+const IGNORE_FAIL_CHIP = 'others:ignoreFail';
+
+/**
+ * Every applied Reporting Filter as a chip — dimension filters, exclusions, metric filters and
+ * "Ignore Fail Traffic" — so the chip row (and its "Clear all") covers everything the flyout set.
+ */
+export function reportingChips(categories: ChipCategory[], v: ReportingFiltersValue): FilterChip[] {
+  const out = [...chipsFromValues(categories, v.filters), ...chipsFromValues(categories, v.exclusions, { exclude: true })];
+  for (const f of METRIC_FILTER_FIELDS) {
+    const e = v.metricFilters[f.key];
+    if (!e || e.value === '' || Number.isNaN(Number(e.value))) continue;
+    out.push({ key: `${METRIC_CHIP_PREFIX}${f.key}`, value: e.value, label: f.label, valueLabel: `${OP_LABEL[e.op]} ${e.value}` });
+  }
+  if (v.ignoreFailTraffic) out.push({ key: IGNORE_FAIL_CHIP, value: '1', label: 'Others', valueLabel: 'Ignore Fail Traffic' });
+  return out;
+}
+
+/** The applied filters with one chip (from `reportingChips`) removed. */
+export function withoutReportingChip(v: ReportingFiltersValue, chip: FilterChip): ReportingFiltersValue {
+  if (chip.key === IGNORE_FAIL_CHIP) return { ...v, ignoreFailTraffic: false };
+  if (chip.key.startsWith(METRIC_CHIP_PREFIX)) {
+    const metricFilters = { ...v.metricFilters };
+    delete metricFilters[chip.key.slice(METRIC_CHIP_PREFIX.length) as MetricFilterKey];
+    return { ...v, metricFilters };
+  }
+  return chip.exclude
+    ? { ...v, exclusions: withoutValue(v.exclusions, chip.key, chip.value) }
+    : { ...v, filters: withoutValue(v.filters, chip.key, chip.value) };
+}
+
+export const EMPTY_REPORTING_FILTERS: ReportingFiltersValue = { filters: {}, exclusions: {}, metricFilters: {}, ignoreFailTraffic: false };
+
+// ── Export ALL rows matching the applied filters (not just the visible page) ──
+
+/** Hard ceiling on one export — past this the file is truncated and the page says so. */
+export const EXPORT_ROW_CAP = 10_000;
+
+/**
+ * Page through a list endpoint until it is exhausted (or `cap` rows are collected). `path(limit,
+ * offset)` builds each page's URL; the response is either a plain array (detail endpoints) or
+ * `{ rows, total }` (/api/reports). Pages are fetched sequentially so a big export never floods the API.
+ */
+export async function fetchAllPages<T>(
+  path: (limit: number, offset: number) => string,
+  pageSize: number,
+  cap: number = EXPORT_ROW_CAP,
+): Promise<{ rows: T[]; capped: boolean; total: number | null }> {
+  const rows: T[] = [];
+  let total: number | null = null;
+  for (let offset = 0; offset < cap; offset += pageSize) {
+    const limit = Math.min(pageSize, cap - offset);
+    const res = await api.get<T[] | { rows: T[]; total?: number }>(path(limit, offset));
+    const page = Array.isArray(res) ? res : (res?.rows ?? []);
+    if (!Array.isArray(res) && typeof res?.total === 'number') total = res.total;
+    rows.push(...page);
+    if (page.length < limit) return { rows, capped: false, total };
+    if (total != null && rows.length >= total) return { rows, capped: false, total };
+  }
+  // Collected exactly `cap` rows — capped unless the source is known to hold no more.
+  return { rows, capped: total == null || total > rows.length, total };
+}
+
+export interface ExportState { busy: boolean; note: string | null; error: string | null }
+
+/**
+ * Export runner shared by the report pages: loads every matching row (via `fetchAllPages` or any
+ * loader), writes CSV/Excel, and reports a visible note when the export hit EXPORT_ROW_CAP.
+ */
+export function useReportExport() {
+  const [state, setState] = useState<ExportState>({ busy: false, note: null, error: null });
+  const run = useCallback(async (
+    format: 'csv' | 'xlsx',
+    filename: string,
+    load: () => Promise<{ rows: Record<string, unknown>[]; capped?: boolean; total?: number | null }>,
+  ) => {
+    setState({ busy: true, note: null, error: null });
+    try {
+      const { rows, capped, total } = await load();
+      if (!rows.length) { setState({ busy: false, note: 'Nothing to export for the applied filters.', error: null }); return; }
+      if (format === 'csv') downloadCsv(`${filename}.csv`, rows); else await downloadXlsx(`${filename}.xlsx`, rows);
+      setState({
+        busy: false, error: null,
+        note: capped
+          ? `Export capped at the first ${rows.length.toLocaleString()} rows${total ? ` of ${total.toLocaleString()}` : ''} — narrow the date range or filters to export the rest.`
+          : null,
+      });
+    } catch (e) {
+      setState({ busy: false, note: null, error: e instanceof Error ? e.message : 'Export failed' });
+    }
+  }, []);
+  const dismiss = useCallback(() => setState((s) => ({ ...s, note: null, error: null })), []);
+  return { ...state, run, dismiss };
+}
+
+/** Inline status line for `useReportExport` — "Exporting…", the cap note, or the error. */
+export function ExportStatus({ busy, note, error, onDismiss }: ExportState & { onDismiss: () => void }) {
+  if (!busy && !note && !error) return null;
+  return (
+    <div role="status" className={`mb-3 flex items-center justify-between gap-2 rounded-[var(--radius)] border px-3 py-2 text-tiny ${error ? 'border-danger bg-danger-bg text-danger-text' : 'border-border bg-surface text-fg-secondary'}`}>
+      <span>{busy ? 'Exporting all matching rows…' : error ? `Export failed: ${error}` : note}</span>
+      {!busy && <button type="button" onClick={onDismiss} className="text-fg-muted hover:text-fg" aria-label="Dismiss">×</button>}
+    </div>
+  );
+}
+
 /**
  * "Reporting Filters" — verified against the live reference: a root menu of Filters / Metric
  * Filters / Exclusions / Others, each drilling into its own submenu. Filters/Exclusions share the
@@ -182,9 +298,18 @@ export function reportingFiltersCount(v: ReportingFiltersValue): number {
  * filter. Others › "Ignore Fail Traffic" is real: it excludes fraud-flagged clicks from the
  * aggregation entirely (api-backend/src/lib/reporting/postgres.ts `excludeInvalid`).
  */
+type FlyoutSection = 'filters' | 'metric' | 'exclusions' | 'others';
+const ALL_SECTIONS: FlyoutSection[] = ['filters', 'metric', 'exclusions', 'others'];
+
 export function ReportingFiltersFlyout({
-  dimCategories, value, onApply, onClose,
-}: { dimCategories: FilterCategory[]; value: ReportingFiltersValue; onApply: (v: ReportingFiltersValue) => void; onClose: () => void }) {
+  dimCategories, value, onApply, onClose, sections = ALL_SECTIONS, singleSelect = false,
+}: {
+  dimCategories: FilterCategory[]; value: ReportingFiltersValue; onApply: (v: ReportingFiltersValue) => void; onClose: () => void;
+  /** Only the sections this page's API actually honours — never show controls that do nothing. */
+  sections?: FlyoutSection[];
+  /** One value per category, for endpoints that accept a single id per filter. */
+  singleSelect?: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [path, setPath] = useState<string[]>([]);
   const [draftFilters, setDraftFilters] = useState<FilterValues>(value.filters);
@@ -230,7 +355,7 @@ export function ReportingFiltersFlyout({
             ['metric', 'Metric Filters', metricCount],
             ['exclusions', 'Exclusions', dimCount(draftExclusions)],
             ['others', 'Others', draftIgnoreFail ? 1 : 0],
-          ] as const).map(([seg, label, n]) => (
+          ] as const).filter(([seg]) => sections.includes(seg)).map(([seg, label, n]) => (
             <button key={seg} type="button" onClick={() => push(seg)}
               className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
               <span className="flex items-center gap-2">{label}{n > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">{n}</span>}</span>
@@ -279,7 +404,12 @@ export function ReportingFiltersFlyout({
       const cat = dimCategories.find((c) => c.key === path[1])!;
       const selected = draft[cat.key] ?? [];
       const filteredOptions = cat.options.filter((o) => o.label.toLowerCase().includes(leafSearch.toLowerCase()));
-      const toggle = (v: string) => setDraft((d) => ({ ...d, [cat.key]: selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v] }));
+      const toggle = (v: string) => setDraft((d) => ({
+        ...d,
+        [cat.key]: selected.includes(v) ? selected.filter((x) => x !== v) : singleSelect ? [v] : [...selected, v],
+      }));
+      // "Select All" selects what the search currently shows, not hidden options too.
+      const selectVisible = () => setDraft((d) => ({ ...d, [cat.key]: Array.from(new Set([...selected, ...filteredOptions.map((o) => o.value)])) }));
       body = (
         <div className="w-80">
           <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
@@ -287,8 +417,12 @@ export function ReportingFiltersFlyout({
               <ChevronLeft size={15} /> {cat.label}
             </button>
             <div className="flex items-center gap-2 text-tiny">
-              <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => setDraft((d) => ({ ...d, [cat.key]: cat.options.map((o) => o.value) }))}>Select All</button>
-              <span className="text-border">|</span>
+              {!singleSelect && <>
+                <button type="button" className="font-medium text-accent-text hover:underline disabled:opacity-40" disabled={filteredOptions.length === 0} onClick={selectVisible}>
+                  {leafSearch ? 'Select Shown' : 'Select All'}
+                </button>
+                <span className="text-border">|</span>
+              </>}
               <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => setDraft((d) => ({ ...d, [cat.key]: [] }))}>Clear</button>
             </div>
           </div>
@@ -300,11 +434,15 @@ export function ReportingFiltersFlyout({
             {filteredOptions.length === 0 && <p className="px-3 py-3 text-small text-fg-muted">No options.</p>}
             {filteredOptions.map((o) => (
               <label key={o.value} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small text-fg hover:bg-accent-subtle">
-                <input type="checkbox" className="chk" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
+                <input type={singleSelect ? 'radio' : 'checkbox'} name={singleSelect ? `rf-${cat.key}` : undefined} className="chk"
+                  checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
                 {o.label}
               </label>
             ))}
           </div>
+          {!singleSelect && selected.length > 1 && (
+            <p className="border-t border-border px-3 py-1.5 text-tiny text-fg-muted">Matches any of the {selected.length} selected (other categories are combined with AND).</p>
+          )}
           <Footer />
         </div>
       );
@@ -318,6 +456,7 @@ export function ReportingFiltersFlyout({
           </button>
           <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraftMetric({})}>Clear</button>
         </div>
+        <p className="border-b border-border px-3 py-2 text-tiny text-fg-muted">Applied to the rows already loaded on this page (after the server-side filters).</p>
         <div className="max-h-80 space-y-2.5 overflow-y-auto p-3">
           {METRIC_FILTER_FIELDS.map((f) => {
             const entry = draftMetric[f.key];
@@ -355,6 +494,9 @@ export function ReportingFiltersFlyout({
           <input type="checkbox" className="chk" checked={draftIgnoreFail} onChange={(e) => setDraftIgnoreFail(e.target.checked)} />
           Ignore Fail Traffic
         </label>
+        <p className="border-t border-border px-3 py-2 text-tiny text-fg-muted">
+          Leaves out fraud-flagged clicks and the conversions those clicks produced.
+        </p>
         <Footer />
       </div>
     );
@@ -458,8 +600,37 @@ export interface SavedReportConfig<OrderMetric extends string> {
   from: string; to: string; filters: FilterValues; exclusions: FilterValues; metricFilters: MetricFilters; ignoreFailTraffic: boolean;
   orderBy: OrderMetric; orderDir: 'asc' | 'desc'; hiddenColumns: string[];
 }
+/**
+ * Saved presets live in localStorage and outlive code changes, so every field is shape-checked and
+ * defaulted here — an old or hand-edited entry must never crash a report page on load.
+ */
 export function loadSavedReports<OrderMetric extends string>(key: string): { name: string; config: SavedReportConfig<OrderMetric> }[] {
-  try { return JSON.parse(localStorage.getItem(`tracker.savedReports.${key}`) ?? '[]'); } catch { return []; }
+  let raw: unknown;
+  try { raw = JSON.parse(localStorage.getItem(`tracker.savedReports.${key}`) ?? '[]'); } catch { return []; }
+  if (!Array.isArray(raw)) return [];
+  const out: { name: string; config: SavedReportConfig<OrderMetric> }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const { name, config } = item as { name?: unknown; config?: Record<string, unknown> };
+    if (typeof name !== 'string' || !config || typeof config !== 'object') continue;
+    const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
+    out.push({
+      name,
+      config: {
+        ...(config as object),
+        from: str(config['from'], daysAgo(30)),
+        to: str(config['to'], todayStr()),
+        filters: cleanFilterValues(config['filters']),
+        exclusions: cleanFilterValues(config['exclusions']),
+        metricFilters: (config['metricFilters'] && typeof config['metricFilters'] === 'object' ? config['metricFilters'] : {}) as MetricFilters,
+        ignoreFailTraffic: config['ignoreFailTraffic'] === true,
+        orderBy: str(config['orderBy'], 'clicks') as OrderMetric,
+        orderDir: config['orderDir'] === 'asc' ? 'asc' : 'desc',
+        hiddenColumns: Array.isArray(config['hiddenColumns']) ? (config['hiddenColumns'] as unknown[]).filter((c): c is string => typeof c === 'string') : [],
+      },
+    });
+  }
+  return out;
 }
 export function persistSavedReports<OrderMetric extends string>(key: string, list: { name: string; config: SavedReportConfig<OrderMetric> }[]): void {
   try { localStorage.setItem(`tracker.savedReports.${key}`, JSON.stringify(list)); } catch { /* best-effort */ }
