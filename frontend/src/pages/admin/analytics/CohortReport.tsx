@@ -30,6 +30,7 @@ import {
   type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts } from '../Reports';
+import { countryLabel } from '../../../data/geo';
 
 interface SmartLink { id: string; name: string }
 interface CohortRow { date: string; topLevel: number; days: (number | null)[] }
@@ -106,7 +107,7 @@ export default function CohortReport() {
   const { data: countryAgg } = useQuery<{ rows: { dimensions: Record<string, string | null> }[] }>('/api/reports?groupBy=country&metrics=clicks&limit=200');
   const countryOptions = useMemo(() => (countryAgg?.rows ?? [])
     .map((r) => r.dimensions['country']).filter((c): c is string => Boolean(c)).sort()
-    .map((c) => ({ value: c, label: c })), [countryAgg]);
+    .map((c) => ({ value: c, label: countryLabel(c) })).sort((a, b) => a.label.localeCompare(b.label)), [countryAgg]);
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },

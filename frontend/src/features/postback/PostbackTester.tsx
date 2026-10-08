@@ -7,13 +7,14 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
 import { Field } from '../../shared-components/primitives/ui';
+import { countryOptions } from '../../data/geo';
 
 const EXAMPLE_HOST = 'example.com';
 const EXAMPLE_URL = `https://${EXAMPLE_HOST}/pb?cid={click_id}&payout={payout}&txn={txn_id}&geo={country}&device={device}`;
 
 interface TestResult { ok: boolean; status: number | null; ms: number; finalUrl: string; error: string | null; body: string | null }
 
-const COUNTRIES = ['US', 'GB', 'IN', 'CA', 'AU', 'DE', 'FR', 'BR', 'JP', 'SG'];
+const COUNTRIES = countryOptions();
 const DEVICES = ['desktop', 'mobile', 'tablet'];
 
 function isExampleUrl(url: string): boolean {
@@ -82,7 +83,7 @@ export function PostbackTester({ testPath, hint }: { testPath: string; hint?: st
           </Field>
           <Field label="GEO (country)">
             <select className="input" value={country} onChange={(e) => setCountry(e.target.value)}>
-              {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {COUNTRIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </Field>
           <Field label="Device">

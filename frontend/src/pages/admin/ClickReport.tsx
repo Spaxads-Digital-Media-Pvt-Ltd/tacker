@@ -29,6 +29,10 @@ import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitive
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { daysAgo, todayStr, toIso, DASH, DEVICES } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
+import { countryLabel, countryName, regionName, useRegions } from '../../data/geo';
+import { formatDateTime } from '../../lib/datetime';
+import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZone';
+import { useReportTimeZone } from '../../lib/useReportTimeZone';
 
 interface SmartLink { id: string; name: string }
 interface ClickRow {
@@ -48,13 +52,6 @@ const ALL_COLUMNS = [
   'Converted', 'Offer', 'Partner', 'Country', 'Region', 'City', 'ISP', 'Device', 'OS', 'Browser',
   'Unique', 'Fraud', 'IP Address', 'Sub1', 'Sub2', 'Sub3', 'Sub4', 'Sub5',
 ] as const;
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const date = `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${d.getUTCFullYear()}`;
-  const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
-  return `${date} ${time}`;
-}
 
 export default function ClickReport() {
   const [from, setFrom] = useState(daysAgo(7));
@@ -115,8 +112,8 @@ export default function ClickReport() {
   const countryOptions = useMemo(() => (countryAgg?.rows ?? [])
     .map((r) => r.dimensions['country'])
     .filter((c): c is string => Boolean(c))
-    .sort()
-    .map((c) => ({ value: c, label: c })), [countryAgg]);
+    .map((c) => ({ value: c, label: countryLabel(c) }))
+    .sort((a, b) => a.label.localeCompare(b.label)), [countryAgg]);
 
   const offerMap = useMemo(() => new Map((offers ?? []).map((o) => [o.id, o.name])), [offers]);
   const pubMap = useMemo(() => new Map((publishers ?? []).map((p) => [p.id, p.name])), [publishers]);
@@ -135,6 +132,11 @@ export default function ClickReport() {
   const smartLinkIdFilter = appliedFilters['smartLink']?.[0];
   const countryFilter = appliedFilters['country']?.[0];
   const deviceFilter = appliedFilters['device']?.[0];
+  // Timestamps follow the filtered country's zone (else network/browser) — re-formatting only.
+  const zone = useReportTimeZone(countryFilter);
+  const regions = useRegions();
+  const formatDate = (iso: string) => formatDateTime(iso, zone.tz);
+  const regionLabel = (r: ClickRow) => (r.region ? (regionName(regions, r.region, r.country) ?? r.region) : DASH);
 
   const qs = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
@@ -169,7 +171,7 @@ export default function ClickReport() {
     if (!searchNeedle) return true;
     const offerName = offerMap.get(r.offer_id) ?? '';
     const pubName = r.publisher_id ? (pubMap.get(r.publisher_id) ?? '') : '';
-    return [offerName, pubName, r.country, r.city, r.ip, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
+    return [offerName, pubName, r.country, r.country ? countryName(r.country) : null, r.city, r.ip, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
       .some((v) => (v ?? '').toLowerCase().includes(searchNeedle));
   }), [filteredRows, searchNeedle, offerMap, pubMap]);
 
@@ -187,7 +189,8 @@ export default function ClickReport() {
   const exportRows = () => rows.map((r) => ({
     date: formatDate(r.created_at), converted: r.converted ? 'Yes' : 'No',
     offer: offerMap.get(r.offer_id) ?? r.offer_id, partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
-    country: r.country ?? DASH, region: r.region ?? DASH, city: r.city ?? DASH, isp: r.isp ?? DASH,
+    timezone: zone.tz,
+    country: r.country ? countryName(r.country) : DASH, region: regionLabel(r), city: r.city ?? DASH, isp: r.isp ?? DASH,
     device: r.device ?? DASH, os: r.os ?? DASH, browser: r.browser ?? DASH, unique: r.is_unique ? 'Y' : 'N',
     fraud: r.fraud_score, ip: r.ip ?? DASH,
     sub1: r.sub1 ?? DASH, sub2: r.sub2 ?? DASH, sub3: r.sub3 ?? DASH, sub4: r.sub4 ?? DASH, sub5: r.sub5 ?? DASH,
@@ -214,11 +217,11 @@ export default function ClickReport() {
       <div className="card mb-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <label className="label">From</label>
+            <label className="label">From (UTC)</label>
             <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           </div>
           <div>
-            <label className="label">To</label>
+            <label className="label">To (UTC)</label>
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <div className="relative">
@@ -245,7 +248,8 @@ export default function ClickReport() {
       <div className="card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {!groupBy && <TimeZoneSelect zone={zone} />}
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
               <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -316,7 +320,7 @@ export default function ClickReport() {
               <table className="premium-table">
                 <thead>
                   <tr>
-                    <th >Date</th>
+                    <th title={zone.tz}>Date <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
                     {shown.has('Converted') && <th >Converted</th>}
                     {shown.has('Offer') && <th >Offer</th>}
                     {shown.has('Partner') && <th >Partner</th>}
@@ -344,8 +348,8 @@ export default function ClickReport() {
                       {shown.has('Converted') && <td className="px-4 py-3">{r.converted ? <Check size={15} className="text-success-text" /> : <span className="text-fg-muted">{DASH}</span>}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
                       {shown.has('Partner') && <td className="px-4 py-3">{r.publisher_id ? <Link to={`/app/publishers/${r.publisher_id}`} className="text-accent-text hover:underline">{pubMap.get(r.publisher_id) ?? r.publisher_id}</Link> : DASH}</td>}
-                      {shown.has('Country') && <td className="px-4 py-3">{r.country ?? DASH}</td>}
-                      {shown.has('Region') && <td className="px-4 py-3">{r.region ?? DASH}</td>}
+                      {shown.has('Country') && <td className="px-4 py-3" title={r.country ?? undefined}>{r.country ? countryName(r.country) : DASH}</td>}
+                      {shown.has('Region') && <td className="px-4 py-3" title={r.region ?? undefined}>{regionLabel(r)}</td>}
                       {shown.has('City') && <td className="px-4 py-3">{r.city ?? DASH}</td>}
                       {shown.has('ISP') && <td className="px-4 py-3">{r.isp ?? DASH}</td>}
                       {shown.has('Device') && <td className="px-4 py-3 capitalize">{r.device ?? DASH}</td>}

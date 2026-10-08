@@ -23,6 +23,7 @@ import { type FilterCategory, type FilterValues } from '../../shared-components/
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { Advertiser, Offer, Publisher } from '../../types';
+import { countryLabel } from '../../data/geo';
 import {
   type AggResult, METRICS_PARAM, DASH, DEVICES, money, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
@@ -169,7 +170,7 @@ export default function AdvertiserReport() {
     .map((r) => r.dimensions['country'])
     .filter((c): c is string => Boolean(c))
     .sort()
-    .map((c) => ({ value: c, label: c })), [countryAgg]);
+    .map((c) => ({ value: c, label: countryLabel(c) })).sort((a, b) => a.label.localeCompare(b.label)), [countryAgg]);
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },

@@ -37,6 +37,7 @@ import {
   type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
+import { countryLabel } from '../../../data/geo';
 
 interface Goal { id: string; name: string; eventName: string | null; isDefault: boolean; sortOrder: number }
 interface FunnelResult { stages: { goalId: string; count: number }[]; breakdown: { key: string; counts: Record<string, number> }[] }
@@ -187,7 +188,7 @@ export default function FunnelReport() {
   const { data: countryAgg } = useQuery<{ rows: { dimensions: Record<string, string | null> }[] }>('/api/reports?groupBy=country&metrics=clicks&limit=200');
   const countryOptions = useMemo(() => (countryAgg?.rows ?? [])
     .map((r) => r.dimensions['country']).filter((c): c is string => Boolean(c)).sort()
-    .map((c) => ({ value: c, label: c })), [countryAgg]);
+    .map((c) => ({ value: c, label: countryLabel(c) })).sort((a, b) => a.label.localeCompare(b.label)), [countryAgg]);
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'partner', label: 'Partner', options: opts.publishers },
     { key: 'country', label: 'Country', options: countryOptions },
