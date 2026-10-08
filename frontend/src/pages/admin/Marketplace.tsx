@@ -21,10 +21,6 @@ import { appliedFilterCount } from '../../shared-components/primitives/Categoriz
 import type { MarketplaceAdvertiser } from '../../types';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Connected', pending: 'Pending', inactive: 'Inactive' };
-const INERT_FILTER_LABELS = [
-  'Promotional Methods Accepted', 'Payment Methods Available',
-  'Geo Markets Targeted', 'Countries Targeted', 'Device Types Targeted',
-] as const;
 
 interface Filters { categories: string[]; payoutModels: string[]; connectionStatus: string[]; funnel: 'any' | 'funnel' | 'single' }
 const EMPTY_FILTERS: Filters = { categories: [], payoutModels: [], connectionStatus: [], funnel: 'any' };
@@ -330,7 +326,6 @@ export default function Marketplace() {
                 categories={filterCategories}
                 values={filtersToValues(filters)}
                 singleSelectKeys={['funnel']}
-                inertLabels={[...INERT_FILTER_LABELS]}
                 onApply={(v) => {
                   const next = valuesToFilters(v);
                   setFilters(next);

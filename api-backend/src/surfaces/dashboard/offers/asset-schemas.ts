@@ -81,12 +81,13 @@ export const createScheduledActionSchema = z.object({
 export const updateScheduledActionSchema = createScheduledActionSchema.partial();
 export type CreateScheduledAction = z.infer<typeof createScheduledActionSchema>;
 
+export const POSTBACK_LEVELS = ['conversion', 'event', 'cpc'] as const;
 export const createOfferPostbackSchema = z.object({
   publisherId: z.string().uuid(),
   url: z.string().url().max(2000),
   method: z.enum(['GET', 'POST']).default('GET'),
   event: z.string().max(100).nullable().optional(),
-  level: z.enum(['conversion', 'event', 'cpc']).default('conversion'),
+  level: z.enum(POSTBACK_LEVELS).default('conversion'),
 });
 export const updateOfferPostbackSchema = createOfferPostbackSchema.partial().extend({
   status: z.enum(['active', 'disabled']).optional(),

@@ -11,7 +11,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
+import { queryDate } from '../../../lib/http/query-params.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -121,8 +123,8 @@ const SELECT = `
     FROM reporting_adjustments a
     JOIN publishers p ON p.id = a.publisher_id AND p.network_id = a.network_id
     JOIN offers o ON o.id = a.offer_id AND o.network_id = a.network_id
-    LEFT JOIN advertisers adv ON adv.id = o.advertiser_id
-    LEFT JOIN users u ON u.id = a.last_modified_by
+    LEFT JOIN advertisers adv ON adv.id = o.advertiser_id AND adv.network_id = a.network_id
+    LEFT JOIN users u ON u.id = a.last_modified_by AND u.network_id = a.network_id
 `;
 
 async function listDTO(networkId: string, row: Row & JoinFields) {
@@ -143,30 +145,55 @@ async function listDTO(networkId: string, row: Row & JoinFields) {
   };
 }
 
+/** Longest span one adjustment / preview may cover — eachDate() materialises one entry per day. */
+const MAX_RANGE_DAYS = 366;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Round-trip check: Date.parse accepts impossible days like 2024-02-30 (rolls over), Postgres doesn't.
+const dayParam = queryDate.refine(
+  (s) => {
+    if (!DAY_RE.test(s)) return false;
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  },
+  { message: 'must be a date (YYYY-MM-DD)' },
+);
+
+function rangeDays(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+}
+/** Throws 400 unless from <= to and the inclusive span is at most MAX_RANGE_DAYS. */
+function assertRange(from: string, to: string): void {
+  if (from > to) throw badRequest('dateFrom must be on or before dateTo');
+  if (rangeDays(from, to) > MAX_RANGE_DAYS) throw badRequest(`date range cannot exceed ${MAX_RANGE_DAYS} days`);
+}
+const orderedRange = (q: { dateFrom?: string; dateTo?: string }) => !q.dateFrom || !q.dateTo || q.dateFrom <= q.dateTo;
+const listQuery = z.object({ dateFrom: dayParam.optional(), dateTo: dayParam.optional() })
+  .refine(orderedRange, { message: 'dateFrom must be on or before dateTo', path: ['dateFrom'] });
+const previewQuery = z.object({
+  publisherId: z.string().uuid(), offerId: z.string().uuid(), dateFrom: dayParam, dateTo: dayParam,
+})
+  .refine(orderedRange, { message: 'dateFrom must be on or before dateTo', path: ['dateFrom'] })
+  .refine((q) => rangeDays(q.dateFrom, q.dateTo) <= MAX_RANGE_DAYS, { message: `date range cannot exceed ${MAX_RANGE_DAYS} days`, path: ['dateTo'] });
+
 export function reportingAdjustmentsRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const dateFrom = String(req.query['dateFrom'] ?? '');
-    const dateTo = String(req.query['dateTo'] ?? '');
+    const { dateFrom, dateTo } = res.locals.query as z.infer<typeof listQuery>;
     const params: unknown[] = [networkId];
     let where = 'a.network_id = $1';
     if (dateFrom && dateTo) { where += ` AND a.date_to >= $2::date AND a.date_from <= $3::date`; params.push(dateFrom, dateTo); }
-    const { rows } = await query<Row & JoinFields>(`${SELECT} WHERE ${where} ORDER BY a.created_at DESC LIMIT 500`, params);
+    const { rows } = await query<Row & JoinFields>(`${SELECT} WHERE ${where} ORDER BY a.created_at DESC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'reporting-adjustments.list');
     const dtos = await Promise.all(rows.map((row) => listDTO(networkId, row)));
     sendOk(res, dtos);
   }));
 
   /** Real per-day originals for a not-yet-created adjustment — powers the Add form's table. */
-  r.get('/preview', asyncHandler(async (req, res) => {
+  r.get('/preview', validateQuery(previewQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const publisherId = String(req.query['publisherId'] ?? '');
-    const offerId = String(req.query['offerId'] ?? '');
-    const dateFrom = String(req.query['dateFrom'] ?? '');
-    const dateTo = String(req.query['dateTo'] ?? '');
-    if (!publisherId || !offerId || !dateFrom || !dateTo) throw badRequest('publisherId, offerId, dateFrom and dateTo are required');
-    if (dateFrom > dateTo) throw badRequest('dateFrom must be on or before dateTo');
+    const { publisherId, offerId, dateFrom, dateTo } = res.locals.query as z.infer<typeof previewQuery>;
     const db = dbForRequest(req);
     const pub = await db.selectOne<{ id: string; name: string }>('publishers', { id: publisherId });
     if (!pub) throw badRequest('publisherId does not belong to this network');
@@ -192,7 +219,7 @@ export function reportingAdjustmentsRoutes(): Router {
   });
   const createSchema = z.object({
     publisherId: z.string().uuid(), offerId: z.string().uuid(),
-    dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    dateFrom: dayParam, dateTo: dayParam,
     days: z.array(daySchema).default([]),
   });
   const updateSchema = createSchema.partial();
@@ -219,7 +246,7 @@ export function reportingAdjustmentsRoutes(): Router {
   r.post('/', requireRole('admin', 'manager'), validateBody(createSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof createSchema>;
-    if (b.dateFrom > b.dateTo) throw badRequest('dateFrom must be on or before dateTo');
+    assertRange(b.dateFrom, b.dateTo);
     const pub = await db.selectOne('publishers', { id: b.publisherId });
     if (!pub) throw badRequest('publisherId does not belong to this network');
     const offer = await db.selectOne('offers', { id: b.offerId });
@@ -258,6 +285,9 @@ export function reportingAdjustmentsRoutes(): Router {
     const before = await db.selectOne<Row>(TABLE, { id: req.params.id });
     if (!before) throw notFound('Adjustment not found');
     const b = req.body as z.infer<typeof updateSchema>;
+    if (b.dateFrom !== undefined || b.dateTo !== undefined) {
+      assertRange(b.dateFrom ?? toDateStr(before.date_from), b.dateTo ?? toDateStr(before.date_to));
+    }
     if (b.publisherId) { const pub = await db.selectOne('publishers', { id: b.publisherId }); if (!pub) throw badRequest('publisherId does not belong to this network'); }
     if (b.offerId) { const offer = await db.selectOne('offers', { id: b.offerId }); if (!offer) throw badRequest('offerId does not belong to this network'); }
     const patch: Record<string, unknown> = {};

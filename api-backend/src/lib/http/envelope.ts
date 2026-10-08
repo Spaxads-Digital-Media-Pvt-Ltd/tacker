@@ -78,6 +78,17 @@ export function errorHandler(
  return;
  }
 
+ // A value Postgres couldn't cast — a malformed uuid in a path param (`/offers/not-a-uuid`), a bad
+ // number/date in a filter — is a caller mistake: answer with the same 422 validation envelope that
+ // zod validation uses instead of a 500. 22P02 = invalid_text_representation (uuid/int/bool/enum
+ // input), 22007/22008 = invalid/out-of-range datetime. Logged at warn so a real code bug stays visible.
+ if (pgCode === '22P02' || pgCode === '22007' || pgCode === '22008') {
+ logger.warn({ err, path: _req.path }, 'rejected malformed value (postgres cast error)');
+ const body: ErrorEnvelope = { ok: false, error: { code: 'validation_failed', message: 'One of the values in the request is malformed (e.g. an invalid id or date).' } };
+ res.status(422).json(body);
+ return;
+ }
+
  // Unknown error — never leak internals to the caller (spec §3A/§12).
  logger.error({ err }, 'unhandled error');
  captureError(err, { path: _req.path, method: _req.method });

@@ -10,7 +10,7 @@
  *
  * All four dropdowns (Add / Table Actions / row kebab / Add Macro) use the shared MenuPopover so a
  * menu open never eats the first click on another trigger. Filter is a real SearchFilterDrawer
- * (Type / Offer / Partner visibility / Language / Size) over the fetched list. File "upload" is a
+ * (Type / Offer / Partner visibility) over the fetched list. File "upload" is a
  * genuine drag-or-browse that stores the bytes inline as a data: URI (no asset host in this build);
  * Bulk Add fans several files into one creative each; Preview renders the stored asset.
  */
@@ -434,7 +434,8 @@ export default function Creatives() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [editRow, setEditRow] = useState<Creative | null>(null);
   const [previewRow, setPreviewRow] = useState<Creative | null>(null);
-  const setStatusMutation = useMutation(({ id, status: s }: { id: string; status: string }) => api.patch(`/api/creatives/${id}`, { status: s }));
+  // Resolves true on success; useMutation.run resolves null (and sets .error) on failure.
+  const setStatusMutation = useMutation(async ({ id, status: s }: { id: string; status: string }) => { await api.patch(`/api/creatives/${id}`, { status: s }); return true; });
 
   // ── Filter drawer (client-side, over the fetched list — same pattern as Manage Offers /
   //    Smart Links / Offer Groups). Status + Search stay in the toolbar as quick filters. ──
@@ -442,13 +443,9 @@ export default function Creatives() {
   const [fType, setFType] = useState('');
   const [fOffer, setFOffer] = useState('');
   const [fVis, setFVis] = useState('');     // '' | 'yes' | 'no'
-  const [fLang, setFLang] = useState('');
-  const [fSize, setFSize] = useState('');
   const [dType, setDType] = useState('');
   const [dOffer, setDOffer] = useState('');
   const [dVis, setDVis] = useState('');
-  const [dLang, setDLang] = useState('');
-  const [dSize, setDSize] = useState('');
 
   const offerLabel = useCallback((id: string) => {
     const o = offers?.find((x) => x.id === id);
@@ -467,27 +464,19 @@ export default function Creatives() {
     }
     return [...byId].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
   }, [data, offerLabel]);
-  const langOptions = useMemo(
-    () => Array.from(new Set((data ?? []).map((r) => r.language).filter((x): x is string => Boolean(x)))).sort(),
-    [data],
-  );
-  const sizeOptions = useMemo(
-    () => Array.from(new Set((data ?? []).filter((r) => r.width && r.height).map((r) => `${r.width}×${r.height}`))).sort(),
-    [data],
-  );
 
   const openDrawer = () => {
-    setDType(fType); setDOffer(fOffer); setDVis(fVis); setDLang(fLang); setDSize(fSize);
+    setDType(fType); setDOffer(fOffer); setDVis(fVis);
     setDrawerOpen(true);
   };
   const applyDrawer = () => {
-    setFType(dType); setFOffer(dOffer); setFVis(dVis); setFLang(dLang); setFSize(dSize);
+    setFType(dType); setFOffer(dOffer); setFVis(dVis);
     setDrawerOpen(false); setPage(1);
   };
-  const clearDraft = () => { setDType(''); setDOffer(''); setDVis(''); setDLang(''); setDSize(''); };
+  const clearDraft = () => { setDType(''); setDOffer(''); setDVis(''); };
 
-  const appliedFilterCount = [fType, fOffer, fVis, fLang, fSize].filter(Boolean).length;
-  const draftFilterCount = [dType, dOffer, dVis, dLang, dSize].filter(Boolean).length;
+  const appliedFilterCount = [fType, fOffer, fVis].filter(Boolean).length;
+  const draftFilterCount = [dType, dOffer, dVis].filter(Boolean).length;
 
   const rows = useMemo(() => {
     let out = data ?? [];
@@ -496,11 +485,11 @@ export default function Creatives() {
     if (fType) out = out.filter((r) => r.type === fType);
     if (fOffer) out = out.filter((r) => r.offerId === fOffer);
     if (fVis) out = out.filter((r) => r.visibleToPartners === (fVis === 'yes'));
-    if (fLang) out = out.filter((r) => r.language === fLang);
-    if (fSize) out = out.filter((r) => r.width && r.height && `${r.width}×${r.height}` === fSize);
     return out;
-  }, [data, status, q, fType, fOffer, fVis, fLang, fSize]);
+  }, [data, status, q, fType, fOffer, fVis]);
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Clamp after a refetch/delete/filter shrinks the list so we never sit on an empty last page.
+  useEffect(() => { const last = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); if (page > last) setPage(last); }, [rows.length, page]);
   const showCol = (c: string) => !hiddenColumns.has(c);
 
   const appliedFilters: Record<string, string | undefined> = {
@@ -509,8 +498,6 @@ export default function Creatives() {
     Type: fType ? TYPE_LABEL[fType as CreativeType] : undefined,
     Offer: fOffer ? offerLabel(fOffer) : undefined,
     'Visible to partners': fVis || undefined,
-    Language: fLang || undefined,
-    Size: fSize || undefined,
   };
 
   return (
@@ -538,6 +525,9 @@ export default function Creatives() {
         </div>
       </div>
 
+      {setStatusMutation.error && (
+        <div role="alert" className="mb-3 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">Could not update the creative: {setStatusMutation.error}</div>
+      )}
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
         : !data || data.length === 0 ? <StateBlock>No creatives yet.</StateBlock>
@@ -583,7 +573,7 @@ export default function Creatives() {
                             canPreview={canPreview(r)}
                             onEdit={() => setEditRow(r)}
                             onPreview={() => setPreviewRow(r)}
-                            onSetStatus={async (s) => { await setStatusMutation.run({ id: r.id, status: s }); refetch(); }} />
+                            onSetStatus={async (s) => { if (await setStatusMutation.run({ id: r.id, status: s })) refetch(); }} />
                         </div>
                       </td>
                     </tr>
@@ -630,21 +620,6 @@ export default function Creatives() {
               <option value="yes">Visible to Partners</option>
               <option value="no">Not visible</option>
             </select>
-          </FieldBlock>
-
-          <FieldBlock label="Language">
-            <select className="input" value={dLang} onChange={(e) => setDLang(e.target.value)}>
-              <option value="">All Languages</option>
-              {langOptions.map((l) => <option key={l} value={l}>{l}</option>)}
-            </select>
-          </FieldBlock>
-
-          <FieldBlock label="Size">
-            <select className="input" value={dSize} onChange={(e) => setDSize(e.target.value)}>
-              <option value="">Any Size</option>
-              {sizeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <p className="mt-1 text-[11px] text-fg-muted">Width×height in pixels — set on Image and HTML creatives.</p>
           </FieldBlock>
         </SearchFilterDrawer>
       )}

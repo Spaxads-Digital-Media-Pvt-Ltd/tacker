@@ -11,6 +11,7 @@ import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import {
   createScheduledActionSchema,
@@ -151,23 +152,30 @@ export function automationRoutes(): Router {
 
   r.get('/scheduled-actions', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const status = (req.query.status as string | undefined) ?? 'all';
+    const status = (res.locals.query as z.infer<typeof listQuery>).status ?? 'all';
     const params: unknown[] = [networkId];
     let where = 'sa.network_id = $1';
-    if (status && status !== 'all') {
+    if (status !== 'all') {
       params.push(status);
       where += ` AND sa.status = $${params.length}`;
     }
-    const { rows } = await query<ScheduledActionRow>(
-      `SELECT sa.*, o.name AS offer_name, o.ref::text AS offer_ref
-       FROM ${TABLE} sa
+    // The table has no ref column, so the display ID is the row's creation order over the WHOLE
+    // network's table (numbered before the status filter) — stable no matter which filter is applied.
+    const { rows } = await query<ScheduledActionRow & { display_id: string }>(
+      `WITH numbered AS (
+         SELECT s.*, ROW_NUMBER() OVER (ORDER BY s.created_at, s.id) AS display_id
+           FROM ${TABLE} s WHERE s.network_id = $1
+       )
+       SELECT sa.*, o.name AS offer_name, o.ref::text AS offer_ref
+       FROM numbered sa
        JOIN offers o ON o.id = sa.offer_id AND o.network_id = sa.network_id
        WHERE ${where}
        ORDER BY sa.created_at DESC
-       LIMIT 500`,
+       LIMIT ${LIST_CAP}`,
       params,
     );
-    sendOk(res, rows.map((row, i) => toDto(row, rows.length - i)));
+    warnIfCapped(rows, LIST_CAP, 'automation.scheduled-actions');
+    sendOk(res, rows.map((row) => toDto(row, Number(row.display_id))));
   }));
 
   r.post(
@@ -249,11 +257,12 @@ export function automationRoutes(): Router {
   // --- Alert rules (Automation › Alerts) ---
   r.get('/alert-rules', validateQuery(alertListQuery), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
-    const status = (req.query.status as string | undefined) ?? 'all';
+    const status = (res.locals.query as z.infer<typeof alertListQuery>).status ?? 'all';
     const where = status === 'all' ? {} : { status };
     const rows = await db.selectMany<AlertRuleRow>(ALERT_RULES_TABLE, {
-      where, orderBy: 'created_at', limit: 500,
+      where, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP,
     });
+    warnIfCapped(rows, LIST_CAP, 'automation.alert-rules');
     sendOk(res, rows.map(alertRuleDto));
   }));
 
@@ -328,11 +337,12 @@ export function automationRoutes(): Router {
   // --- Webhooks (Automation › Webhooks) ---
   r.get('/webhooks', validateQuery(webhookListQuery), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
-    const status = (req.query.status as string | undefined) ?? 'all';
+    const status = (res.locals.query as z.infer<typeof webhookListQuery>).status ?? 'all';
     const where = status === 'all' ? {} : { status };
     const rows = await db.selectMany<WebhookRow>(WEBHOOKS_TABLE, {
-      where, orderBy: 'created_at', limit: 500,
+      where, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP,
     });
+    warnIfCapped(rows, LIST_CAP, 'automation.webhooks');
     sendOk(res, rows.map(webhookDto));
   }));
 

@@ -27,6 +27,9 @@ const STATUS_OPTIONS = [
 
 const ALL_COLUMNS = ['Default', 'ID', 'Name', 'Partners', 'Margin', 'Labels', 'Description', 'Created', 'Modified'] as const;
 
+/** All member ids when the list row carries them (`memberIds`), else the 2-member preview. */
+const memberIdsOf = (t: PartnerTier): string[] => t.memberIds ?? t.partners.map((p) => p.id);
+
 function SearchFieldSelect({ value, onChange }: { value: SearchField; onChange: (v: SearchField) => void }) {
   const { open, setOpen, ref } = useDropdown();
   const current = SEARCH_FIELDS.find((f) => f.value === value)!;
@@ -142,18 +145,23 @@ export default function TiersManage() {
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
   ], [allLabels, publishers]);
 
+  const pubNameById = useMemo(() => new Map((publishers ?? []).map((p) => [p.id, p.name])), [publishers]);
+
   const filtered = useMemo(() => {
     let rows = data ?? [];
     if (q.trim()) {
       const qq = q.trim().toLowerCase();
       if (searchField === 'name') rows = rows.filter((t) => t.name.toLowerCase().includes(qq));
-      else rows = rows.filter((t) => t.partners.some((p) => p.name.toLowerCase().includes(qq)));
+      else rows = rows.filter((t) => {
+        const previewNames = new Map(t.partners.map((p) => [p.id, p.name]));
+        return memberIdsOf(t).some((id) => (pubNameById.get(id) ?? previewNames.get(id) ?? '').toLowerCase().includes(qq));
+      });
     }
     const has = (key: string) => (filters[key]?.length ?? 0) > 0;
     if (has('label')) rows = rows.filter((t) => t.labels.some((l) => filters['label']!.includes(l)));
-    if (has('partner')) rows = rows.filter((t) => t.partners.some((p) => filters['partner']!.includes(p.id)));
+    if (has('partner')) rows = rows.filter((t) => memberIdsOf(t).some((id) => filters['partner']!.includes(id)));
     return rows;
-  }, [data, q, searchField, filters]);
+  }, [data, q, searchField, filters, pubNameById]);
 
   const columnsByHeader: Record<string, Column<PartnerTier>> = {
     Default: { header: 'Default', cell: (t) => (t.isDefault ? <span className="grid h-5 w-5 place-items-center rounded-full bg-success text-white">✓</span> : null) },

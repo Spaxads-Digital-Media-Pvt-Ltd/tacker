@@ -33,6 +33,11 @@ export interface Publisher {
   partnerManagerId?: string | null;
   accountExecutiveId?: string | null;
   referredById?: string | null;
+  /** Control Center channel (segmentation_channels id) + its name when the API joined it. */
+  channelId?: string | null;
+  channelName?: string | null;
+  /** Referring partner's name — present on paged list rows (GET /api/publishers?paged=1). */
+  referredByName?: string | null;
   contactName?: string | null;
   taxId?: string | null;
   website?: string | null;
@@ -93,6 +98,21 @@ export interface Offer {
   emailSettings?: OfferEmailSettings;
   createdAt: string;
   updatedAt?: string;
+  /** Joined advertiser fields — present on paged list rows (GET /api/offers?paged=1). */
+  advertiserName?: string | null;
+  advertiserRef?: number | null;
+  advertiserAccountManagerId?: string | null;
+  advertiserSalesManagerId?: string | null;
+}
+
+/** Paged entity list (GET /api/offers|publishers|advertisers?paged=1): one page of the filtered,
+ * sorted set + the filtered total + badge counts (e.g. counts.statuses.active, counts.tabs.pending). */
+export interface PagedList<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: Record<string, Record<string, number> | undefined>;
 }
 
 export const TARGETING_KEYS = [
@@ -164,6 +184,8 @@ export interface PartnerTier {
   labels: string[];
   partners: PartnerTierPreview[];
   partnersTotal: number;
+  /** Every member publisher id (list endpoint). Optional until the backend ships it — fall back to `partners` (preview). */
+  memberIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -270,6 +292,8 @@ export interface QuestionnaireListItem {
   status: 'active' | 'inactive';
   questions: string[];
   offers: string[];
+  /** Same order as `offers`; optional only for responses from older servers. */
+  offerIds?: string[];
   createdAt: string;
   updatedAt: string;
 }

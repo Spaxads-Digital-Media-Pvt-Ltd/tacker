@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
@@ -76,9 +77,10 @@ export function postbacksRoutes(): Router {
          LEFT JOIN publishers p ON p.id = pb.publisher_id AND p.network_id = pb.network_id
          LEFT JOIN offers o ON o.id = pb.offer_id AND o.network_id = pb.network_id
         WHERE pb.network_id = $1
-        ORDER BY pb.created_at DESC LIMIT 1000`,
+        ORDER BY pb.created_at DESC LIMIT ${LIST_CAP}`,
       [req.scope!.networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'postbacks.list');
     sendOk(res, rows.map(dto));
   }));
 

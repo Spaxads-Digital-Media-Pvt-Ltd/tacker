@@ -13,7 +13,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -125,15 +126,19 @@ export function partnerInvoicesRoutes(): Router {
     sendOk(res, { currency: s?.currency ?? 'USD', billedAmount: s?.billed ?? '0.00', paymentsAmount: s?.payments ?? '0.00', balance: s?.balance ?? '0.00', otherCurrencies: s?.other ?? [] });
   }));
 
-  r.get('/', asyncHandler(async (req, res) => {
+  const listQuery = z.object({
+    status: z.enum(['all', 'unpaid', 'paid', 'deleted']).default('unpaid'),
+    publisherId: z.string().uuid().optional(),
+  });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'unpaid');
-    const publisherId = req.query['publisherId'] ? String(req.query['publisherId']) : null;
+    const { status: statusParam, publisherId } = res.locals.query as z.infer<typeof listQuery>;
     const params: unknown[] = [networkId];
     let where = 'i.network_id = $1';
     if (statusParam !== 'all') { params.push(statusParam); where += ` AND i.status = $${params.length}`; }
     if (publisherId) { params.push(publisherId); where += ` AND i.publisher_id = $${params.length}`; }
-    const { rows } = await query<JoinedRow>(`${SELECT} WHERE ${where} ORDER BY i.created_at DESC LIMIT 1000`, params);
+    const { rows } = await query<JoinedRow>(`${SELECT} WHERE ${where} ORDER BY i.created_at DESC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'partner-invoices.list');
     sendOk(res, rows.map(dto));
   }));
 

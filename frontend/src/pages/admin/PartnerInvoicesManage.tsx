@@ -9,14 +9,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDateOnly } from '../../lib/dateOnly';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeOff, CheckCircle2, Trash2, Download, Clock } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeOff, CheckCircle2, Trash2, Download, Clock, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import type { PartnerInvoice, PartnerInvoiceSummary, Publisher } from '../../types';
+import type { PartnerInvoice, Publisher } from '../../types';
 
 /** Real client-side CSV/JSON export (same pattern as Offers/Publishers Table Actions) — no export
  * job queue exists server-side, so the "Exports" tab below is a browser-local history of what this
@@ -78,6 +78,10 @@ const STATUS_OPTIONS = [
   { value: 'deleted', label: 'Deleted', dot: STATUS_DOT['deleted']! },
 ] as const;
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
+/** Filter value for invoices with no payment terms recorded (null / empty). */
+const TERMS_NOT_SET = '__not_set__';
+/** POST /api/partner-invoices/bulk-approve-pay accepts at most this many ids per request. */
+const BULK_CHUNK = 500;
 const ALL_COLUMNS = ['Invoice ID', 'Partner', 'Status', 'Visibility', 'Payment Terms', 'Payment Method', 'Start Date', 'End Date', 'Billed', 'Payments', 'Paid Date', 'Balance', 'Public Notes', 'Internal Notes', 'Created', 'Modified'] as const;
 
 const money = (v: string | number, c = 'USD') => `${c} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}`;
@@ -120,11 +124,12 @@ function NotesModal({ title, text, onClose }: { title: string; text: string; onC
 }
 
 /** Exact sum of 2-dp amount strings (integer cents, never float), grouped by currency. */
-function sumByCurrency(invoices: PartnerInvoice[]): string {
+function sumByCurrency(invoices: PartnerInvoice[], field: 'billedAmount' | 'paymentsAmount' | 'balance' = 'billedAmount'): string {
   const cents = new Map<string, bigint>();
   for (const inv of invoices) {
-    const neg = inv.billedAmount.trim().startsWith('-');
-    const [i, f = ''] = inv.billedAmount.replace('-', '').split('.');
+    const raw = String(inv[field] ?? '0').trim();
+    const neg = raw.startsWith('-');
+    const [i, f = ''] = raw.replace('-', '').split('.');
     const c = BigInt(i || '0') * 100n + BigInt((f + '00').slice(0, 2));
     cents.set(inv.currency, (cents.get(inv.currency) ?? 0n) + (neg ? -c : c));
   }
@@ -146,7 +151,21 @@ function ApprovePayModal({ invoices, onClose, onDone }: { invoices: PartnerInvoi
       if (invoices.length === 1) {
         await api.post(`/api/partner-invoices/${invoices[0]!.id}/approve-pay`, {});
       } else {
-        await api.post('/api/partner-invoices/bulk-approve-pay', { ids: invoices.map((i) => i.id) });
+        // The bulk endpoint accepts at most BULK_CHUNK ids, so larger selections go in sequential
+        // chunks; failures are aggregated instead of aborting the rest.
+        const ids = invoices.map((i) => i.id);
+        let failed = 0;
+        let firstError: string | null = null;
+        for (let k = 0; k < ids.length; k += BULK_CHUNK) {
+          const chunk = ids.slice(k, k + BULK_CHUNK);
+          try { await api.post('/api/partner-invoices/bulk-approve-pay', { ids: chunk }); }
+          catch (e) { failed += chunk.length; firstError ??= e instanceof Error ? e.message : 'Request failed'; }
+        }
+        if (failed > 0) {
+          onDone();
+          setError(`${failed.toLocaleString()} of ${ids.length.toLocaleString()} invoices could not be approved & paid (${firstError}). The rest were processed.`);
+          return;
+        }
       }
       onDone();
       onClose();
@@ -292,7 +311,6 @@ export default function PartnerInvoicesManage() {
   const [page, setPage] = useState('Invoices');
   const [status, setStatus] = useState('unpaid');
   const { data, loading, error, refetch } = useQuery<PartnerInvoice[]>(`/api/partner-invoices?status=${status}`);
-  const { data: summary, refetch: refetchSummary } = useQuery<PartnerInvoiceSummary>('/api/partner-invoices/summary');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
 
   const [q, setQ] = useState('');
@@ -319,7 +337,7 @@ export default function PartnerInvoicesManage() {
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
-    { key: 'paymentTerms', label: 'Payment Terms', options: PAYMENT_TERMS_OPTIONS.map((t) => ({ value: t, label: t })) },
+    { key: 'paymentTerms', label: 'Payment Terms', options: [{ value: TERMS_NOT_SET, label: 'Not set' }, ...PAYMENT_TERMS_OPTIONS.map((t) => ({ value: t, label: t }))] },
   ], [publishers]);
 
   const filtered = useMemo(() => {
@@ -330,13 +348,19 @@ export default function PartnerInvoicesManage() {
     }
     const has = (key: string) => (filters[key]?.length ?? 0) > 0;
     if (has('partner')) rows = rows.filter((i) => filters['partner']!.includes(i.publisherId));
-    if (has('paymentTerms')) rows = rows.filter((i) => i.paymentTerms && filters['paymentTerms']!.includes(i.paymentTerms));
+    if (has('paymentTerms')) rows = rows.filter((i) => (i.paymentTerms?.trim() ? filters['paymentTerms']!.includes(i.paymentTerms) : filters['paymentTerms']!.includes(TERMS_NOT_SET)));
     return rows;
   }, [data, q, filters]);
 
   const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleSelectAll = () => setSelected((s) => (s.size === filtered.length ? new Set() : new Set(filtered.map((i) => i.id))));
-  const afterChange = () => { refetch(); refetchSummary(); setSelected(new Set()); };
+  const toggleSelectAll = () => setSelected((s) => (filtered.every((i) => s.has(i.id)) ? new Set() : new Set(filtered.map((i) => i.id))));
+  const afterChange = () => { refetch(); setSelected(new Set()); };
+  // Summary reflects exactly the rows shown (status + search + filters), summed exactly per currency.
+  const summary = useMemo(() => ({
+    billed: sumByCurrency(filtered, 'billedAmount') || '—',
+    payments: sumByCurrency(filtered, 'paymentsAmount') || '—',
+    balance: sumByCurrency(filtered, 'balance') || '—',
+  }), [filtered]);
 
   const columnsByHeader: Record<string, Column<PartnerInvoice>> = {
     'Invoice ID': { header: 'Invoice ID', cell: (i) => <Link to={`/app/aff-invoices/${i.id}`} className="text-accent-text hover:underline">Invoice ID: {i.ref}</Link> },
@@ -372,7 +396,10 @@ export default function PartnerInvoicesManage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnOrder, shownColumns, selected, filtered]);
 
-  const selectedInvoices = filtered.filter((i) => selected.has(i.id) && i.status === 'unpaid');
+  // Selection intersected with what the current status/search/filters still show.
+  const visibleSelected = filtered.filter((i) => selected.has(i.id));
+  const selectedInvoices = visibleSelected.filter((i) => i.status === 'unpaid');
+  const exportTarget = visibleSelected.length > 0 ? visibleSelected : filtered;
 
   return (
     <>
@@ -383,13 +410,14 @@ export default function PartnerInvoicesManage() {
       <div className="mb-4 rounded-card border border-border bg-surface">
         <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 px-4 py-2.5 text-small font-medium text-fg">
           <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
+          <span className="text-tiny font-normal text-fg-secondary">— {filtered.length.toLocaleString()} invoice{filtered.length === 1 ? '' : 's'} matching the current status, search and filters</span>
         </button>
         {summaryOpen && (
           <div className="grid grid-cols-3 gap-4 border-t border-border px-4 py-4">
-            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.billedAmount, summary.currency) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Payments Amount(s)</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.paymentsAmount, summary.currency) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Balance</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.balance, summary.currency) : '—'}</p></div>
-            {summary && summary.otherCurrencies.length > 0 && <p className="col-span-3 text-tiny text-fg-muted">Totals are in {summary.currency}; invoices in {summary.otherCurrencies.join(', ')} are not included.</p>}
+            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount (filtered)</p><p className="text-h3 font-semibold text-fg">{summary.billed}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Payments Amount(s) (filtered)</p><p className="text-h3 font-semibold text-fg">{summary.payments}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Balance (filtered)</p><p className="text-h3 font-semibold text-fg">{summary.balance}</p></div>
+            <p className="col-span-3 text-tiny text-fg-muted">Totals are summed per currency over the invoices listed below.</p>
           </div>
         )}
       </div>
@@ -420,7 +448,7 @@ export default function PartnerInvoicesManage() {
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-              
+              <MoreVertical size={15} />
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-60 rounded-card border border-border bg-elevated py-1 shadow-elevated">
@@ -431,13 +459,13 @@ export default function PartnerInvoicesManage() {
                 </button>
                 <div className="relative" onMouseEnter={() => setExportSubmenuOpen(true)} onMouseLeave={() => setExportSubmenuOpen(false)}>
                   <button onClick={() => setExportSubmenuOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                    Export {selected.size > 0 ? `(${selected.size})` : `All (${filtered.length})`} <ChevronRight size={13} className="text-fg-muted" />
+                    Export {visibleSelected.length > 0 ? `(${visibleSelected.length})` : `All (${filtered.length})`} <ChevronRight size={13} className="text-fg-muted" />
                   </button>
                   {exportSubmenuOpen && (
                     <div className="absolute right-full top-0 mr-1 w-28 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                      <button onClick={() => runExport('csv', selected.size > 0 ? filtered.filter((i) => selected.has(i.id)) : filtered, () => { setTableActionsOpen(false); setExportSubmenuOpen(false); })}
+                      <button onClick={() => runExport('csv', exportTarget, () => { setTableActionsOpen(false); setExportSubmenuOpen(false); })}
                         className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                      <button onClick={() => runExport('json', selected.size > 0 ? filtered.filter((i) => selected.has(i.id)) : filtered, () => { setTableActionsOpen(false); setExportSubmenuOpen(false); })}
+                      <button onClick={() => runExport('json', exportTarget, () => { setTableActionsOpen(false); setExportSubmenuOpen(false); })}
                         className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">JSON</button>
                     </div>
                   )}
@@ -459,9 +487,9 @@ export default function PartnerInvoicesManage() {
             <Table columns={displayedColumns} rows={filtered} rowKey={(i) => i.id} />
             <div className="mt-3 flex items-center justify-between text-tiny text-fg-secondary">
               <button type="button" onClick={toggleSelectAll} className="text-accent-text hover:underline">
-                {selected.size === filtered.length ? 'Deselect all' : `Select all ${filtered.length}`}
+                {visibleSelected.length === filtered.length ? 'Deselect all' : `Select all ${filtered.length}`}
               </button>
-              <span>{selected.size > 0 ? `${selected.size} selected · ` : ''}{filtered.length} Total</span>
+              <span>{visibleSelected.length > 0 ? `${visibleSelected.length} selected · ` : ''}{filtered.length} Total</span>
             </div>
           </>
         )}

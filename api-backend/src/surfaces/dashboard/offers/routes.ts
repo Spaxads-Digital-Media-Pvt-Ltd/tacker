@@ -15,6 +15,7 @@ import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuer
 import { badRequest, notFound, forbidden } from '../../../lib/http/errors.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
+import { containsPattern } from '../../../lib/db/like.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { idempotentCreate } from '../../../lib/http/idempotency.js';
 import type {
@@ -56,6 +57,22 @@ import {
 import { env } from '../../../config/env.js';
 import { mountOfferAssets } from './asset-routes.js';
 import { attachTagRoutes } from '../tags/routes.js';
+import { isPagedRequest, runPagedList } from '../../../lib/http/paged-list.js';
+import { offerListQuerySchema, buildOfferListQuery, type OfferListQuery } from './list-query.js';
+
+/** Paged Manage Offers row: the admin DTO plus the advertiser fields the table shows, joined in the
+ * same query so a page never depends on the (capped) advertiser picker list. */
+type PagedOfferRow = OfferRow & {
+ advertiser_name: string | null; advertiser_ref: string | null;
+ advertiser_account_manager_id: string | null; advertiser_sales_manager_id: string | null;
+};
+const toPagedOfferDTO = (row: PagedOfferRow) => ({
+ ...toAdminDTO(row),
+ advertiserName: row.advertiser_name,
+ advertiserRef: row.advertiser_ref == null ? null : Number(row.advertiser_ref),
+ advertiserAccountManagerId: row.advertiser_account_manager_id,
+ advertiserSalesManagerId: row.advertiser_sales_manager_id,
+});
 
 const OFFERS = 'offers';
 const GEO = 'offer_geo_rules';
@@ -117,6 +134,20 @@ function actorLabel(req: import('express').Request): string | null {
 export function offersAdminRoutes(): Router {
  const r = Router();
 
+ // Paged mode (`?paged=1`) for the Manage Offers page: filters/search/sort/paging in SQL, returns
+ // { rows, total, page, pageSize, counts: { statuses } }. Any other caller (every offer picker)
+ // falls through to the plain array below via next('route').
+ r.get(
+ '/',
+ (req, _res, next) => next(isPagedRequest(req.query) ? undefined : 'route'),
+ validateQuery(offerListQuerySchema),
+ asyncHandler(async (req, res) => {
+ const q = res.locals.query as OfferListQuery;
+ const built = buildOfferListQuery(req.scope!.networkId, q);
+ sendOk(res, await runPagedList(built, q, toPagedOfferDTO));
+ }),
+ );
+
  r.get(
  '/',
  validateQuery(paginationSchema),
@@ -153,6 +184,47 @@ export function offersAdminRoutes(): Router {
  [req.scope!.networkId],
  );
  sendOk(res, rows.map(toOfferCountryDTO));
+ }));
+
+ // Complete option lists for the Manage Offers filters, independent of the (paged) list: every
+ // category in use, every country named in a geo rule or targeting.country rule, every platform named
+ // in a targeting.platform rule. Registered before /:id.
+ r.get('/filter-options', asyncHandler(async (req, res) => {
+ const nid = req.scope!.networkId;
+ const [cats, geo, tgt, plat] = await Promise.all([
+ query<{ v: string }>(
+ `SELECT DISTINCT btrim(category) AS v FROM offers WHERE network_id = $1 AND category IS NOT NULL AND btrim(category) <> '' ORDER BY 1`,
+ [nid],
+ ),
+ query<{ v: string }>(
+ `SELECT DISTINCT upper(country) AS v FROM offer_geo_rules WHERE network_id = $1 AND country <> '*'`,
+ [nid],
+ ),
+ query<{ v: string }>(
+ `SELECT DISTINCT upper(tv.v) AS v
+ FROM offers o, jsonb_array_elements_text(
+ CASE WHEN jsonb_typeof(o.metadata->'targeting'->'country'->'values') = 'array'
+ THEN o.metadata->'targeting'->'country'->'values' ELSE '[]'::jsonb END) AS tv(v)
+ WHERE o.network_id = $1`,
+ [nid],
+ ),
+ query<{ v: string }>(
+ `SELECT DISTINCT tv.v AS v
+ FROM offers o, jsonb_array_elements_text(
+ CASE WHEN jsonb_typeof(o.metadata->'targeting'->'platform'->'values') = 'array'
+ THEN o.metadata->'targeting'->'platform'->'values' ELSE '[]'::jsonb END) AS tv(v)
+ WHERE o.network_id = $1`,
+ [nid],
+ ),
+ ]);
+ // Categories de-duplicated case-insensitively (first spelling wins), like the platform list.
+ const ci = (vals: string[]) => Array.from(new Map(vals.filter(Boolean).map((v) => [v.toLowerCase(), v] as const)).values())
+ .sort((a, b) => a.localeCompare(b));
+ sendOk(res, {
+ categories: ci(cats.rows.map((x) => x.v)),
+ countries: Array.from(new Set([...geo.rows, ...tgt.rows].map((x) => x.v).filter((v) => /^[A-Z]{2}$/.test(v)))).sort(),
+ platforms: ci(plat.rows.map((x) => x.v.trim())),
+ });
  }));
 
  // Status counts for the list stat-card header (registered before /:id).
@@ -786,15 +858,16 @@ export function offerPortalRoutes(): Router {
  const { limit, offset } = res.locals.query as PaginationQuery;
  const ownerId = ownerIdOf(req);
  const networkId = id.networkId;
- const filter = req.query as Record<string, string | undefined>;
+ // The zod-validated copy (enums checked, single strings) — never the raw req.query.
+ const filter = res.locals.query as z.infer<typeof offerPortalPaginationSchema>;
 
  if (id.kind === 'advertiser') {
  const where = ['network_id = $1', 'advertiser_id = $2'];
  const params: (string | number)[] = [networkId, ownerId];
  if (filter.q) {
  const next = params.length + 1;
- where.push(`name ILIKE $${next}`);
- params.push(`%${filter.q}%`);
+ where.push(`name ILIKE $${next} ESCAPE '\\'`);
+ params.push(containsPattern(filter.q));
  }
  if (filter.status) {
  const next = params.length + 1;
@@ -817,8 +890,8 @@ export function offerPortalRoutes(): Router {
  const params: (string | number)[] = [networkId, ownerId];
  if (filter.q) {
  const next = params.length + 1;
- where.push(`o.name ILIKE $${next}`);
- params.push(`%${filter.q}%`);
+ where.push(`o.name ILIKE $${next} ESCAPE '\\'`);
+ params.push(containsPattern(filter.q));
  }
  if (filter.status) {
  const next = params.length + 1;

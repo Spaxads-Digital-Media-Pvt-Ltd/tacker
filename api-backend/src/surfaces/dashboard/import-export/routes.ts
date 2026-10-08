@@ -7,6 +7,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { query } from '../../../lib/db/pool.js';
 import { requireRole } from '../auth.js';
@@ -31,9 +32,10 @@ export function importExportRoutes(): Router {
   r.get('/', asyncHandler(async (req, res) => {
     const { rows } = await query(
       `SELECT id, kind, entity, status, row_count, detail, created_at
-         FROM import_export_logs WHERE network_id = $1 ORDER BY created_at DESC LIMIT 500`,
+         FROM import_export_logs WHERE network_id = $1 ORDER BY created_at DESC LIMIT ${LIST_CAP}`,
       [req.scope!.networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'import-export.logs');
     sendOk(res, rows);
   }));
 

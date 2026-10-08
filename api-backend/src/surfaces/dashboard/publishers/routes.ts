@@ -26,7 +26,9 @@ import {
   type CreatePublisher, type UpdatePublisher, type CreatePostback,
   type UpdatePostback, type PostbackTest,
 } from './schemas.js';
-import { toAdminDTO, toSelfDTO } from './dto.js';
+import { toAdminDTO, toSelfDTO, type PublisherRowWithJoins } from './dto.js';
+import { isPagedRequest, runPagedList } from '../../../lib/http/paged-list.js';
+import { publisherListQuerySchema, buildPublisherListQuery, regionOf, type PublisherListQuery } from './list-query.js';
 import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
@@ -36,6 +38,27 @@ const TABLE = 'publishers';
 const POSTBACKS = 'publisher_postbacks';
 
 const requestBalancesSchema = z.object({ publisherIds: z.array(z.string().uuid()).min(1) });
+
+/** Control Center channel names for this network (id → name), for DTOs read without a join. */
+async function channelNames(networkId: string): Promise<Map<string, string>> {
+  const { rows } = await query<{ id: string; name: string }>(
+    `SELECT id, name FROM segmentation_channels WHERE network_id = $1`, [networkId],
+  );
+  return new Map(rows.map((c) => [c.id, c.name]));
+}
+
+/** One publisher with its channel name joined (same-network channels only). */
+async function loadPublisher(networkId: string, id: string): Promise<PublisherRowWithJoins | null> {
+  const { rows } = await query<PublisherRowWithJoins>(
+    `SELECT p.*, sc.name AS channel_name
+       FROM publishers p
+       LEFT JOIN segmentation_channels sc ON sc.id = p.channel_id AND sc.network_id = p.network_id
+      WHERE p.network_id = $1 AND p.id = $2`,
+    [networkId, id],
+  );
+  return rows[0] ?? null;
+}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface PostbackRow {
   id: string; url: string; method: string; offer_id: string | null; event: string | null;
@@ -49,6 +72,23 @@ const toPostbackDTO = (r: PostbackRow) => ({
 export function publishersAdminRoutes(): Router {
   const r = Router();
 
+  // Paged mode (`?paged=1`) for the Manage Partners page: tabs/filters/search/sort/paging in SQL,
+  // returns { rows, total, page, pageSize, counts: { tabs, statuses } }. Every other caller (the
+  // partner pickers) falls through to the plain array below via next('route').
+  r.get(
+    '/',
+    (req, _res, next) => next(isPagedRequest(req.query) ? undefined : 'route'),
+    validateQuery(publisherListQuerySchema),
+    asyncHandler(async (req, res) => {
+      const q = res.locals.query as PublisherListQuery;
+      const built = buildPublisherListQuery(req.scope!.networkId, q);
+      sendOk(res, await runPagedList(built, q, (row: PublisherRowWithJoins) => ({
+        ...toAdminDTO(row),
+        referredByName: row.referred_by_name ?? null,
+      })));
+    }),
+  );
+
   r.get(
     '/',
     validateQuery(paginationSchema),
@@ -56,13 +96,38 @@ export function publishersAdminRoutes(): Router {
       const { offset } = res.locals.query as PaginationQuery;
       const limit = entityListLimit(req.query, res.locals.query as PaginationQuery);
       const db = dbForRequest(req);
-      const [rows, total] = await Promise.all([
-        db.selectMany<PublisherRow>(TABLE, { limit, offset, orderBy: 'created_at', maxLimit: ENTITY_LIST_CAP }),
+      const [rows, total, channels] = await Promise.all([
+        db.selectMany<PublisherRowWithJoins>(TABLE, { limit, offset, orderBy: 'created_at', maxLimit: ENTITY_LIST_CAP }),
         db.count(TABLE),
+        channelNames(db.scope.networkId),
       ]);
-      sendOk(res, rows.map(toAdminDTO), { limit, offset, total });
+      sendOk(res, rows.map((row) => toAdminDTO({ ...row, channel_name: row.channel_id ? channels.get(row.channel_id) ?? null : null })), { limit, offset, total });
     }),
   );
+
+  // Complete option lists for the Manage Partners filter drawer, independent of the paged list:
+  // distinct stored countries / tiers / payment methods (case-insensitively de-duplicated) / payment
+  // terms, and the region buckets actually in use. Registered before /:id.
+  r.get('/filter-options', asyncHandler(async (req, res) => {
+    const { rows } = await query<{ kind: string; v: string | null }>(
+      `SELECT DISTINCT 'country' AS kind, country AS v FROM publishers WHERE network_id = $1
+       UNION SELECT DISTINCT 'tier', tier FROM publishers WHERE network_id = $1 AND tier IS NOT NULL AND tier <> ''
+       UNION SELECT DISTINCT 'paymentMethod', btrim(payment_method) FROM publishers WHERE network_id = $1 AND btrim(payment_method) <> ''
+       UNION SELECT DISTINCT 'paymentTerms', payout_terms FROM publishers WHERE network_id = $1 AND payout_terms IS NOT NULL AND payout_terms <> ''`,
+      [req.scope!.networkId],
+    );
+    const of = (kind: string) => rows.filter((x) => x.kind === kind).map((x) => x.v);
+    const countriesRaw = of('country');
+    const sorted = (vals: (string | null)[]) => Array.from(new Set(vals.filter((v): v is string => Boolean(v)))).sort();
+    sendOk(res, {
+      countries: sorted(countriesRaw),
+      regions: Array.from(new Set(countriesRaw.map(regionOf))).sort(),
+      tiers: sorted(of('tier')),
+      paymentMethods: Array.from(new Map(of('paymentMethod').filter((m): m is string => Boolean(m)).map((m) => [m.toLowerCase(), m] as const)).values())
+        .sort((a, b) => a.localeCompare(b)),
+      paymentTerms: sorted(of('paymentTerms')),
+    });
+  }));
 
   r.get('/stats', asyncHandler(async (req, res) => {
     const { rows } = await query<{ status: string; n: string }>(
@@ -117,7 +182,8 @@ export function publishersAdminRoutes(): Router {
   r.get(
     '/:id',
     asyncHandler(async (req, res) => {
-      const row = await dbForRequest(req).selectOne<PublisherRow>(TABLE, { id: req.params.id });
+      const id = req.params.id ?? '';
+      const row = UUID_RE.test(id) ? await loadPublisher(req.scope!.networkId, id) : null;
       if (!row) throw notFound('Publisher not found');
       sendOk(res, toAdminDTO(row));
     }),
@@ -133,7 +199,8 @@ export function publishersAdminRoutes(): Router {
       await assertSameNetwork(nid, 'users', b.partnerManagerId, 'partnerManagerId');
       await assertSameNetwork(nid, 'users', b.accountExecutiveId, 'accountExecutiveId');
       await assertSameNetwork(nid, 'publishers', b.referredById, 'referredById');
-      const row = await dbForRequest(req).insert<PublisherRow>(TABLE, {
+      await assertSameNetwork(nid, 'segmentation_channels', b.channelId, 'channelId');
+      const row = await dbForRequest(req).insert<PublisherRowWithJoins>(TABLE, {
         name: b.name,
         status: b.status,
         contact_email: b.contactEmail ?? null,
@@ -146,6 +213,7 @@ export function publishersAdminRoutes(): Router {
         partner_manager_id: b.partnerManagerId ?? null,
         account_executive_id: b.accountExecutiveId ?? null,
         referred_by_id: b.referredById ?? null,
+        channel_id: b.channelId ?? null,
         contact_name: b.contactName ?? null,
         tax_id: b.taxId ?? null,
         website: b.website ?? null,
@@ -155,7 +223,7 @@ export function publishersAdminRoutes(): Router {
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
       });
       await writeAudit(req, { action: 'publisher.create', entityType: 'publisher', entityId: row.id, after: row });
-      sendOk(res, toAdminDTO(row), undefined, 201);
+      sendOk(res, toAdminDTO((await loadPublisher(nid, row.id)) ?? row), undefined, 201);
     }),
   );
 
@@ -171,6 +239,7 @@ export function publishersAdminRoutes(): Router {
       await assertSameNetwork(db.scope.networkId, 'users', b.partnerManagerId, 'partnerManagerId');
       await assertSameNetwork(db.scope.networkId, 'users', b.accountExecutiveId, 'accountExecutiveId');
       await assertSameNetwork(db.scope.networkId, 'publishers', b.referredById, 'referredById');
+      await assertSameNetwork(db.scope.networkId, 'segmentation_channels', b.channelId, 'channelId');
       if (b.referredById && b.referredById === req.params.id) throw badRequest('A partner cannot refer itself');
       const patch: Record<string, unknown> = {};
       if (b.name !== undefined) patch['name'] = b.name;
@@ -187,6 +256,7 @@ export function publishersAdminRoutes(): Router {
       if (b.partnerManagerId !== undefined) patch['partner_manager_id'] = b.partnerManagerId;
       if (b.accountExecutiveId !== undefined) patch['account_executive_id'] = b.accountExecutiveId;
       if (b.referredById !== undefined) patch['referred_by_id'] = b.referredById;
+      if (b.channelId !== undefined) patch['channel_id'] = b.channelId;
       if (b.contactName !== undefined) patch['contact_name'] = b.contactName;
       if (b.taxId !== undefined) patch['tax_id'] = b.taxId;
       if (b.website !== undefined) patch['website'] = b.website;
@@ -195,7 +265,7 @@ export function publishersAdminRoutes(): Router {
 
       const [row] = await db.update<PublisherRow>(TABLE, patch, { id: req.params.id });
       await writeAudit(req, { action: 'publisher.update', entityType: 'publisher', entityId: req.params.id, before, after: row });
-      sendOk(res, toAdminDTO(row ?? before));
+      sendOk(res, toAdminDTO((await loadPublisher(db.scope.networkId, before.id)) ?? row ?? before));
     }),
   );
 

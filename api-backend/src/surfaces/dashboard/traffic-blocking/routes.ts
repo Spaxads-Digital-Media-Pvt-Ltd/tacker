@@ -12,7 +12,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -81,13 +82,15 @@ const SELECT = `
 export function trafficBlockingRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  const listQuery = z.object({ status: z.enum(['all', 'active', 'inactive']).default('active') });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'active');
+    const { status: statusParam } = res.locals.query as z.infer<typeof listQuery>;
     const params: unknown[] = [networkId];
     let where = 't.network_id = $1';
     if (statusParam !== 'all') { where += ` AND t.status = $2`; params.push(statusParam); }
-    const { rows } = await query<JoinedRow>(`${SELECT} WHERE ${where} ORDER BY t.created_at DESC LIMIT 1000`, params);
+    const { rows } = await query<JoinedRow>(`${SELECT} WHERE ${where} ORDER BY t.created_at DESC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'traffic-blocking.list');
     sendOk(res, rows.map(dto));
   }));
 

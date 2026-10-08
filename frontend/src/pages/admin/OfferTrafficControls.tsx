@@ -11,7 +11,7 @@
  * These rules are genuinely enforced at /click by the tracking surface (traffic-controls-eval.ts);
  * the CRUD routes bust the cached OfferConfig on write so a new rule takes effect immediately.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, MoreVertical, ChevronRight, SlidersHorizontal, X } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
@@ -206,6 +206,8 @@ export default function OfferTrafficControls() {
     return out;
   }, [data, status, q, fType, fAction, fOfferScope, fPartnerScope, fVariable]);
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Clamp after a refetch/delete/filter shrinks the list so we never sit on an empty last page.
+  useEffect(() => { const last = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); if (page > last) setPage(last); }, [rows.length, page]);
   const showCol = (c: string) => !hiddenColumns.has(c);
 
   const appliedFilters: Record<string, string | undefined> = {

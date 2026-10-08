@@ -9,7 +9,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
+import { queryDate } from '../../../lib/http/query-params.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -20,11 +21,13 @@ import { toDTO } from '../tracking-domains/dto.js';
 
 const DOMAIN_TABLE = 'tracking_domains';
 
-function parseRange(from: unknown, to: unknown): { from: string | null; to: string | null } {
-  return {
-    from: typeof from === 'string' && from ? from : null,
-    to: typeof to === 'string' && to ? to : null,
-  };
+/** Optional from/to range; an empty param means "unbounded" (as before), anything else must be an ISO date. */
+const optionalDate = z.preprocess((v) => (v === '' ? undefined : v), queryDate.optional());
+const rangeQuery = z.object({ from: optionalDate, to: optionalDate });
+
+function parseRange(q: unknown): { from: string | null; to: string | null } {
+  const { from, to } = q as z.infer<typeof rangeQuery>;
+  return { from: from ?? null, to: to ?? null };
 }
 
 async function domainRow(networkId: string, id: string): Promise<TrackingDomainRow | null> {
@@ -96,9 +99,9 @@ export function trafficHealthRoutes(): Router {
   const r = Router();
 
   /** Per-domain usage table for the Usage tab — real assignment + offer-attributed traffic. */
-  r.get('/usage', asyncHandler(async (req, res) => {
+  r.get('/usage', validateQuery(rangeQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const { from, to } = parseRange(req.query['from'], req.query['to']);
+    const { from, to } = parseRange(res.locals.query);
     const { rows: domains } = await query<{ id: string; host: string; ref: string }>(
       `SELECT id, host, ref FROM ${DOMAIN_TABLE} WHERE network_id = $1 ORDER BY ref ASC`, [networkId],
     );
@@ -121,22 +124,22 @@ export function trafficHealthRoutes(): Router {
   }));
 
   /** Domain detail summary — assignments + traffic for Overview panel Usage section. */
-  r.get('/domains/:id/summary', asyncHandler(async (req, res) => {
+  r.get('/domains/:id/summary', validateQuery(rangeQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
     const row = await domainRow(networkId, req.params.id ?? '');
     if (!row) throw notFound('Domain not found');
-    const { from, to } = parseRange(req.query['from'], req.query['to']);
+    const { from, to } = parseRange(res.locals.query);
     const stats = await domainStats(networkId, row.id, from, to);
     sendOk(res, { domain: toDTO(row), ...stats });
   }));
 
   /** All Activity tab — real audit-log entries for this tracking domain. */
-  r.get('/domains/:id/activity', asyncHandler(async (req, res) => {
+  r.get('/domains/:id/activity', validateQuery(rangeQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
     const domainId = req.params.id ?? '';
     const row = await domainRow(networkId, domainId);
     if (!row) throw notFound('Domain not found');
-    const { from, to } = parseRange(req.query['from'], req.query['to']);
+    const { from, to } = parseRange(res.locals.query);
     const params: unknown[] = [networkId, domainId];
     let where = `network_id = $1 AND entity_type = 'tracking_domain' AND entity_id = $2`;
     if (from) { params.push(from); where += ` AND created_at >= $${params.length}`; }

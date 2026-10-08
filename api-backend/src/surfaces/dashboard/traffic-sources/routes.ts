@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
@@ -51,7 +52,8 @@ export function trafficSourcesRoutes(): Router {
   const r = Router();
 
   r.get('/', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where: {}, limit: 500, orderBy: 'created_at', orderDir: 'desc' });
+    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where: {}, limit: LIST_CAP, maxLimit: LIST_CAP, orderBy: 'created_at', orderDir: 'desc' });
+    warnIfCapped(rows, LIST_CAP, 'traffic-sources.list');
     sendOk(res, rows.map(dto));
   }));
 

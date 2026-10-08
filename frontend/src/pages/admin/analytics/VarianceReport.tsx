@@ -19,20 +19,23 @@
  * or e-commerce order tracking) — shown as "—" rather than a fabricated 0, matching the "—" convention
  * already established on every other report page (ReportPageKit.tsx).
  */
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronRight, MoreVertical, Search, SlidersHorizontal } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
+import { api } from '../../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  type AggResult, METRICS_PARAM, DASH, DEVICES, money, pct, toIso, daysAgo, todayStr,
-  deriveRow, type DerivedRow,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, toIso, daysAgo, todayStr,
+  deriveRow, type DerivedRow, Pagination,
   type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
+import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 
 interface SmartLink { id: string; name: string }
 
@@ -105,6 +108,36 @@ function linkFor(dim: DimKey, id: string): string | null {
 
 interface VarianceRow { raw: string; name: string; current: DerivedRow; previous: DerivedRow }
 
+/**
+ * Set a report filter param to `values`. Uuid params (`…Id`) are comma lists. Text values may contain
+ * commas ("Comcast Cable, LLC") and the API splits a plain comma list, so when any value has a comma
+ * every value is sent as a repeated `key[]=value` param, which the API takes literally (the `[]` form
+ * also keeps a single comma-bearing value intact — a lone `key=v` would still be split). Comma-free
+ * text values go as one comma list, which the API reads identically and which has no repeat-count limit.
+ */
+function setFilterValues(params: URLSearchParams, key: string, values: string[]) {
+  params.delete(key); params.delete(`${key}[]`);
+  if (!values.length) return;
+  if (/Id$/.test(key) || !values.some((v) => v.includes(','))) params.set(key, values.join(','));
+  else for (const v of values) params.append(`${key}[]`, v);
+}
+
+function buildQs(extra: Record<string, string | number | undefined>): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
+  return params;
+}
+
+/** Current-period rows (the page) joined to their previous-period values; absent there ⇒ genuinely 0. */
+function joinPrevious(currentRows: AggRow[], previousRows: AggRow[], dim: DimKey): { raw: string; current: DerivedRow; previous: DerivedRow }[] {
+  const empty = deriveRow({});
+  const prev = new Map<string, DerivedRow>();
+  for (const r of previousRows) { const id = r.dimensions[dim]; if (id) prev.set(id, deriveRow(r.metrics)); }
+  return currentRows
+    .filter((r) => r.dimensions[dim])
+    .map((r) => { const raw = r.dimensions[dim]!; return { raw, current: deriveRow(r.metrics), previous: prev.get(raw) ?? empty }; });
+}
+
 function mergeRows(currentRows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[],
   previousRows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[], dim: DimKey): { raw: string; current: DerivedRow; previous: DerivedRow }[] {
   const empty = deriveRow({});
@@ -161,16 +194,17 @@ function ExpandedChildRows({
   childDim: DimKey; parentFilterParam: string; parentRawId: string; currentFrom: string; currentTo: string; previousFrom: string; previousTo: string;
   dimParams: Record<string, string | number | undefined>; mode: 'pct' | 'num'; opts: Opts; smartLinkMap: Map<string, string>;
 }) {
-  const qs = (extra: Record<string, string | number | undefined>) => {
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
+  // The page's filters narrowed to this parent; the parent value replaces a page filter on the same
+  // dimension, and a text parent value goes as a literal `key[]=value` (never comma-split).
+  const qs = (from: string, to: string) => {
+    const params = buildQs({ ...dimParams, groupBy: childDim, metrics: METRICS_PARAM, limit: 200, from: toIso(from), to: toIso(to, true) });
+    setFilterValues(params, parentFilterParam, []);
+    if (/Id$/.test(parentFilterParam)) params.set(parentFilterParam, parentRawId);
+    else params.append(`${parentFilterParam}[]`, parentRawId);
     return params.toString();
   };
-  const base = { groupBy: childDim, metrics: METRICS_PARAM, limit: 200, ...dimParams, [parentFilterParam]: parentRawId };
-  const curQs = qs({ ...base, from: toIso(currentFrom), to: toIso(currentTo, true) });
-  const prevQs = qs({ ...base, from: toIso(previousFrom), to: toIso(previousTo, true) });
-  const { data: curData, loading: curLoading } = useQuery<AggResult>(`/api/reports?${curQs}`);
-  const { data: prevData, loading: prevLoading } = useQuery<AggResult>(`/api/reports?${prevQs}`);
+  const { data: curData, loading: curLoading, error: curError } = useQuery<AggResult>(`/api/reports?${qs(currentFrom, currentTo)}`);
+  const { data: prevData, loading: prevLoading, error: prevError } = useQuery<AggResult>(`/api/reports?${qs(previousFrom, previousTo)}`);
 
   const rows = useMemo(() => mergeRows(curData?.rows ?? [], prevData?.rows ?? [], childDim)
     .map((r) => ({ ...r, name: resolveName(childDim, r.raw, opts, smartLinkMap) }))
@@ -179,6 +213,7 @@ function ExpandedChildRows({
 
   const colCount = 1 + DETAIL_METRICS.length * 3;
   if (curLoading || prevLoading) return <tr><td colSpan={colCount} className="px-4 py-3 text-center"><Spinner /></td></tr>;
+  if (curError || prevError) return <tr><td colSpan={colCount} className="px-4 py-3 text-small text-danger-text">{curError ?? prevError}</td></tr>;
   if (!rows.length) return <tr><td colSpan={colCount} className="px-4 py-3 text-small text-fg-muted">No activity for this period.</td></tr>;
   return (
     <>
@@ -233,6 +268,8 @@ export default function VarianceReport() {
   const [mode, setMode] = useState<'pct' | 'num'>('pct');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showApiRequest, setShowApiRequest] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   const { data: offers } = useQuery<{ id: string; name: string }[]>('/api/offers');
   const { data: publishers } = useQuery<{ id: string; name: string }[]>('/api/publishers');
@@ -249,52 +286,81 @@ export default function VarianceReport() {
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'smartLink', label: 'Smart Link', options: (smartLinksList ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: countryOptions },
-    { key: 'device', label: 'Device', options: DEVICES.map((d) => ({ value: d, label: d.charAt(0).toUpperCase() + d.slice(1) })) },
+    { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [offers, advertisers, publishers, smartLinksList, countryOptions]);
 
-  const excludeOfferId = appliedExclusions['offer']?.[0];
-  const excludeAdvertiserId = appliedExclusions['advertiser']?.[0];
-  const excludePublisherId = appliedExclusions['partner']?.[0];
-  const excludeSmartLinkId = appliedExclusions['smartLink']?.[0];
-  const excludeCountry = appliedExclusions['country']?.[0];
-  const excludeDevice = appliedExclusions['device']?.[0];
+  const excludeOfferId = appliedExclusions['offer']?.join(',');
+  const excludeAdvertiserId = appliedExclusions['advertiser']?.join(',');
+  const excludePublisherId = appliedExclusions['partner']?.join(',');
+  const excludeSmartLinkId = appliedExclusions['smartLink']?.join(',');
+  const excludeCountry = appliedExclusions['country']?.join(',');
+  const excludeDevice = appliedExclusions['device']?.join(',');
   const dimParams = {
-    offerId: appliedFilters['offer']?.[0], advertiserId: appliedFilters['advertiser']?.[0],
-    publisherId: appliedFilters['partner']?.[0], smartLinkId: appliedFilters['smartLink']?.[0],
-    country: appliedFilters['country']?.[0], device: appliedFilters['device']?.[0],
+    offerId: appliedFilters['offer']?.join(','), advertiserId: appliedFilters['advertiser']?.join(','),
+    publisherId: appliedFilters['partner']?.join(','), smartLinkId: appliedFilters['smartLink']?.join(','),
+    country: appliedFilters['country']?.join(','), device: appliedFilters['device']?.join(','),
     excludeOfferId, excludeAdvertiserId, excludePublisherId, excludeSmartLinkId, excludeCountry, excludeDevice,
     excludeInvalid: appliedIgnoreFailTraffic ? 1 : undefined,
   };
 
-  const qs = (extra: Record<string, string | number | undefined>) => {
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
-    return params.toString();
-  };
+  const qs = (extra: Record<string, string | number | undefined>) => buildQs(extra).toString();
 
-  const curTableQs = qs({ groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedCurrentFrom), to: toIso(appliedCurrentTo, true), ...dimParams, limit: 200 });
-  const prevTableQs = qs({ groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedPreviousFrom), to: toIso(appliedPreviousTo, true), ...dimParams, limit: 200 });
+  // Summary: one exact grand-total row per period (groupBy=none), not a sum of a truncated grouping.
+  const curSummaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedCurrentFrom), to: toIso(appliedCurrentTo, true), ...dimParams });
+  const prevSummaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedPreviousFrom), to: toIso(appliedPreviousTo, true), ...dimParams });
+  const { data: curSummaryData, loading: curSummaryLoading, error: curSummaryError } = useQuery<AggResult>(`/api/reports?${curSummaryQs}`);
+  const { data: prevSummaryData, loading: prevSummaryLoading, error: prevSummaryError } = useQuery<AggResult>(`/api/reports?${prevSummaryQs}`);
+  const summaryLoading = curSummaryLoading || prevSummaryLoading;
+  const summaryError = curSummaryError ?? prevSummaryError;
+
+  // Table: the Current period is paged server-side; the Previous period is then fetched filtered to
+  // exactly this page's groups, so every row gets its true previous value (a group missing from the
+  // Previous result had no activity there — a real 0, not a top-N truncation artefact). Page size
+  // stays ≤ 20: comma-bearing text keys go as repeated `key[]` params, which the API caps at 20.
+  const curTableQs = qs({
+    groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedCurrentFrom), to: toIso(appliedCurrentTo, true), ...dimParams,
+    orderBy: 'clicks', orderDir: 'desc', limit: pageSize, offset: (page - 1) * pageSize,
+  });
   const { data: curData, loading: curLoading, error: curError } = useQuery<AggResult>(`/api/reports?${curTableQs}`);
-  const { data: prevData, loading: prevLoading, error: prevError } = useQuery<AggResult>(`/api/reports?${prevTableQs}`);
+  const pageKeys = useMemo(() => Array.from(new Set((curData?.rows ?? []).map((r) => r.dimensions[appliedParentDim]).filter((v): v is string => Boolean(v)))),
+    [curData, appliedParentDim]);
+  const prevTableQs = useMemo(() => {
+    if (!pageKeys.length) return null;
+    const params = buildQs({ groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedPreviousFrom), to: toIso(appliedPreviousTo, true), ...dimParams, limit: pageKeys.length });
+    setFilterValues(params, DIM_OPTIONS.find((o) => o.key === appliedParentDim)!.filterParam, pageKeys);
+    return params.toString();
+  // dimParams is rebuilt each render; its content is fully determined by the applied filter state below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageKeys, appliedParentDim, appliedPreviousFrom, appliedPreviousTo, appliedFilters, appliedExclusions, appliedIgnoreFailTraffic]);
+  // Fetched by hand (not useQuery) so the result is tagged with the query it answers — a previous
+  // page's Previous-period data must never be joined to the new page's rows, even for one render.
+  const [prevState, setPrevState] = useState<{ qs: string; data: AggResult | null; error: string | null } | null>(null);
+  useEffect(() => {
+    if (!prevTableQs) return;
+    let alive = true;
+    api.get<AggResult>(`/api/reports?${prevTableQs}`)
+      .then((d) => { if (alive) setPrevState({ qs: prevTableQs, data: d, error: null }); })
+      .catch((e: unknown) => { if (alive) setPrevState({ qs: prevTableQs, data: null, error: e instanceof Error ? e.message : 'Request failed' }); });
+    return () => { alive = false; };
+  }, [prevTableQs]);
+  const prevReady = !prevTableQs || prevState?.qs === prevTableQs;
+  const prevLoading = !prevReady;
+  const prevData = prevTableQs && prevReady ? prevState?.data ?? null : null;
+  const prevError = prevTableQs && prevReady ? prevState?.error ?? null : null;
 
-  const rows = useMemo((): VarianceRow[] => mergeRows(curData?.rows ?? [], prevData?.rows ?? [], appliedParentDim)
+  const rows = useMemo((): VarianceRow[] => (curLoading || !prevReady ? [] : joinPrevious(curData?.rows ?? [], prevData?.rows ?? [], appliedParentDim))
     .map((r) => ({ raw: r.raw, name: resolveName(appliedParentDim, r.raw, opts, smartLinkMap), current: r.current, previous: r.previous }))
     .filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))
-    .filter((r) => passesMetricFilters(r.current, appliedMetricFilters))
-    .sort((a, b) => b.current.clicksGross - a.current.clicksGross),
-  [curData, prevData, appliedParentDim, opts, smartLinkMap, q, appliedMetricFilters]);
+    .filter((r) => passesMetricFilters(r.current, appliedMetricFilters)),
+  [curLoading, curData, prevReady, prevData, appliedParentDim, opts, smartLinkMap, q, appliedMetricFilters]);
 
   const summary = useMemo(() => {
-    if (!curData?.rows.length && !prevData?.rows?.length) return null;
-    const sum = (rowsIn: { metrics: Record<string, string | number> }[]) => rowsIn.reduce((acc, r) => {
-      acc.clicks += Number(r.metrics['clicks'] ?? 0); acc.unique_clicks += Number(r.metrics['unique_clicks'] ?? 0);
-      acc.invalid_clicks += Number(r.metrics['invalid_clicks'] ?? 0);
-      acc.conversions += Number(r.metrics['conversions'] ?? 0); acc.total_conversions += Number(r.metrics['total_conversions'] ?? 0);
-      acc.payout += Number(r.metrics['payout'] ?? 0); acc.revenue += Number(r.metrics['revenue'] ?? 0); acc.margin += Number(r.metrics['margin'] ?? 0);
-      return acc;
-    }, { clicks: 0, unique_clicks: 0, invalid_clicks: 0, conversions: 0, total_conversions: 0, payout: 0, revenue: 0, margin: 0 });
-    return { current: deriveRow(sum(curData?.rows ?? [])), previous: deriveRow(sum(prevData?.rows ?? [])) };
-  }, [curData, prevData]);
+    const cur = curSummaryData?.rows?.[0]?.metrics ?? {};
+    const prev = prevSummaryData?.rows?.[0]?.metrics ?? {};
+    const current = deriveRow(cur); const previous = deriveRow(prev);
+    if (current.clicksGross === 0 && current.totalCv === 0 && previous.clicksGross === 0 && previous.totalCv === 0) return null;
+    return { current, previous };
+  }, [curSummaryData, prevSummaryData]);
 
   const canRun = !!parentDim;
   const runReport = () => {
@@ -303,7 +369,7 @@ export default function VarianceReport() {
     setAppliedCurrentFrom(currentFrom); setAppliedCurrentTo(currentTo);
     setAppliedPreviousFrom(previousFrom); setAppliedPreviousTo(previousTo);
     setAppliedFilters(filters); setAppliedExclusions(exclusions); setAppliedMetricFilters(metricFilters); setAppliedIgnoreFailTraffic(ignoreFailTraffic);
-    setExpanded(new Set());
+    setExpanded(new Set()); setPage(1);
   };
   const clearAll = () => {
     setParentDim('publisher'); setChildDim(null);
@@ -312,6 +378,7 @@ export default function VarianceReport() {
     setAppliedParentDim('publisher'); setAppliedChildDim(null);
     setAppliedCurrentFrom(todayStr()); setAppliedCurrentTo(todayStr()); setAppliedPreviousFrom(daysAgo(1)); setAppliedPreviousTo(daysAgo(1));
     setAppliedFilters({}); setAppliedExclusions({}); setAppliedMetricFilters({}); setAppliedIgnoreFailTraffic(false);
+    setExpanded(new Set()); setPage(1);
   };
   const toggleExpand = (raw: string) => setExpanded((s) => { const n = new Set(s); if (n.has(raw)) n.delete(raw); else n.add(raw); return n; });
 
@@ -340,6 +407,7 @@ export default function VarianceReport() {
   ];
 
   const loading = curLoading || prevLoading;
+  const changePage = (p: number) => { setPage(p); setExpanded(new Set()); };
 
   return (
     <>
@@ -400,7 +468,7 @@ export default function VarianceReport() {
           <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
         </button>
         {summaryOpen && (
-          loading ? <div className="pt-4"><Spinner /></div> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 md:grid-cols-5">
               {SUMMARY_TILES.map((t) => {
                 const curr = t.real && t.get ? t.get(summary.current) : 0;
@@ -423,8 +491,19 @@ export default function VarianceReport() {
       </div>
 
       <div className="card">
+        <ActiveFilterChips className="mb-3"
+          chips={[...chipsFromValues(FILTER_CATEGORIES, appliedFilters), ...chipsFromValues(FILTER_CATEGORIES, appliedExclusions, { exclude: true })]}
+          onRemove={(c) => {
+            if (c.exclude) { const n = withoutValue(appliedExclusions, c.key, c.value); setExclusions(n); setAppliedExclusions(n); }
+            else { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); }
+            changePage(1);
+          }}
+          onClearAll={() => { setFilters({}); setAppliedFilters({}); setExclusions({}); setAppliedExclusions({}); changePage(1); }} />
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
+          <div>
+            <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
+            <p className="text-tiny text-fg-muted">Groups with activity in the Current period, compared with their Previous-period values.</p>
+          </div>
           <div className="flex items-center gap-2">
             <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
               <button type="button" onClick={() => setMode('pct')} className={`px-2.5 py-1.5 text-tiny font-medium ${mode === 'pct' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>%</button>
@@ -432,7 +511,7 @@ export default function VarianceReport() {
             </div>
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
           </div>
         </div>
@@ -503,6 +582,9 @@ export default function VarianceReport() {
               </table>
             </div>
           )}
+        <div className="mt-3 flex justify-end">
+          <Pagination total={curError ? 0 : (curData?.total ?? 0)} page={page} pageSize={pageSize} onPageChange={changePage} />
+        </div>
       </div>
 
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports?${curTableQs}`} appliedFilters={{

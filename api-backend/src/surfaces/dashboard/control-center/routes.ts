@@ -10,7 +10,10 @@ import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
+import { getTableScope } from '../../../lib/db/table-registry.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { assertSameNetwork } from '../../../lib/db/ownership.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import {
@@ -52,6 +55,12 @@ const userDto = (r: UserRow) => {
     updatedAt: r.updated_at,
   };
 };
+
+/** Catalog lists (categories, channels, …) are small by nature but must never be cut silently. */
+const CATALOG_LIMIT = LIST_CAP;
+/** Login history is a recent-activity log, not a whole-entity list — kept bounded. */
+const LOGIN_EVENTS_LIMIT = 500;
+const usageQuery = z.object({ year: z.coerce.number().int().min(2000).max(2100).optional() });
 
 const statusListQuery = z.object({
   status: z.enum(['all', 'active', 'inactive', 'deleted']).optional(),
@@ -167,9 +176,9 @@ export function controlCenterRoutes(): Router {
   );
 
   // --- Usage (monthly impressions + marketplace pulls) ---
-  r.get('/usage', validateQuery(z.object({ year: z.coerce.number().optional() })), asyncHandler(async (req, res) => {
+  r.get('/usage', validateQuery(usageQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const year = Number(req.query.year) || new Date().getFullYear();
+    const year = (res.locals.query as z.infer<typeof usageQuery>).year ?? new Date().getFullYear();
     const { rows } = await query<{ month: string; total: string }>(
       `SELECT to_char(period_date, 'YYYY-MM') AS month, SUM(value)::bigint AS total
        FROM usage_records
@@ -242,7 +251,8 @@ export function controlCenterRoutes(): Router {
 
   // --- Security lists ---
   r.get('/api-whitelist', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<{ id: string; ip_address: string; created_at: string }>('network_api_whitelist', { where: {}, orderBy: 'created_at', limit: 500 });
+    const rows = await dbForRequest(req).selectMany<{ id: string; ip_address: string; created_at: string }>('network_api_whitelist', { where: {}, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'control-center.api-whitelist');
     sendOk(res, rows.map((row) => ({ id: row.id, ipAddress: row.ip_address, createdAt: row.created_at })));
   }));
 
@@ -260,7 +270,9 @@ export function controlCenterRoutes(): Router {
   }));
 
   r.get('/ip-blacklist', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<{ id: string; ip_from: string; ip_to: string }>('network_ip_blacklist', { where: {}, orderBy: 'created_at', limit: 500 });
+    // Must return EVERY range: the PUT below deletes all rows and re-inserts what the form sends back.
+    const rows = await dbForRequest(req).selectMany<{ id: string; ip_from: string; ip_to: string }>('network_ip_blacklist', { where: {}, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'control-center.ip-blacklist');
     sendOk(res, rows.map((row) => ({ id: row.id, from: row.ip_from, to: row.ip_to || row.ip_from })));
   }));
 
@@ -282,7 +294,9 @@ export function controlCenterRoutes(): Router {
   }));
 
   r.get('/login-events', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<Record<string, unknown>>('login_events', { where: {}, orderBy: 'created_at', orderDir: 'desc', limit: 500 });
+    // A recent-activity log — intentionally bounded to the newest LOGIN_EVENTS_LIMIT rows.
+    const rows = await dbForRequest(req).selectMany<Record<string, unknown>>('login_events', { where: {}, orderBy: 'created_at', orderDir: 'desc', limit: LOGIN_EVENTS_LIMIT });
+    warnIfCapped(rows, LOGIN_EVENTS_LIMIT, 'control-center.login-events');
     sendOk(res, rows.map(loginDto));
   }));
 
@@ -314,18 +328,21 @@ export function controlCenterRoutes(): Router {
   // --- Partner referral overrides ---
   r.get('/partner-referrals', validateQuery(statusListQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const status = (req.query.status as string | undefined) ?? 'all';
+    const { status = 'all' } = res.locals.query as z.infer<typeof statusListQuery>;
     const params: unknown[] = [networkId];
     let sql = `SELECT o.*, p.name AS partner_name
       FROM partner_referral_overrides o
-      LEFT JOIN publishers p ON p.id = o.publisher_id
+      LEFT JOIN publishers p ON p.id = o.publisher_id AND p.network_id = o.network_id
       WHERE o.network_id = $1`;
     if (status !== 'all') {
       params.push(status);
       sql += ` AND o.status = $2`;
+    } else {
+      sql += ` AND o.status <> 'deleted'`; // soft-deleted only under an explicit status=deleted
     }
-    sql += ' ORDER BY o.created_at DESC LIMIT 500';
+    sql += ` ORDER BY o.created_at DESC LIMIT ${LIST_CAP}`;
     const { rows } = await query<Record<string, unknown>>(sql, params);
+    warnIfCapped(rows, LIST_CAP, 'control-center.partner-referrals');
     sendOk(res, rows.map(referralDto));
   }));
 
@@ -339,6 +356,7 @@ export function controlCenterRoutes(): Router {
   })), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as Record<string, unknown>;
+    await assertSameNetwork(req.scope!.networkId, 'publishers', b['publisherId'] as string | null | undefined, 'publisherId');
     const row = await db.insert('partner_referral_overrides', {
       publisher_id: b['publisherId'] ?? null,
       enabled: b['enabled'],
@@ -364,12 +382,13 @@ export function controlCenterRoutes(): Router {
     const { rows } = await query<Record<string, unknown>>(
       `SELECT t.*, p.name AS partner_name
        FROM terms_acceptances t
-       LEFT JOIN publishers p ON p.id = t.publisher_id
+       LEFT JOIN publishers p ON p.id = t.publisher_id AND p.network_id = t.network_id
        WHERE t.network_id = $1
        ORDER BY t.created_at DESC
-       LIMIT 500`,
+       LIMIT ${LIST_CAP}`,
       [networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'control-center.terms-acceptances');
     sendOk(res, rows.map(termsDto));
   }));
 
@@ -381,6 +400,7 @@ export function controlCenterRoutes(): Router {
   })), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as Record<string, unknown>;
+    await assertSameNetwork(req.scope!.networkId, 'publishers', b['publisherId'] as string | null | undefined, 'publisherId');
     const row = await db.insert('terms_acceptances', {
       publisher_id: b['publisherId'] ?? null,
       partner_user: b['partnerUser'] ?? '',
@@ -394,7 +414,8 @@ export function controlCenterRoutes(): Router {
   r.get('/tags-with-usage', asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const networkId = req.scope!.networkId;
-    const tags = await db.selectMany<{ id: string; name: string; color: string | null; created_at: string }>('tags', { where: {}, orderBy: 'name', limit: 1000 });
+    const tags = await db.selectMany<{ id: string; name: string; color: string | null; created_at: string }>('tags', { where: {}, orderBy: 'name', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(tags, LIST_CAP, 'control-center.tags-with-usage');
     const { rows: counts } = await query<{ tag_id: string; entity_type: string; c: string }>(
       `SELECT tag_id, entity_type, COUNT(*)::text AS c FROM taggings WHERE network_id = $1 GROUP BY tag_id, entity_type`,
       [networkId],
@@ -492,11 +513,22 @@ function crudRoutes(
     toInsert: (body: Record<string, unknown>) => Record<string, unknown>;
   },
 ): void {
+  // `table` is a registered constant (getTableScope throws otherwise), never user input.
+  const tenantColumn = getTableScope(table).tenantColumn;
   r.get(`/${path}`, validateQuery(statusListQuery), asyncHandler(async (req, res) => {
-    const db = dbForRequest(req);
-    const status = (req.query.status as string | undefined) ?? 'all';
-    const where = status === 'all' ? {} : { status };
-    const rows = await db.selectMany<Record<string, unknown>>(table, { where, orderBy: 'created_at', orderDir: 'desc', limit: 500 });
+    const { status = 'all' } = res.locals.query as z.infer<typeof statusListQuery>;
+    if (status === 'all') {
+      // 'all' = every live row; soft-deleted rows only appear under an explicit status=deleted.
+      const { rows } = await query<Record<string, unknown>>(
+        `SELECT * FROM ${table} WHERE ${tenantColumn} = $1 AND status <> 'deleted' ORDER BY created_at DESC LIMIT ${CATALOG_LIMIT}`,
+        [req.scope!.networkId],
+      );
+      warnIfCapped(rows, CATALOG_LIMIT, `control-center.${path}`);
+      sendOk(res, rows.map(spec.toDto));
+      return;
+    }
+    const rows = await dbForRequest(req).selectMany<Record<string, unknown>>(table, { where: { status }, orderBy: 'created_at', orderDir: 'desc', limit: CATALOG_LIMIT, maxLimit: CATALOG_LIMIT });
+    warnIfCapped(rows, CATALOG_LIMIT, `control-center.${path}`);
     sendOk(res, rows.map(spec.toDto));
   }));
 

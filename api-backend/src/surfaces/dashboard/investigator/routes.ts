@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
@@ -116,9 +117,10 @@ export function investigatorRoutes(): Router {
        LEFT JOIN publishers p ON p.id = i.publisher_id AND p.network_id = i.network_id
        WHERE i.network_id = $1
        ORDER BY i.created_at DESC
-       LIMIT 200`,
+       LIMIT ${LIST_CAP}`,
       [networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'investigator.list');
     sendOk(res, rows.map(toDto));
   }));
 

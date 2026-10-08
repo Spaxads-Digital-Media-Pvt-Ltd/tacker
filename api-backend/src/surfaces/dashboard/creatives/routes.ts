@@ -16,6 +16,7 @@ import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 
 const TABLE = 'offer_creatives';
@@ -72,9 +73,10 @@ export function creativesRoutes(): Router {
     const { rows } = await query<Row & { offer_name: string; offer_ref: string }>(
       `SELECT c.*, o.name AS offer_name, o.ref AS offer_ref
          FROM offer_creatives c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
-        WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT 1000`,
+        WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT ${LIST_CAP}`,
       [req.scope!.networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'creatives.list');
     sendOk(res, rows.map(dto));
   }));
 

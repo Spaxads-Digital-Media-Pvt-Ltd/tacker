@@ -6,10 +6,11 @@
  * the caller's network before any nested write (FKs don't enforce tenant boundaries — spec §3A).
  */
 import { Router, type Request } from 'express';
-import type { ZodTypeAny } from 'zod';
+import { z, type ZodTypeAny } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
@@ -22,7 +23,7 @@ import {
   createCouponSchema, updateCouponSchema,
   createDealSchema, updateDealSchema,
   createForwardingRuleSchema, updateForwardingRuleSchema,
-  createOfferPostbackSchema, updateOfferPostbackSchema,
+  createOfferPostbackSchema, updateOfferPostbackSchema, POSTBACK_LEVELS,
 } from './asset-schemas.js';
 
 type Db = ReturnType<typeof dbForRequest>;
@@ -57,8 +58,9 @@ export interface AssetSpec {
   auditKind: string;                  // e.g. 'goal'
   invalidateCache?: boolean;          // goals affect payout resolution → bust the offer cache
   beforeWrite?: (db: Db, offerId: string, body: Record<string, unknown>) => Promise<void>;
-  /** Allow-listed exact-match list filters: query param → snake_case column (e.g. ?level=event). */
-  listFilters?: Record<string, string>;
+  /** Allow-listed exact-match list filters: query param → snake_case column + its allowed values
+   * (e.g. ?level=event). An empty param is ignored; any other value outside `values` is a 400. */
+  listFilters?: Record<string, { column: string; values: readonly [string, ...string[]] }>;
   /** Readable 409 message when a write hits one of the table's unique indexes. */
   uniqueMessage?: string;
 }
@@ -107,16 +109,22 @@ export async function deleteAsset(req: Request, spec: AssetSpec, offerId: string
 
 function mountAsset(r: Router, spec: AssetSpec): void {
   const base = `/:id/${spec.collection}`;
+  const filters = Object.entries(spec.listFilters ?? {});
+  const listQuery = z.object(Object.fromEntries(filters.map(([param, f]) => [
+    param, z.preprocess((v) => (v === '' ? undefined : v), z.enum(f.values).optional()),
+  ])));
 
-  r.get(base, asyncHandler(async (req, res) => {
+  r.get(base, validateQuery(listQuery), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     await ensureOffer(db, req.params.id);
     const where: Record<string, unknown> = { offer_id: req.params.id };
-    for (const [param, column] of Object.entries(spec.listFilters ?? {})) {
-      const v = req.query[param];
-      if (typeof v === 'string' && v) where[column] = v;
+    const q = res.locals.query as Record<string, string | undefined>;
+    for (const [param, f] of filters) {
+      const v = q[param];
+      if (v) where[f.column] = v;
     }
-    const rows = await db.selectMany<Row>(spec.table, { where, limit: 1000, orderBy: 'created_at' });
+    const rows = await db.selectMany<Row>(spec.table, { where, limit: LIST_CAP, maxLimit: LIST_CAP, orderBy: 'created_at' });
+    warnIfCapped(rows, LIST_CAP, `offer-assets.${spec.collection}`);
     sendOk(res, rows.map(spec.dto));
   }));
 
@@ -239,7 +247,7 @@ export function mountOfferAssets(r: Router): void {
     collection: 'postbacks', table: 'publisher_postbacks',
     createSchema: createOfferPostbackSchema, updateSchema: updateOfferPostbackSchema,
     colMap: { publisherId: 'publisher_id', url: 'url', method: 'method', event: 'event', level: 'level', status: 'status' },
-    dto: offerPostbackDTO, auditKind: 'postback', listFilters: { level: 'level' },
+    dto: offerPostbackDTO, auditKind: 'postback', listFilters: { level: { column: 'level', values: POSTBACK_LEVELS } },
     // The partner (publisher) a postback is scoped to must belong to this network.
     beforeWrite: async (db, _offerId, body) => {
       const pid = body['publisherId'];

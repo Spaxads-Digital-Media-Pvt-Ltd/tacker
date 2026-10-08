@@ -202,8 +202,10 @@ export default function PostbacksManage() {
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'deliveryMethod', label: 'Delivery Method', options: Object.entries(DELIVERY_LABEL).map(([value, label]) => ({ value, label })) },
-    { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
-    { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
+    // A postback with no offer / no partner fires for every offer / partner, so it applies to any
+    // selection — the labels say so.
+    { key: 'offer', label: 'Offer (includes postbacks that apply to all offers)', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
+    { key: 'partner', label: 'Partner (includes postbacks that apply to all partners)', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
   ], [offers, publishers]);
 
   const tabbed = useMemo(() => (data ?? []).filter((p) => p.postbackType === tab), [data, tab]);
@@ -218,12 +220,14 @@ export default function PostbacksManage() {
     }
     const has = (key: string) => (filters[key]?.length ?? 0) > 0;
     if (has('deliveryMethod')) rows = rows.filter((p) => filters['deliveryMethod']!.includes(p.deliveryMethod));
-    if (has('offer')) rows = rows.filter((p) => p.offerId && filters['offer']!.includes(p.offerId));
-    if (has('partner')) rows = rows.filter((p) => p.publisherId && filters['partner']!.includes(p.publisherId));
+    if (has('offer')) rows = rows.filter((p) => !p.offerId || filters['offer']!.includes(p.offerId));
+    if (has('partner')) rows = rows.filter((p) => !p.publisherId || filters['partner']!.includes(p.publisherId));
     return rows;
   }, [tabbed, status, q, searchField, filters]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Clamp after a refetch/delete shrinks the list so we never sit on an empty last page.
+  useEffect(() => { if (page > pageCount) setPage(pageCount); }, [page, pageCount]);
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const columnsByHeader: Record<string, Column<Postback>> = {
@@ -244,11 +248,10 @@ export default function PostbacksManage() {
     'HTML Code': { header: 'HTML Code', cell: (p) => (p.htmlCode ? <button className="text-accent-text hover:underline" onClick={() => setHtmlCode(p.htmlCode)}>View</button> : <span className="text-fg-muted">—</span>) },
   };
   const actionsCol: Column<Postback> = { header: '', className: 'text-right', cell: (p) => <RowActionMenu postback={p} onDeleted={refetch} /> };
-  const checkboxCol: Column<Postback> = { header: '', cell: () => <input type="checkbox" className="chk" /> };
   const shownColumns = useMemo<Set<string>>(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const displayedColumns = useMemo(() => {
     const ordered = columnOrder.map((h) => columnsByHeader[h]).filter((c): c is Column<Postback> => Boolean(c && shownColumns.has(c.header)));
-    return [checkboxCol, ...ordered, actionsCol];
+    return [...ordered, actionsCol];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnOrder, shownColumns, publishers, offers]);
 
@@ -291,7 +294,7 @@ export default function PostbacksManage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <Link to="/app/aff-postbacks/new" className="btn-primary">+ Postback</Link>
         <div className="flex flex-wrap items-center gap-2">
-          <SearchFieldSelect value={searchField} onChange={setSearchField} />
+          <SearchFieldSelect value={searchField} onChange={(v) => { setSearchField(v); setPage(1); }} />
           <div className="relative">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className="input !w-56 !pl-8" placeholder={`Search by ${searchField}…`} value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />

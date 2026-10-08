@@ -23,11 +23,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { assertSameNetwork } from '../../../lib/db/ownership.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { sendNetworkEmail } from '../../../lib/mailer.js';
 import type { Request } from 'express';
@@ -78,7 +80,7 @@ async function countRecipients(networkId: string, groupType: 'publishers' | 'adv
   if (statusFilter.length) { params.push(statusFilter); sql += ` AND status = ANY($${params.length})`; }
   if (groupType === 'publishers' && tierId) {
     params.push(tierId);
-    sql += ` AND id IN (SELECT publisher_id FROM partner_tier_members WHERE tier_id = $${params.length})`;
+    sql += ` AND id IN (SELECT publisher_id FROM partner_tier_members WHERE network_id = $1 AND tier_id = $${params.length})`;
   }
   const { rows } = await query<{ n: number }>(sql, params);
   return rows[0]?.n ?? 0;
@@ -91,7 +93,7 @@ async function recipientEmails(networkId: string, groupType: 'publishers' | 'adv
   if (statusFilter.length) { params.push(statusFilter); sql += ` AND status = ANY($${params.length})`; }
   if (groupType === 'publishers' && tierId) {
     params.push(tierId);
-    sql += ` AND id IN (SELECT publisher_id FROM partner_tier_members WHERE tier_id = $${params.length})`;
+    sql += ` AND id IN (SELECT publisher_id FROM partner_tier_members WHERE network_id = $1 AND tier_id = $${params.length})`;
   }
   const { rows } = await query<{ contact_email: string }>(sql, params);
   return rows.map((r) => r.contact_email);
@@ -181,7 +183,7 @@ export function communicationHubRoutes(): Router {
     const [drafts, sentThisMonth, publishedLive, bannerDrafts] = await Promise.all([
       db.count('email_messages', { status: 'draft' }),
       query<{ n: number }>(
-        `SELECT COUNT(*)::int AS n FROM email_messages WHERE network_id=$1 AND status='sent' AND sent_at >= date_trunc('month', now())`,
+        `SELECT COUNT(*)::int AS n FROM email_messages WHERE network_id=$1 AND status='sent' AND sent_at >= date_trunc('month', now(), 'UTC')`,
         [networkId],
       ).then((r2) => r2.rows[0]?.n ?? 0),
       query<{ n: number }>(
@@ -229,7 +231,8 @@ export function communicationHubRoutes(): Router {
 
   // ---- Templates ----
   r.get('/templates', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<TemplateRow>('email_templates', { orderBy: 'updated_at', orderDir: 'desc', limit: 200 });
+    const rows = await dbForRequest(req).selectMany<TemplateRow>('email_templates', { orderBy: 'updated_at', orderDir: 'desc', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'communication-hub.templates');
     sendOk(res, rows.map((t) => ({
       id: t.id, name: t.name, messageType: t.message_type, subject: t.subject, body: t.body,
       createdAt: t.created_at, updatedAt: t.updated_at,
@@ -263,7 +266,8 @@ export function communicationHubRoutes(): Router {
   r.get('/audiences', asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const networkId = req.scope!.networkId;
-    const rows = await db.selectMany<AudienceRow>('audiences', { orderBy: 'created_at', orderDir: 'desc', limit: 200 });
+    const rows = await db.selectMany<AudienceRow>('audiences', { orderBy: 'created_at', orderDir: 'desc', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'communication-hub.audiences');
     const withCounts = await Promise.all(rows.map(async (a) => ({
       id: a.id, name: a.name, groupType: a.group_type, statusFilter: a.status_filter, tierId: a.tier_id,
       recipientCount: await countRecipients(networkId, a.group_type, a.status_filter, a.tier_id),
@@ -273,6 +277,7 @@ export function communicationHubRoutes(): Router {
   }));
   r.post('/audiences', requireRole('admin', 'manager'), validateBody(audienceSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof audienceSchema>;
+    await assertSameNetwork(req.scope!.networkId, 'partner_tiers', b.tierId, 'tierId');
     const row = await dbForRequest(req).insert<AudienceRow>('audiences', {
       name: b.name, group_type: b.groupType, status_filter: b.statusFilter, tier_id: b.tierId ?? null,
     });
@@ -281,6 +286,7 @@ export function communicationHubRoutes(): Router {
   }));
   r.put('/audiences/:id', requireRole('admin', 'manager'), validateBody(audienceSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof audienceSchema>;
+    await assertSameNetwork(req.scope!.networkId, 'partner_tiers', b.tierId, 'tierId');
     const [row] = await dbForRequest(req).update<AudienceRow>('audiences', {
       name: b.name, group_type: b.groupType, status_filter: b.statusFilter, tier_id: b.tierId ?? null,
     }, { id: req.params.id });
@@ -296,11 +302,13 @@ export function communicationHubRoutes(): Router {
   }));
 
   // ---- Emails ----
-  r.get('/emails', asyncHandler(async (req, res) => {
-    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const emailsQuery = z.object({ status: z.enum(['all', 'draft', 'scheduled', 'sent']).optional() });
+  r.get('/emails', validateQuery(emailsQuery), asyncHandler(async (req, res) => {
+    const { status } = res.locals.query as z.infer<typeof emailsQuery>;
     const rows = await dbForRequest(req).selectMany<EmailRow>('email_messages', {
-      where: status ? { status } : {}, orderBy: 'updated_at', orderDir: 'desc', limit: 200,
+      where: status && status !== 'all' ? { status } : {}, orderBy: 'updated_at', orderDir: 'desc', limit: LIST_CAP, maxLimit: LIST_CAP,
     });
+    warnIfCapped(rows, LIST_CAP, 'communication-hub.emails');
     sendOk(res, rows.map((e) => ({
       id: e.id, subject: e.subject, messageType: e.message_type, status: e.status,
       recipientCount: e.recipient_count, sentAt: e.sent_at, sendError: e.send_error,
@@ -358,7 +366,8 @@ export function communicationHubRoutes(): Router {
 
   // ---- Partner Banners ----
   r.get('/banners', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<BannerRow>('banners', { orderBy: 'created_at', orderDir: 'desc', limit: 200 });
+    const rows = await dbForRequest(req).selectMany<BannerRow>('banners', { orderBy: 'created_at', orderDir: 'desc', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'communication-hub.banners');
     sendOk(res, rows.map(bannerDto));
   }));
   r.post('/banners', requireRole('admin', 'manager'), validateBody(bannerSchema), asyncHandler(async (req, res) => {

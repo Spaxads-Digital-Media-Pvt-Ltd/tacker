@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { pool, query } from '../../../lib/db/pool.js';
 import { rebalanceConversionLedger, writeConversionLedger } from '../../../lib/ledger/ledger.js';
@@ -51,9 +52,10 @@ export function conversionImportsRoutes(): Router {
          FROM import_export_logs l
          LEFT JOIN users u ON u.id = l.created_by AND u.network_id = l.network_id
         WHERE l.network_id = $1 AND l.kind = 'import' AND l.entity = 'conversions'
-        ORDER BY l.created_at DESC LIMIT 200`,
+        ORDER BY l.created_at DESC LIMIT ${LIST_CAP}`,
       [req.scope!.networkId],
     );
+    warnIfCapped(rows, LIST_CAP, 'conversion-imports.list');
     sendOk(res, rows);
   }));
 

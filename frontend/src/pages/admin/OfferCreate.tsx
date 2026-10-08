@@ -8,11 +8,12 @@
  * exists: offer-group membership (lives on offer_groups.offer_ids), labels, and an uploaded
  * thumbnail file. Creatives are added from the Offer Detail page after creation.
  */
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { useOfferCategories } from '../../lib/useOfferCategories';
 import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
@@ -57,13 +58,8 @@ export default function OfferCreate() {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: offerGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
   const { data: networkSecurity } = useQuery<{ securityCode: string | null }>('/api/settings/security');
-  // Distinct category values already in use — the offers.category column is free text (no reference
-  // table), so this is the honest source for autocomplete suggestions, same list the Offers filter
-  // drawer builds.
-  const categoryOptions = useMemo(
-    () => Array.from(new Set((offers ?? []).map((o) => o.category).filter((c): c is string => Boolean(c)))).sort(),
-    [offers],
-  );
+  // Category options = Control Center › Categories catalog ∪ names already on offers.
+  const { options: categoryOptions, ensureCategory } = useOfferCategories((offers ?? []).map((o) => o.category));
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(() => {
     const base = {
@@ -161,7 +157,7 @@ export default function OfferCreate() {
       revenueSettings: revenue,
       emailSettings: email,
     };
-    if (form.category) body.category = form.category;
+    if (form.category) { body.category = form.category; await ensureCategory(form.category); }
     if (form.previewUrl) body.previewUrl = normalizeUrl(form.previewUrl);
     if (form.trackingDomainId) body.trackingDomainId = form.trackingDomainId;
     if (form.description) body.description = form.description;

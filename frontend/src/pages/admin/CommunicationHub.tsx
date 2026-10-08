@@ -16,7 +16,9 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 
 const TOP_TABS = ['Overview', 'Emails', 'Banners', 'Audiences', 'Templates', 'Settings'] as const;
-const EMAIL_SUBTABS = ['Sent', 'Scheduled', 'Drafts'] as const;
+// Email scheduling isn't offered (messages are sent immediately or kept as drafts), so there is no
+// always-empty "Scheduled" tab.
+const EMAIL_SUBTABS = ['Sent', 'Drafts'] as const;
 const BANNER_SUBTABS = ['Published', 'Scheduled', 'Drafts', 'Expired'] as const;
 const PAGE_SIZE = 10;
 
@@ -97,7 +99,6 @@ function OverviewTab({ goto }: { goto: (t: (typeof TOP_TABS)[number]) => void })
           <button className="btn-primary" onClick={() => goto('Emails')}>Quick Start</button>
           <div className="flex gap-6 border-t border-border pt-3 text-small">
             <span><b className="text-fg">{data.emails.drafts}</b> <span className="text-fg-secondary">Draft(s)</span></span>
-            <span><b className="text-fg">{data.emails.scheduledThisWeek}</b> <span className="text-fg-secondary">Scheduled This Week</span></span>
             <span><b className="text-fg">{data.emails.sentThisMonth}</b> <span className="text-fg-secondary">Sent This Month</span></span>
           </div>
         </div>
@@ -320,7 +321,7 @@ function EmailsTab() {
   const { data: viewedEmail, loading: viewLoading } = useQuery<EmailMsg>(
     viewing ? `/api/communication-hub/emails/${viewing.id}` : null,
   );
-  const status = sub === 'Sent' ? 'sent' : sub === 'Scheduled' ? 'scheduled' : 'draft';
+  const status = sub === 'Sent' ? 'sent' : 'draft';
   const { data, loading, refetch } = useQuery<EmailMsg[]>(`/api/communication-hub/emails?status=${status}`);
   const { data: audiencesData } = useQuery<AudienceRow[]>('/api/communication-hub/audiences');
   const { data: templatesData } = useQuery<TemplateRow[]>('/api/communication-hub/templates');

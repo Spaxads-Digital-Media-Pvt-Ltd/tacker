@@ -20,6 +20,8 @@ const STATUS_DOT: Record<string, string> = { active: 'bg-success', pending: 'bg-
 interface FormState {
   name: string; status: string; contactEmail: string; trafficSource: string; payoutTerms: string; defaultAttributionWindowS: string;
   country: string; paymentMethod: string; billingFrequency: string; tier: string; partnerManagerId: string; accountExecutiveId: string; referredById: string;
+  /** Control Center channel id ('' = none). */
+  channelId: string;
   contactName: string; taxId: string; website: string; notes: string;
 }
 
@@ -76,11 +78,15 @@ function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => 
 // ── General (real fields backed by publisher-manage-parity columns, plus a few genuinely
 // unbacked toggles kept interactive-but-not-persisted) ──────────────────────
 function GeneralExtras({
-  base, publisherId, form, set, users, publishers,
+  base, publisherId, form, set, users, publishers, currentChannelName,
 }: {
   base: string; publisherId: string; form: FormState; set: <K extends keyof FormState>(k: K, v: FormState[K]) => void;
-  users: DashboardUser[]; publishers: Publisher[];
+  users: DashboardUser[]; publishers: Publisher[]; currentChannelName?: string | null;
 }) {
+  const { data: channels } = useQuery<Array<{ id: string; name: string }>>('/api/control-center/channels?status=active');
+  const channelList = channels ?? [];
+  // Keep a currently-assigned channel selectable even if it has since been deactivated.
+  const missingCurrent = Boolean(form.channelId) && !channelList.some((c) => c.id === form.channelId);
   const [notify, setNotify] = useState(true);
   const [dynamicPayouts, setDynamicPayouts] = useState(false);
   const [macroVisibility, setMacroVisibility] = useState('None');
@@ -90,6 +96,13 @@ function GeneralExtras({
         <select className="input" value={form.partnerManagerId} onChange={(e) => set('partnerManagerId', e.target.value)}>
           <option value="">—</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Channel">
+        <select className="input" value={form.channelId} onChange={(e) => set('channelId', e.target.value)}>
+          <option value="">None</option>
+          {missingCurrent && <option value={form.channelId}>{currentChannelName ?? 'Current channel'} (inactive)</option>}
+          {channelList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </Field>
       <Field label="Account Executive">
@@ -213,7 +226,7 @@ export default function PublisherEdit() {
       defaultAttributionWindowS: publisher.defaultAttributionWindowS != null ? String(publisher.defaultAttributionWindowS) : '',
       country: publisher.country ?? '', paymentMethod: publisher.paymentMethod ?? '', billingFrequency: publisher.billingFrequency ?? '',
       tier: publisher.tier ?? '', partnerManagerId: publisher.partnerManagerId ?? '', accountExecutiveId: publisher.accountExecutiveId ?? '',
-      referredById: publisher.referredById ?? '',
+      referredById: publisher.referredById ?? '', channelId: publisher.channelId ?? '',
       contactName: publisher.contactName ?? '', taxId: publisher.taxId ?? '', website: publisher.website ?? '', notes: publisher.notes ?? '',
     });
   }, [publisher]);
@@ -230,7 +243,7 @@ export default function PublisherEdit() {
       name: form.name, status: form.status, contactEmail: form.contactEmail.trim() || null, payoutTerms: form.payoutTerms.trim() || null,
       country: form.country || null, paymentMethod: form.paymentMethod || null, billingFrequency: form.billingFrequency || null,
       tier: form.tier || null, partnerManagerId: form.partnerManagerId || null, accountExecutiveId: form.accountExecutiveId || null,
-      referredById: form.referredById || null,
+      referredById: form.referredById || null, channelId: form.channelId || null,
       contactName: form.contactName || null, taxId: form.taxId || null, website: form.website || null, notes: form.notes || null,
     };
     body.trafficSource = form.trafficSource || null; // empty clears it
@@ -264,7 +277,7 @@ export default function PublisherEdit() {
             </div>
             <Field label="Default Attribution Window (seconds)" hint="Saved for reference — the attribution window that applies is the offer's own."><input type="number" min={0} className="input" value={form.defaultAttributionWindowS} onChange={(e) => set('defaultAttributionWindowS', e.target.value)} placeholder="2592000" /></Field>
             <Field label="Payout Terms *"><textarea className="input min-h-[80px]" required value={form.payoutTerms} onChange={(e) => set('payoutTerms', e.target.value)} /></Field>
-            <GeneralExtras base={base} publisherId={id} form={form} set={set} users={users ?? []} publishers={publishers ?? []} />
+            <GeneralExtras base={base} publisherId={id} form={form} set={set} users={users ?? []} publishers={publishers ?? []} currentChannelName={publisher.channelName} />
           </div>
         )}
 

@@ -10,10 +10,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { findOrCreateTag } from '../../../lib/db/tags.js';
 import { requireRole } from '../auth.js';
 
 type Db = ReturnType<typeof dbForRequest>;
@@ -30,40 +31,37 @@ const assignTagSchema = z.object({
   color: z.string().max(20).nullable().optional(),
 }).refine((v) => v.tagId || v.name, { message: 'tagId or name required' });
 
-/** Find an existing tag by name (case-insensitive) or create it. Returns the tag row. */
-async function findOrCreateTag(db: Db, name: string, color: string | null): Promise<TagRow> {
-  const existing = await db.selectMany<TagRow>('tags', { where: {}, limit: 1000 });
-  const hit = existing.find((t) => t.name.toLowerCase() === name.toLowerCase());
-  if (hit) return hit;
-  return db.insert<TagRow>('tags', { name, color });
-}
+/** Every entity_type taggings' CHECK constraint allows (migration 1700000055000). */
+const TAGGABLE_ENTITY_TYPES = ['offer', 'publisher', 'advertiser', 'partner_tier', 'smart_link', 'offer_group'] as const;
+const assignmentsQuery = z.object({ entityType: z.enum(TAGGABLE_ENTITY_TYPES) });
+const ASSIGNMENTS_LIMIT = 10_000;
+
+/** Whole-dictionary reads: bounded, but above ScopedDb's default 500 (which silently truncated). */
+const TAG_LIST_LIMIT = 10_000;
 
 /** /api/tags — the network's tag dictionary. */
 export function tagsRoutes(): Router {
   const r = Router();
 
   r.get('/', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<TagRow>('tags', { where: {}, limit: 1000, orderBy: 'name' });
+    const rows = await dbForRequest(req).selectMany<TagRow>('tags', { where: {}, orderBy: 'name', limit: TAG_LIST_LIMIT, maxLimit: TAG_LIST_LIMIT });
     sendOk(res, rows.map(tagDTO));
   }));
 
   r.post('/', requireRole('admin', 'manager'), validateBody(createTagSchema), asyncHandler(async (req, res) => {
-    const db = dbForRequest(req);
     const b = req.body as z.infer<typeof createTagSchema>;
-    const row = await findOrCreateTag(db, b.name, b.color ?? null);
+    const row = await findOrCreateTag(req.scope!.networkId, b.name, b.color ?? null);
     await writeAudit(req, { action: 'tag.create', entityType: 'tag', entityId: row.id, after: row });
     sendOk(res, tagDTO(row), undefined, 201);
   }));
 
   // Bulk tag→entity map for list-page filtering (e.g. "filter Offers by tag"), so the caller
   // doesn't need N+1 requests against every entity's own /:id/tags.
-  r.get('/assignments', asyncHandler(async (req, res) => {
-    const entityType = req.query['entityType'];
-    if (entityType !== 'offer' && entityType !== 'publisher' && entityType !== 'advertiser' && entityType !== 'partner_tier') {
-      throw badRequest('entityType must be offer, publisher, advertiser, or partner_tier');
-    }
+  r.get('/assignments', validateQuery(assignmentsQuery), asyncHandler(async (req, res) => {
+    const { entityType } = res.locals.query as z.infer<typeof assignmentsQuery>;
+    // maxLimit lifts ScopedDb's default 500-row ceiling — without it this bulk map was silently truncated.
     const rows = await dbForRequest(req).selectMany<{ tag_id: string; entity_id: string }>('taggings', {
-      where: { entity_type: entityType }, limit: 10_000,
+      where: { entity_type: entityType }, limit: ASSIGNMENTS_LIMIT, maxLimit: ASSIGNMENTS_LIMIT,
     });
     sendOk(res, rows.map((r) => ({ tagId: r.tag_id, entityId: r.entity_id })));
   }));
@@ -104,10 +102,10 @@ export function attachTagRoutes(r: Router, entityType: EntityType): void {
     const db = dbForRequest(req);
     await ensureEntity(db, req.params.id);
     const rows = await db.selectMany<{ tag_id: string }>('taggings', {
-      where: { entity_type: entityType, entity_id: req.params.id }, limit: 1000,
+      where: { entity_type: entityType, entity_id: req.params.id }, limit: TAG_LIST_LIMIT, maxLimit: TAG_LIST_LIMIT,
     });
     const tagIds = new Set(rows.map((t) => t.tag_id));
-    const all = await db.selectMany<TagRow>('tags', { where: {}, limit: 1000 });
+    const all = await db.selectMany<TagRow>('tags', { where: {}, limit: TAG_LIST_LIMIT, maxLimit: TAG_LIST_LIMIT });
     sendOk(res, all.filter((t) => tagIds.has(t.id)).map(tagDTO));
   }));
 
@@ -120,7 +118,7 @@ export function attachTagRoutes(r: Router, entityType: EntityType): void {
       tag = await db.selectOne<TagRow>('tags', { id: b.tagId });
       if (!tag) throw badRequest('tagId does not belong to this network');
     } else {
-      tag = await findOrCreateTag(db, b.name!, b.color ?? null);
+      tag = await findOrCreateTag(req.scope!.networkId, b.name!, b.color ?? null);
     }
     // Idempotent assign (unique index on tag_id+entity → ignore duplicates).
     const existing = await db.selectOne('taggings', { tag_id: tag.id, entity_type: entityType, entity_id: req.params.id });

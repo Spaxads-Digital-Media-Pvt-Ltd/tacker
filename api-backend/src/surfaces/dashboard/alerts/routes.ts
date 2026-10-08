@@ -45,10 +45,12 @@ export function alertsRoutes(): Router {
     asyncHandler(async (req, res) => {
       const q = res.locals.query as PaginationQuery & { status?: string };
       const where = q.status ? { status: q.status } : {};
-      const rows = await dbForRequest(req).selectMany<AlertRow>('alerts', {
-        where, limit: q.limit, offset: q.offset, orderBy: 'created_at',
-      });
-      sendOk(res, rows.map(toDTO), { limit: q.limit, offset: q.offset });
+      const db = dbForRequest(req);
+      const [rows, total] = await Promise.all([
+        db.selectMany<AlertRow>('alerts', { where, limit: q.limit, offset: q.offset, orderBy: 'created_at' }),
+        db.count('alerts', where),
+      ]);
+      sendOk(res, rows.map(toDTO), { limit: q.limit, offset: q.offset, total });
     }),
   );
 

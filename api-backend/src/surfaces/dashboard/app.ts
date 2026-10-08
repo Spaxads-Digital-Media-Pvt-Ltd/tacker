@@ -12,6 +12,7 @@ import { z } from 'zod';
 import cookieParser from 'cookie-parser';
 import { createBaseApp, finalizeApp } from '../../lib/http/express-app.js';
 import { sendOk } from '../../lib/http/envelope.js';
+import { warnIfCapped } from '../../lib/http/list-cap.js';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { validateBody } from '../../lib/http/validate.js';
 import { badRequest } from '../../lib/http/errors.js';
@@ -56,8 +57,6 @@ import { smartSwitchRoutes } from './smartswitch/routes.js';
 import { usersRoutes } from './users/routes.js';
 import { postbacksRoutes } from './postbacks/routes.js';
 import { partnerTiersRoutes } from './partner-tiers/routes.js';
-import { partnerChannelsRoutes } from './partner-channels/routes.js';
-import { offerCategoriesRoutes } from './offer-categories/routes.js';
 import { businessUnitsRoutes } from './business-units/routes.js';
 import { offerApplicationsRoutes } from './offer-applications/routes.js';
 import { questionnairesRoutes } from './questionnaires/routes.js';
@@ -230,6 +229,8 @@ export function buildDashboardApp(): Express {
        LIMIT 200`,
       [req.scope.networkId, userId],
     );
+    // Recent-activity log — intentionally bounded to the newest 200 logins.
+    warnIfCapped(rows, 200, 'me.logins');
     sendOk(res, rows.map((row) => ({
       id: row['id'],
       loginTime: row['created_at'],
@@ -357,8 +358,6 @@ export function buildDashboardApp(): Express {
   authed.use('/users', requireAdmin, usersRoutes());
   authed.use('/postbacks', requireAdmin, postbacksRoutes());
   authed.use('/partner-tiers', requireAdmin, partnerTiersRoutes());
-  authed.use('/partner-channels', requireAdmin, partnerChannelsRoutes());
-  authed.use('/offer-categories', requireAdmin, offerCategoriesRoutes());
   authed.use('/business-units', requireAdmin, businessUnitsRoutes());
   authed.use('/offer-applications', requireAdmin, offerApplicationsRoutes());
   authed.use('/questionnaires', requireAdmin, questionnairesRoutes());

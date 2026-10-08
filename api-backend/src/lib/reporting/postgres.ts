@@ -21,8 +21,8 @@ const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers
   isp: { click: 'clicks.isp', conv: 'k.isp' },
   browser: { click: 'clicks.browser', conv: 'k.browser' },
   os: { click: 'clicks.os', conv: 'k.os' },
-  day: { click: "date_trunc('day', clicks.created_at)", conv: "date_trunc('day', c.created_at)" },
-  hour: { click: "date_trunc('hour', clicks.created_at)", conv: "date_trunc('hour', c.created_at)" },
+  day: { click: "date_trunc('day', clicks.created_at, 'UTC')", conv: "date_trunc('day', c.created_at, 'UTC')" },
+  hour: { click: "date_trunc('hour', clicks.created_at, 'UTC')", conv: "date_trunc('hour', c.created_at, 'UTC')" },
   sub1: { click: 'clicks.sub1', conv: 'k.sub1' },
   sub2: { click: 'clicks.sub2', conv: 'k.sub2' },
   sub3: { click: 'clicks.sub3', conv: 'k.sub3' },
@@ -30,11 +30,12 @@ const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers
   sub5: { click: 'clicks.sub5', conv: 'k.sub5' },
 };
 
-// Metrics usable in ORDER BY map to a concrete output column (cr/epc order by clicks).
+// ORDER BY expressions over the outer `s` row (cr/epc are ratios, computed the same way as below).
 const ORDER_COL: Record<Metric, string> = {
-  clicks: 'clicks', unique_clicks: 'unique_clicks', conversions: 'conversions',
-  payout: 'payout', revenue: 'revenue', margin: 'margin', cr: 'clicks', epc: 'clicks',
-  invalid_clicks: 'invalid_clicks', total_conversions: 'total_conversions', avg_fraud_score: 'avg_fraud_score',
+  clicks: 's.clicks', unique_clicks: 's.unique_clicks', conversions: 's.conversions',
+  payout: 's.payout', revenue: 's.revenue', margin: 's.margin',
+  cr: 's.conversions::numeric / NULLIF(s.clicks, 0)', epc: 's.payout / NULLIF(s.clicks, 0)',
+  invalid_clicks: 's.invalid_clicks', total_conversions: 's.total_conversions', avg_fraud_score: 's.avg_fraud_score',
 };
 
 export class PostgresReportingProvider implements ReportingProvider {
@@ -53,19 +54,23 @@ export class PostgresReportingProvider implements ReportingProvider {
     // other caller still just passes a single value.
     const add = (value: unknown, clickExpr: string, convExpr: string, op: '=' | '<>' | '>=' | '<=' = '='): void => {
       if (value == null || value === '') return;
+      // Exclusions keep rows whose value is NULL ("exclude smart link X" must not also drop all
+      // traffic that has no smart link) — hence the explicit IS NULL / IS DISTINCT FROM.
+      const exclude = op === '<>';
       if (Array.isArray(value)) {
         if (value.length === 0) return;
         params.push(value);
         const p = `$${params.length}`;
-        const cmp = op === '=' ? `= ANY(${p}::text[])` : `!= ALL(${p}::text[])`;
-        clickWhere.push(`${clickExpr}::text ${cmp}`);
-        convWhere.push(`${convExpr}::text ${cmp}`);
+        const cmp = (e: string) => (exclude ? `(${e} IS NULL OR ${e}::text <> ALL(${p}::text[]))` : `${e}::text = ANY(${p}::text[])`);
+        clickWhere.push(cmp(clickExpr));
+        convWhere.push(cmp(convExpr));
         return;
       }
       params.push(value);
       const p = `$${params.length}`;
-      clickWhere.push(`${clickExpr} ${op} ${p}`);
-      convWhere.push(`${convExpr} ${op} ${p}`);
+      const cmp = (e: string) => (exclude ? `${e}::text IS DISTINCT FROM ${p}::text` : `${e} ${op} ${p}`);
+      clickWhere.push(cmp(clickExpr));
+      convWhere.push(cmp(convExpr));
     };
     const f = req.filters;
     add(f.from, 'clicks.created_at', 'c.created_at', '>=');
@@ -93,8 +98,13 @@ export class PostgresReportingProvider implements ReportingProvider {
     add(f.excludeSmartLinkId, 'clicks.smart_link_id', 'k.smart_link_id', '<>');
     add(f.excludeCountry, 'clicks.country', 'k.country', '<>');
     add(f.excludeDevice, 'clicks.device', 'k.device', '<>');
-    // "Others › Ignore Fail Traffic" — drop fraud-flagged clicks from click-side metrics entirely.
-    if (f.excludeInvalid) clickWhere.push('array_length(clicks.fraud_flags, 1) IS NULL');
+    // "Others › Ignore Fail Traffic" — drop fraud-flagged clicks from click-side metrics entirely, and
+    // the conversions those clicks produced (a conversion with no resolvable click — offline/manual —
+    // has nothing flagged and is kept; array_length of NULL or '{}' is NULL).
+    if (f.excludeInvalid) {
+      clickWhere.push('array_length(clicks.fraud_flags, 1) IS NULL');
+      convWhere.push('array_length(k.fraud_flags, 1) IS NULL');
+    }
 
     const needsOffers = gb.includes('advertiser') || f.advertiserId != null || f.excludeAdvertiserId != null;
     const groupIdx = gb.map((_, i) => `d${i}`).join(', ');
@@ -129,7 +139,7 @@ export class PostgresReportingProvider implements ReportingProvider {
     // A day/hour-only report reads naturally in chronological order — default to that (the group's
     // own dimension column) rather than clicks-desc when the caller hasn't asked for a specific sort.
     const chronological = gb.length === 1 && (gb[0] === 'day' || gb[0] === 'hour');
-    const orderCol = req.orderBy ? ORDER_COL[req.orderBy] : (chronological ? 'd0' : ORDER_COL['clicks']);
+    const orderCol = req.orderBy ? ORDER_COL[req.orderBy] : (chronological ? 's.d0' : ORDER_COL['clicks']);
     const orderDir = req.orderDir ? (req.orderDir === 'asc' ? 'ASC' : 'DESC') : (chronological && !req.orderBy ? 'ASC' : 'DESC');
 
     const baseSql =
@@ -155,7 +165,10 @@ export class PostgresReportingProvider implements ReportingProvider {
     const limP = `$${pageParams.length}`;
     pageParams.push(req.offset);
     const offP = `$${pageParams.length}`;
-    const sql = `${baseSql} ORDER BY ${orderCol} ${orderDir} LIMIT ${limP} OFFSET ${offP}`;
+    // Stable tie-break on the group key so paging never repeats/skips rows with equal metrics.
+    const tieBreak = gb.map((_, i) => `s.d${i}::text`).join(', ');
+    const sql = `SELECT s.* FROM (${baseSql}) AS s
+      ORDER BY ${orderCol} ${orderDir} NULLS LAST${tieBreak ? `, ${tieBreak}` : ''} LIMIT ${limP} OFFSET ${offP}`;
 
     const { rows } = await query<Record<string, unknown>>(sql, pageParams);
 

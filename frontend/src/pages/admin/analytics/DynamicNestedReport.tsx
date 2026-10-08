@@ -22,15 +22,21 @@ import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
-import { downloadCsv, downloadXlsx } from '../../../lib/export';
 import {
-  type AggResult, METRICS_PARAM, DASH, DEVICES, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
-  type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
+  type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
+  fetchAllPages, useReportExport, ExportStatus,
 } from '../../../shared-components/primitives/ReportPageKit';
+import {
+  readUrlFilters, readUrlDate, readUrlMetricFilters, writeUrlMetricFilters,
+  IGNORE_FAIL_PARAM, readUrlFlag, reportLink, urlFilterParams,
+} from '../../../lib/reportFilterState';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
+import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 
 interface SmartLink { id: string; name: string }
 
@@ -131,13 +137,21 @@ function SingleSelectDropdown({ label, value, onChange }: { label: string; value
 }
 
 function ExpandedChildRows({
-  childDim, parentFilterParam, parentRawId, from, to, opts, smartLinkMap, shown,
+  childDim, parentFilterParam, parentRawId, from, to, opts, smartLinkMap, shown, dimParams,
 }: {
   childDim: DimKey; parentFilterParam: string; parentRawId: string; from: string; to: string;
+  dimParams: Record<string, string | number | undefined>;
   opts: Opts; smartLinkMap: Map<string, string>; shown: Set<string>;
 }) {
-  const params = new URLSearchParams({ groupBy: childDim, metrics: METRICS_PARAM, from: toIso(from), to: toIso(to, true), limit: '200' });
-  params.set(parentFilterParam, parentRawId);
+  // Child rows use the page's filters + date range, narrowed to this parent. The parent value is set
+  // last (overrides a page filter on the same dimension). Text values may contain commas ("Comcast
+  // Cable, LLC"), so they're sent as `key[]=value`, which the API takes literally instead of splitting.
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(dimParams)) if (v !== undefined && v !== '' && k !== parentFilterParam) params.set(k, String(v));
+  params.set('groupBy', childDim); params.set('metrics', METRICS_PARAM);
+  params.set('from', toIso(from)); params.set('to', toIso(to, true)); params.set('limit', '200');
+  if (/Id$/.test(parentFilterParam)) params.set(parentFilterParam, parentRawId);
+  else params.append(`${parentFilterParam}[]`, parentRawId);
   const { data, loading, error } = useQuery<AggResult>(`/api/reports?${params.toString()}`);
   const rows = useMemo(() => (data?.rows ?? [])
     .filter((r) => r.dimensions[childDim])
@@ -163,40 +177,70 @@ function ExpandedChildRows({
 function RowActionMenu({ dim, id, label }: { dim: DimKey; id: string; label: string }) {
   const url = linkFor(dim, id);
   const items = url ? [{ label: `View ${DIM_OPTIONS.find((d) => d.key === dim)?.label}: ${label}`.slice(0, 40), onClick: () => { window.location.href = url; } }] : [];
-  items.push({ label: 'Open Flex Report', onClick: () => { window.location.href = '/app/analytics?tab=flex'; } });
+  // Uuid parents deep-link into Flex pre-filtered to that entity (Flex reads offerId/publisherId/…).
+  const flexLink = /Id$/.test(DIM_OPTIONS.find((d) => d.key === dim)?.filterParam ?? '')
+    ? `/app/analytics?tab=flex&${DIM_OPTIONS.find((d) => d.key === dim)!.filterParam}=${encodeURIComponent(id)}`
+    : '/app/analytics?tab=flex';
+  items.push({ label: 'Open Flex Report', onClick: () => { window.location.href = flexLink; } });
   return <RowKebabMenu items={items} />;
 }
 
 type SavedConfig = SavedReportConfig<OrderMetric> & { parentDim: DimKey; childDim: DimKey };
 
+const ORDER_METRICS: OrderMetric[] = ['clicks', 'unique_clicks', 'invalid_clicks', 'conversions', 'total_conversions', 'payout', 'revenue', 'margin'];
+const isDimKey = (v: string | null): v is DimKey => DIM_OPTIONS.some((d) => d.key === v);
+
+/** Initial report state from the URL — what "Copy Link to Report" writes. */
+function readNestedUrl() {
+  const sp = new URLSearchParams(window.location.search);
+  let from = readUrlDate(sp, 'from', daysAgo(7));
+  const to = readUrlDate(sp, 'to', todayStr());
+  if (from > to) from = to;
+  const parent = sp.get('parent');
+  const child = sp.get('child');
+  const ob = sp.get('orderBy');
+  return {
+    from, to,
+    parentDim: isDimKey(parent) ? parent : 'offer' as DimKey,
+    childDim: isDimKey(child) ? child : 'publisher' as DimKey,
+    filters: readUrlFilters(sp, 'f'),
+    exclusions: readUrlFilters(sp, 'x'),
+    metricFilters: readUrlMetricFilters<MetricFilters>(sp, METRIC_FILTER_FIELDS.map((f) => f.key)),
+    ignoreFail: readUrlFlag(sp, IGNORE_FAIL_PARAM),
+    orderBy: (ORDER_METRICS as string[]).includes(ob ?? '') ? (ob as OrderMetric) : 'clicks',
+    orderDir: (sp.get('orderDir') === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc',
+  };
+}
+
 export default function DynamicNestedReport() {
   const opts = useReportOpts();
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks?.map((s: { value: string; label: string }) => [s.value, s.label]) ?? []), [opts.smartLinks]);
 
-  const [parentDim, setParentDim] = useState<DimKey>('offer');
-  const [childDim, setChildDim] = useState<DimKey>('publisher');
+  const [init] = useState(readNestedUrl);
+  const [parentDim, setParentDim] = useState<DimKey>(init.parentDim);
+  const [childDim, setChildDim] = useState<DimKey>(init.childDim);
   const [appliedParentDim, setAppliedParentDim] = useState<DimKey>(parentDim);
   const [appliedChildDim, setAppliedChildDim] = useState<DimKey>(childDim);
-  const [from, setFrom] = useState(daysAgo(7));
-  const [to, setTo] = useState(todayStr());
+  const [from, setFrom] = useState(init.from);
+  const [to, setTo] = useState(init.to);
   const [appliedFrom, setAppliedFrom] = useState(from);
   const [appliedTo, setAppliedTo] = useState(to);
-  const [filters, setFilters] = useState<FilterValues>({});
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>({});
-  const [exclusions, setExclusions] = useState<FilterValues>({});
-  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>({});
-  const [metricFilters, setMetricFilters] = useState<MetricFilters>({});
-  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>({});
-  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(false);
-  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(false);
+  const [filters, setFilters] = useState<FilterValues>(init.filters);
+  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
+  const [exclusions, setExclusions] = useState<FilterValues>(init.exclusions);
+  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>(init.exclusions);
+  const [metricFilters, setMetricFilters] = useState<MetricFilters>(init.metricFilters);
+  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>(init.metricFilters);
+  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(init.ignoreFail);
+  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(init.ignoreFail);
   const [filterOpen, setFilterOpen] = useState(false);
   const [hasRun, setHasRun] = useState(true);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [graphOpen, setGraphOpen] = useState(false);
   const [q, setQ] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [orderBy, setOrderBy] = useState<OrderMetric>('clicks');
-  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc');
+  const [orderBy, setOrderBy] = useState<OrderMetric>(init.orderBy);
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(init.orderDir);
   const [page, setPage] = useState(1);
   const pageSize = 25;
   const [showColumns, setShowColumns] = useState(false);
@@ -225,7 +269,7 @@ export default function DynamicNestedReport() {
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'smartLink', label: 'Smart Link', options: (smartLinksList ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: countryOptions },
-    { key: 'device', label: 'Device', options: DEVICES.map((d) => ({ value: d, label: d.charAt(0).toUpperCase() + d.slice(1) })) },
+    { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [offers, advertisers, publishers, smartLinksList, countryOptions]);
 
   const qs = (extra: Record<string, string | number | undefined>) => {
@@ -233,22 +277,22 @@ export default function DynamicNestedReport() {
     for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
     return params.toString();
   };
-  const excludeOfferId = appliedExclusions['offer']?.[0];
-  const excludeAdvertiserId = appliedExclusions['advertiser']?.[0];
-  const excludePublisherId = appliedExclusions['partner']?.[0];
-  const excludeSmartLinkId = appliedExclusions['smartLink']?.[0];
-  const excludeCountry = appliedExclusions['country']?.[0];
-  const excludeDevice = appliedExclusions['device']?.[0];
+  const excludeOfferId = appliedExclusions['offer']?.join(',');
+  const excludeAdvertiserId = appliedExclusions['advertiser']?.join(',');
+  const excludePublisherId = appliedExclusions['partner']?.join(',');
+  const excludeSmartLinkId = appliedExclusions['smartLink']?.join(',');
+  const excludeCountry = appliedExclusions['country']?.join(',');
+  const excludeDevice = appliedExclusions['device']?.join(',');
   const dimParams = {
-    offerId: appliedFilters['offer']?.[0], advertiserId: appliedFilters['advertiser']?.[0],
-    publisherId: appliedFilters['partner']?.[0], smartLinkId: appliedFilters['smartLink']?.[0],
-    country: appliedFilters['country']?.[0], device: appliedFilters['device']?.[0],
+    offerId: appliedFilters['offer']?.join(','), advertiserId: appliedFilters['advertiser']?.join(','),
+    publisherId: appliedFilters['partner']?.join(','), smartLinkId: appliedFilters['smartLink']?.join(','),
+    country: appliedFilters['country']?.join(','), device: appliedFilters['device']?.join(','),
     excludeOfferId, excludeAdvertiserId, excludePublisherId, excludeSmartLinkId, excludeCountry, excludeDevice,
     excludeInvalid: appliedIgnoreFailTraffic ? 1 : undefined,
   };
 
-  const summaryQs = qs({ groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: summaryData, loading: summaryLoading } = useQuery<AggResult>(hasRun ? `/api/reports?${summaryQs}` : null);
+  const summaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(hasRun ? `/api/reports?${summaryQs}` : null);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
     if (!rows.length) return null;
@@ -276,18 +320,21 @@ export default function DynamicNestedReport() {
     };
   }, [graphData, chronological]);
 
-  const tableQs = qs({
+  const tableQsFor = (limit: number, offset: number) => qs({
     groupBy: appliedParentDim, metrics: METRICS_PARAM,
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
-    orderBy, orderDir, limit: pageSize, offset: (page - 1) * pageSize,
+    orderBy, orderDir, limit, offset,
   });
+  const tableQs = tableQsFor(pageSize, (page - 1) * pageSize);
   const { data, loading, error } = useQuery<AggResult>(hasRun ? `/api/reports?${tableQs}` : null);
 
-  const rows = useMemo(() => (data?.rows ?? [])
+  const toParentRows = (src: AggRow[]) => src
     .filter((r) => r.dimensions[appliedParentDim])
-    .map((r) => ({ raw: r.dimensions[appliedParentDim]!, name: resolveName(appliedParentDim, r.dimensions[appliedParentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics) }))
+    .map((r) => ({ raw: r.dimensions[appliedParentDim]!, name: resolveName(appliedParentDim, r.dimensions[appliedParentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics) }));
+  const rows = useMemo(() => toParentRows(data?.rows ?? [])
     .filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))
     .filter((r) => passesMetricFilters(r.derived, appliedMetricFilters)),
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- toParentRows only closes over the listed values
   [data, appliedParentDim, opts, smartLinkMap, q, appliedMetricFilters]);
 
   const runReport = () => {
@@ -310,7 +357,16 @@ export default function DynamicNestedReport() {
   const toggleExpand = (key: string) => setExpanded((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const exportRows = () => rows.map((r) => ({
+  // Export every parent row matching the applied filters (all pages, not the expanded children), with
+  // the same client-side metric filters as the table — but not the "Search this page" box.
+  const reportExport = useReportExport();
+  const runExport = (format: 'csv' | 'xlsx') => {
+    void reportExport.run(format, 'nested-report', async () => {
+      const res = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${tableQsFor(limit, offset)}`, 200);
+      return { ...res, rows: exportRows(toParentRows(res.rows).filter((r) => passesMetricFilters(r.derived, appliedMetricFilters))) };
+    });
+  };
+  const exportRows = (list: ReturnType<typeof toParentRows>) => list.map((r) => ({
     [DIM_OPTIONS.find((d) => d.key === appliedParentDim)?.label ?? appliedParentDim]: r.name,
     imp: DASH, rpm: DASH, cpm: DASH, grossClicks: r.derived.clicksGross, clicks: r.derived.clicks,
     uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks, invalidClicks: r.derived.invalidClicks,
@@ -347,7 +403,14 @@ export default function DynamicNestedReport() {
     persistSavedReports('nested-report', next as unknown as { name: string; config: SavedReportConfig<OrderMetric> }[]);
   };
   const copyLink = async () => {
-    await navigator.clipboard?.writeText(window.location.href);
+    const mf = new URLSearchParams();
+    writeUrlMetricFilters(mf, appliedMetricFilters);
+    await navigator.clipboard?.writeText(reportLink({
+      from: appliedFrom, to: appliedTo, parent: appliedParentDim, child: appliedChildDim,
+      ...urlFilterParams('f', appliedFilters), ...urlFilterParams('x', appliedExclusions),
+      ...Object.fromEntries(mf), [IGNORE_FAIL_PARAM]: appliedIgnoreFailTraffic,
+      orderBy, orderDir,
+    }));
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
@@ -431,7 +494,7 @@ export default function DynamicNestedReport() {
           <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
         </button>
         {summaryOpen && (
-          summaryLoading ? <div className="pt-4"><Spinner /></div> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <SummaryGrid summary={summary} />
           )
         )}
@@ -456,6 +519,13 @@ export default function DynamicNestedReport() {
 
       <div className="card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <ActiveFilterChips className="mb-3"
+            chips={[...chipsFromValues(FILTER_CATEGORIES, appliedFilters), ...chipsFromValues(FILTER_CATEGORIES, appliedExclusions, { exclude: true })]}
+            onRemove={(c) => {
+              if (c.exclude) { const n = withoutValue(appliedExclusions, c.key, c.value); setExclusions(n); setAppliedExclusions(n); }
+              else { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); } setPage(1);
+            }}
+            onClearAll={() => { setFilters({}); setAppliedFilters({}); setExclusions({}); setAppliedExclusions({}); setPage(1); }} />
           <div>
             <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
             <p className="text-tiny text-fg-muted">Learn more about <Link to="/app/reports/custom-metrics" className="text-accent-text hover:underline">Custom Reporting Metrics</Link></p>
@@ -463,7 +533,7 @@ export default function DynamicNestedReport() {
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div className="relative">
               <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
@@ -479,8 +549,8 @@ export default function DynamicNestedReport() {
                     </button>
                     {exportOpen && (
                       <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button onClick={() => { downloadCsv('nested-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                        <button onClick={() => { downloadXlsx('nested-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                        <button disabled={reportExport.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                        <button disabled={reportExport.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
                       </div>
                     )}
                   </div>
@@ -491,6 +561,7 @@ export default function DynamicNestedReport() {
           </div>
         </div>
 
+        <ExportStatus busy={reportExport.busy} note={reportExport.note} error={reportExport.error} onDismiss={reportExport.dismiss} />
         {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>
@@ -546,7 +617,7 @@ export default function DynamicNestedReport() {
                       {expanded.has(r.raw) && (
                         <ExpandedChildRows
                           childDim={appliedChildDim} parentFilterParam={parentOpt.filterParam} parentRawId={r.raw}
-                          from={appliedFrom} to={appliedTo} opts={opts} smartLinkMap={smartLinkMap} shown={shown}
+                          from={appliedFrom} to={appliedTo} opts={opts} smartLinkMap={smartLinkMap} shown={shown} dimParams={dimParams}
                         />
                       )}
                     </Fragment>

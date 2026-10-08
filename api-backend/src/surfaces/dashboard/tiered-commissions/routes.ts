@@ -7,11 +7,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
+import { containsPattern } from '../../../lib/db/like.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { assertAllSameNetwork } from '../../../lib/db/ownership.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { TIERED_VARIABLES, TIERED_ACTIONS, TIME_PERIODS } from '../../../lib/tiered-commissions/evaluate.js';
 
@@ -80,6 +83,12 @@ const baseSchema = z.object({
   message: 'revenueAction and revenueValue are required when revenueEnabled', path: ['revenueAction'],
 });
 const createSchema = baseSchema;
+/** Every target/partner id must belong to the caller's network (ids are global uuids). */
+async function assertRefsInNetwork(networkId: string, targetType: string, targetIds: readonly string[], partnerIds: readonly string[]): Promise<void> {
+  await assertAllSameNetwork(networkId, targetType === 'advertiser' ? 'advertisers' : 'offers', targetIds, 'targetIds');
+  await assertAllSameNetwork(networkId, 'publishers', partnerIds, 'partnerIds');
+}
+
 const updateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   status: z.enum(['active', 'inactive']).optional(),
@@ -103,21 +112,26 @@ const updateSchema = z.object({
 export function tieredCommissionsRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  const listQuery = z.object({
+    status: z.enum(['all', 'active', 'inactive']).default('active'),
+    q: z.string().max(200).optional(),
+  });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'active');
-    const q = req.query['q'] ? String(req.query['q']) : null;
+    const { status: statusParam, q } = res.locals.query as z.infer<typeof listQuery>;
     const params: unknown[] = [networkId];
     let where = 'network_id = $1';
     if (statusParam !== 'all') { params.push(statusParam); where += ` AND status = $${params.length}`; }
-    if (q) { params.push(`%${q}%`); where += ` AND name ILIKE $${params.length}`; }
-    const { rows } = await query<Row>(`SELECT * FROM ${TABLE} WHERE ${where} ORDER BY ref ASC LIMIT 1000`, params);
+    if (q) { params.push(containsPattern(q)); where += ` AND name ILIKE $${params.length} ESCAPE '\\'`; }
+    const { rows } = await query<Row>(`SELECT * FROM ${TABLE} WHERE ${where} ORDER BY ref ASC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'tiered-commissions.list');
     sendOk(res, rows.map(dto));
   }));
 
   r.post('/', requireRole('admin', 'manager'), validateBody(createSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof createSchema>;
+    await assertRefsInNetwork(req.scope!.networkId, b.targetType, b.targetIds, b.partnerIds);
     const row = await db.insert<Row>(TABLE, {
       name: b.name, status: b.status, notes: b.notes ?? null,
       effective_start: b.effectiveStart ?? null, effective_end: b.effectiveEnd ?? null,
@@ -142,6 +156,11 @@ export function tieredCommissionsRoutes(): Router {
     if (!before) throw notFound('Tiered commission not found');
     const b = req.body as z.infer<typeof updateSchema>;
     if (b.payoutEnabled && !b.payoutAction && !before.payout_action) throw badRequest('payoutAction is required when payoutEnabled');
+    if (b.targetType !== undefined || b.targetIds !== undefined || b.partnerIds !== undefined) {
+      await assertRefsInNetwork(
+        req.scope!.networkId, b.targetType ?? before.target_type, b.targetIds ?? before.target_ids ?? [], b.partnerIds ?? [],
+      );
+    }
     const patch: Record<string, unknown> = {};
     if (b.name !== undefined) patch['name'] = b.name;
     if (b.status !== undefined) patch['status'] = b.status;
@@ -211,9 +230,10 @@ export function tieredCommissionsRoutes(): Router {
          LEFT JOIN publishers p ON p.id = c.publisher_id AND p.network_id = c.network_id
         WHERE ${where}
         GROUP BY c.publisher_id, p.name, c.offer_id, o.name
-        ORDER BY COUNT(*) DESC LIMIT 200`,
+        ORDER BY COUNT(*) DESC LIMIT ${LIST_CAP}`,
       params,
     );
+    warnIfCapped(rows, LIST_CAP, 'tiered-commissions.summary');
     sendOk(res, rows.map((r) => ({
       publisherId: r.publisher_id, publisherName: r.publisher_name ?? 'Unknown', offerId: r.offer_id, offerName: r.offer_name,
       conversions: Number(r.conversions), revenue: r.revenue, payout: r.payout,

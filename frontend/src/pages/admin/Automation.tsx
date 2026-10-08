@@ -49,9 +49,11 @@ interface Webhook {
 const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 type StatusFilter = 'All' | 'Active' | 'Inactive' | 'Deleted';
 
+// Scheduled actions are only ever pending or cancelled (nothing executes them yet), so an
+// "Inactive" (= executed) option could never match anything — it is not offered.
+const SCHEDULED_STATUS_OPTIONS = ['All', 'Active', 'Deleted'] as const;
 function scheduledStatusParam(filter: StatusFilter): string {
   if (filter === 'Active') return 'pending';
-  if (filter === 'Inactive') return 'executed';
   if (filter === 'Deleted') return 'cancelled';
   return 'all';
 }
@@ -133,6 +135,7 @@ function ScheduledActionsPanel() {
       addLabel="Action"
       status="All"
       statusFilter={statusFilter}
+      statusOptions={SCHEDULED_STATUS_OPTIONS}
       onStatusFilterChange={(v) => setStatusFilter(v as StatusFilter)}
       rows={rows}
       loading={loading}

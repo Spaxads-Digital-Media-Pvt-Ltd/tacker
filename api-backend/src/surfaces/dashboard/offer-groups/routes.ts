@@ -14,6 +14,8 @@ import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { assertSameNetwork } from '../../../lib/db/ownership.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 
 const TABLE = 'offer_groups';
@@ -75,7 +77,8 @@ export function offerGroupsRoutes(): Router {
   const r = Router();
 
   r.get('/', asyncHandler(async (req, res) => {
-    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where: {}, orderBy: 'created_at', limit: 500 });
+    const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where: {}, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
+    warnIfCapped(rows, LIST_CAP, 'offer-groups.list');
     const withStats = await Promise.all(rows.map(async (row) => ({
       ...dto(row), today: await todayAggForOffers(req.scope!.networkId, row.offer_ids),
     })));
@@ -141,6 +144,7 @@ export function offerGroupsRoutes(): Router {
   r.post('/', requireRole('admin', 'manager'), validateBody(createSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof createSchema>;
+    await assertSameNetwork(req.scope!.networkId, 'advertisers', b.advertiserId, 'advertiserId');
     for (const offerId of b.offerIds) {
       const offer = await db.selectOne('offers', { id: offerId });
       if (!offer) throw badRequest('offerIds contains an offer outside this network');
@@ -157,6 +161,7 @@ export function offerGroupsRoutes(): Router {
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(updateSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof updateSchema>;
+    await assertSameNetwork(req.scope!.networkId, 'advertisers', b.advertiserId, 'advertiserId');
     if (b.offerIds !== undefined) {
       for (const offerId of b.offerIds) {
         const offer = await db.selectOne('offers', { id: offerId });

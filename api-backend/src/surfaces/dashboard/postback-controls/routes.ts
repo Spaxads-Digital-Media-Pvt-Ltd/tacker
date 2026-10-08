@@ -9,11 +9,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
+import { containsPattern } from '../../../lib/db/like.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { assertAllSameNetwork } from '../../../lib/db/ownership.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { RULE_VARIABLES, RULE_OPERATORS } from '../../../lib/postback-controls/evaluate.js';
 
@@ -68,6 +71,13 @@ const baseSchema = z.object({
   message: 'effectiveEnd must be on or after effectiveStart', path: ['effectiveEnd'],
 });
 const createSchema = baseSchema;
+/** Every target/partner id must belong to the caller's network (ids are global uuids). */
+async function assertRefsInNetwork(networkId: string, targetType: string | null | undefined, targetIds: readonly string[], partnerIds: readonly string[]): Promise<void> {
+  if (targetType === 'offer') await assertAllSameNetwork(networkId, 'offers', targetIds, 'targetIds');
+  else if (targetType === 'advertiser') await assertAllSameNetwork(networkId, 'advertisers', targetIds, 'targetIds');
+  await assertAllSameNetwork(networkId, 'publishers', partnerIds, 'partnerIds');
+}
+
 const updateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   status: z.enum(['active', 'inactive']).optional(),
@@ -84,15 +94,20 @@ const updateSchema = z.object({
 export function postbackControlsRoutes(): Router {
   const r = Router();
 
-  r.get('/', asyncHandler(async (req, res) => {
+  const listQuery = z.object({
+    status: z.enum(['all', 'active', 'inactive']).default('active'),
+    q: z.string().max(200).optional(),
+  });
+  r.get('/', validateQuery(listQuery), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
-    const statusParam = String(req.query['status'] ?? 'active');
-    const q = req.query['q'] ? String(req.query['q']) : null;
+    const { status: statusParam, q } = res.locals.query as z.infer<typeof listQuery>;
     const params: unknown[] = [networkId];
     let where = 'network_id = $1';
     if (statusParam !== 'all') { params.push(statusParam); where += ` AND status = $${params.length}`; }
-    if (q) { params.push(`%${q}%`); where += ` AND name ILIKE $${params.length}`; }
-    const { rows } = await query<Row>(`SELECT * FROM ${TABLE} WHERE ${where} ORDER BY ref ASC LIMIT 1000`, params);
+    if (q) { params.push(containsPattern(q)); where += ` AND name ILIKE $${params.length} ESCAPE '\\'`; }
+    // Newest first (the page renders server order and doesn't re-sort).
+    const { rows } = await query<Row>(`SELECT * FROM ${TABLE} WHERE ${where} ORDER BY ref DESC LIMIT ${LIST_CAP}`, params);
+    warnIfCapped(rows, LIST_CAP, 'postback-controls.list');
     sendOk(res, rows.map(dto));
   }));
 
@@ -100,6 +115,7 @@ export function postbackControlsRoutes(): Router {
     const db = dbForRequest(req);
     const b = req.body as z.infer<typeof createSchema>;
     if (b.targetType && b.targetIds.length === 0) throw badRequest('targetIds is required when targetType is set');
+    await assertRefsInNetwork(req.scope!.networkId, b.targetType, b.targetIds, b.partnerIds);
     const row = await db.insert<Row>(TABLE, {
       name: b.name, status: b.status,
       effective_start: b.effectiveStart ?? null, effective_end: b.effectiveEnd ?? null,
@@ -122,6 +138,14 @@ export function postbackControlsRoutes(): Router {
     const before = await db.selectOne<Row>(TABLE, { id: req.params.id });
     if (!before) throw notFound('Postback control not found');
     const b = req.body as z.infer<typeof updateSchema>;
+    if (b.targetType !== undefined || b.targetIds !== undefined || b.partnerIds !== undefined) {
+      await assertRefsInNetwork(
+        req.scope!.networkId,
+        b.targetType !== undefined ? b.targetType : before.target_type,
+        b.targetIds ?? before.target_ids ?? [],
+        b.partnerIds ?? [],
+      );
+    }
     const patch: Record<string, unknown> = {};
     if (b.name !== undefined) patch['name'] = b.name;
     if (b.status !== undefined) patch['status'] = b.status;

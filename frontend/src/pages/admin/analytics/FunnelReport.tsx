@@ -21,9 +21,9 @@
  * omitted as Child choices here since the Offer is already fixed by Target).
  *
  * "Funnel Type" has only one real option (Offer Level Events — this app has no other funnel input to
- * offer) so it's shown as a fixed label rather than a fake dropdown. "Include Media Buying Costs" is
- * real UI but inert: this app has no media buying cost data anywhere (same dash convention as every
- * other report's "Media Buying Cost" tile).
+ * offer) so it's shown as plain text rather than a fake dropdown. The reference's "Include Media
+ * Buying Costs" checkbox is omitted: this app has no media buying cost data anywhere (same dash
+ * convention as every other report's "Media Buying Cost" tile).
  */
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -33,11 +33,13 @@ import { PageHeader, Spinner, StateBlock } from '../../../shared-components/prim
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  DASH, DEVICES, daysAgo, todayStr,
+  DASH, DEVICE_OPTIONS, daysAgo, todayStr, toIso,
   type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
+import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 
 interface Goal { id: string; name: string; eventName: string | null; isDefault: boolean; sortOrder: number }
 interface FunnelResult { stages: { goalId: string; count: number }[]; breakdown: { key: string; counts: Record<string, number> }[] }
@@ -168,7 +170,6 @@ export default function FunnelReport() {
   const [childDim, setChildDim] = useState<ChildDim>('publisher');
   const [from, setFrom] = useState(daysAgo(30));
   const [to, setTo] = useState(todayStr());
-  const [includeMbc, setIncludeMbc] = useState(false);
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterValues>({});
   const [exclusions, setExclusions] = useState<FilterValues>({});
@@ -192,7 +193,7 @@ export default function FunnelReport() {
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'partner', label: 'Partner', options: opts.publishers },
     { key: 'country', label: 'Country', options: countryOptions },
-    { key: 'device', label: 'Device', options: DEVICES.map((d) => ({ value: d, label: d.charAt(0).toUpperCase() + d.slice(1) })) },
+    { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [opts.publishers, countryOptions]);
 
   const canRun = !!offerId && selectedGoalIds.length >= 2;
@@ -202,7 +203,7 @@ export default function FunnelReport() {
   };
   const clearAll = () => {
     setOfferId(null); setChildDim('publisher'); setFrom(daysAgo(30)); setTo(todayStr());
-    setIncludeMbc(false); setSelectedGoalIds([]); setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
+    setSelectedGoalIds([]); setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
     setApplied(null);
   };
 
@@ -212,7 +213,7 @@ export default function FunnelReport() {
     return params.toString();
   };
   const funnelQs = applied ? qs({
-    offerId: applied.offerId, goalIds: applied.goalIds.join(','), from: applied.from, to: applied.to, childDim: applied.childDim,
+    offerId: applied.offerId, goalIds: applied.goalIds.join(','), from: toIso(applied.from), to: toIso(applied.to, true), childDim: applied.childDim,
     publisherId: applied.filters['partner']?.[0], country: applied.filters['country']?.[0], device: applied.filters['device']?.[0],
   }) : '';
   const { data, loading, error } = useQuery<FunnelResult>(applied ? `/api/reports/funnel?${funnelQs}` : null);
@@ -245,8 +246,8 @@ export default function FunnelReport() {
             <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
           </div>
           <div>
-            <label className="label">Funnel Type</label>
-            <div className="input flex !w-44 items-center !py-2 text-fg-secondary">Offer Level Events</div>
+            <span className="label">Funnel Type</span>
+            <p className="py-2 text-small text-fg-secondary">Offer Level Events</p>
           </div>
           <OfferPicker value={offerId} onChange={(id) => { setOfferId(id); setSelectedGoalIds([]); }} opts={opts} />
           <ChildPicker value={childDim} onChange={setChildDim} />
@@ -263,6 +264,7 @@ export default function FunnelReport() {
             </button>
             {filterOpen && (
               <ReportingFiltersFlyout
+                sections={['filters']} singleSelect
                 dimCategories={FILTER_CATEGORIES}
                 value={{ filters, exclusions, metricFilters, ignoreFailTraffic }}
                 onApply={(v) => { setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic); }}
@@ -272,14 +274,15 @@ export default function FunnelReport() {
           </div>
           <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
         </div>
-        <label title="Not available yet" className="flex w-fit cursor-not-allowed items-center gap-2 text-small text-fg-muted">
-          <input type="checkbox" className="chk" checked={includeMbc} disabled onChange={() => setIncludeMbc((v) => !v)} />
-          Include Media Buying Costs
-        </label>
         <button type="button" className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50" onClick={runReport} disabled={!canRun}>Run Report</button>
       </div>
 
       <div className="card">
+        {applied && (
+          <ActiveFilterChips className="mb-3" chips={chipsFromValues(FILTER_CATEGORIES, applied.filters)}
+            onRemove={(c) => { const n = withoutValue(applied.filters, c.key, c.value); setFilters(n); setApplied({ ...applied, filters: n }); }}
+            onClearAll={() => { setFilters({}); setApplied({ ...applied, filters: {} }); }} />
+        )}
         {!applied ? <StateBlock>Set Parameters and Run Report</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>

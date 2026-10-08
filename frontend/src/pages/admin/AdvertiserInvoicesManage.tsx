@@ -9,14 +9,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDateOnly } from '../../lib/dateOnly';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, Pencil, CreditCard, Trash2, Clock } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Pencil, CreditCard, Trash2, Clock, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import type { AdvertiserInvoice, AdvertiserInvoiceSummary, Advertiser, DashboardUser } from '../../types';
+import type { AdvertiserInvoice, Advertiser, DashboardUser } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', deleted: 'bg-danger-text' };
 const STATUS_LABEL: Record<string, string> = { unpaid: 'Unpaid', paid: 'Paid', deleted: 'Deleted' };
@@ -27,9 +27,27 @@ const STATUS_OPTIONS = [
   { value: 'deleted', label: 'Deleted', dot: STATUS_DOT['deleted']! },
 ] as const;
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
+/** Filter value for invoices with no payment terms recorded (null / empty). */
+const TERMS_NOT_SET = '__not_set__';
 const ALL_COLUMNS = ['Invoice ID', 'Advertiser', 'Status', 'Visibility', 'Payment Terms', 'Start Date', 'End Date', 'Billed', 'Paid', 'Balance', 'Notes', 'Created', 'Modified'] as const;
 
 const money = (v: string | number, c = 'USD') => `${c} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}`;
+
+/** Exact sum of 2-dp amount strings (integer cents, never float), grouped by currency — same as Partner Invoices. */
+function sumByCurrency(invoices: AdvertiserInvoice[], field: 'billedAmount' | 'paidAmount' | 'balance'): string {
+  const cents = new Map<string, bigint>();
+  for (const inv of invoices) {
+    const raw = String(inv[field] ?? '0').trim();
+    const neg = raw.startsWith('-');
+    const [i, f = ''] = raw.replace('-', '').split('.');
+    const c = BigInt(i || '0') * 100n + BigInt((f + '00').slice(0, 2));
+    cents.set(inv.currency, (cents.get(inv.currency) ?? 0n) + (neg ? -c : c));
+  }
+  return [...cents].map(([cur, c]) => {
+    const a = c < 0n ? -c : c;
+    return money(`${c < 0n ? '-' : ''}${a / 100n}.${(a % 100n).toString().padStart(2, '0')}`, cur);
+  }).join(' + ');
+}
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { open, setOpen, ref } = useDropdown();
@@ -168,7 +186,6 @@ function RowMenu({ invoice, onChanged }: { invoice: AdvertiserInvoice; onChanged
 export default function AdvertiserInvoicesManage() {
   const [status, setStatus] = useState('unpaid');
   const { data, loading, error, refetch } = useQuery<AdvertiserInvoice[]>(`/api/advertiser-invoices?status=${status}`);
-  const { data: summary, refetch: refetchSummary } = useQuery<AdvertiserInvoiceSummary>('/api/advertiser-invoices/summary');
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: users } = useQuery<DashboardUser[]>('/api/users');
 
@@ -195,7 +212,7 @@ export default function AdvertiserInvoicesManage() {
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'advertiser', label: 'Advertiser', options: (advertisers ?? []).map((a) => ({ value: a.id, label: a.name })) },
     { key: 'accountManager', label: 'Advertiser Manager', options: (users ?? []).map((u) => ({ value: u.id, label: u.name })) },
-    { key: 'paymentTerms', label: 'Payment Terms', options: PAYMENT_TERMS_OPTIONS.map((t) => ({ value: t, label: t })) },
+    { key: 'paymentTerms', label: 'Payment Terms', options: [{ value: TERMS_NOT_SET, label: 'Not set' }, ...PAYMENT_TERMS_OPTIONS.map((t) => ({ value: t, label: t }))] },
     { key: 'visibility', label: 'Visibility', options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }] },
   ], [advertisers, users]);
 
@@ -213,12 +230,18 @@ export default function AdvertiserInvoicesManage() {
         return adv?.accountManagerId && filters['accountManager']!.includes(adv.accountManagerId);
       });
     }
-    if (has('paymentTerms')) rows = rows.filter((i) => i.paymentTerms && filters['paymentTerms']!.includes(i.paymentTerms));
+    if (has('paymentTerms')) rows = rows.filter((i) => (i.paymentTerms?.trim() ? filters['paymentTerms']!.includes(i.paymentTerms) : filters['paymentTerms']!.includes(TERMS_NOT_SET)));
     if (has('visibility')) rows = rows.filter((i) => filters['visibility']!.includes(i.visibleToAdvertiser ? 'yes' : 'no'));
     return rows;
   }, [data, q, filters, advertisers]);
 
-  const afterChange = () => { refetch(); refetchSummary(); };
+  const afterChange = () => { refetch(); };
+  // Summary reflects exactly the rows shown (status + search + filters), summed exactly per currency.
+  const summary = useMemo(() => ({
+    billed: sumByCurrency(filtered, 'billedAmount') || '—',
+    paid: sumByCurrency(filtered, 'paidAmount') || '—',
+    balance: sumByCurrency(filtered, 'balance') || '—',
+  }), [filtered]);
 
   const columnsByHeader: Record<string, Column<AdvertiserInvoice>> = {
     'Invoice ID': { header: 'Invoice ID', cell: (i) => <Link to={`/app/adv-invoices/${i.id}`} className="text-accent-text hover:underline">Invoice {i.ref}</Link> },
@@ -250,13 +273,14 @@ export default function AdvertiserInvoicesManage() {
       <div className="mb-4 rounded-card border border-border bg-surface">
         <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 px-4 py-2.5 text-small font-medium text-fg">
           <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
+          <span className="text-tiny font-normal text-fg-secondary">— {filtered.length.toLocaleString()} invoice{filtered.length === 1 ? '' : 's'} matching the current status, search and filters</span>
         </button>
         {summaryOpen && (
           <div className="grid grid-cols-3 gap-4 border-t border-border px-4 py-4">
-            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.billedAmount, summary.currency) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Paid Amount</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.paidAmount, summary.currency) : '—'}</p></div>
-            <div><p className="text-tiny uppercase text-fg-secondary">Balance</p><p className="text-h3 font-semibold text-fg">{summary ? money(summary.balance, summary.currency) : '—'}</p></div>
-            {summary && summary.otherCurrencies.length > 0 && <p className="col-span-3 text-tiny text-fg-muted">Totals are in {summary.currency}; invoices in {summary.otherCurrencies.join(', ')} are not included.</p>}
+            <div><p className="text-tiny uppercase text-fg-secondary">Billed Amount (filtered)</p><p className="text-h3 font-semibold text-fg">{summary.billed}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Paid Amount (filtered)</p><p className="text-h3 font-semibold text-fg">{summary.paid}</p></div>
+            <div><p className="text-tiny uppercase text-fg-secondary">Balance (filtered)</p><p className="text-h3 font-semibold text-fg">{summary.balance}</p></div>
+            <p className="col-span-3 text-tiny text-fg-muted">Totals are summed per currency over the invoices listed below.</p>
           </div>
         )}
       </div>
@@ -287,6 +311,7 @@ export default function AdvertiserInvoicesManage() {
           <div ref={tableActionsRef} className="relative">
             <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+              <MoreVertical size={15} />
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">

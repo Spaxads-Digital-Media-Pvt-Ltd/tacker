@@ -7,11 +7,12 @@
  * conversion settings are enforced by the tracking server. Offer-group membership lives on
  * offer_groups, so it's diffed separately after the main PATCH.
  */
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { useOfferCategories } from '../../lib/useOfferCategories';
 import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column, Segmented } from '../../shared-components/primitives/ui';
@@ -68,10 +69,8 @@ export default function OfferEdit() {
   const { data: groups, refetch: refetchGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
   const { data: allOffers } = useQuery<Offer[]>('/api/offers');
   const { data: networkSecurity } = useQuery<{ securityCode: string | null }>('/api/settings/security');
-  const categoryOptions = useMemo(
-    () => Array.from(new Set((allOffers ?? []).map((o) => o.category).filter((c): c is string => Boolean(c)))).sort(),
-    [allOffers],
-  );
+  // Category options = Control Center › Categories catalog ∪ names already on offers.
+  const { options: categoryOptions, ensureCategory } = useOfferCategories((allOffers ?? []).map((o) => o.category));
   const [tab, setTab] = useState<string>('General');
   const [form, setForm] = useState<FormState | null>(null);
   const [capsEnabled, setCapsEnabled] = useState(false);
@@ -155,6 +154,7 @@ export default function OfferEdit() {
     const normalizeUrl = (v: string) => (v && !/^https?:\/\//i.test(v) ? 'https://' + v : v);
     const orNull = (v: string) => (v.trim() ? v.trim() : null);
     const capOrNull = (v: string) => (capsEnabled && v !== '' ? Number(v) : null);
+    if (form.category.trim()) await ensureCategory(form.category); // new names join the Control Center catalog
     const body: Record<string, unknown> = {
       name: form.name, status: form.status, advertiserId: form.advertiserId, currency: form.currency,
       visibility: form.visibility, destinationUrl: normalizeUrl(form.destinationUrl), payoutModel: form.payoutModel,

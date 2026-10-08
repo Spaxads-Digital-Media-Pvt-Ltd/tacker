@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
-import { useQuery, useMutation } from '../../lib/useApi';
+import { useMutation } from '../../lib/useApi';
+import { useAllNetworks } from './useAllNetworks';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import type { NetworkRow } from '../../types';
 
@@ -14,7 +15,7 @@ const columns: Column<NetworkRow>[] = [
 ];
 
 export default function Networks() {
-  const { data, loading, error, refetch } = useQuery<NetworkRow[]>('/platform/networks');
+  const { data, loading, error, refetch } = useAllNetworks();
   const [open, setOpen] = useState(false);
 
   return (

@@ -28,15 +28,21 @@ import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
-import { downloadCsv, downloadXlsx } from '../../../lib/export';
 import {
-  type AggResult, METRICS_PARAM, DASH, DEVICES, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, Pagination,
-  type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
+  type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
+  fetchAllPages, useReportExport, ExportStatus,
 } from '../../../shared-components/primitives/ReportPageKit';
+import {
+  readUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
+  IGNORE_FAIL_PARAM, readUrlFlag, reportLink, urlFilterParams,
+} from '../../../lib/reportFilterState';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
+import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
+import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 
 interface SmartLink { id: string; name: string }
 
@@ -100,32 +106,67 @@ function metricCells(d: DerivedRow) {
 
 type SavedConfig = SavedReportConfig<OrderMetric> & { dims: DimKey[] };
 
+const DEFAULT_DIMS: DimKey[] = ['offer', 'publisher'];
+const ORDER_METRICS: OrderMetric[] = ['clicks', 'total_conversions', 'payout', 'revenue', 'margin'];
+
+/**
+ * Initial report state from the URL — what "Copy Link to Report" writes (`from`, `to`, `dims`,
+ * `f.*`/`x.*`, `mf.*`, `ignoreFail`, `orderBy`/`orderDir`) plus the legacy deep-link ids the
+ * Offer/Partner/Advertiser/Smart Link/Event report pages send ("Open Flex Report").
+ */
+function readFlexUrl() {
+  const sp = new URLSearchParams(window.location.search);
+  const filters = readUrlFilters(sp, 'f');
+  const deepLinks: [string, string[]][] = [
+    ['offer', readUrlIds(sp, 'offerId')],
+    ['partner', readUrlIds(sp, 'publisherId', 'partnerId')],
+    ['advertiser', readUrlIds(sp, 'advertiserId')],
+    ['smartLink', readUrlIds(sp, 'smartLinkId')],
+  ];
+  for (const [k, ids] of deepLinks) if (ids.length && !filters[k]?.length) filters[k] = ids;
+  const urlDims = (sp.get('dims') ?? '').split(',').filter((d): d is DimKey => DIM_OPTIONS.some((o) => o.key === d));
+  let from = readUrlDate(sp, 'from', daysAgo(7));
+  const to = readUrlDate(sp, 'to', todayStr());
+  if (from > to) from = to;
+  const ob = sp.get('orderBy');
+  return {
+    from, to, filters,
+    exclusions: readUrlFilters(sp, 'x'),
+    metricFilters: readUrlMetricFilters<MetricFilters>(sp, METRIC_FILTER_FIELDS.map((f) => f.key)),
+    ignoreFail: readUrlFlag(sp, IGNORE_FAIL_PARAM),
+    dims: urlDims.length ? Array.from(new Set(urlDims)).slice(0, MAX_DIMS) : DEFAULT_DIMS,
+    orderBy: (ORDER_METRICS as string[]).includes(ob ?? '') ? (ob as OrderMetric) : 'clicks',
+    orderDir: (sp.get('orderDir') === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc',
+  };
+}
+
 export default function FlexReport() {
   const opts = useReportOpts();
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks?.map((s: { value: string; label: string }) => [s.value, s.label]) ?? []), [opts.smartLinks]);
 
-  const [dims, setDims] = useState<DimKey[]>(['offer', 'publisher']);
+  const [init] = useState(readFlexUrl);
+  const [dims, setDims] = useState<DimKey[]>(init.dims);
   const [dimPickerOpen, setDimPickerOpen] = useState(false);
-  const [from, setFrom] = useState(daysAgo(7));
-  const [to, setTo] = useState(todayStr());
+  const [from, setFrom] = useState(init.from);
+  const [to, setTo] = useState(init.to);
   const [appliedFrom, setAppliedFrom] = useState(from);
   const [appliedTo, setAppliedTo] = useState(to);
   const [appliedDims, setAppliedDims] = useState<DimKey[]>(dims);
-  const [filters, setFilters] = useState<FilterValues>({});
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>({});
-  const [exclusions, setExclusions] = useState<FilterValues>({});
-  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>({});
-  const [metricFilters, setMetricFilters] = useState<MetricFilters>({});
-  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>({});
-  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(false);
-  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(false);
+  const [filters, setFilters] = useState<FilterValues>(init.filters);
+  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
+  const [exclusions, setExclusions] = useState<FilterValues>(init.exclusions);
+  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>(init.exclusions);
+  const [metricFilters, setMetricFilters] = useState<MetricFilters>(init.metricFilters);
+  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>(init.metricFilters);
+  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(init.ignoreFail);
+  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(init.ignoreFail);
   const [filterOpen, setFilterOpen] = useState(false);
   const [hasRun, setHasRun] = useState(true);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [graphOpen, setGraphOpen] = useState(false);
   const [q, setQ] = useState('');
-  const [orderBy, setOrderBy] = useState<OrderMetric>('clicks');
-  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc');
+  const [orderBy, setOrderBy] = useState<OrderMetric>(init.orderBy);
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(init.orderDir);
   const [page, setPage] = useState(1);
   const pageSize = 25;
   const [showColumns, setShowColumns] = useState(false);
@@ -154,7 +195,7 @@ export default function FlexReport() {
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'smartLink', label: 'Smart Link', options: (smartLinksList ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: countryOptions },
-    { key: 'device', label: 'Device', options: DEVICES.map((d) => ({ value: d, label: d.charAt(0).toUpperCase() + d.slice(1) })) },
+    { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [offers, advertisers, publishers, smartLinksList, countryOptions]);
 
   const qs = (extra: Record<string, string | number | undefined>) => {
@@ -162,23 +203,23 @@ export default function FlexReport() {
     for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
     return params.toString();
   };
-  const excludeOfferId = appliedExclusions['offer']?.[0];
-  const excludeAdvertiserId = appliedExclusions['advertiser']?.[0];
-  const excludePublisherId = appliedExclusions['partner']?.[0];
-  const excludeSmartLinkId = appliedExclusions['smartLink']?.[0];
-  const excludeCountry = appliedExclusions['country']?.[0];
-  const excludeDevice = appliedExclusions['device']?.[0];
+  const excludeOfferId = appliedExclusions['offer']?.join(',');
+  const excludeAdvertiserId = appliedExclusions['advertiser']?.join(',');
+  const excludePublisherId = appliedExclusions['partner']?.join(',');
+  const excludeSmartLinkId = appliedExclusions['smartLink']?.join(',');
+  const excludeCountry = appliedExclusions['country']?.join(',');
+  const excludeDevice = appliedExclusions['device']?.join(',');
   const dimParams = {
-    offerId: appliedFilters['offer']?.[0], advertiserId: appliedFilters['advertiser']?.[0],
-    publisherId: appliedFilters['partner']?.[0], smartLinkId: appliedFilters['smartLink']?.[0],
-    country: appliedFilters['country']?.[0], device: appliedFilters['device']?.[0],
+    offerId: appliedFilters['offer']?.join(','), advertiserId: appliedFilters['advertiser']?.join(','),
+    publisherId: appliedFilters['partner']?.join(','), smartLinkId: appliedFilters['smartLink']?.join(','),
+    country: appliedFilters['country']?.join(','), device: appliedFilters['device']?.join(','),
     excludeOfferId, excludeAdvertiserId, excludePublisherId, excludeSmartLinkId, excludeCountry, excludeDevice,
     excludeInvalid: appliedIgnoreFailTraffic ? 1 : undefined,
   };
 
   const groupByStr = appliedDims.join(',');
-  const summaryQs = qs({ groupBy: groupByStr, metrics: 'clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: summaryData, loading: summaryLoading } = useQuery<AggResult>(hasRun ? `/api/reports?${summaryQs}` : null);
+  const summaryQs = qs({ groupBy: 'none', metrics: 'clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(hasRun ? `/api/reports?${summaryQs}` : null);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
     if (!rows.length) return null;
@@ -206,20 +247,23 @@ export default function FlexReport() {
     };
   }, [graphData, chronological]);
 
-  const tableQs = qs({
+  const tableQsFor = (limit: number, offset: number) => qs({
     groupBy: groupByStr, metrics: METRICS_PARAM,
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
-    orderBy, orderDir, limit: pageSize, offset: (page - 1) * pageSize,
+    orderBy, orderDir, limit, offset,
   });
+  const tableQs = tableQsFor(pageSize, (page - 1) * pageSize);
   const { data, loading, error } = useQuery<AggResult>(hasRun && appliedDims.length ? `/api/reports?${tableQs}` : null);
 
-  const rows = useMemo(() => (data?.rows ?? []).map((r) => ({
+  const toRow = (r: AggRow) => ({
     key: appliedDims.map((d) => r.dimensions[d] ?? '~').join('|'),
     dims: appliedDims.map((d) => ({ dim: d, raw: r.dimensions[d] ?? null, name: resolveName(d, r.dimensions[d] ?? null, opts, smartLinkMap) })),
     derived: deriveRow(r.metrics),
-  }))
+  });
+  const rows = useMemo(() => (data?.rows ?? []).map(toRow)
     .filter((r) => !q.trim() || r.dims.some((d) => d.name.toLowerCase().includes(q.trim().toLowerCase())))
     .filter((r) => passesMetricFilters(r.derived, appliedMetricFilters)),
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- toRow only closes over the listed values
   [data, appliedDims, opts, smartLinkMap, q, appliedMetricFilters]);
 
   const addDim = (k: DimKey) => { if (dims.length < MAX_DIMS && !dims.includes(k)) setDims([...dims, k]); setDimPickerOpen(false); };
@@ -244,7 +288,7 @@ export default function FlexReport() {
   };
 
   const shownMetrics = useMemo(() => new Set(METRIC_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const exportRows = () => rows.map((r) => {
+  const toExportRow = (r: ReturnType<typeof toRow>) => {
     const base: Record<string, unknown> = {};
     r.dims.forEach((d) => { base[DIM_OPTIONS.find((o) => o.key === d.dim)?.label ?? d.dim] = d.name; });
     return {
@@ -252,7 +296,17 @@ export default function FlexReport() {
       cvr: pct(r.derived.cvr), revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2),
       profit: r.derived.margin.toFixed(2), margin: pct(r.derived.marginPct), epc: r.derived.epc.toFixed(3),
     };
-  });
+  };
+  // Export every row matching the applied filters (all pages), with the same client-side metric
+  // filters as the table — but not the "Search this page" box, which only narrows the visible page.
+  const reportExport = useReportExport();
+  const runExport = (format: 'csv' | 'xlsx') => {
+    if (!appliedDims.length) return;
+    void reportExport.run(format, 'flex-report', async () => {
+      const res = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${tableQsFor(limit, offset)}`, 200);
+      return { ...res, rows: res.rows.map(toRow).filter((r) => passesMetricFilters(r.derived, appliedMetricFilters)).map(toExportRow) };
+    });
+  };
 
   const saveReport = (name: string) => {
     const config: SavedConfig = { from, to, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns], dims };
@@ -275,7 +329,14 @@ export default function FlexReport() {
     persistSavedReports('flex-report', next as unknown as { name: string; config: SavedReportConfig<OrderMetric> }[]);
   };
   const copyLink = async () => {
-    await navigator.clipboard?.writeText(window.location.href);
+    const mf = new URLSearchParams();
+    writeUrlMetricFilters(mf, appliedMetricFilters);
+    await navigator.clipboard?.writeText(reportLink({
+      from: appliedFrom, to: appliedTo, dims: appliedDims.join(','),
+      ...urlFilterParams('f', appliedFilters), ...urlFilterParams('x', appliedExclusions),
+      ...Object.fromEntries(mf), [IGNORE_FAIL_PARAM]: appliedIgnoreFailTraffic,
+      orderBy, orderDir,
+    }));
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   };
@@ -375,7 +436,7 @@ export default function FlexReport() {
           <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
         </button>
         {summaryOpen && (
-          summaryLoading ? <div className="pt-4"><Spinner /></div> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <SummaryGrid summary={summary} />
           )
         )}
@@ -400,6 +461,13 @@ export default function FlexReport() {
 
       <div className="card">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <ActiveFilterChips className="mb-3"
+            chips={[...chipsFromValues(FILTER_CATEGORIES, appliedFilters), ...chipsFromValues(FILTER_CATEGORIES, appliedExclusions, { exclude: true })]}
+            onRemove={(c) => {
+              if (c.exclude) { const n = withoutValue(appliedExclusions, c.key, c.value); setExclusions(n); setAppliedExclusions(n); }
+              else { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); } setPage(1);
+            }}
+            onClearAll={() => { setFilters({}); setAppliedFilters({}); setExclusions({}); setAppliedExclusions({}); setPage(1); }} />
           <div>
             <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
             <p className="text-tiny text-fg-muted">Learn more about <Link to="/app/reports/custom-metrics" className="text-accent-text hover:underline">Custom Reporting Metrics</Link></p>
@@ -407,7 +475,7 @@ export default function FlexReport() {
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div className="relative">
               <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
@@ -423,8 +491,8 @@ export default function FlexReport() {
                     </button>
                     {exportOpen && (
                       <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button onClick={() => { downloadCsv('flex-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                        <button onClick={() => { downloadXlsx('flex-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                        <button disabled={reportExport.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                        <button disabled={reportExport.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
                       </div>
                     )}
                   </div>
@@ -435,6 +503,7 @@ export default function FlexReport() {
           </div>
         </div>
 
+        <ExportStatus busy={reportExport.busy} note={reportExport.note} error={reportExport.error} onDismiss={reportExport.dismiss} />
         {!appliedDims.length ? <StateBlock>Add at least one column to see a breakdown.</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>

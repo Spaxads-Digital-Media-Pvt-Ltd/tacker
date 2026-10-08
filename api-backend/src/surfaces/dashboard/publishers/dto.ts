@@ -1,6 +1,14 @@
 /** Publisher audience DTOs (spec §3A). Admins see all; a publisher sees only their own profile. */
 import type { PublisherRow } from '../../../domain/entities.js';
 
+/** publishers row as read here: `channel_id` (→ Control Center segmentation_channels) plus the
+ * optional joined names the list/detail queries select. */
+export type PublisherRowWithJoins = PublisherRow & {
+  channel_id?: string | null;
+  channel_name?: string | null;
+  referred_by_name?: string | null;
+};
+
 export interface PublisherAdminDTO {
   id: string;
   ref: number;
@@ -18,6 +26,10 @@ export interface PublisherAdminDTO {
   partnerManagerId: string | null;
   accountExecutiveId: string | null;
   referredById: string | null;
+  /** Control Center channel (segmentation_channels.id). */
+  channelId: string | null;
+  /** Present when the query joined the channel (list/detail); null when unset or unknown. */
+  channelName?: string | null;
   contactName: string | null;
   taxId: string | null;
   website: string | null;
@@ -28,7 +40,7 @@ export interface PublisherAdminDTO {
   updatedAt: string;
 }
 
-export function toAdminDTO(row: PublisherRow): PublisherAdminDTO {
+export function toAdminDTO(row: PublisherRowWithJoins): PublisherAdminDTO {
   return {
     id: row.id,
     ref: Number(row.ref),
@@ -46,6 +58,8 @@ export function toAdminDTO(row: PublisherRow): PublisherAdminDTO {
     partnerManagerId: row.partner_manager_id,
     accountExecutiveId: row.account_executive_id,
     referredById: row.referred_by_id,
+    channelId: row.channel_id ?? null,
+    ...(row.channel_name !== undefined ? { channelName: row.channel_name } : {}),
     contactName: row.contact_name,
     taxId: row.tax_id,
     website: row.website,

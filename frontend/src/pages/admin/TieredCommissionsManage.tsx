@@ -261,9 +261,17 @@ export default function TieredCommissionsManage() {
       rows = rows.filter((c) => c.name.toLowerCase().includes(qq));
     }
     const has = (key: string) => (filters[key]?.length ?? 0) > 0;
-    if (has('advertiser')) rows = rows.filter((c) => c.targetType === 'advertiser' && c.targetIds.some((id) => filters['advertiser']!.includes(id)));
-    if (has('offer')) rows = rows.filter((c) => c.targetType === 'offer' && c.targetIds.some((id) => filters['offer']!.includes(id)));
-    if (has('partner')) rows = rows.filter((c) => c.partnerIds.some((id) => filters['partner']!.includes(id)));
+    // A rule targets EITHER advertisers or offers, so the two target filters are OR-ed: a rule matches
+    // when its own targetType's selection contains one of its targets (selecting both no longer
+    // returns nothing).
+    if (has('advertiser') || has('offer')) {
+      rows = rows.filter((c) => {
+        const selected = c.targetType === 'advertiser' ? filters['advertiser'] : c.targetType === 'offer' ? filters['offer'] : undefined;
+        return (selected?.length ?? 0) > 0 && c.targetIds.some((id) => selected!.includes(id));
+      });
+    }
+    // Empty partnerIds means "All partners", so such a rule applies to every selected partner.
+    if (has('partner')) rows = rows.filter((c) => c.partnerIds.length === 0 || c.partnerIds.some((id) => filters['partner']!.includes(id)));
     return rows;
   }, [data, q, filters]);
 

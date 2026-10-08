@@ -21,15 +21,40 @@ import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, PromptModal } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import {
-  type AggResult, METRICS_PARAM, DASH, DEVICES, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
-  type MetricFilters, passesMetricFilters,
-  reportingFiltersCount, ReportingFiltersFlyout,
+  type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters,
+  reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
+  reportingChips, withoutReportingChip, fetchAllPages, useReportExport, ExportStatus,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
 } from '../../shared-components/primitives/ReportPageKit';
+import {
+  readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
+  IGNORE_FAIL_PARAM, readUrlFlag,
+} from '../../lib/reportFilterState';
+import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
+import { countryLabel } from '../../data/geo';
+
+/** Max hours the Performance Graph pages in (200 per request, ~93 days); past this it shows a "narrow the range" note. */
+const GRAPH_HOUR_CAP = 24 * 93;
+
+/**
+ * Initial dimension filters: `f.<category>` params, with the legacy deep-link id params
+ * (offerId / publisherId / advertiserId / smartLinkId) as fallbacks for categories `f.` doesn't set.
+ */
+function initialUrlFilters(sp: URLSearchParams): FilterValues {
+  const f = readUrlFilters(sp, 'f');
+  const legacy: [string, string[]][] = [
+    ['offer', readUrlIds(sp, 'offerId')],
+    ['partner', readUrlIds(sp, 'publisherId', 'partnerId')],
+    ['advertiser', readUrlIds(sp, 'advertiserId')],
+    ['smartLink', readUrlIds(sp, 'smartLinkId')],
+  ];
+  for (const [k, ids] of legacy) if (ids.length && !f[k]?.length) f[k] = ids;
+  return f;
+}
 
 interface SmartLink { id: string; name: string }
 
@@ -89,21 +114,28 @@ function formatHour(iso: string): string {
   return `${date} ${time}`;
 }
 
+/** API rows → table rows (shared by the table and the all-rows export). */
+function toHourRows(src: AggRow[]) {
+  return src
+    .filter((r) => r.dimensions['hour'])
+    .map((r) => ({ hour: r.dimensions['hour']!, derived: deriveRow(r.metrics) }));
+}
+
 export default function HourlyReport() {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [from, setFrom] = useState(searchParams.get('from') ?? daysAgo(7));
-  const [to, setTo] = useState(searchParams.get('to') ?? todayStr());
+  const [from, setFrom] = useState(() => readUrlDate(searchParams, 'from', daysAgo(7)));
+  const [to, setTo] = useState(() => readUrlDate(searchParams, 'to', todayStr()));
   const [appliedFrom, setAppliedFrom] = useState(from);
   const [appliedTo, setAppliedTo] = useState(to);
-  const [filters, setFilters] = useState<FilterValues>({});
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>({});
-  const [exclusions, setExclusions] = useState<FilterValues>({});
-  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>({});
-  const [metricFilters, setMetricFilters] = useState<MetricFilters>({});
-  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>({});
-  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(false);
-  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(false);
+  const [filters, setFilters] = useState<FilterValues>(() => initialUrlFilters(searchParams));
+  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(filters);
+  const [exclusions, setExclusions] = useState<FilterValues>(() => readUrlFilters(searchParams, 'x'));
+  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>(exclusions);
+  const [metricFilters, setMetricFilters] = useState<MetricFilters>(() => readUrlMetricFilters<MetricFilters>(searchParams, METRIC_FILTER_FIELDS.map((f) => f.key)));
+  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>(metricFilters);
+  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(() => readUrlFlag(searchParams, IGNORE_FAIL_PARAM));
+  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(ignoreFailTraffic);
   const [filterOpen, setFilterOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [graphOpen, setGraphOpen] = useState(false);
@@ -149,8 +181,8 @@ export default function HourlyReport() {
   const countryOptions = useMemo(() => (countryAgg?.rows ?? [])
     .map((r) => r.dimensions['country'])
     .filter((c): c is string => Boolean(c))
-    .sort()
-    .map((c) => ({ value: c, label: c })), [countryAgg]);
+    .map((c) => ({ value: c, label: countryLabel(c) }))
+    .sort((a, b) => a.label.localeCompare(b.label)), [countryAgg]);
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
@@ -158,21 +190,21 @@ export default function HourlyReport() {
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'smartLink', label: 'Smart Link', options: (smartLinks ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: countryOptions },
-    { key: 'device', label: 'Device', options: DEVICES.map((d) => ({ value: d, label: d.charAt(0).toUpperCase() + d.slice(1) })) },
+    { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [offers, advertisers, publishers, smartLinks, countryOptions]);
 
-  const offerIdFilter = appliedFilters['offer']?.[0];
-  const advertiserIdFilter = appliedFilters['advertiser']?.[0];
-  const publisherIdFilter = appliedFilters['partner']?.[0];
-  const smartLinkIdFilter = appliedFilters['smartLink']?.[0];
-  const countryFilter = appliedFilters['country']?.[0];
-  const deviceFilter = appliedFilters['device']?.[0];
-  const excludeOfferId = appliedExclusions['offer']?.[0];
-  const excludeAdvertiserId = appliedExclusions['advertiser']?.[0];
-  const excludePublisherId = appliedExclusions['partner']?.[0];
-  const excludeSmartLinkId = appliedExclusions['smartLink']?.[0];
-  const excludeCountry = appliedExclusions['country']?.[0];
-  const excludeDevice = appliedExclusions['device']?.[0];
+  const offerIdFilter = appliedFilters['offer']?.join(',');
+  const advertiserIdFilter = appliedFilters['advertiser']?.join(',');
+  const publisherIdFilter = appliedFilters['partner']?.join(',');
+  const smartLinkIdFilter = appliedFilters['smartLink']?.join(',');
+  const countryFilter = appliedFilters['country']?.join(',');
+  const deviceFilter = appliedFilters['device']?.join(',');
+  const excludeOfferId = appliedExclusions['offer']?.join(',');
+  const excludeAdvertiserId = appliedExclusions['advertiser']?.join(',');
+  const excludePublisherId = appliedExclusions['partner']?.join(',');
+  const excludeSmartLinkId = appliedExclusions['smartLink']?.join(',');
+  const excludeCountry = appliedExclusions['country']?.join(',');
+  const excludeDevice = appliedExclusions['device']?.join(',');
 
   const qs = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
@@ -184,14 +216,15 @@ export default function HourlyReport() {
     const next = new URLSearchParams();
     next.set('from', appliedFrom);
     next.set('to', appliedTo);
-    if (offerIdFilter) next.set('offerId', offerIdFilter);
-    if (countryFilter) next.set('country', countryFilter);
-    if (deviceFilter) next.set('device', deviceFilter);
+    writeUrlFilters(next, 'f', appliedFilters);
+    writeUrlFilters(next, 'x', appliedExclusions);
+    writeUrlMetricFilters(next, appliedMetricFilters);
+    if (appliedIgnoreFailTraffic) next.set(IGNORE_FAIL_PARAM, '1');
     if (orderBy) next.set('orderBy', orderBy);
     next.set('orderDir', orderDir);
     setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedFrom, appliedTo, offerIdFilter, countryFilter, deviceFilter, orderBy, orderDir]);
+  }, [appliedFrom, appliedTo, JSON.stringify(appliedFilters), JSON.stringify(appliedExclusions), JSON.stringify(appliedMetricFilters), appliedIgnoreFailTraffic, orderBy, orderDir]);
 
   const dimParams = {
     offerId: offerIdFilter, advertiserId: advertiserIdFilter, publisherId: publisherIdFilter, smartLinkId: smartLinkIdFilter,
@@ -200,8 +233,8 @@ export default function HourlyReport() {
     excludeInvalid: appliedIgnoreFailTraffic ? 1 : undefined,
   };
 
-  const summaryQs = qs({ groupBy: 'hour', metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: summaryData, loading: summaryLoading } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
+  const summaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
     if (!rows.length) return null;
@@ -216,27 +249,37 @@ export default function HourlyReport() {
     return deriveRow(totals);
   }, [summaryData]);
 
-  const graphQs = qs({ groupBy: 'hour', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: graphData } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
+  // Graph pages through every hour in range (200 per request, chronological default order) up to
+  // GRAPH_HOUR_CAP — a single limit=200 request showed only the oldest ~8 days of a longer range.
+  const graphQs = qs({ groupBy: 'hour', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const [graph, setGraph] = useState<{ rows: AggRow[]; capped: boolean; error: string | null } | null>(null);
+  useEffect(() => {
+    if (!graphOpen) return;
+    let alive = true;
+    setGraph(null);
+    fetchAllPages<AggRow>((limit, offset) => `/api/reports?${graphQs}&limit=${limit}&offset=${offset}`, 200, GRAPH_HOUR_CAP)
+      .then((r) => { if (alive) setGraph({ rows: r.rows, capped: r.capped, error: null }); })
+      .catch((e: unknown) => { if (alive) setGraph({ rows: [], capped: false, error: e instanceof Error ? e.message : 'Failed to load graph' }); });
+    return () => { alive = false; };
+  }, [graphOpen, graphQs]);
   const graphSeries = useMemo(() => {
-    const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions['hour'] ?? '').localeCompare(b.dimensions['hour'] ?? ''));
+    const rows = [...(graph?.rows ?? [])].sort((a, b) => (a.dimensions['hour'] ?? '').localeCompare(b.dimensions['hour'] ?? ''));
     return {
       labels: rows.map((r) => (r.dimensions['hour'] ?? '').slice(0, 13)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
     };
-  }, [graphData]);
+  }, [graph]);
 
-  const tableQs = qs({
+  const tableParams = {
     groupBy: 'hour', metrics: METRICS_PARAM,
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
-    orderBy: orderBy || undefined, orderDir, limit: pageSize, offset: (page - 1) * pageSize,
-  });
+    orderBy: orderBy || undefined, orderDir,
+  };
+  const tableQs = qs({ ...tableParams, limit: pageSize, offset: (page - 1) * pageSize });
   const { data, loading, error } = useQuery<AggResult>(`/api/reports?${tableQs}`);
 
-  const rows = useMemo(() => (data?.rows ?? [])
-    .filter((r) => r.dimensions['hour'])
-    .map((r) => ({ hour: r.dimensions['hour']!, derived: deriveRow(r.metrics) }))
+  const rows = useMemo(() => toHourRows(data?.rows ?? [])
     .filter((r) => !q.trim() || formatHour(r.hour).includes(q.trim()))
     .filter((r) => passesMetricFilters(r.derived, appliedMetricFilters)),
   [data, q, appliedMetricFilters]);
@@ -260,7 +303,7 @@ export default function HourlyReport() {
   };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const exportRows = () => rows.map((r) => ({
+  const exportRow = (r: ReturnType<typeof toHourRows>[number]) => ({
     hour: formatHour(r.hour), imp: DASH, rpm: DASH, cpm: DASH, grossClicks: r.derived.clicksGross, clicks: r.derived.clicks,
     uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks, invalidClicks: r.derived.invalidClicks,
     totalCv: r.derived.totalCv, cv: r.derived.cv, vtCv: DASH, ctr: DASH, throttle: DASH,
@@ -268,7 +311,25 @@ export default function HourlyReport() {
     rpc: r.derived.rpc.toFixed(2), rpa: r.derived.rpa.toFixed(2),
     revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2), profit: r.derived.margin.toFixed(2),
     margin: pct(r.derived.marginPct), cc: DASH, fraud: r.derived.fraudScore.toFixed(0),
-  }));
+  });
+  // Export every row matching the applied filters (all pages), not just the visible page — the
+  // search box is a page-local filter and does not apply here.
+  const exp = useReportExport();
+  const runExport = (format: 'csv' | 'xlsx') => {
+    setTableActionsOpen(false); setExportOpen(false);
+    void exp.run(format, 'hourly-report', async () => {
+      const r = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${qs({ ...tableParams, limit, offset })}`, 200);
+      return { rows: toHourRows(r.rows).filter((x) => passesMetricFilters(x.derived, appliedMetricFilters)).map(exportRow), capped: r.capped, total: r.total };
+    });
+  };
+  const appliedReporting: ReportingFiltersValue = { filters: appliedFilters, exclusions: appliedExclusions, metricFilters: appliedMetricFilters, ignoreFailTraffic: appliedIgnoreFailTraffic };
+  const setReporting = (v: ReportingFiltersValue) => {
+    setFilters(v.filters); setAppliedFilters(v.filters);
+    setExclusions(v.exclusions); setAppliedExclusions(v.exclusions);
+    setMetricFilters(v.metricFilters); setAppliedMetricFilters(v.metricFilters);
+    setIgnoreFailTraffic(v.ignoreFailTraffic); setAppliedIgnoreFailTraffic(v.ignoreFailTraffic);
+    setPage(1);
+  };
 
   const sortIcon = (metric: OrderMetric) => (orderBy === metric ? (orderDir === 'desc' ? '↓' : '↑') : '');
   const sortableHeader = (label: string, metric: OrderMetric) => (
@@ -306,8 +367,7 @@ export default function HourlyReport() {
     <>
       <PageHeader title="Hourly Report" subtitle="Reporting › Hourly" action={
         <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1 text-small text-fg-secondary">(GMT+00:00) UTC <ChevronDown size={13} /></span>
-          <span className="inline-flex items-center gap-1 text-small text-fg-secondary">$ {currency} <ChevronDown size={13} /></span>
+          <span className="text-small text-fg-secondary" title="Report times are UTC">UTC · {currency}</span>
           <div ref={pageMenuRef} className="relative">
             <button type="button" title="Page Actions" onClick={() => setPageMenuOpen((o) => !o)}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
@@ -380,7 +440,7 @@ export default function HourlyReport() {
           <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
         </button>
         {summaryOpen && (
-          summaryLoading ? <div className="pt-4"><Spinner /></div> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <SummaryGrid summary={summary} />
           )
         )}
@@ -391,8 +451,9 @@ export default function HourlyReport() {
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          !graphData ? <div className="pt-4"><Spinner /></div> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          !graph ? <div className="pt-4"><Spinner /></div> : graph.error ? <p className="pt-3 text-small text-danger-text">{graph.error}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
+              {graph.capped && <p className="mb-2 text-tiny text-fg-muted">Graph shows the first {graphSeries.labels.length.toLocaleString()} hours — narrow the date range to see the rest.</p>}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
                 <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
@@ -404,12 +465,17 @@ export default function HourlyReport() {
       </div>
 
       <div className="card">
+        <ActiveFilterChips className="mb-3"
+          chips={reportingChips(FILTER_CATEGORIES, appliedReporting)}
+          onRemove={(c) => setReporting(withoutReportingChip(appliedReporting, c))}
+          onClearAll={() => setReporting(EMPTY_REPORTING_FILTERS)} />
+        <ExportStatus {...exp} onDismiss={exp.dismiss} />
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search hours…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div ref={tableActionsRef} className="relative">
               <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
@@ -425,8 +491,8 @@ export default function HourlyReport() {
                     </button>
                     {exportOpen && (
                       <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button onClick={() => { downloadCsv('hourly-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                        <button onClick={() => { downloadXlsx('hourly-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                        <button disabled={exp.busy} onClick={() => runExport('csv')} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">CSV</button>
+                        <button disabled={exp.busy} onClick={() => runExport('xlsx')} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">Excel</button>
                       </div>
                     )}
                   </div>

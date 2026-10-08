@@ -9,6 +9,7 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody } from '../../../lib/http/validate.js';
 import { query } from '../../../lib/db/pool.js';
+import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 
@@ -21,7 +22,8 @@ export function catalogRoutes(): Router {
       `SELECT c.id, c.name, c.type, c.url, c.width, c.height, c.status, c.created_at,
               o.name AS offer_name, o.id AS offer_id
          FROM offer_creatives c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
-        WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT 500`, [nid(req)]);
+        WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT ${LIST_CAP}`, [nid(req)]);
+    warnIfCapped(rows, LIST_CAP, 'catalog.creatives');
     sendOk(res, rows);
   }));
 
@@ -29,7 +31,8 @@ export function catalogRoutes(): Router {
     const { rows } = await query(
       `SELECT c.id, c.code, c.discount, c.status, c.publisher_id, c.created_at, o.name AS offer_name, o.id AS offer_id
          FROM offer_coupons c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
-        WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT 500`, [nid(req)]);
+        WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT ${LIST_CAP}`, [nid(req)]);
+    warnIfCapped(rows, LIST_CAP, 'catalog.coupons');
     sendOk(res, rows);
   }));
 
@@ -37,7 +40,8 @@ export function catalogRoutes(): Router {
     const { rows } = await query(
       `SELECT d.id, d.name, d.deal_type, d.value, d.status, d.created_at, o.name AS offer_name, o.id AS offer_id
          FROM offer_deals d JOIN offers o ON o.id = d.offer_id AND o.network_id = d.network_id
-        WHERE d.network_id = $1 ORDER BY d.created_at DESC LIMIT 500`, [nid(req)]);
+        WHERE d.network_id = $1 ORDER BY d.created_at DESC LIMIT ${LIST_CAP}`, [nid(req)]);
+    warnIfCapped(rows, LIST_CAP, 'catalog.deals');
     sendOk(res, rows);
   }));
 
@@ -49,7 +53,8 @@ export function catalogRoutes(): Router {
          FROM offer_publisher_access a
          JOIN offers o ON o.id = a.offer_id AND o.network_id = a.network_id
          JOIN publishers p ON p.id = a.publisher_id AND p.network_id = a.network_id
-        WHERE a.network_id = $1 ORDER BY a.created_at DESC LIMIT 500`, [nid(req)]);
+        WHERE a.network_id = $1 ORDER BY a.created_at DESC LIMIT ${LIST_CAP}`, [nid(req)]);
+    warnIfCapped(rows, LIST_CAP, 'catalog.access');
     sendOk(res, rows);
   }));
 
@@ -60,7 +65,8 @@ export function catalogRoutes(): Router {
          FROM publisher_postbacks pb
          LEFT JOIN publishers p ON p.id = pb.publisher_id AND p.network_id = pb.network_id
          LEFT JOIN offers o ON o.id = pb.offer_id AND o.network_id = pb.network_id
-        WHERE pb.network_id = $1 ORDER BY pb.created_at DESC LIMIT 500`, [nid(req)]);
+        WHERE pb.network_id = $1 ORDER BY pb.created_at DESC LIMIT ${LIST_CAP}`, [nid(req)]);
+    warnIfCapped(rows, LIST_CAP, 'catalog.postbacks');
     sendOk(res, rows);
   }));
 

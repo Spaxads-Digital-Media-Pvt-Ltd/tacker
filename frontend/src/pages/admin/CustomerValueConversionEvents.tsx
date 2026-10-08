@@ -86,7 +86,7 @@ export default function CustomerValueConversionEvents() {
   const clearAll = () => {
     setUserIdInput(''); setFrom(daysAgo(30)); setTo(todayStr());
     setAppliedUserId(''); setAppliedFrom(daysAgo(30)); setAppliedTo(todayStr());
-    setHasRun(false); setPage(1);
+    setHasRun(false); setPage(1); setQ('');
   };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
@@ -126,7 +126,7 @@ export default function CustomerValueConversionEvents() {
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input className="input !w-56 !pl-8" placeholder="Search this page…" aria-label="Search this page" title="Filters only the events on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
             <div className="relative">
               <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
@@ -142,9 +142,10 @@ export default function CustomerValueConversionEvents() {
                       Export <ChevronRight size={13} className="text-fg-muted" />
                     </button>
                     {exportOpen && (
-                      <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button onClick={() => { downloadCsv('conversion-events-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                        <button onClick={() => { downloadXlsx('conversion-events-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel</button>
+                      <div className="absolute right-full top-0 mr-1 w-44 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                        <p className="px-3 py-1 text-tiny text-fg-muted">Current page only</p>
+                        <button onClick={() => { downloadCsv('conversion-events-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV (current page)</button>
+                        <button onClick={() => { downloadXlsx('conversion-events-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel (current page)</button>
                       </div>
                     )}
                   </div>
@@ -157,7 +158,7 @@ export default function CustomerValueConversionEvents() {
 
         {!hasRun ? <StateBlock>Enter a User ID and run the report to see that customer's full activity log.</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
-          : !rows.length ? <StateBlock>No Record Found</StateBlock>
+          : !rows.length ? <StateBlock>{q.trim() && pageEvents.length > 0 ? 'No events on this page match your search.' : 'No Record Found'}</StateBlock>
           : (
             <div className="overflow-x-auto rounded-card border border-border">
               <table className="premium-table">
@@ -204,7 +205,7 @@ export default function CustomerValueConversionEvents() {
               </table>
             </div>
           )}
-        {hasRun && rows.length > 0 && (
+        {hasRun && (rows.length > 0 || hasNextPage || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">
