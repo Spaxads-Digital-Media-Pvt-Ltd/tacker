@@ -12,7 +12,7 @@ import { useDropdown, TableRowMenu } from '../../shared-components/primitives/Ta
 import { countryLabel, isCountryCode } from '../../data/geo';
 import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
-import { pagedPath, fetchAllPages, useDebounced, sortParams, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
+import { pagedPath, fetchAllPages, useDebounced, sortParams, useTodaySoFarRange, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
 import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
 import type { Publisher, DashboardUser, PagedList } from '../../types';
 
@@ -36,12 +36,6 @@ const isPayable = (p: Publisher): boolean => Boolean(p.hasPortalAccount && p.pay
 const userDisplayName = (p: Publisher): string | null => p.contactName || (p.contactEmail ? p.contactEmail.split('@')[0]! : null);
 
 const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
-function todayStartIso(): string {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
 const PAGE_SIZE = 12;
 
 function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; onChange: (v: string) => void; statusOpts: readonly string[] }) {
@@ -131,7 +125,8 @@ export default function Publishers() {
   const { data: tagAssignments } = useQuery<TagAssignment[]>('/api/tags/assignments?entityType=publisher');
   const { data: options } = useQuery<PublisherFilterOptions>('/api/publishers/filter-options');
   const { data: channels } = useQuery<Channel[]>('/api/control-center/channels?status=active');
-  const today = useQuery<AggResult>(`/api/reports?groupBy=publisher&metrics=revenue&from=${encodeURIComponent(todayStartIso())}&to=${encodeURIComponent(new Date().toISOString())}`);
+  const todayRange = useTodaySoFarRange();
+  const today = useQuery<AggResult>(`/api/reports?groupBy=publisher&metrics=revenue&${todayRange}`);
 
   const todayRevenueByPub = useMemo(() => {
     const m = new Map<string, number>();

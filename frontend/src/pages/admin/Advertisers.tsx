@@ -20,7 +20,7 @@ import { TableActionsMenu, } from './AdvertisersTableActions';
 import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
-import { pagedPath, fetchAllPages, useDebounced, sortParams, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
+import { pagedPath, fetchAllPages, useDebounced, sortParams, useTodaySoFarRange, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
 import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
 import type { Advertiser, DashboardUser, PagedList } from '../../types';
 
@@ -35,12 +35,6 @@ const BILLING_FREQUENCIES = ['Weekly', 'Bimonthly', 'Monthly'];
 const PAGE_SIZE = 12;
 
 const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
-function todayStartIso(): string {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
 function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; onChange: (v: string) => void; statusOpts: readonly string[] }) {
   const { open, setOpen, ref } = useDropdown();
   const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...statusOpts.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s, dot: STATUS_DOT[s] ?? 'bg-fg-muted' }))];
@@ -158,7 +152,8 @@ export default function Advertisers() {
   const { data: users } = useQuery<DashboardUser[]>('/api/users');
   const { data: tags } = useQuery<Tag[]>('/api/tags');
   const { data: tagAssignments } = useQuery<TagAssignment[]>('/api/tags/assignments?entityType=advertiser');
-  const today = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=revenue&from=${encodeURIComponent(todayStartIso())}&to=${encodeURIComponent(new Date().toISOString())}`);
+  const todayRange = useTodaySoFarRange();
+  const today = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=revenue&${todayRange}`);
 
   const todayRevenueByAdv = useMemo(() => {
     const m = new Map<string, number>();

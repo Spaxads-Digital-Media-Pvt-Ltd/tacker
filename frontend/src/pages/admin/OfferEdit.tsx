@@ -26,6 +26,7 @@ import { TargetingPanel } from './offerForm/TargetingPanel';
 import { targetingErrors } from './offerForm/targetingValidation';
 import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
 import { ThumbnailField } from './offerForm/ThumbnailField';
+import { SearchablePicker } from '../../shared-components/primitives/SearchablePicker';
 import { DEFAULT_ATTRIBUTION, DEFAULT_EMAIL, DEFAULT_REVENUE, settingsErrors, withDefaults } from './offerForm/settings';
 import type {
   Offer, Advertiser, TrackingDomain, OfferTargeting,
@@ -42,6 +43,8 @@ const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
 const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
+/** Category picker option that switches to the "New category name" text input. */
+const NEW_CATEGORY = '__new__';
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => import('react').ReactNode): Column<Row> => ({ header, cell });
 
@@ -255,16 +258,18 @@ export default function OfferEdit() {
                     onClick={() => { setCatNew(false); set('category', ''); }}>Cancel</button>
                 </div>
               ) : (
-                <select className="input" value={form.category}
-                  onChange={(e) => {
-                    if (e.target.value === '__new__') { setCatNew(true); set('category', ''); }
-                    else set('category', e.target.value);
-                  }}>
-                  <option value="">No category</option>
-                  {form.category && !categoryOptions.includes(form.category) && <option value={form.category}>{form.category}</option>}
-                  {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                  <option value="__new__">＋ New category…</option>
-                </select>
+                <SearchablePicker single ariaLabel="Category" searchPlaceholder="Search categories…"
+                  value={[form.category]}
+                  options={[
+                    { value: '', label: 'No category' },
+                    ...(form.category && !categoryOptions.includes(form.category) ? [{ value: form.category, label: form.category }] : []),
+                    ...categoryOptions.map((c) => ({ value: c, label: c })),
+                    { value: NEW_CATEGORY, label: '＋ New category…' },
+                  ]}
+                  onChange={([v = '']) => {
+                    if (v === NEW_CATEGORY) { setCatNew(true); set('category', ''); }
+                    else set('category', v);
+                  }} />
               )}
             </Field>
             <Field label="Currency *" hint="ISO 4217 3-letter code (e.g. USD). All payout, revenue and ledger amounts for this offer are recorded in it. Not validated server-side yet — enter a real code.">

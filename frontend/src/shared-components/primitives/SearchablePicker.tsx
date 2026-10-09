@@ -2,7 +2,8 @@
  * Multi-select dropdown for long option lists (countries, regions, cities): a search box pinned at
  * the top, a scrollable list underneath, optional group headers, keyboard navigation
  * (↑/↓/Home/End/Enter/Esc) and close-on-outside-click. Optionally accepts free text that isn't in
- * the list (`allowCustom`).
+ * the list (`allowCustom`). With `single`, picking replaces the value and closes the panel (the
+ * value is then a one-element array and the trigger shows that option's label).
  *
  * Why not EntitySearchSelect / MenuPopover: EntitySearchSelect uses the search box itself as the
  * trigger and caps results at 40 with no keyboard support; MenuPopover dismisses on any scroll —
@@ -23,7 +24,7 @@ const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCa
 
 export function SearchablePicker({
   options, value, onChange, placeholder = 'Select…', searchPlaceholder = 'Search…',
-  allowCustom, disabled = false, emptyText = 'No matches', renderLimit = DEFAULT_RENDER_LIMIT, ariaLabel,
+  allowCustom, disabled = false, emptyText = 'No matches', renderLimit = DEFAULT_RENDER_LIMIT, ariaLabel, single = false, required = false,
 }: {
   options: PickerOption[];
   value: string[];
@@ -36,6 +37,10 @@ export function SearchablePicker({
   emptyText?: string;
   renderLimit?: number;
   ariaLabel?: string;
+  /** Single-select: a pick replaces the value and closes the panel. */
+  single?: boolean;
+  /** Take part in native form validation: submitting with no (non-empty) value is blocked. */
+  required?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -114,14 +119,21 @@ export function SearchablePicker({
 
   const close = () => { setOpen(false); setQ(''); triggerRef.current?.focus(); };
   const toggle = (v: string) => {
+    if (single) { onChange([v]); close(); return; }
     const has = selected.has(v.toLowerCase());
     onChange(has ? value.filter((x) => x.toLowerCase() !== v.toLowerCase()) : [...value, v]);
   };
   const activate = (row: number) => {
-    if (custom && row === customRow) { if (!selected.has(custom.toLowerCase())) onChange([...value, custom]); setQ(''); return; }
+    if (custom && row === customRow) {
+      if (single) { onChange([custom]); close(); return; }
+      if (!selected.has(custom.toLowerCase())) onChange([...value, custom]); setQ(''); return;
+    }
     const o = shown[row];
     if (o) toggle(o.value);
   };
+  const singleLabel = single && value.length
+    ? (options.find((o) => o.value.toLowerCase() === value[0]!.toLowerCase())?.label ?? value[0])
+    : null;
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(rowCount - 1, a + 1)); }
@@ -140,11 +152,15 @@ export function SearchablePicker({
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true); } }}
         className="input flex items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-60">
-        <span className={value.length ? 'text-fg' : 'text-fg-muted'}>
-          {value.length ? `${value.length} selected` : placeholder}
+        <span className={`min-w-0 truncate ${value.length ? 'text-fg' : 'text-fg-muted'}`}>
+          {singleLabel ?? (value.length ? `${value.length} selected` : placeholder)}
         </span>
         <ChevronDown size={15} className={`shrink-0 text-fg-muted transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
+      {/* A button can't be `required` — this hidden mirror lets the browser's form validation see the value. */}
+      {required && (
+        <input className="sr-only" tabIndex={-1} aria-hidden required value={value.filter(Boolean).join(',')} onChange={() => {}} />
+      )}
       {open && createPortal(
         <div ref={panelRef} onKeyDown={onKeyDown}
           style={{ top: style.top, bottom: style.bottom, left: style.left, width: style.width, maxHeight: style.maxHeight }}
@@ -156,7 +172,7 @@ export function SearchablePicker({
               aria-activedescendant={rowCount ? `spk-row-${active}` : undefined}
               onChange={(e) => setQ(e.target.value)} />
           </div>
-          <ul ref={listRef} id="searchable-picker-list" role="listbox" aria-multiselectable className="min-h-0 flex-1 overflow-y-auto py-1">
+          <ul ref={listRef} id="searchable-picker-list" role="listbox" aria-multiselectable={!single} className="min-h-0 flex-1 overflow-y-auto py-1">
             {shown.map((o, i) => {
               const row = i;
               const header = o.group && o.group !== lastGroup ? o.group : null;

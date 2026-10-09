@@ -47,6 +47,23 @@ export function useDebounced<T>(value: T, ms = 300): T {
   return v;
 }
 
+/**
+ * `from=…&to=…` for "today so far" (UTC midnight → now) — or, with `daysBack`, from UTC midnight
+ * that many days earlier → now — fixed when the page mounts. Reading the clock during render would
+ * put a new `to` into the query path on every render — and useQuery refetches whenever its path
+ * changes, so each response would trigger the next request.
+ */
+export function useTodaySoFarRange(daysBack = 0): string {
+  const [range] = useState(() => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setUTCHours(0, 0, 0, 0);
+    start.setUTCDate(start.getUTCDate() - daysBack);
+    return new URLSearchParams({ from: start.toISOString(), to: now.toISOString() }).toString();
+  });
+  return range;
+}
+
 /** Split a "sort:dir" value into the API's sort + dir params. */
 export function sortParams(v: string): { sort: string; dir: 'asc' | 'desc' } {
   const [sort, dir] = v.split(':');
