@@ -27,6 +27,7 @@ import { TargetingPanel } from './offerForm/TargetingPanel';
 import { targetingErrors } from './offerForm/targetingValidation';
 import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
 import { ThumbnailField } from './offerForm/ThumbnailField';
+import { SearchablePicker } from '../../shared-components/primitives/SearchablePicker';
 import { DEFAULT_ATTRIBUTION, DEFAULT_EMAIL, DEFAULT_REVENUE, settingsErrors } from './offerForm/settings';
 import type { Advertiser, Offer, OfferTargeting, TrackingDomain } from '../../types';
 
@@ -45,6 +46,8 @@ const VISIBILITIES = ['public', 'private', 'ask'] as const;
 const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
 // Non-binding autocomplete for the free-text currency column (no server-side currency list exists).
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
+/** Category picker option that switches to the "New category name" text input. */
+const NEW_CATEGORY = '__new__';
 
 export default function OfferCreate() {
   const nav = useNavigate();
@@ -90,7 +93,7 @@ export default function OfferCreate() {
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
   const [assignGroup, setAssignGroup] = useState(false);
   const [groupId, setGroupId] = useState('');
-  // Category picker: a dropdown of existing values by default; "＋ New category…" flips to a text input.
+  // Category picker: a searchable list of existing values by default; "＋ New category…" flips to a text input.
   const [catNew, setCatNew] = useState(false);
   // Labels (tags) — collected locally; assigned via POST /api/offers/:id/tags once the offer exists.
   const [labels, setLabels] = useState<string[]>([]);
@@ -245,16 +248,17 @@ export default function OfferCreate() {
                         onClick={() => { setCatNew(false); set('category', ''); }}>Cancel</button>
                     </div>
                   ) : (
-                    <select className="input" required value={form.category}
-                      onChange={(e) => {
-                        if (e.target.value === '__new__') { setCatNew(true); set('category', ''); }
-                        else set('category', e.target.value);
-                      }}>
-                      <option value="" disabled>Select Category…</option>
-                      {form.category && !categoryOptions.includes(form.category) && <option value={form.category}>{form.category}</option>}
-                      {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                      <option value="__new__">＋ New category…</option>
-                    </select>
+                    <SearchablePicker single required ariaLabel="Category" placeholder="Select Category…" searchPlaceholder="Search categories…"
+                      value={form.category ? [form.category] : []}
+                      options={[
+                        ...(form.category && !categoryOptions.includes(form.category) ? [{ value: form.category, label: form.category }] : []),
+                        ...categoryOptions.map((c) => ({ value: c, label: c })),
+                        { value: NEW_CATEGORY, label: '＋ New category…' },
+                      ]}
+                      onChange={([v = '']) => {
+                        if (v === NEW_CATEGORY) { setCatNew(true); set('category', ''); }
+                        else set('category', v);
+                      }} />
                   )}
                 </Field>
                 <Field label="Currency *" hint="ISO 4217 3-letter code (e.g. USD). All payout, revenue and ledger amounts for this offer are recorded in it. Not validated server-side yet — enter a real code.">

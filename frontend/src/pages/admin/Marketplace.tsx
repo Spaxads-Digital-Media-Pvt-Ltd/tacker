@@ -19,6 +19,7 @@ import { PageHeader, Spinner, StateBlock } from '../../shared-components/primiti
 import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { appliedFilterCount } from '../../shared-components/primitives/CategorizedFilters';
 import type { MarketplaceAdvertiser } from '../../types';
+import { useTodaySoFarRange } from './pagedList';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Connected', pending: 'Pending', inactive: 'Inactive' };
 
@@ -44,13 +45,6 @@ function valuesToFilters(v: FilterValues): Filters {
 }
 
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
-
-function todayIso(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
 
 function initials(name: string): string {
   return name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
@@ -183,8 +177,10 @@ function AdvertiserCard({
 export default function Marketplace() {
   const navigate = useNavigate();
   const { data, loading, error, refetch } = useQuery<MarketplaceAdvertiser[]>('/api/advertisers/marketplace');
-  const stats7 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&from=${encodeURIComponent(todayIso(7))}&to=${encodeURIComponent(new Date().toISOString())}&limit=200`);
-  const stats30 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&from=${encodeURIComponent(todayIso(30))}&to=${encodeURIComponent(new Date().toISOString())}&limit=200`);
+  const range7 = useTodaySoFarRange(7);
+  const range30 = useTodaySoFarRange(30);
+  const stats7 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&${range7}&limit=200`);
+  const stats30 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&${range30}&limit=200`);
   const { run: patchAdvertiser, busy: applying } = useMutation((id: string) => api.patch(`/api/advertisers/${id}`, { status: 'pending' }));
 
   const [q, setQ] = useState('');

@@ -31,11 +31,11 @@ import {
   type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, Pagination,
   type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
+  type ReportingFiltersValue, reportingChips, withoutReportingChip, EMPTY_REPORTING_FILTERS,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
 import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
-import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 
 interface SmartLink { id: string; name: string }
 
@@ -380,6 +380,16 @@ export default function VarianceReport() {
     setAppliedFilters({}); setAppliedExclusions({}); setAppliedMetricFilters({}); setAppliedIgnoreFailTraffic(false);
     setExpanded(new Set()); setPage(1);
   };
+  // Chip row ⇄ every applied Reporting Filter (incl. metric filters and Ignore Fail Traffic), so
+  // removing a chip or "Clear all" changes exactly what the requests and the table use.
+  const appliedReporting: ReportingFiltersValue = { filters: appliedFilters, exclusions: appliedExclusions, metricFilters: appliedMetricFilters, ignoreFailTraffic: appliedIgnoreFailTraffic };
+  const setReporting = (v: ReportingFiltersValue) => {
+    setFilters(v.filters); setAppliedFilters(v.filters);
+    setExclusions(v.exclusions); setAppliedExclusions(v.exclusions);
+    setMetricFilters(v.metricFilters); setAppliedMetricFilters(v.metricFilters);
+    setIgnoreFailTraffic(v.ignoreFailTraffic); setAppliedIgnoreFailTraffic(v.ignoreFailTraffic);
+    changePage(1);
+  };
   const toggleExpand = (raw: string) => setExpanded((s) => { const n = new Set(s); if (n.has(raw)) n.delete(raw); else n.add(raw); return n; });
 
   const SUMMARY_TILES: { key: string; label: string; real: boolean; get?: (d: DerivedRow) => number; format?: (v: number) => string }[] = [
@@ -492,13 +502,9 @@ export default function VarianceReport() {
 
       <div className="card">
         <ActiveFilterChips className="mb-3"
-          chips={[...chipsFromValues(FILTER_CATEGORIES, appliedFilters), ...chipsFromValues(FILTER_CATEGORIES, appliedExclusions, { exclude: true })]}
-          onRemove={(c) => {
-            if (c.exclude) { const n = withoutValue(appliedExclusions, c.key, c.value); setExclusions(n); setAppliedExclusions(n); }
-            else { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); }
-            changePage(1);
-          }}
-          onClearAll={() => { setFilters({}); setAppliedFilters({}); setExclusions({}); setAppliedExclusions({}); changePage(1); }} />
+          chips={reportingChips(FILTER_CATEGORIES, appliedReporting)}
+          onRemove={(c) => setReporting(withoutReportingChip(appliedReporting, c))}
+          onClearAll={() => setReporting(EMPTY_REPORTING_FILTERS)} />
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>

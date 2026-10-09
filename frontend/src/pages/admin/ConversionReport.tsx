@@ -17,8 +17,8 @@
  * Pagination is "has more" (overfetch by one row), matching Click Report — the shared API client
  * discards response pagination metadata app-wide.
  */
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight, ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
@@ -114,7 +114,7 @@ const URL_FILTER_PARAMS: [category: string, param: string][] = [
   ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
 ];
 
-/** Applied report state from the URL (Copy Link / legacy deep links). */
+/** Applied report state from the URL (Copy Link / reload / legacy deep links). */
 function readInitialState() {
   const sp = new URLSearchParams(window.location.search);
   const filters: FilterValues = {};
@@ -128,6 +128,7 @@ function readInitialState() {
 
 export default function ConversionReport() {
   const [init] = useState(readInitialState);
+  const [, setSearchParams] = useSearchParams();
   const [from, setFrom] = useState(init.from);
   const [to, setTo] = useState(init.to);
   const [appliedFrom, setAppliedFrom] = useState(init.from);
@@ -194,6 +195,16 @@ export default function ConversionReport() {
     smartLinkId: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
   };
   const tableQs = qs({ ...baseParams, limit: pageSize + 1, offset: (page - 1) * pageSize });
+  // The applied report lives in the URL (replace, not push) so reload / back keep it.
+  const urlState = useMemo(() => {
+    const next = new URLSearchParams();
+    next.set('from', appliedFrom); next.set('to', appliedTo);
+    for (const [cat, param] of URL_FILTER_PARAMS) { const v = appliedFilters[cat]?.[0]; if (v) next.set(param, v); }
+    return next.toString();
+  }, [appliedFrom, appliedTo, appliedFilters]);
+  useEffect(() => {
+    if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
+  }, [urlState, setSearchParams]);
   const { data, loading, error, refetch } = useQuery<ConvRow[]>(hasRun ? `/api/reports/conversions?${tableQs}` : null);
   const hasNextPage = (data?.length ?? 0) > pageSize;
   const pageRows = (data ?? []).slice(0, pageSize);
@@ -241,7 +252,7 @@ export default function ConversionReport() {
   };
 
   const copyLink = async () => {
-    // The applied report (not the address bar, which never reflects Run Report) — read back on load.
+    // The link carries the applied report (dates + filters) — the page reads these back on load.
     const link = reportLink({
       from: appliedFrom, to: appliedTo,
       ...Object.fromEntries(URL_FILTER_PARAMS.map(([cat, param]) => [param, appliedFilters[cat]?.[0]])),

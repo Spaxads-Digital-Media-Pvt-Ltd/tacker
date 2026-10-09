@@ -14,7 +14,7 @@ import { TrackingLinksModal } from './offerDetail/TrackingLinksModal';
 import { groupTrackingDomains } from '../../lib/trackingLinks';
 import { countryLabel, countryName } from '../../data/geo';
 import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
-import { pagedPath, fetchAllPages, useDebounced, sortParams, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
+import { pagedPath, fetchAllPages, useDebounced, sortParams, useTodaySoFarRange, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
 import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
 import type { Offer, Advertiser, Publisher, TrackingDomain, PagedList } from '../../types';
 
@@ -96,12 +96,6 @@ const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-
 // Bare 2-dp amount — the Revenue/Payout columns pair it with a separate currency label, and it keeps
 // them consistent with the money-formatted "Today's Revenue" column instead of dumping raw "10.0000".
 const amt = (v: string | number | undefined) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0));
-
-function todayStartIso(): string {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return d.toISOString();
-}
 
 const PAGE_SIZE = 12;
 
@@ -240,7 +234,8 @@ export default function Offers() {
     }
     return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
   }, [ccCategories, filterOptions]);
-  const today = useQuery<AggResult>(`/api/reports?groupBy=offer&metrics=clicks,revenue&from=${encodeURIComponent(todayStartIso())}&to=${encodeURIComponent(new Date().toISOString())}`);
+  const todayRange = useTodaySoFarRange();
+  const today = useQuery<AggResult>(`/api/reports?groupBy=offer&metrics=clicks,revenue&${todayRange}`);
   const todayByOffer = useMemo(() => {
     const m = new Map<string, { clicks: number; revenue: number }>();
     for (const r of today.data?.rows ?? []) {
