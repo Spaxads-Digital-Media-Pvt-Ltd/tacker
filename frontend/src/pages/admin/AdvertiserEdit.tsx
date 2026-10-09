@@ -225,10 +225,10 @@ export default function AdvertiserEdit() {
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Contact Email *"><input type="email" className="input" required value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
+              <Field label="Contact Email"><input type="email" className="input" value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
               <Field label="Default Currency *"><input className="input" maxLength={3} required value={form.defaultCurrency} onChange={(e) => set('defaultCurrency', e.target.value.toUpperCase())} /></Field>
             </div>
-            <Field label="Billing Terms *"><textarea className="input min-h-[80px]" required value={form.billingTerms} onChange={(e) => set('billingTerms', e.target.value)} /></Field>
+            <Field label="Billing Terms"><textarea className="input min-h-[80px]" value={form.billingTerms} onChange={(e) => set('billingTerms', e.target.value)} /></Field>
             <GeneralExtras form={form} set={set} users={users ?? []} base={base} />
           </div>
         )}
