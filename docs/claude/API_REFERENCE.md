@@ -75,6 +75,12 @@
 | GET,POST,PATCH,DELETE | `/api/tiered-commissions/*` | Tiered commissions | admin |
 | GET,POST,PATCH,DELETE | `/api/control-center/*` | Control center (incl. the Category / Channel catalogs: `/api/control-center/categories`, `/api/control-center/channels`) | admin |
 
+### Path ids (Offers, Partners, Advertisers and their sub-resources)
+
+Path ids are UUIDs. A malformed one (`/api/publishers/123`) is the standard **422** `validation_failed` envelope on every route (`rejectMalformedIdParams` in `api-backend/src/lib/http/path-params.ts`, registered per router). A well-formed id that doesn't exist **or belongs to another network** is the same plain **404** — the response never reveals whether a record exists elsewhere. Related ids in a body (advertiser, managers, channel, referrer, tracking domain) must belong to the caller's network → otherwise **400**.
+
+Optional on Advertisers: `contactEmail`, `billingTerms`; on Partners: `contactEmail`, `payoutTerms` (nullable columns; the create/edit forms send them only when filled, and still format-check the email).
+
 ### Filter query parameters (all list/report endpoints)
 
 Every filter param is zod-validated (`validateQuery`); bad input is a **422 validation error**, never a Postgres 500, and values are always bound as `$n`. Shared parsers live in `api-backend/src/lib/http/query-params.ts` (`csvList`, `queryBool`, `queryDate`); free-text search uses `escapeLike` (`lib/db/like.ts`) with `ILIKE … ESCAPE '\'`.

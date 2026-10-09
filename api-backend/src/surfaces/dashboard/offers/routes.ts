@@ -13,6 +13,7 @@ import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
 import { badRequest, notFound, forbidden } from '../../../lib/http/errors.js';
+import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { containsPattern } from '../../../lib/db/like.js';
@@ -133,6 +134,7 @@ function actorLabel(req: import('express').Request): string | null {
 
 export function offersAdminRoutes(): Router {
  const r = Router();
+ rejectMalformedIdParams(r, 'id', 'accessId', 'actionId', 'ruleId', 'assetId');
 
  // Paged mode (`?paged=1`) for the Manage Offers page: filters/search/sort/paging in SQL, returns
  // { rows, total, page, pageSize, counts: { statuses } }. Any other caller (every offer picker)
@@ -846,6 +848,7 @@ function portalClickUrl(host: string | null, offerId: string, pubId: string | nu
 
 export function offerPortalRoutes(): Router {
  const r = Router();
+ rejectMalformedIdParams(r, 'id');
 
  r.get(
  '/',

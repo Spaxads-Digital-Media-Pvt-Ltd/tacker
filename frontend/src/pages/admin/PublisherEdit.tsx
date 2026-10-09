@@ -268,7 +268,7 @@ export default function PublisherEdit() {
               <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Contact Email *"><input type="email" className="input" required value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
+              <Field label="Contact Email"><input type="email" className="input" value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
               <Field label="User Name"><input className="input" value={form.contactName} onChange={(e) => set('contactName', e.target.value)} placeholder="The contact person's name" /></Field>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -276,7 +276,7 @@ export default function PublisherEdit() {
               <Field label="Website"><input className="input" value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="https://…" /></Field>
             </div>
             <Field label="Default Attribution Window (seconds)" hint="Saved for reference — the attribution window that applies is the offer's own."><input type="number" min={0} className="input" value={form.defaultAttributionWindowS} onChange={(e) => set('defaultAttributionWindowS', e.target.value)} placeholder="2592000" /></Field>
-            <Field label="Payout Terms *"><textarea className="input min-h-[80px]" required value={form.payoutTerms} onChange={(e) => set('payoutTerms', e.target.value)} /></Field>
+            <Field label="Payout Terms"><textarea className="input min-h-[80px]" value={form.payoutTerms} onChange={(e) => set('payoutTerms', e.target.value)} /></Field>
             <GeneralExtras base={base} publisherId={id} form={form} set={set} users={users ?? []} publishers={publishers ?? []} currentChannelName={publisher.channelName} />
           </div>
         )}

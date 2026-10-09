@@ -99,8 +99,8 @@ export default function PublisherCreate() {
 
  const validateStep3 = (): boolean => {
  const errs: Partial<Record<keyof FormState, string>> = {};
- if (!form.contactEmail.trim()) errs.contactEmail = 'Email is required for the portal login.';
- else if (!EMAIL_RE.test(form.contactEmail)) errs.contactEmail = 'Enter a valid email address.';
+ // Optional (the API stores it nullable) — only its format is checked when one is given.
+ if (form.contactEmail.trim() && !EMAIL_RE.test(form.contactEmail)) errs.contactEmail = 'Enter a valid email address.';
  setFieldErrors(errs);
  return Object.keys(errs).length === 0;
  };
@@ -110,9 +110,9 @@ export default function PublisherCreate() {
  const body: Record<string, unknown> = {
  name: form.name.trim(),
  status: form.status,
- contactEmail: form.contactEmail || undefined,
+ contactEmail: form.contactEmail.trim() || undefined,
  contactName: [form.contactFirstName, form.contactLastName].filter(Boolean).join(' ') || undefined,
- payoutTerms: form.payoutTerms || undefined,
+ payoutTerms: form.payoutTerms.trim() || undefined,
  country: form.country || undefined,
  tier: partnerTier ? form.tier.trim() || undefined : undefined,
  partnerManagerId: form.partnerManagerId || undefined,
@@ -292,8 +292,8 @@ export default function PublisherCreate() {
  {['Weekly', 'Bi-Weekly', 'Monthly', 'Net 15', 'Net 30'].map((f) => <option key={f} value={f}>{f}</option>)}
  </select>
  </Field>
- <Field label="Payout Terms *">
- <textarea className="input min-h-[80px]" required value={form.payoutTerms} onChange={(e) => set('payoutTerms', e.target.value)} placeholder="Net-30, minimum $50…" />
+ <Field label="Payout Terms">
+ <textarea className="input min-h-[80px]" value={form.payoutTerms} onChange={(e) => set('payoutTerms', e.target.value)} placeholder="Net-30, minimum $50…" />
  </Field>
  </div>
  <Field label="Payment Method">
@@ -324,8 +324,8 @@ export default function PublisherCreate() {
  <input className="input" value={form.contactLastName} onChange={(e) => set('contactLastName', e.target.value)} />
  </Field>
  </div>
- <Field label="Email *">
- <input type="email" className={fieldClass('contactEmail')} required value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} />
+ <Field label="Email">
+ <input type="email" className={fieldClass('contactEmail')} value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} />
  {fieldError('contactEmail')}
  </Field>
  <p className="text-[11px] text-fg-muted">Portal user creation is handled separately from this form.</p>

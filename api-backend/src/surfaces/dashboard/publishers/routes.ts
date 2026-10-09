@@ -9,6 +9,7 @@ import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
 import { notFound } from '../../../lib/http/errors.js';
+import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
@@ -58,7 +59,6 @@ async function loadPublisher(networkId: string, id: string): Promise<PublisherRo
   );
   return rows[0] ?? null;
 }
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface PostbackRow {
   id: string; url: string; method: string; offer_id: string | null; event: string | null;
@@ -71,6 +71,7 @@ const toPostbackDTO = (r: PostbackRow) => ({
 
 export function publishersAdminRoutes(): Router {
   const r = Router();
+  rejectMalformedIdParams(r, 'id', 'pbId');
 
   // Paged mode (`?paged=1`) for the Manage Partners page: tabs/filters/search/sort/paging in SQL,
   // returns { rows, total, page, pageSize, counts: { tabs, statuses } }. Every other caller (the
@@ -183,7 +184,7 @@ export function publishersAdminRoutes(): Router {
     '/:id',
     asyncHandler(async (req, res) => {
       const id = req.params.id ?? '';
-      const row = UUID_RE.test(id) ? await loadPublisher(req.scope!.networkId, id) : null;
+      const row = await loadPublisher(req.scope!.networkId, id);
       if (!row) throw notFound('Publisher not found');
       sendOk(res, toAdminDTO(row));
     }),
@@ -355,6 +356,7 @@ export function publishersAdminRoutes(): Router {
 /** Publisher portal: your OWN profile + your OWN postbacks (owner-scoped by publisher_id). */
 export function publisherPortalRoutes(): Router {
   const r = Router();
+  rejectMalformedIdParams(r, 'id');
   r.use(requirePortal('publisher'));
 
   r.get(

@@ -97,9 +97,9 @@ d('Advertiser events (offer goals, advertiser-scoped)', () => {
     expect((await request(app).post(base()).set(bearer(adminA)).send({ offerId: offerB, name: 'x' })).status).toBe(400);
   });
 
-  it('unknown or malformed advertiser → 404', async () => {
+  it('unknown advertiser → 404, malformed id → 422', async () => {
     expect((await request(app).get('/api/advertisers/00000000-0000-4000-8000-0000000000ff/events').set(bearer(adminA))).status).toBe(404);
-    expect((await request(app).get('/api/advertisers/82/events').set(bearer(adminA))).status).toBe(404);
+    expect((await request(app).get('/api/advertisers/82/events').set(bearer(adminA))).status).toBe(422);
   });
 
   it('another network cannot read, create, update or delete it', async () => {
@@ -133,7 +133,7 @@ d('Advertiser events (offer goals, advertiser-scoped)', () => {
     expect(res.body.data).toMatchObject({ id: eventId, name: 'Purchase v2', payout: '3.0000', offerId: fx.offerA });
     const move = await request(app).patch(`${base()}/${eventId}`).set(bearer(adminA)).send({ offerId: offerA2 });
     expect(move.status).toBe(400);
-    expect((await request(app).patch(`${base()}/not-a-uuid`).set(bearer(adminA)).send({ name: 'x' })).status).toBe(404);
+    expect((await request(app).patch(`${base()}/not-a-uuid`).set(bearer(adminA)).send({ name: 'x' })).status).toBe(422);
   });
 
   it('delete removes it from the list and from the offer goals', async () => {

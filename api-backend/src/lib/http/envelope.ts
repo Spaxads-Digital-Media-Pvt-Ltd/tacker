@@ -3,7 +3,7 @@
  * envelope, standard error codes, pagination"). One shape for success, one for errors.
  */
 import type { Request, Response, NextFunction } from 'express';
-import { AppError, type ErrorCode } from './errors.js';
+import { AppError, MALFORMED_VALUE_MESSAGE, type ErrorCode } from './errors.js';
 import { logger } from '../logger.js';
 import { captureError } from '../observability/sentry.js';
 
@@ -84,7 +84,7 @@ export function errorHandler(
  // input), 22007/22008 = invalid/out-of-range datetime. Logged at warn so a real code bug stays visible.
  if (pgCode === '22P02' || pgCode === '22007' || pgCode === '22008') {
  logger.warn({ err, path: _req.path }, 'rejected malformed value (postgres cast error)');
- const body: ErrorEnvelope = { ok: false, error: { code: 'validation_failed', message: 'One of the values in the request is malformed (e.g. an invalid id or date).' } };
+ const body: ErrorEnvelope = { ok: false, error: { code: 'validation_failed', message: MALFORMED_VALUE_MESSAGE } };
  res.status(422).json(body);
  return;
  }
