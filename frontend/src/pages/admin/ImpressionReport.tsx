@@ -16,90 +16,64 @@
  * rather than 40 fabricated columns that could never hold real values here.
  */
 import { useState } from 'react';
-import { Search, MoreVertical, Info } from 'lucide-react';
-import { PageHeader, StateBlock } from '../../shared-components/primitives/ui';
+import { Search, Info } from 'lucide-react';
+import { PageHeader } from '../../shared-components/primitives/ui';
 import { daysAgo, todayStr } from '../../shared-components/primitives/ReportPageKit';
+import { useAutoDateRange } from './reportView';
+import { ReportCard, ReportControls, DateRangeField, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 
 const COLUMNS = ['Date', 'Offer', 'Partner', 'Country', 'Device', 'IP Address', 'Sub1', 'Sub2'] as const;
 
 export default function ImpressionReport() {
-  const [from, setFrom] = useState(daysAgo(7));
-  const [to, setTo] = useState(todayStr());
-  const [hasRun, setHasRun] = useState(true);
+  // No "Run Report": the range applies on its own like every other report (there's simply nothing
+  // to fetch for it here — see above).
+  const range = useAutoDateRange(daysAgo(7), todayStr());
   const [q, setQ] = useState('');
-  const [copied, setCopied] = useState(false);
-
-  const copyLink = async () => {
-    await navigator.clipboard?.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  };
 
   return (
     <>
-      <PageHeader title="Impression Report" subtitle="Reporting › Impression" action={
-        <button type="button" onClick={copyLink} title="Page Actions"
-          className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-          <MoreVertical size={15} />
-        </button>
-      } />
-      {copied && <p className="mb-3 text-tiny text-fg-secondary">Link copied.</p>}
+      <PageHeader title="Impression Report" subtitle="Reporting › Impression" />
 
-      <div className="card mb-4">
-        <div className="flex items-start gap-3">
-          <Info size={16} className="mt-0.5 shrink-0 text-accent-text" />
-          <p className="text-small text-fg-secondary">
-            This network tracks clicks and conversions, not ad impressions. There's no impression
-            pixel or impression-level data source in this app, so this report has no data to show —
-            the same is true on Everflow's own live demo account for this report.
-          </p>
-        </div>
-      </div>
+      <ReportCard>
+        <ReportControls problem={range.problem}>
+          <DateRangeField idPrefix="impression-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+        </ReportControls>
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => { setFrom(e.target.value); setHasRun(false); }} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => { setTo(e.target.value); setHasRun(false); }} />
-          </div>
-          <div className="flex-1" />
-          <button type="button" className="btn-primary" onClick={() => setHasRun(true)}>Run Report</button>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-          <div className="relative">
+        <ResultsBar title="Detailed Report" actions={
+          <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-56 !pl-8" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search…" aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-        </div>
+        } />
 
-        {!hasRun ? <StateBlock>Set parameters and run report</StateBlock> : (
-          <>
-            <div className="overflow-x-auto rounded-card border border-border">
-              <table className="premium-table">
-                <thead>
-                  <tr>
-                    {COLUMNS.map((c) => <th key={c} >{c}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td colSpan={COLUMNS.length} className="px-4 py-10 text-center text-small text-fg-muted">No Record Found</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-3 flex justify-end text-tiny text-fg-secondary">0 Total</div>
-          </>
-        )}
-      </div>
+        <ReportBody>
+          <div className="mb-4 flex items-start gap-3">
+            <Info size={16} className="mt-0.5 shrink-0 text-accent-text" />
+            <p className="text-small text-fg-secondary">
+              This network tracks clicks and conversions, not ad impressions. There's no impression
+              pixel or impression-level data source in this app, so this report has no data to show —
+              the same is true on Everflow's own live demo account for this report.
+            </p>
+          </div>
+          <div className="overflow-x-auto rounded-card border border-border">
+            <table className="premium-table">
+              <thead>
+                <tr>
+                  {COLUMNS.map((c) => <th key={c} >{c}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={COLUMNS.length} className="px-4 py-10 text-center text-small text-fg-muted">No Record Found</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex justify-end text-tiny text-fg-secondary">0 Total</div>
+        </ReportBody>
+      </ReportCard>
     </>
   );
 }

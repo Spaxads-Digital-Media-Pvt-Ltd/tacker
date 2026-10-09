@@ -13,9 +13,12 @@
  * column structure, genuinely empty, inert "Not available yet" controls instead of live filtering
  * that doesn't exist.
  */
-import { Filter, MoreVertical } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
+import { daysAgo, todayStr } from '../../shared-components/primitives/ReportPageKit';
+import { useAutoDateRange } from './reportView';
+import { ReportCard, ReportControls, DateRangeField, FiltersButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 
 const COLUMNS = [
   'Conversion Status', 'Refund Date', 'Offer', 'Partner', 'Advertiser', 'Revenue', 'Payout',
@@ -24,42 +27,34 @@ const COLUMNS = [
 ];
 
 export default function RefundsReport() {
+  // Nothing to fetch, but the range behaves like every other report's (applies on its own, no Run Report).
+  const range = useAutoDateRange(daysAgo(7), todayStr());
+
   return (
     <>
-      <PageHeader title="Refunds Report" subtitle="Reporting › Refunds" action={
-        <button title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-          <MoreVertical size={15} />
-        </button>
-      } />
+      <PageHeader title="Refunds Report" subtitle="Reporting › Refunds" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input title="Not available yet" type="date" className="input" defaultValue="" />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input title="Not available yet" type="date" className="input" defaultValue="" />
-          </div>
-          <button title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <Filter size={15} />
+      <ReportCard>
+        <ReportControls problem={range.problem} actions={<>
+          {/* Inert, like the rest of this shell — filtering isn't available yet. */}
+          <FiltersButton disabled title="Not available yet" />
+          <button title="Not available yet" className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+            <MoreVertical size={15} />
           </button>
-          <div className="flex-1" />
-          <button title="Not available yet" className="btn-primary">Run Report</button>
-        </div>
-      </div>
+        </>}>
+          <DateRangeField idPrefix="refunds-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+        </ReportControls>
 
-      <div className="card mb-4">
-        <p className="text-small text-fg-muted">
-          Refunds aren't available yet — this data comes from a WooCommerce, ClickFunnels, Stripe, or Shopify integration, none of which this network has connected. See Connect › Integrations.
-        </p>
-      </div>
+        <ResultsBar title="Detailed Report" />
 
-      <div className="card">
-        <h3 className="mb-3 text-h3 font-medium text-fg">Detailed Report</h3>
-        <EmptyShellTable columns={COLUMNS} search={false} />
-      </div>
+        <ReportBody>
+          <p className="mb-4 text-small text-fg-muted">
+            Refunds aren't available yet — this data comes from a WooCommerce, ClickFunnels, Stripe, or Shopify integration, none of which this network has connected. See Connect › Integrations.
+          </p>
+          <EmptyShellTable columns={COLUMNS} search={false} />
+        </ReportBody>
+      </ReportCard>
     </>
   );
 }

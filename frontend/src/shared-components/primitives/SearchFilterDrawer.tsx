@@ -42,15 +42,16 @@ export function SearchFilterDrawer({ appliedCount, onClose, onApply, children }:
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-accent-subtle px-2.5 py-0.5 text-[11px] font-medium text-accent-text">
-              {appliedCount} filters applied
+              {appliedCount} {appliedCount === 1 ? 'filter' : 'filters'} applied
             </span>
             <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-fg-muted hover:bg-page hover:text-fg">✕</button>
           </div>
         </header>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         <footer className="flex shrink-0 gap-2 border-t border-border bg-page px-5 py-4">
-          <button type="button" className="btn-primary flex-1 justify-center" onClick={onApply}>Apply Filters</button>
+          {/* Cancel → Apply, the same order as the report pages' filter flyout. */}
           <button type="button" className="btn-ghost border border-border px-5" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-primary flex-1 justify-center" onClick={onApply}>Apply Filters</button>
         </footer>
       </aside>
     </div>,

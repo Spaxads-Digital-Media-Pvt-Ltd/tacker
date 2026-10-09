@@ -13,9 +13,12 @@
  * structure from the reference, genuinely empty, with inert "Not available yet" controls instead of
  * live filtering that doesn't exist.
  */
-import { Filter, MoreVertical } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
+import { daysAgo, todayStr } from '../../shared-components/primitives/ReportPageKit';
+import { useAutoDateRange } from './reportView';
+import { ReportCard, ReportControls, DateRangeField, FiltersButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 
 const COLUMNS = [
   'Referrer (Originating) Partner', 'Referred Partner', 'Referral Status',
@@ -23,42 +26,34 @@ const COLUMNS = [
 ];
 
 export default function PartnerReferralsReport() {
+  // Nothing to fetch, but the range behaves like every other report's (applies on its own, no Run Report).
+  const range = useAutoDateRange(daysAgo(7), todayStr());
+
   return (
     <>
-      <PageHeader title="Partner Referrals Report" subtitle="Reporting › Partner Referrals" action={
-        <button title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-          <MoreVertical size={15} />
-        </button>
-      } />
+      <PageHeader title="Partner Referrals Report" subtitle="Reporting › Partner Referrals" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input title="Not available yet" type="date" className="input" defaultValue="" />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input title="Not available yet" type="date" className="input" defaultValue="" />
-          </div>
-          <button title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <Filter size={15} />
+      <ReportCard>
+        <ReportControls problem={range.problem} actions={<>
+          {/* Inert, like the rest of this shell — filtering isn't available yet. */}
+          <FiltersButton disabled title="Not available yet" />
+          <button title="Not available yet" className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+            <MoreVertical size={15} />
           </button>
-          <div className="flex-1" />
-          <button title="Not available yet" className="btn-primary">Run Report</button>
-        </div>
-      </div>
+        </>}>
+          <DateRangeField idPrefix="partner-referrals-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+        </ReportControls>
 
-      <div className="card mb-4">
-        <p className="text-small text-fg-muted">
-          Partner Referrals aren't configured for this network yet — see Control Center › Partners › Partner Referral to enable a referral program.
-        </p>
-      </div>
+        <ResultsBar title="Detailed Report" />
 
-      <div className="card">
-        <h3 className="mb-3 text-h3 font-medium text-fg">Detailed Report</h3>
-        <EmptyShellTable columns={COLUMNS} search={false} />
-      </div>
+        <ReportBody>
+          <p className="mb-4 text-small text-fg-muted">
+            Partner Referrals aren't configured for this network yet — see Control Center › Partners › Partner Referral to enable a referral program.
+          </p>
+          <EmptyShellTable columns={COLUMNS} search={false} />
+        </ReportBody>
+      </ReportCard>
     </>
   );
 }

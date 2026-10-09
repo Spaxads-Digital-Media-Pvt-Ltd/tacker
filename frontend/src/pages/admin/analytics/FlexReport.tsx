@@ -20,10 +20,14 @@
  * The Detailed Report's metric columns (Clicks, Total CV, RPA, CPA, CVR, Revenue, Payout, Profit,
  * Margin, EPC) are the reference's own fixed default set, not user-configurable there either — all
  * real, derived via the same `deriveRow` used by every other report page.
+ *
+ * No "Run Report": every control applies on its own — dates once they form a valid range (debounced),
+ * columns / Reporting Filters / chips / sort immediately. The applied report is mirrored to the
+ * address bar (keeping `tab=flex`), so the URL itself is the shareable link.
  */
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, MoreVertical, Plus, Search, X, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ChevronDown, ChevronRight, MoreVertical, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
@@ -32,17 +36,20 @@ import {
   type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
+  type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
   fetchAllPages, useReportExport, ExportStatus,
 } from '../../../shared-components/primitives/ReportPageKit';
 import {
-  readUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
-  IGNORE_FAIL_PARAM, readUrlFlag, reportLink, urlFilterParams,
+  readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
+  IGNORE_FAIL_PARAM, readUrlFlag,
 } from '../../../lib/reportFilterState';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
 import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
-import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
+import { useAutoDateRange } from '../reportView';
+import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 
 interface SmartLink { id: string; name: string }
 
@@ -110,7 +117,7 @@ const DEFAULT_DIMS: DimKey[] = ['offer', 'publisher'];
 const ORDER_METRICS: OrderMetric[] = ['clicks', 'total_conversions', 'payout', 'revenue', 'margin'];
 
 /**
- * Initial report state from the URL — what "Copy Link to Report" writes (`from`, `to`, `dims`,
+ * Initial report state from the URL — what the page mirrors to the address bar (`from`, `to`, `dims`,
  * `f.*`/`x.*`, `mf.*`, `ignoreFail`, `orderBy`/`orderDir`) plus the legacy deep-link ids the
  * Offer/Partner/Advertiser/Smart Link/Event report pages send ("Open Flex Report").
  */
@@ -144,41 +151,44 @@ export default function FlexReport() {
   const opts = useReportOpts();
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks?.map((s: { value: string; label: string }) => [s.value, s.label]) ?? []), [opts.smartLinks]);
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [init] = useState(readFlexUrl);
+  // Dates apply on their own once they form a valid range (see useAutoDateRange); columns, Reporting
+  // Filters and sort apply immediately and return to page 1. `page` lives with the range, so a new
+  // range and the page reset land in one render (one request).
+  const range = useAutoDateRange(init.from, init.to);
+  const { appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
   const [dims, setDims] = useState<DimKey[]>(init.dims);
   const [dimPickerOpen, setDimPickerOpen] = useState(false);
-  const [from, setFrom] = useState(init.from);
-  const [to, setTo] = useState(init.to);
-  const [appliedFrom, setAppliedFrom] = useState(from);
-  const [appliedTo, setAppliedTo] = useState(to);
-  const [appliedDims, setAppliedDims] = useState<DimKey[]>(dims);
   const [filters, setFilters] = useState<FilterValues>(init.filters);
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
   const [exclusions, setExclusions] = useState<FilterValues>(init.exclusions);
-  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>(init.exclusions);
   const [metricFilters, setMetricFilters] = useState<MetricFilters>(init.metricFilters);
-  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>(init.metricFilters);
   const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(init.ignoreFail);
-  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(init.ignoreFail);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [hasRun, setHasRun] = useState(true);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [graphOpen, setGraphOpen] = useState(false);
   const [q, setQ] = useState('');
   const [orderBy, setOrderBy] = useState<OrderMetric>(init.orderBy);
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(init.orderDir);
-  const [page, setPage] = useState(1);
   const pageSize = 25;
   const [showColumns, setShowColumns] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  // Page ⋮ menu: Save / Load / Show API Request. No separate Copy Link — the applied report is
+  // mirrored to the address bar, so the URL is the link.
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric>('flex-report') as unknown as { name: string; config: SavedConfig }[]);
-  const [copied, setCopied] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
+  const pageMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pageMenuOpen) return;
+    const onDown = (e: MouseEvent) => { if (!pageMenuRef.current?.contains(e.target as Node)) { setPageMenuOpen(false); setLoadOpen(false); } };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [pageMenuOpen]);
 
   const { data: offers } = useQuery<{ id: string; name: string }[]>('/api/offers');
   const { data: publishers } = useQuery<{ id: string; name: string }[]>('/api/publishers');
@@ -203,23 +213,42 @@ export default function FlexReport() {
     for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
     return params.toString();
   };
-  const excludeOfferId = appliedExclusions['offer']?.join(',');
-  const excludeAdvertiserId = appliedExclusions['advertiser']?.join(',');
-  const excludePublisherId = appliedExclusions['partner']?.join(',');
-  const excludeSmartLinkId = appliedExclusions['smartLink']?.join(',');
-  const excludeCountry = appliedExclusions['country']?.join(',');
-  const excludeDevice = appliedExclusions['device']?.join(',');
+  const excludeOfferId = exclusions['offer']?.join(',');
+  const excludeAdvertiserId = exclusions['advertiser']?.join(',');
+  const excludePublisherId = exclusions['partner']?.join(',');
+  const excludeSmartLinkId = exclusions['smartLink']?.join(',');
+  const excludeCountry = exclusions['country']?.join(',');
+  const excludeDevice = exclusions['device']?.join(',');
   const dimParams = {
-    offerId: appliedFilters['offer']?.join(','), advertiserId: appliedFilters['advertiser']?.join(','),
-    publisherId: appliedFilters['partner']?.join(','), smartLinkId: appliedFilters['smartLink']?.join(','),
-    country: appliedFilters['country']?.join(','), device: appliedFilters['device']?.join(','),
+    offerId: filters['offer']?.join(','), advertiserId: filters['advertiser']?.join(','),
+    publisherId: filters['partner']?.join(','), smartLinkId: filters['smartLink']?.join(','),
+    country: filters['country']?.join(','), device: filters['device']?.join(','),
     excludeOfferId, excludeAdvertiserId, excludePublisherId, excludeSmartLinkId, excludeCountry, excludeDevice,
-    excludeInvalid: appliedIgnoreFailTraffic ? 1 : undefined,
+    excludeInvalid: ignoreFailTraffic ? 1 : undefined,
   };
 
-  const groupByStr = appliedDims.join(',');
+  // The applied report lives in the address bar (replace, not push), so reload / back / a pasted
+  // link reopen it. `tab` is kept, or the Analytics shell would switch tabs.
+  const tab = searchParams.get('tab');
+  const urlState = useMemo(() => {
+    const next = new URLSearchParams();
+    if (tab) next.set('tab', tab);
+    next.set('from', appliedFrom); next.set('to', appliedTo);
+    if (dims.length) next.set('dims', dims.join(','));
+    writeUrlFilters(next, 'f', filters);
+    writeUrlFilters(next, 'x', exclusions);
+    writeUrlMetricFilters(next, metricFilters);
+    if (ignoreFailTraffic) next.set(IGNORE_FAIL_PARAM, '1');
+    next.set('orderBy', orderBy); next.set('orderDir', orderDir);
+    return next.toString();
+  }, [tab, appliedFrom, appliedTo, dims, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir]);
+  useEffect(() => {
+    if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
+  }, [urlState, setSearchParams]);
+
+  const groupByStr = dims.join(',');
   const summaryQs = qs({ groupBy: 'none', metrics: 'clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
-  const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(hasRun ? `/api/reports?${summaryQs}` : null);
+  const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
     if (!rows.length) return null;
@@ -236,7 +265,7 @@ export default function FlexReport() {
 
   const chronological = appliedFrom !== appliedTo;
   const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: graphData } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
+  const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
     const dimKey = chronological ? 'day' : 'hour';
     const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions[dimKey] ?? '').localeCompare(b.dimensions[dimKey] ?? ''));
@@ -253,38 +282,43 @@ export default function FlexReport() {
     orderBy, orderDir, limit, offset,
   });
   const tableQs = tableQsFor(pageSize, (page - 1) * pageSize);
-  const { data, loading, error } = useQuery<AggResult>(hasRun && appliedDims.length ? `/api/reports?${tableQs}` : null);
+  // No columns picked → nothing to group by: no request, the body shows a hint instead.
+  const { data, loading, error } = useQuery<AggResult>(dims.length ? `/api/reports?${tableQs}` : null);
 
   const toRow = (r: AggRow) => ({
-    key: appliedDims.map((d) => r.dimensions[d] ?? '~').join('|'),
-    dims: appliedDims.map((d) => ({ dim: d, raw: r.dimensions[d] ?? null, name: resolveName(d, r.dimensions[d] ?? null, opts, smartLinkMap) })),
+    key: dims.map((d) => r.dimensions[d] ?? '~').join('|'),
+    dims: dims.map((d) => ({ dim: d, raw: r.dimensions[d] ?? null, name: resolveName(d, r.dimensions[d] ?? null, opts, smartLinkMap) })),
     derived: deriveRow(r.metrics),
   });
   const rows = useMemo(() => (data?.rows ?? []).map(toRow)
     .filter((r) => !q.trim() || r.dims.some((d) => d.name.toLowerCase().includes(q.trim().toLowerCase())))
-    .filter((r) => passesMetricFilters(r.derived, appliedMetricFilters)),
+    .filter((r) => passesMetricFilters(r.derived, metricFilters)),
   // eslint-disable-next-line react-hooks/exhaustive-deps -- toRow only closes over the listed values
-  [data, appliedDims, opts, smartLinkMap, q, appliedMetricFilters]);
+  [data, dims, opts, smartLinkMap, q, metricFilters]);
 
-  const addDim = (k: DimKey) => { if (dims.length < MAX_DIMS && !dims.includes(k)) setDims([...dims, k]); setDimPickerOpen(false); };
-  const removeDim = (k: DimKey) => setDims(dims.filter((d) => d !== k));
-
-  const runReport = () => {
-    setAppliedFrom(from); setAppliedTo(to); setAppliedDims(dims); setAppliedFilters(filters);
-    setAppliedExclusions(exclusions); setAppliedMetricFilters(metricFilters); setAppliedIgnoreFailTraffic(ignoreFailTraffic);
-    setHasRun(true); setPage(1);
+  // Column picks apply at once and return to page 1.
+  const addDim = (k: DimKey) => {
+    if (dims.length < MAX_DIMS && !dims.includes(k)) { setDims([...dims, k]); toFirstPage(); }
+    setDimPickerOpen(false);
   };
+  const removeDim = (k: DimKey) => { setDims(dims.filter((d) => d !== k)); toFirstPage(); };
+
+  // Reset dates, columns and every Reporting Filter in one render → one request per query. The
+  // debounced range catches up to the same values later and is then a no-op.
   const clearAll = () => {
-    setFrom(daysAgo(7)); setTo(todayStr()); setDims(['offer', 'publisher']); setFilters({});
-    setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
-    setAppliedFrom(daysAgo(7)); setAppliedTo(todayStr()); setAppliedDims(['offer', 'publisher']); setAppliedFilters({});
-    setAppliedExclusions({}); setAppliedMetricFilters({}); setAppliedIgnoreFailTraffic(false);
-    setPage(1);
+    range.reset({ from: daysAgo(7), to: todayStr() });
+    setDims(DEFAULT_DIMS); setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
   };
   const toggleSort = (m: OrderMetric) => {
     if (orderBy === m) setOrderDir((d) => (d === 'desc' ? 'asc' : 'desc'));
     else { setOrderBy(m); setOrderDir('desc'); }
-    setPage(1);
+    toFirstPage();
+  };
+  const reporting: ReportingFiltersValue = { filters, exclusions, metricFilters, ignoreFailTraffic };
+  // Flyout Apply, chip removal and the chips' "Clear all" apply at once and return to page 1.
+  const setReporting = (v: ReportingFiltersValue) => {
+    setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic);
+    toFirstPage();
   };
 
   const shownMetrics = useMemo(() => new Set(METRIC_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
@@ -301,153 +335,130 @@ export default function FlexReport() {
   // filters as the table — but not the "Search this page" box, which only narrows the visible page.
   const reportExport = useReportExport();
   const runExport = (format: 'csv' | 'xlsx') => {
-    if (!appliedDims.length) return;
+    if (!dims.length) return;
     void reportExport.run(format, 'flex-report', async () => {
       const res = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${tableQsFor(limit, offset)}`, 200);
-      return { ...res, rows: res.rows.map(toRow).filter((r) => passesMetricFilters(r.derived, appliedMetricFilters)).map(toExportRow) };
+      return { ...res, rows: res.rows.map(toRow).filter((r) => passesMetricFilters(r.derived, metricFilters)).map(toExportRow) };
     });
   };
 
   const saveReport = (name: string) => {
-    const config: SavedConfig = { from, to, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns], dims };
+    const config: SavedConfig = { from: appliedFrom, to: appliedTo, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns], dims };
     const next = [...savedReports.filter((s) => s.name !== name), { name, config }];
     setSavedReports(next);
     persistSavedReports('flex-report', next as unknown as { name: string; config: SavedReportConfig<OrderMetric> }[]);
     setPageMenuOpen(false);
   };
   const applySavedReport = (config: SavedConfig) => {
-    setFrom(config.from); setTo(config.to); setFilters(config.filters); setDims(config.dims);
+    // range.reset sets the inputs, the applied range and page 1 together — one render, one request.
+    range.reset({ from: config.from, to: config.to });
+    setFilters(config.filters); setDims(config.dims);
     setExclusions(config.exclusions ?? {}); setMetricFilters(config.metricFilters ?? {}); setIgnoreFailTraffic(config.ignoreFailTraffic ?? false);
-    setAppliedFrom(config.from); setAppliedTo(config.to); setAppliedFilters(config.filters); setAppliedDims(config.dims);
-    setAppliedExclusions(config.exclusions ?? {}); setAppliedMetricFilters(config.metricFilters ?? {}); setAppliedIgnoreFailTraffic(config.ignoreFailTraffic ?? false);
     setOrderBy(config.orderBy); setOrderDir(config.orderDir); setHiddenColumns(new Set(config.hiddenColumns));
-    setPage(1); setPageMenuOpen(false); setLoadOpen(false);
+    setPageMenuOpen(false); setLoadOpen(false);
   };
   const deleteSavedReport = (name: string) => {
     const next = savedReports.filter((s) => s.name !== name);
     setSavedReports(next);
     persistSavedReports('flex-report', next as unknown as { name: string; config: SavedReportConfig<OrderMetric> }[]);
   };
-  const copyLink = async () => {
-    const mf = new URLSearchParams();
-    writeUrlMetricFilters(mf, appliedMetricFilters);
-    await navigator.clipboard?.writeText(reportLink({
-      from: appliedFrom, to: appliedTo, dims: appliedDims.join(','),
-      ...urlFilterParams('f', appliedFilters), ...urlFilterParams('x', appliedExclusions),
-      ...Object.fromEntries(mf), [IGNORE_FAIL_PARAM]: appliedIgnoreFailTraffic,
-      orderBy, orderDir,
-    }));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  };
 
   return (
     <>
-      <PageHeader title="Flex Report" subtitle="Analytics › Flex" action={
-        <div className="relative">
-          <button type="button" title="Page Actions" onClick={() => setPageMenuOpen((o) => !o)}
-            className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <MoreVertical size={15} />
-          </button>
-          {pageMenuOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setLoadOpen(false)}>
-              <button onClick={() => { setPageMenuOpen(false); setSaveModalOpen(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Save</button>
-              <div className="relative" onMouseEnter={() => setLoadOpen(true)}>
-                <button disabled={!savedReports.length} onClick={() => setLoadOpen((s) => !s)}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
-                  Load{savedReports.length ? ` (${savedReports.length})` : ''} <ChevronRight size={13} className="text-fg-muted" />
-                </button>
-                {loadOpen && savedReports.length > 0 && (
-                  <div className="absolute right-full top-0 mr-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                    {savedReports.map((s) => (
-                      <div key={s.name} className="flex items-center justify-between px-3 py-1.5 text-small hover:bg-accent-subtle">
-                        <button onClick={() => applySavedReport(s.config)} className="flex-1 truncate text-left text-fg">{s.name}</button>
-                        <button onClick={() => deleteSavedReport(s.name)} className="ml-2 text-fg-muted hover:text-danger-text">×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button onClick={() => { copyLink(); setPageMenuOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{copied ? 'Copied!' : 'Copy Link to Report'}</button>
-              <button onClick={() => { setPageMenuOpen(false); setShowApiRequest(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Show API Request</button>
-            </div>
-          )}
-        </div>
-      } />
+      <PageHeader title="Flex Report" subtitle="Analytics › Flex" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div className="relative">
-            <button type="button" className="btn-ghost flex items-center gap-1.5" onClick={() => setDimPickerOpen((o) => !o)} disabled={dims.length >= MAX_DIMS}>
-              <Plus size={15} /> Add Columns <span className="text-fg-muted">{dims.length}/{MAX_DIMS}</span>
-            </button>
-            {dimPickerOpen && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setDimPickerOpen(false)} />
-                <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-52 overflow-y-auto rounded-card border border-border bg-elevated p-1 shadow-elevated">
-                  {DIM_OPTIONS.filter((d) => !dims.includes(d.key)).map((d) => (
-                    <button key={d.key} onClick={() => addDim(d.key)} className="block w-full rounded-[var(--radius)] px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{d.label}</button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-          {dims.map((d) => (
-            <span key={d} className="inline-flex items-center gap-1.5 rounded-full bg-accent-subtle px-3 py-1 text-tiny font-medium text-accent-text">
-              {DIM_OPTIONS.find((o) => o.key === d)?.label}
-              <button onClick={() => removeDim(d)}><X size={12} /></button>
-            </span>
-          ))}
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic }) > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic })}
-                </span>
-              )}
-            </button>
+      <ReportCard className="mb-4">
+        <ReportControls problem={range.problem} actions={<>
+          <ClearButton onClick={clearAll} title="Reset dates, columns and filters" />
+          <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
                 dimCategories={FILTER_CATEGORIES}
-                value={{ filters, exclusions, metricFilters, ignoreFailTraffic }}
-                onApply={(v) => { setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic); }}
+                value={reporting}
+                onApply={setReporting}
                 onClose={() => setFilterOpen(false)}
               />
             )}
+          </FiltersButton>
+          <div ref={pageMenuRef} className="relative">
+            <button type="button" title="Page Actions" aria-label="Page Actions" onClick={() => setPageMenuOpen((o) => !o)}
+              className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+              <MoreVertical size={15} />
+            </button>
+            {pageMenuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                <button onClick={() => { setPageMenuOpen(false); setSaveModalOpen(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Save</button>
+                <div className="relative" onMouseEnter={() => setLoadOpen(true)} onMouseLeave={() => setLoadOpen(false)}>
+                  <button disabled={!savedReports.length} onClick={() => setLoadOpen((s) => !s)}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
+                    Load{savedReports.length ? ` (${savedReports.length})` : ''} <ChevronRight size={13} className="text-fg-muted" />
+                  </button>
+                  {loadOpen && savedReports.length > 0 && (
+                    <div className="absolute right-full top-0 mr-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                      {savedReports.map((s) => (
+                        <div key={s.name} className="flex items-center justify-between px-3 py-1.5 text-small hover:bg-accent-subtle">
+                          <button onClick={() => applySavedReport(s.config)} className="flex-1 truncate text-left text-fg">{s.name}</button>
+                          <button onClick={() => deleteSavedReport(s.name)} className="ml-2 text-fg-muted hover:text-danger-text">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => { setPageMenuOpen(false); setShowApiRequest(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Show API Request</button>
+              </div>
+            )}
           </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-          <div className="flex-1" />
-          <button type="button" className="btn-primary" onClick={runReport}>Run Report</button>
-        </div>
-      </div>
+        </>}>
+          <DateRangeField idPrefix="flex-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+          <ControlField label="Columns" htmlFor="flex-report-columns" className="w-full sm:w-auto">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <button id="flex-report-columns" type="button" className={`btn-ghost ${CONTROL} flex items-center gap-1.5 !px-3.5`} onClick={() => setDimPickerOpen((o) => !o)} disabled={dims.length >= MAX_DIMS}>
+                  <Plus size={15} /> Add Columns <span className="text-fg-muted">{dims.length}/{MAX_DIMS}</span>
+                </button>
+                {dimPickerOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setDimPickerOpen(false)} />
+                    <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-52 overflow-y-auto rounded-card border border-border bg-elevated p-1 shadow-elevated">
+                      {DIM_OPTIONS.filter((d) => !dims.includes(d.key)).map((d) => (
+                        <button key={d.key} onClick={() => addDim(d.key)} className="block w-full rounded-[var(--radius)] px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{d.label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              {dims.map((d) => {
+                const label = DIM_OPTIONS.find((o) => o.key === d)?.label;
+                return (
+                  <span key={d} className="inline-flex items-center gap-1.5 rounded-full bg-accent-subtle px-3 py-1 text-tiny font-medium text-accent-text">
+                    {label}
+                    <button type="button" onClick={() => removeDim(d)} aria-label={`Remove column ${label}`}><X size={12} /></button>
+                  </span>
+                );
+              })}
+            </div>
+          </ControlField>
+        </ReportControls>
 
-      <div className="card mb-4">
-        <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
-          <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
-        </button>
-        {summaryOpen && (
-          summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
-            <SummaryGrid summary={summary} />
-          )
-        )}
-      </div>
+        <div className="border-t border-border px-5 py-4 sm:px-6">
+          <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
+            <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
+          </button>
+          {summaryOpen && (
+            summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+              <SummaryGrid summary={summary} />
+            )
+          )}
+        </div>
+      </ReportCard>
 
       <div className="card mb-4">
         <button type="button" onClick={() => setGraphOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          !graphData ? <div className="pt-4"><Spinner /></div> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
                 <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>
@@ -459,52 +470,46 @@ export default function FlexReport() {
         )}
       </div>
 
-      <div className="card">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <ActiveFilterChips className="mb-3"
-            chips={[...chipsFromValues(FILTER_CATEGORIES, appliedFilters), ...chipsFromValues(FILTER_CATEGORIES, appliedExclusions, { exclude: true })]}
-            onRemove={(c) => {
-              if (c.exclude) { const n = withoutValue(appliedExclusions, c.key, c.value); setExclusions(n); setAppliedExclusions(n); }
-              else { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); } setPage(1);
-            }}
-            onClearAll={() => { setFilters({}); setAppliedFilters({}); setExclusions({}); setAppliedExclusions({}); setPage(1); }} />
-          <div>
-            <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-            <p className="text-tiny text-fg-muted">Learn more about <Link to="/app/reports/custom-metrics" className="text-accent-text hover:underline">Custom Reporting Metrics</Link></p>
+      <ReportCard>
+        <ResultsBar position="top" loading={loading} title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted">· Learn more about <Link to="/app/reports/custom-metrics" className="text-accent-text hover:underline">Custom Reporting Metrics</Link></span></>} actions={<>
+          <div className="relative min-w-0 flex-1 sm:flex-none">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
+              aria-label="Search this page" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-            <div className="relative">
-              <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
-                className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-                <MoreVertical size={15} />
-              </button>
-              {tableActionsOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
-                  <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
-                  <div className="relative" onMouseEnter={() => setExportOpen(true)}>
-                    <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                      Export <ChevronRight size={13} className="text-fg-muted" />
-                    </button>
-                    {exportOpen && (
-                      <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button disabled={reportExport.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
-                        <button disabled={reportExport.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
+          <div className="relative">
+            <button type="button" title="Table Actions" aria-label="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
+              className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+              <MoreVertical size={15} />
+            </button>
+            {tableActionsOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
+                <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
+                <div className="relative" onMouseEnter={() => setExportOpen(true)}>
+                  <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
+                    Export <ChevronRight size={13} className="text-fg-muted" />
+                  </button>
+                  {exportOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                      <button disabled={reportExport.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                      <button disabled={reportExport.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+                <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
+              </div>
+            )}
           </div>
-        </div>
+        </>}>
+          <ActiveFilterChips
+            chips={reportingChips(FILTER_CATEGORIES, reporting)}
+            onRemove={(c) => setReporting(withoutReportingChip(reporting, c))}
+            onClearAll={() => setReporting(EMPTY_REPORTING_FILTERS)} />
+        </ResultsBar>
 
+        <ReportBody>
         <ExportStatus busy={reportExport.busy} note={reportExport.note} error={reportExport.error} onDismiss={reportExport.dismiss} />
-        {!appliedDims.length ? <StateBlock>Add at least one column to see a breakdown.</StateBlock>
+        {!dims.length ? <StateBlock>Add at least one column to see a breakdown.</StateBlock>
           : loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
@@ -513,7 +518,7 @@ export default function FlexReport() {
               <table className="premium-table">
                 <thead>
                   <tr>
-                    {appliedDims.map((d) => <th key={d} >{DIM_OPTIONS.find((o) => o.key === d)?.label}</th>)}
+                    {dims.map((d) => <th key={d} >{DIM_OPTIONS.find((o) => o.key === d)?.label}</th>)}
                     {shownMetrics.has('Clicks') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('clicks')}>Clicks {orderBy === 'clicks' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
                     {shownMetrics.has('Total CV') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('total_conversions')}>Total CV {orderBy === 'total_conversions' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
                     {shownMetrics.has('RPA') && <th className="text-right font-semibold">RPA</th>}
@@ -542,16 +547,18 @@ export default function FlexReport() {
             </div>
           )}
         <div className="mt-3 flex justify-end">
-          <Pagination total={data?.total ?? 0} page={page} pageSize={pageSize} onPageChange={setPage} />
+          {/* A failed request keeps the previous `data` in useQuery — never show its total as current. */}
+          <Pagination total={error ? 0 : (data?.total ?? 0)} page={page} pageSize={pageSize} onPageChange={setPage} />
         </div>
-      </div>
+        </ReportBody>
+      </ReportCard>
 
       {showColumns && <ColumnsModal allColumns={METRIC_COLUMNS} order={[...METRIC_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports?${tableQs}`} appliedFilters={{
-        from: appliedFrom, to: appliedTo, columns: appliedDims.join(','),
+        from: appliedFrom, to: appliedTo, columns: dims.join(','),
         offer: dimParams.offerId, advertiser: dimParams.advertiserId, partner: dimParams.publisherId, smartLink: dimParams.smartLinkId, country: dimParams.country, device: dimParams.device,
         excludeOffer: excludeOfferId, excludeAdvertiser: excludeAdvertiserId, excludePartner: excludePublisherId, excludeSmartLink: excludeSmartLinkId, excludeCountry, excludeDevice,
-        ignoreFailTraffic: appliedIgnoreFailTraffic ? 'true' : undefined,
+        ignoreFailTraffic: ignoreFailTraffic ? 'true' : undefined,
       }} />}
       <PromptModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} title="Save Report" message="Name this saved report:" placeholder="e.g. Flex Overview" onConfirm={saveReport} />
     </>

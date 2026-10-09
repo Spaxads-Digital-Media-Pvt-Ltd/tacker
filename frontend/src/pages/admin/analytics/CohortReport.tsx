@@ -19,21 +19,29 @@
  * Backed by a new dedicated endpoint (`GET /api/reports/cohort`,
  * api-backend/src/surfaces/dashboard/reports/detail-reports.ts) rather than the generic
  * multi-dimension `/api/reports` engine — day-offset bucketing needs its own SQL.
+ *
+ * No "Run Report": every control applies on its own — dates once they form a valid range (debounced,
+ * since the native date input reports each typed segment), Top-level Metric / Metric / filters / chips
+ * immediately. The applied report is mirrored to the address bar (keeping `tab`), so the URL itself
+ * is the shareable link.
  */
-import { useMemo, useState } from 'react';
-import { ChevronDown, MoreVertical, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import {
   DASH, DEVICE_OPTIONS, money, toIso, daysAgo, todayStr,
-  type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
+  dimCount, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS,
 } from '../../../shared-components/primitives/ReportPageKit';
-import { readUrlFilters, readUrlDate, reportLink, urlFilterParams } from '../../../lib/reportFilterState';
+import { readUrlFilters, readUrlDate, writeUrlFilters } from '../../../lib/reportFilterState';
 import { useReportOpts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
 import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
+import { useAutoDateRange } from '../reportView';
+import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 
 interface SmartLink { id: string; name: string }
 interface CohortRow { date: string; topLevel: number; days: (number | null)[] }
@@ -58,32 +66,7 @@ function fmtCell(v: number | null, metric: MetricKey): string {
   return v.toLocaleString();
 }
 
-function SingleSelect<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: readonly { key: T; label: string }[]; onChange: (k: T) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <label className="label">{label} <span className="text-danger-text">*</span></label>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
-        {options.find((o) => o.key === value)?.label} <ChevronDown size={13} className="text-fg-muted" />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-40 mt-1 w-44 overflow-y-auto rounded-card border border-border bg-elevated py-1 shadow-elevated">
-            {options.map((o) => (
-              <button key={o.key} onClick={() => { onChange(o.key); setOpen(false); }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-small hover:bg-accent-subtle ${o.key === value ? 'text-accent-text' : 'text-fg'}`}>
-                {o.key === value && '✓'} {o.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** Initial report state from the URL — what "Copy Link to Report" writes. */
+/** Initial report state from the URL (reload / shared link) — what the address-bar sync writes. */
 function readCohortUrl() {
   const sp = new URLSearchParams(window.location.search);
   let from = readUrlDate(sp, 'from', daysAgo(6));
@@ -100,23 +83,16 @@ function readCohortUrl() {
 export default function CohortReport() {
   useReportOpts();
   const [init] = useState(readCohortUrl);
-  const [from, setFrom] = useState(init.from);
-  const [to, setTo] = useState(init.to);
-  const [appliedFrom, setAppliedFrom] = useState(from);
-  const [appliedTo, setAppliedTo] = useState(to);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Dates apply on their own once they form a valid range (see useAutoDateRange); everything else
+  // applies immediately.
+  const range = useAutoDateRange(init.from, init.to);
+  const { appliedFrom, appliedTo } = range;
   const [topLevel, setTopLevel] = useState<TopLevelKey>(init.topLevel);
   const [metric, setMetric] = useState<MetricKey>(init.metric);
-  const [appliedTopLevel, setAppliedTopLevel] = useState<TopLevelKey>(topLevel);
-  const [appliedMetric, setAppliedMetric] = useState<MetricKey>(metric);
+  // The cohort endpoint honours dimension filters only (the flyout shows just that section).
   const [filters, setFilters] = useState<FilterValues>(init.filters);
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
-  const [exclusions, setExclusions] = useState<FilterValues>({});
-  const [metricFilters, setMetricFilters] = useState<MetricFilters>({});
-  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [hasRun, setHasRun] = useState(true);
-  const [pageMenuOpen, setPageMenuOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const { data: offers } = useQuery<{ id: string; name: string }[]>('/api/offers');
   const { data: publishers } = useQuery<{ id: string; name: string }[]>('/api/publishers');
@@ -143,94 +119,81 @@ export default function CohortReport() {
   };
   const tableQs = qs({
     from: toIso(appliedFrom), to: toIso(appliedTo, true),
-    topLevelMetric: appliedTopLevel, metric: appliedMetric,
-    offerId: appliedFilters['offer']?.[0], advertiserId: appliedFilters['advertiser']?.[0],
-    publisherId: appliedFilters['partner']?.[0], smartLinkId: appliedFilters['smartLink']?.[0],
-    country: appliedFilters['country']?.[0], device: appliedFilters['device']?.[0],
+    topLevelMetric: topLevel, metric,
+    offerId: filters['offer']?.[0], advertiserId: filters['advertiser']?.[0],
+    publisherId: filters['partner']?.[0], smartLinkId: filters['smartLink']?.[0],
+    country: filters['country']?.[0], device: filters['device']?.[0],
   });
-  const { data, loading, error } = useQuery<CohortResult>(hasRun ? `/api/reports/cohort?${tableQs}` : null);
+  const { data, loading, error } = useQuery<CohortResult>(`/api/reports/cohort?${tableQs}`);
 
-  const runReport = () => {
-    setAppliedFrom(from); setAppliedTo(to); setAppliedTopLevel(topLevel); setAppliedMetric(metric); setAppliedFilters(filters);
-    setHasRun(true);
-  };
+  // The applied report lives in the URL (replace, not push) so reload / back / a shared link keep it.
+  // `tab` is carried over — it is what selects this report on /app/analytics.
+  const tab = searchParams.get('tab');
+  const urlState = useMemo(() => {
+    const next = new URLSearchParams();
+    if (tab) next.set('tab', tab);
+    next.set('from', appliedFrom); next.set('to', appliedTo);
+    next.set('topLevelMetric', topLevel); next.set('metric', metric);
+    writeUrlFilters(next, 'f', filters);
+    return next.toString();
+  }, [tab, appliedFrom, appliedTo, topLevel, metric, filters]);
+  useEffect(() => {
+    if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
+  }, [urlState, setSearchParams]);
+
+  // Reset dates, metrics and filters in one render → one request. The debounced range catches up to
+  // the same values later and is then a no-op.
   const clearAll = () => {
-    setFrom(daysAgo(6)); setTo(todayStr()); setTopLevel('clicks'); setMetric('conversions'); setFilters({});
-    setAppliedFrom(daysAgo(6)); setAppliedTo(todayStr()); setAppliedTopLevel('clicks'); setAppliedMetric('conversions'); setAppliedFilters({});
-  };
-  const copyLink = async () => {
-    await navigator.clipboard?.writeText(reportLink({
-      from: appliedFrom, to: appliedTo, topLevelMetric: appliedTopLevel, metric: appliedMetric,
-      ...urlFilterParams('f', appliedFilters),
-    }));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+    range.reset({ from: daysAgo(6), to: todayStr() });
+    setTopLevel('clicks'); setMetric('conversions'); setFilters({});
   };
 
-  const topLevelLabel = TOP_LEVEL_OPTIONS.find((o) => o.key === appliedTopLevel)?.label ?? 'Clicks';
+  const topLevelLabel = TOP_LEVEL_OPTIONS.find((o) => o.key === topLevel)?.label ?? 'Clicks';
   const dayHeaders = useMemo(() => Array.from({ length: data?.maxDay ?? 0 }, (_, i) => i + 1), [data?.maxDay]);
   const rowMax = (r: CohortRow) => Math.max(1, ...r.days.filter((v): v is number => v != null));
 
   return (
     <>
-      <PageHeader title="Cohort Report" subtitle="Analytics › Cohort" action={
-        <div className="relative">
-          <button type="button" title="Page Actions" onClick={() => setPageMenuOpen((o) => !o)}
-            className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <MoreVertical size={15} />
-          </button>
-          {pageMenuOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-              <button onClick={() => { copyLink(); setPageMenuOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{copied ? 'Copied!' : 'Copy Link to Report'}</button>
-            </div>
-          )}
-        </div>
-      } />
+      <PageHeader title="Cohort Report" subtitle="Analytics › Cohort" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <SingleSelect label="Top-level Metric" value={topLevel} options={TOP_LEVEL_OPTIONS} onChange={setTopLevel} />
-          <SingleSelect label="Metric" value={metric} options={METRIC_OPTIONS} onChange={setMetric} />
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic }) > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic })}
-                </span>
-              )}
-            </button>
+      <ReportCard>
+        <ReportControls problem={range.problem} actions={<>
+          <ClearButton onClick={clearAll} title="Reset dates, metrics and filters" />
+          <FiltersButton count={dimCount(filters)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
                 sections={['filters']} singleSelect
                 dimCategories={FILTER_CATEGORIES}
-                value={{ filters, exclusions, metricFilters, ignoreFailTraffic }}
-                onApply={(v) => { setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic); }}
+                value={{ ...EMPTY_REPORTING_FILTERS, filters }}
+                onApply={(v) => setFilters(v.filters)}
                 onClose={() => setFilterOpen(false)}
               />
             )}
-          </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-          <div className="flex-1" />
-          <button type="button" className="btn-primary" onClick={runReport}>Run Report</button>
-        </div>
-      </div>
+          </FiltersButton>
+        </>}>
+          <DateRangeField idPrefix="cohort-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+          <ControlField label="Top-level Metric" htmlFor="cohort-report-top-level" className="w-full sm:w-48">
+            <select id="cohort-report-top-level" className={`input ${CONTROL}`} value={topLevel} onChange={(e) => setTopLevel(e.target.value as TopLevelKey)}>
+              {TOP_LEVEL_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          </ControlField>
+          <ControlField label="Metric" htmlFor="cohort-report-metric" className="w-full sm:w-48">
+            <select id="cohort-report-metric" className={`input ${CONTROL}`} value={metric} onChange={(e) => setMetric(e.target.value as MetricKey)}>
+              {METRIC_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          </ControlField>
+        </ReportControls>
 
-      <div className="card">
-        <ActiveFilterChips className="mb-3" chips={chipsFromValues(FILTER_CATEGORIES, appliedFilters)}
-          onRemove={(c) => { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); }}
-          onClearAll={() => { setFilters({}); setAppliedFilters({}); }} />
-        {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
-          : loading ? <StateBlock><Spinner /></StateBlock>
+        <ResultsBar title="Detailed Report" loading={loading}>
+          <ActiveFilterChips chips={chipsFromValues(FILTER_CATEGORIES, filters)}
+            onRemove={(c) => setFilters(withoutValue(filters, c.key, c.value))}
+            onClearAll={() => setFilters({})} />
+        </ResultsBar>
+
+        <ReportBody>
+        {/* A failed request keeps the previous `data` in useQuery — the error wins, never stale rows. */}
+        {loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>
           : !data?.rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
@@ -256,7 +219,7 @@ export default function CohortReport() {
                           return (
                             <td key={n} className="px-4 py-3 text-right"
                               style={v != null && v > 0 ? { backgroundColor: `rgb(var(--accent) / ${0.08 + intensity * 0.22})` } : undefined}>
-                              {fmtCell(v, appliedMetric)}
+                              {fmtCell(v, metric)}
                             </td>
                           );
                         })}
@@ -267,7 +230,8 @@ export default function CohortReport() {
               </table>
             </div>
           )}
-      </div>
+        </ReportBody>
+      </ReportCard>
     </>
   );
 }

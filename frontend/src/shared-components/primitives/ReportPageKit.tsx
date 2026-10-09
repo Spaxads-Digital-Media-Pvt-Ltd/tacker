@@ -311,7 +311,15 @@ export function ReportingFiltersFlyout({
   singleSelect?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [path, setPath] = useState<string[]>([]);
+  // With a single section (and, for Filters/Exclusions, a single category) the root menu would offer
+  // one choice — open straight on it instead, and never step back above it.
+  const [startPath] = useState<string[]>(() => {
+    if (sections.length !== 1) return [];
+    const only = sections[0]!;
+    return (only === 'filters' || only === 'exclusions') && dimCategories.length === 1 ? [only, dimCategories[0]!.key] : [only];
+  });
+  const [path, setPath] = useState<string[]>(startPath);
+  const atStart = path.length <= startPath.length;
   const [draftFilters, setDraftFilters] = useState<FilterValues>(value.filters);
   const [draftExclusions, setDraftExclusions] = useState<FilterValues>(value.exclusions);
   const [draftMetric, setDraftMetric] = useState<MetricFilters>(value.metricFilters);
@@ -321,13 +329,28 @@ export function ReportingFiltersFlyout({
 
   useEffect(() => { setCatSearch(''); setLeafSearch(''); }, [path]);
   useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    // The flyout is rendered next to its trigger (FiltersButton wraps both). A press on the trigger
+    // is left to the button's own toggle — closing here on mousedown would let its click reopen it.
+    const onDown = (e: MouseEvent) => {
+      const host = ref.current?.parentElement ?? ref.current;
+      if (!host?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [onClose]);
 
   const push = (seg: string) => setPath((p) => [...p, seg]);
-  const pop = () => setPath((p) => p.slice(0, -1));
+  const pop = () => setPath((p) => (p.length > startPath.length ? p.slice(0, -1) : p));
+  /** Submenu header: a back link, or — when this is where the flyout opened — the panel title. */
+  const backHeader = (label: string, detail?: string) => (atStart
+    ? <h3 className="text-small font-semibold text-fg">Reporting Filters{detail && <span className="font-normal text-fg-muted"> · {detail}</span>}</h3>
+    : (
+      <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
+        <ChevronLeft size={15} /> {label}
+      </button>
+    ));
   const metricCount = Object.values(draftMetric).filter((m) => m?.value).length;
   const total = dimCount(draftFilters) + dimCount(draftExclusions) + metricCount + (draftIgnoreFail ? 1 : 0);
   const clearAll = () => { setDraftFilters({}); setDraftExclusions({}); setDraftMetric({}); setDraftIgnoreFail(false); };
@@ -376,9 +399,7 @@ export function ReportingFiltersFlyout({
       body = (
         <div className="w-72">
           <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronLeft size={15} /> {isExclude ? 'Exclusions' : 'Filters'}
-            </button>
+            {backHeader(isExclude ? 'Exclusions' : 'Filters')}
             <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraft({})}>Clear</button>
           </div>
           <div className="relative border-b border-border px-3 py-2">
@@ -413,9 +434,7 @@ export function ReportingFiltersFlyout({
       body = (
         <div className="w-80">
           <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronLeft size={15} /> {cat.label}
-            </button>
+            {backHeader(cat.label, cat.label)}
             <div className="flex items-center gap-2 text-tiny">
               {!singleSelect && <>
                 <button type="button" className="font-medium text-accent-text hover:underline disabled:opacity-40" disabled={filteredOptions.length === 0} onClick={selectVisible}>
@@ -434,12 +453,21 @@ export function ReportingFiltersFlyout({
             {filteredOptions.length === 0 && <p className="px-3 py-3 text-small text-fg-muted">No options.</p>}
             {filteredOptions.map((o) => (
               <label key={o.value} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small text-fg hover:bg-accent-subtle">
-                <input type={singleSelect ? 'radio' : 'checkbox'} name={singleSelect ? `rf-${cat.key}` : undefined} className="chk"
-                  checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
+                {singleSelect ? (
+                  // A radio fires no change event when it's already checked — use click, so pressing the
+                  // selected option again clears it (as the old single-select drawer allowed).
+                  <input type="radio" name={`rf-${cat.key}`} className="chk" checked={selected.includes(o.value)}
+                    onChange={() => {}} onClick={() => toggle(o.value)} />
+                ) : (
+                  <input type="checkbox" className="chk" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
+                )}
                 {o.label}
               </label>
             ))}
           </div>
+          {singleSelect && selected.length > 0 && (
+            <p className="border-t border-border px-3 py-1.5 text-tiny text-fg-muted">One value per filter — click the selected one again to clear it.</p>
+          )}
           {!singleSelect && selected.length > 1 && (
             <p className="border-t border-border px-3 py-1.5 text-tiny text-fg-muted">Matches any of the {selected.length} selected (other categories are combined with AND).</p>
           )}
@@ -451,9 +479,7 @@ export function ReportingFiltersFlyout({
     body = (
       <div className="w-96">
         <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-          <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-            <ChevronLeft size={15} /> Metric Filters
-          </button>
+          {backHeader('Metric Filters')}
           <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraftMetric({})}>Clear</button>
         </div>
         <p className="border-b border-border px-3 py-2 text-tiny text-fg-muted">Applied to the rows already loaded on this page (after the server-side filters).</p>
@@ -485,9 +511,7 @@ export function ReportingFiltersFlyout({
     body = (
       <div className="w-72">
         <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-          <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-            <ChevronLeft size={15} /> Others
-          </button>
+          {backHeader('Others')}
           <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraftIgnoreFail(false)}>Clear</button>
         </div>
         <label className="flex cursor-pointer items-center gap-2 px-3 py-3 text-small text-fg hover:bg-accent-subtle">

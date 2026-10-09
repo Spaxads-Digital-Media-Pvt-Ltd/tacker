@@ -27,19 +27,22 @@
  */
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, MoreVertical, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, MoreVertical, Search } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
   DASH, DEVICE_OPTIONS, daysAgo, todayStr, toIso,
-  type MetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
+  reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
 import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
+import { useAutoDateRange } from '../reportView';
+import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 
 interface Goal { id: string; name: string; eventName: string | null; isDefault: boolean; sortOrder: number }
 interface FunnelResult { stages: { goalId: string; count: number }[]; breakdown: { key: string; counts: Record<string, number> }[] }
@@ -77,7 +80,7 @@ function OfferPicker({ value, onChange, opts }: { value: string | null; onChange
   return (
     <div className="relative">
       <label className="label">Target <span className="text-danger-text">*</span></label>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="input flex !w-64 items-center justify-between !py-2 text-left">
+      <button type="button" onClick={() => setOpen((o) => !o)} className={`input flex !w-64 items-center justify-between text-left ${CONTROL}`}>
         <span className="truncate">{selected ? selected.label : 'None'}</span> <ChevronDown size={13} className="shrink-0 text-fg-muted" />
       </button>
       {open && (
@@ -109,7 +112,7 @@ function ChildPicker({ value, onChange }: { value: ChildDim; onChange: (k: Child
   return (
     <div className="relative">
       <label className="label">Child <span className="text-danger-text">*</span></label>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
+      <button type="button" onClick={() => setOpen((o) => !o)} className={`input flex items-center justify-between text-left ${CONTROL}`}>
         {CHILD_DIM_OPTIONS.find((d) => d.key === value)?.label} <ChevronDown size={13} className="text-fg-muted" />
       </button>
       {open && (
@@ -136,7 +139,7 @@ function EventsPicker({ goals, selected, onChange, disabled }: { goals: Goal[]; 
     <div className="relative">
       <label className="label">Add Events <span className="text-danger-text">*</span></label>
       <button type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
-        className="input flex !w-64 items-center justify-between !py-2 text-left disabled:cursor-not-allowed disabled:opacity-60">
+        className={`input flex !w-64 items-center justify-between text-left disabled:cursor-not-allowed disabled:opacity-60 ${CONTROL}`}>
         <span className="truncate">{selected.length ? `${selected.length} selected` : 'Select Events…'}</span> <ChevronDown size={13} className="shrink-0 text-fg-muted" />
       </button>
       {open && !disabled && (
@@ -166,21 +169,16 @@ function EventsPicker({ goals, selected, onChange, disabled }: { goals: Goal[]; 
 export default function FunnelReport() {
   const opts = useReportOpts();
 
+  // No "Run Report": dates apply on their own once they form a valid range (debounced, see
+  // useAutoDateRange); Target / Child / Events / Filters apply immediately. The funnel is requested
+  // only while it can run (a Target and at least 2 Events), and reloads once per change after that.
+  const range = useAutoDateRange(daysAgo(30), todayStr());
   const [offerId, setOfferId] = useState<string | null>(null);
   const [childDim, setChildDim] = useState<ChildDim>('publisher');
-  const [from, setFrom] = useState(daysAgo(30));
-  const [to, setTo] = useState(todayStr());
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterValues>({});
-  const [exclusions, setExclusions] = useState<FilterValues>({});
-  const [metricFilters, setMetricFilters] = useState<MetricFilters>({});
-  const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
-
-  const [applied, setApplied] = useState<{
-    offerId: string; childDim: ChildDim; from: string; to: string; goalIds: string[]; filters: FilterValues;
-  } | null>(null);
 
   const { data: goalsData } = useQuery<Goal[]>(offerId ? `/api/offers/${offerId}/goals` : null);
   const goals = useMemo(() => [...(goalsData ?? [])].sort((a, b) => a.sortOrder - b.sortOrder), [goalsData]);
@@ -195,16 +193,14 @@ export default function FunnelReport() {
     { key: 'country', label: 'Country', options: countryOptions },
     { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [opts.publishers, countryOptions]);
+  // The funnel endpoint honours only the dimension filters (the flyout shows just that section).
+  const reporting: ReportingFiltersValue = { ...EMPTY_REPORTING_FILTERS, filters };
 
   const canRun = !!offerId && selectedGoalIds.length >= 2;
-  const runReport = () => {
-    if (!canRun || !offerId) return;
-    setApplied({ offerId, childDim, from, to, goalIds: selectedGoalIds, filters });
-  };
+  // Dates, pickers and filters reset in one render → at most one request.
   const clearAll = () => {
-    setOfferId(null); setChildDim('publisher'); setFrom(daysAgo(30)); setTo(todayStr());
-    setSelectedGoalIds([]); setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
-    setApplied(null);
+    range.reset({ from: daysAgo(30), to: todayStr() });
+    setOfferId(null); setChildDim('publisher'); setSelectedGoalIds([]); setFilters({});
   };
 
   const qs = (extra: Record<string, string | number | undefined>) => {
@@ -212,84 +208,69 @@ export default function FunnelReport() {
     for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
     return params.toString();
   };
-  const funnelQs = applied ? qs({
-    offerId: applied.offerId, goalIds: applied.goalIds.join(','), from: toIso(applied.from), to: toIso(applied.to, true), childDim: applied.childDim,
-    publisherId: applied.filters['partner']?.[0], country: applied.filters['country']?.[0], device: applied.filters['device']?.[0],
+  const funnelQs = canRun ? qs({
+    offerId: offerId ?? undefined, goalIds: selectedGoalIds.join(','), from: toIso(range.appliedFrom), to: toIso(range.appliedTo, true), childDim,
+    publisherId: filters['partner']?.[0], country: filters['country']?.[0], device: filters['device']?.[0],
   }) : '';
-  const { data, loading, error } = useQuery<FunnelResult>(applied ? `/api/reports/funnel?${funnelQs}` : null);
+  const { data, loading, error } = useQuery<FunnelResult>(canRun ? `/api/reports/funnel?${funnelQs}` : null);
 
   const stages = useMemo(() => (data?.stages ?? []).map((s) => ({ ...s, goal: goalById.get(s.goalId) })), [data, goalById]);
   const firstCount = stages[0]?.count ?? 0;
   const maxCount = Math.max(1, ...stages.map((s) => s.count));
 
   const breakdownRows = useMemo(() => (data?.breakdown ?? []).map((b) => ({
-    key: b.key, name: applied ? resolveChildName(applied.childDim, b.key, opts) : b.key, counts: b.counts,
-  })), [data, applied, opts]);
+    key: b.key, name: resolveChildName(childDim, b.key, opts), counts: b.counts,
+  })), [data, childDim, opts]);
 
   return (
     <>
-      <PageHeader title="Funnel Report" subtitle="Analytics › Funnel" action={
-        <button type="button" title="Page Actions" onClick={() => setShowApiRequest(true)}
-          className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-          <MoreVertical size={15} />
-        </button>
-      } />
+      <PageHeader title="Funnel Report" subtitle="Analytics › Funnel" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div>
-            <span className="label">Funnel Type</span>
-            <p className="py-2 text-small text-fg-secondary">Offer Level Events</p>
-          </div>
-          <OfferPicker value={offerId} onChange={(id) => { setOfferId(id); setSelectedGoalIds([]); }} opts={opts} />
-          <ChildPicker value={childDim} onChange={setChildDim} />
-          <EventsPicker goals={goals} selected={selectedGoalIds} onChange={setSelectedGoalIds} disabled={!offerId} />
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic }) > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic })}
-                </span>
-              )}
-            </button>
+      <ReportCard>
+        <ReportControls problem={range.problem} actions={<>
+          <ClearButton onClick={clearAll} title="Reset dates, target, events and filters" />
+          <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
                 sections={['filters']} singleSelect
                 dimCategories={FILTER_CATEGORIES}
-                value={{ filters, exclusions, metricFilters, ignoreFailTraffic }}
-                onApply={(v) => { setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic); }}
+                value={reporting}
+                onApply={(v) => setFilters(v.filters)}
                 onClose={() => setFilterOpen(false)}
               />
             )}
+          </FiltersButton>
+          <button type="button" title="Page Actions" aria-label="Show API Request" onClick={() => setShowApiRequest(true)}
+            className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+            <MoreVertical size={15} />
+          </button>
+        </>}>
+          <DateRangeField idPrefix="funnel-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+          <div>
+            <span className="label">Funnel Type</span>
+            <p className="flex h-10 items-center text-small text-fg-secondary">Offer Level Events</p>
           </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-        </div>
-        <button type="button" className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50" onClick={runReport} disabled={!canRun}>Run Report</button>
-      </div>
+          <OfferPicker value={offerId} onChange={(id) => { setOfferId(id); setSelectedGoalIds([]); }} opts={opts} />
+          <ChildPicker value={childDim} onChange={setChildDim} />
+          <EventsPicker goals={goals} selected={selectedGoalIds} onChange={setSelectedGoalIds} disabled={!offerId} />
+        </ReportControls>
 
-      <div className="card">
-        {applied && (
-          <ActiveFilterChips className="mb-3" chips={chipsFromValues(FILTER_CATEGORIES, applied.filters)}
-            onRemove={(c) => { const n = withoutValue(applied.filters, c.key, c.value); setFilters(n); setApplied({ ...applied, filters: n }); }}
-            onClearAll={() => { setFilters({}); setApplied({ ...applied, filters: {} }); }} />
-        )}
-        {!applied ? <StateBlock>Set Parameters and Run Report</StateBlock>
-          : loading ? <StateBlock><Spinner /></StateBlock>
+        <ResultsBar title="Funnel" loading={loading}>
+          <ActiveFilterChips chips={chipsFromValues(FILTER_CATEGORIES, filters)}
+            onRemove={(c) => setFilters(withoutValue(filters, c.key, c.value))}
+            onClearAll={() => setFilters({})} />
+        </ResultsBar>
+
+        <ReportBody>
+        {!canRun ? <StateBlock>Pick a target offer and at least 2 events to build the funnel.</StateBlock>
+          // `!data && !error`: the render where the request is about to start (useQuery sets loading in an effect).
+          : loading || (!data && !error) ? <StateBlock><Spinner /></StateBlock>
+          // A failed request keeps the previous `data` in useQuery — the error wins, never stale stages.
           : error ? <StateBlock>{error}</StateBlock>
           : !stages.length ? <StateBlock>No Record Found</StateBlock>
           : (
             <>
-              <h3 className="mb-4 text-h3 font-medium text-fg">Funnel</h3>
               <div className="mb-8 space-y-2">
                 {stages.map((s, i) => {
                   const widthPct = maxCount > 0 ? (s.count / maxCount) * 100 : 0;
@@ -322,20 +303,21 @@ export default function FunnelReport() {
                   <table className="premium-table">
                     <thead>
                       <tr>
-                        <th >{CHILD_DIM_OPTIONS.find((d) => d.key === applied.childDim)?.label}</th>
+                        <th >{CHILD_DIM_OPTIONS.find((d) => d.key === childDim)?.label}</th>
                         {stages.map((s) => <th key={s.goalId} className="text-right font-semibold">{s.goal?.name ?? DASH}</th>)}
                       </tr>
                     </thead>
                     <tbody>
                       {breakdownRows.map((r) => {
-                        const url = linkForChild(applied.childDim, r.key);
+                        const url = linkForChild(childDim, r.key);
                         return (
                           <tr key={r.key} className="hover:bg-accent-subtle/40">
                             <td >
                               {url ? <Link to={url} className="text-accent-text hover:underline">{r.name}</Link> : r.name}
                             </td>
-                            {applied.goalIds.map((gid) => (
-                              <td key={gid} className="px-4 py-3 text-right">{(r.counts[gid] ?? 0).toLocaleString()}</td>
+                            {/* Columns follow the response's own stages, so cells always match the headers. */}
+                            {stages.map((s) => (
+                              <td key={s.goalId} className="px-4 py-3 text-right">{(r.counts[s.goalId] ?? 0).toLocaleString()}</td>
                             ))}
                           </tr>
                         );
@@ -346,10 +328,11 @@ export default function FunnelReport() {
               )}
             </>
           )}
-      </div>
+        </ReportBody>
+      </ReportCard>
 
-      {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={applied ? `/api/reports/funnel?${funnelQs}` : '/api/reports/funnel'} appliedFilters={{
-        offer: applied?.offerId, from: applied?.from, to: applied?.to, child: applied?.childDim, events: applied?.goalIds.join(','),
+      {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={canRun ? `/api/reports/funnel?${funnelQs}` : '/api/reports/funnel'} appliedFilters={{
+        offer: offerId ?? undefined, from: range.appliedFrom, to: range.appliedTo, child: childDim, events: selectedGoalIds.join(',') || undefined,
       }} />}
     </>
   );

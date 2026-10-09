@@ -6,13 +6,14 @@ import type { ReportTimeZone } from '../../lib/useReportTimeZone';
 
 const pretty = (tz: string) => tz.replace(/_/g, ' ');
 
-export function TimeZoneSelect({ zone }: { zone: ReportTimeZone }) {
+/** `selectClassName` overrides the compact default sizing (e.g. to match a taller toolbar row). */
+export function TimeZoneSelect({ zone, selectClassName = '!py-1 text-tiny' }: { zone: ReportTimeZone; selectClassName?: string }) {
   const all = useMemo(() => allTimeZones(), []);
   const suggested = Array.from(new Set([...zone.countryZones, zone.networkTz, browserTimeZone(), UTC].filter((z): z is string => Boolean(z))));
   return (
     <label className="flex items-center gap-1.5 text-tiny text-fg-secondary" title="Timezone used to display the timestamps below">
       <Globe size={14} className="shrink-0 text-fg-muted" />
-      <select className="input !w-auto !py-1 text-tiny" aria-label="Display timezone" value={zone.override ?? ''}
+      <select className={`input !w-auto ${selectClassName}`} aria-label="Display timezone" value={zone.override ?? ''}
         onChange={(e) => zone.setOverride(e.target.value || null)}>
         <option value="">Auto — {zone.auto.source}: {pretty(zone.auto.tz)} ({utcOffsetLabel(zone.auto.tz)})</option>
         <optgroup label="Suggested">

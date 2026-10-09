@@ -23,15 +23,21 @@
  * Device, City, Region, ISP, OS, Browser, Sub1-5 — City/Region/ISP/OS/Browser are new real
  * dimensions added to the reporting engine alongside the multi-value filter work, backed by real
  * `clicks` columns that existed but weren't previously exposed as a groupable/filterable dimension.
+ *
+ * No "Run Report": dates apply once they form a valid range (debounced, since the native date input
+ * reports each typed segment); dimensions, metric/chart pickers and row cross-filters immediately.
  */
 import { useMemo, useState } from 'react';
-import { ChevronDown, Filter, Plus, X } from 'lucide-react';
+import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { daysAgo, todayStr, toIso, DASH, money, num } from '../../../shared-components/primitives/ReportPageKit';
 import { METRIC_KEYS, METRIC_LABELS, type MetricKey } from '../../../lib/customMetrics';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
+import { useAutoDateRange } from '../reportView';
+import { ReportCard, ReportControls, ControlField, DateRangeField, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 
 interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
 interface AggResult { rows: AggRow[] }
@@ -130,16 +136,21 @@ function DimensionCard({
   };
 
   return (
-    <div className="card !p-0">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h3 className="text-h3 font-medium text-fg">{label}</h3>
-        <button type="button" onClick={onRemove} className="text-fg-muted hover:text-danger-text" title="Remove dimension"><X size={14} /></button>
-      </div>
-      <div className="flex items-center justify-between gap-2 px-4 pt-3">
-        <input className="input !py-1.5 text-tiny" placeholder="Search this page…" title="Filters only the rows on the current page (the top 200 loaded here)" value={q} onChange={(e) => setQ(e.target.value)} />
+    <ReportCard>
+      <ResultsBar position="top" title={label} loading={loading} actions={<>
+        <div className="relative min-w-0 flex-1 sm:flex-none">
+          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+          <input className={`input ${CONTROL} !pl-8 sm:!w-44`} placeholder="Search this page…" title="Filters only the rows on the current page (the top 200 loaded here)"
+            aria-label={`Search ${label}`} value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <button type="button" onClick={onRemove} title="Remove dimension" aria-label={`Remove ${label}`}
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-muted hover:bg-accent-subtle hover:text-danger-text">
+          <X size={14} />
+        </button>
+      </>}>
         {selected.size > 0 && <button type="button" onClick={() => onClearDim(dim)} className="whitespace-nowrap text-tiny font-medium text-accent-text hover:underline">Clear filter</button>}
-      </div>
-      <div className="p-4">
+      </ResultsBar>
+      <ReportBody>
         {loading ? <Spinner /> : error ? <p className="text-small text-danger-text">{error}</p>
           : rows.length === 0 ? <p className="text-small text-fg-muted">No Data Available</p>
           : (
@@ -172,8 +183,8 @@ function DimensionCard({
               </tbody>
             </table>
           )}
-      </div>
-    </div>
+      </ReportBody>
+    </ReportCard>
   );
 }
 
@@ -214,17 +225,17 @@ function LabeledChart({ label, labels, values }: { label: string; labels: string
   );
 }
 
+/** Multi-select picker as a 40 px control-row field — the label comes from the surrounding ControlField. */
 function MultiSelectDropdown<T extends string>({
-  label, allOptions, optionLabels, selected, onChange, max,
-}: { label: string; allOptions: readonly T[]; optionLabels: Record<T, string>; selected: T[]; onChange: (v: T[]) => void; max?: number }) {
+  id, allOptions, optionLabels, selected, onChange, max,
+}: { id: string; allOptions: readonly T[]; optionLabels: Record<T, string>; selected: T[]; onChange: (v: T[]) => void; max?: number }) {
   const [open, setOpen] = useState(false);
   const toggle = (k: T) => onChange(selected.includes(k) ? selected.filter((x) => x !== k) : (!max || selected.length < max) ? [...selected, k] : selected);
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full min-w-0 items-center gap-1.5 whitespace-nowrap text-small font-medium text-fg hover:text-accent-text">
-        <span className="shrink-0">{label}</span>
-        <span className="min-w-0 truncate text-fg-secondary">{selected.map((s) => optionLabels[s]).join(', ') || 'None'}</span>
-        <span className="shrink-0 text-fg-muted">{selected.length}/{max ?? allOptions.length}</span>
+      <button id={id} type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className={`input ${CONTROL} flex min-w-0 items-center gap-1.5 whitespace-nowrap text-left`}>
+        <span className="min-w-0 flex-1 truncate">{selected.map((s) => optionLabels[s]).join(', ') || 'None'}</span>
+        <span className="shrink-0 text-tiny text-fg-muted">{selected.length}/{max ?? allOptions.length}</span>
         <ChevronDown size={13} className="shrink-0 text-fg-muted" />
       </button>
       {open && (
@@ -248,8 +259,10 @@ export function DimensionalReport() {
   const opts = useReportOpts();
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks.map((s) => [s.value, s.label])), [opts.smartLinks]);
 
-  const [from, setFrom] = useState(todayStr());
-  const [to, setTo] = useState(todayStr());
+  // Dates apply on their own once they form a valid range (see useAutoDateRange) — never a
+  // half-typed or inverted range reaching the API; everything else applies immediately.
+  const range = useAutoDateRange(todayStr(), todayStr());
+  const { appliedFrom, appliedTo } = range;
   const [dims, setDims] = useState<DimKey[]>(['sub1', 'offer']);
   const [dimMetrics, setDimMetrics] = useState<MetricKey[]>(['payout', 'conversions']);
   const [charts, setCharts] = useState<MetricKey[]>(['clicks', 'conversions', 'payout', 'revenue', 'margin']);
@@ -258,7 +271,9 @@ export function DimensionalReport() {
 
   const addDim = (k: DimKey) => { if (dims.length < 5 && !dims.includes(k)) setDims([...dims, k]); setDimPickerOpen(false); };
   const removeDim = (k: DimKey) => { setDims(dims.filter((d) => d !== k)); setFilters((f) => { const n = { ...f }; delete n[k]; return n; }); };
-  const clearAll = () => { setDims([]); setFilters({}); };
+  // Reset dates, dimensions and row filters in one render. The debounced range catches up to the
+  // same values later and is then a no-op.
+  const clearAll = () => { range.reset({ from: todayStr(), to: todayStr() }); setDims([]); setFilters({}); };
   const clearDim = (k: DimKey) => setFilters((f) => { const n = { ...f }; delete n[k]; return n; });
   const toggleRow = (dim: DimKey, value: string) => setFilters((f) => {
     const cur = f[dim] ?? [];
@@ -270,14 +285,15 @@ export function DimensionalReport() {
 
   const activeDims = (Object.keys(filters) as DimKey[]).filter((k) => (filters[k]?.length ?? 0) > 0);
 
-  const chronological = from !== to;
+  const chronological = appliedFrom !== appliedTo;
   const chartGroupBy = chronological ? 'day' : 'hour';
   const chartsParams = new URLSearchParams({
-    groupBy: chartGroupBy, metrics: charts.join(',') || 'clicks',
-    from: toIso(from), to: toIso(to, true), limit: '200',
+    groupBy: chartGroupBy, metrics: charts.join(','),
+    from: toIso(appliedFrom), to: toIso(appliedTo, true), limit: '200',
   });
   appendOtherDimParams(chartsParams, filters);
-  const chartsQ = useQuery<AggResult>(`/api/reports?${chartsParams.toString()}`);
+  // No chart selected → nothing to request (the body says so).
+  const chartsQ = useQuery<AggResult>(charts.length ? `/api/reports?${chartsParams.toString()}` : null);
   const chartRows = [...(chartsQ.data?.rows ?? [])].sort((a, b) => (a.dimensions[chartGroupBy] ?? '').localeCompare(b.dimensions[chartGroupBy] ?? ''));
   const chartLabels = chartRows.map((r) => {
     const iso = r.dimensions[chartGroupBy] ?? '';
@@ -287,43 +303,47 @@ export function DimensionalReport() {
   });
 
   return (
-    <div className="space-y-6">
-      <div className="card space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={() => { setFrom(daysAgo(6)); setTo(todayStr()); }}>Last 7 Days</button>
-          <div className="relative">
-            <button type="button" className="btn-ghost flex items-center gap-1.5" onClick={() => setDimPickerOpen((o) => !o)} disabled={dims.length >= 5}>
-              <Plus size={15} /> Add Dimensions <span className="text-fg-muted">{dims.length}/5</span>
-            </button>
-            {dimPickerOpen && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setDimPickerOpen(false)} />
-                <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-52 overflow-y-auto rounded-card border border-border bg-elevated p-1 shadow-elevated">
-                  {DIM_OPTIONS.filter((d) => !dims.includes(d.key)).map((d) => (
-                    <button key={d.key} onClick={() => addDim(d.key)} className="block w-full rounded-[var(--radius)] px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{d.label}</button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-          {dims.map((d) => (
-            <span key={d} className="inline-flex items-center gap-1.5 rounded-full bg-accent-subtle px-3 py-1 text-tiny font-medium text-accent-text">
-              {DIM_OPTIONS.find((o) => o.key === d)?.label}
-              <button onClick={() => removeDim(d)}><X size={12} /></button>
-            </span>
-          ))}
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-        </div>
+    <>
+      <ReportCard className="mb-4">
+        <ReportControls problem={range.problem} actions={<ClearButton onClick={clearAll} title="Reset dates, dimensions and row filters" />}>
+          <DateRangeField idPrefix="dimensional-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+          <button type="button" className={`inline-flex items-center px-1 text-small font-medium text-accent-text hover:underline ${CONTROL}`}
+            onClick={() => range.reset({ from: daysAgo(6), to: todayStr() })}>Last 7 Days</button>
+          <ControlField label="Dimension Metrics" htmlFor="dimensional-report-metrics">
+            <MultiSelectDropdown id="dimensional-report-metrics" allOptions={METRIC_KEYS} optionLabels={METRIC_LABELS} selected={dimMetrics} onChange={(v) => setDimMetrics(v.length ? v : dimMetrics)} />
+          </ControlField>
+          <ControlField label="Charts" htmlFor="dimensional-report-charts">
+            <MultiSelectDropdown id="dimensional-report-charts" allOptions={CHART_METRICS.map((c) => c.key)} optionLabels={Object.fromEntries(CHART_METRICS.map((c) => [c.key, c.label])) as Record<MetricKey, string>} selected={charts} onChange={setCharts} />
+          </ControlField>
+          <ControlField label="Dimensions" htmlFor="dimensional-report-add-dim" className="w-full sm:w-auto">
+            <div className="flex min-h-10 flex-wrap items-center gap-2">
+              <div className="relative">
+                <button id="dimensional-report-add-dim" type="button" className={`btn-ghost ${CONTROL} flex items-center gap-1.5`} onClick={() => setDimPickerOpen((o) => !o)} disabled={dims.length >= 5}>
+                  <Plus size={15} /> Add Dimensions <span className="text-fg-muted">{dims.length}/5</span>
+                </button>
+                {dimPickerOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setDimPickerOpen(false)} />
+                    <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-52 overflow-y-auto rounded-card border border-border bg-elevated p-1 shadow-elevated">
+                      {DIM_OPTIONS.filter((d) => !dims.includes(d.key)).map((d) => (
+                        <button key={d.key} onClick={() => addDim(d.key)} className="block w-full rounded-[var(--radius)] px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{d.label}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              {dims.map((d) => (
+                <span key={d} className="inline-flex items-center gap-1.5 rounded-full bg-accent-subtle px-3 py-1 text-tiny font-medium text-accent-text">
+                  {DIM_OPTIONS.find((o) => o.key === d)?.label}
+                  <button type="button" onClick={() => removeDim(d)} aria-label={`Remove ${DIM_OPTIONS.find((o) => o.key === d)?.label ?? d}`}><X size={12} /></button>
+                </span>
+              ))}
+            </div>
+          </ControlField>
+        </ReportControls>
         {activeDims.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border bg-page px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-4 sm:px-6">
             <span className="text-small font-medium text-fg-secondary">Filtering by</span>
             {activeDims.map((d) => (
               <span key={d} className="inline-flex items-center gap-1.5 rounded-full bg-accent-subtle py-1 pl-3 pr-1.5 text-tiny font-medium text-accent-text">
@@ -332,40 +352,42 @@ export function DimensionalReport() {
                 <button type="button" onClick={() => clearDim(d)} className="grid h-4 w-4 place-items-center rounded-full hover:bg-elevated hover:text-danger-text"><X size={11} /></button>
               </span>
             ))}
-            <button type="button" onClick={clearAll} className="text-tiny font-medium text-accent-text hover:underline">Clear all</button>
+            <button type="button" onClick={() => setFilters({})} className="text-tiny font-medium text-accent-text hover:underline">Clear all</button>
           </div>
         )}
-      </div>
+      </ReportCard>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_380px]">
         <div>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-h3 font-medium text-fg">Dimensional Breakdown</h2>
-            <MultiSelectDropdown label="Select Dimension Metric(s)" allOptions={METRIC_KEYS} optionLabels={METRIC_LABELS} selected={dimMetrics} onChange={(v) => setDimMetrics(v.length ? v : dimMetrics)} />
+            <p className="text-tiny text-fg-muted">Click row to filter</p>
           </div>
-          <p className="mb-3 text-tiny text-fg-muted">Click row to filter</p>
 
           {dims.length === 0 ? <StateBlock>Add at least one dimension to see a breakdown.</StateBlock> : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {dims.map((d) => (
                 <DimensionCard key={d} dim={d} label={DIM_OPTIONS.find((o) => o.key === d)?.label ?? d} opts={opts} smartLinkMap={smartLinkMap}
-                  from={from} to={to} dimMetrics={dimMetrics} filters={filters} onToggleRow={toggleRow} onClearDim={clearDim} onRemove={() => removeDim(d)} />
+                  from={appliedFrom} to={appliedTo} dimMetrics={dimMetrics} filters={filters} onToggleRow={toggleRow} onClearDim={clearDim} onRemove={() => removeDim(d)} />
               ))}
             </div>
           )}
         </div>
 
-        <div className="card !p-0 self-start">
-          <div className="border-b border-border px-4 py-3">
-            <MultiSelectDropdown label="Select Chart(s)" allOptions={CHART_METRICS.map((c) => c.key)} optionLabels={Object.fromEntries(CHART_METRICS.map((c) => [c.key, c.label])) as Record<MetricKey, string>} selected={charts} onChange={setCharts} />
-          </div>
-          <div className="space-y-5 p-4">
-            {chartsQ.loading ? <Spinner /> : chartsQ.error ? <p className="text-small text-danger-text">{chartsQ.error}</p> : charts.length === 0 ? <p className="text-small text-fg-muted">No charts selected.</p> : CHART_METRICS.filter((c) => charts.includes(c.key)).map((c) => (
-              <LabeledChart key={c.key} label={c.label} labels={chartLabels} values={chartRows.map((r) => num(r.metrics[c.key] ?? 0))} />
-            ))}
-          </div>
-        </div>
+        <ReportCard className="self-start">
+          <ResultsBar position="top" title="Charts" loading={chartsQ.loading} />
+          <ReportBody>
+            <div className="space-y-5">
+              {charts.length === 0 ? <p className="text-small text-fg-muted">No charts selected — pick at least one under Charts.</p>
+                : chartsQ.loading ? <Spinner />
+                : chartsQ.error ? <p className="text-small text-danger-text">{chartsQ.error}</p>
+                : CHART_METRICS.filter((c) => charts.includes(c.key)).map((c) => (
+                  <LabeledChart key={c.key} label={c.label} labels={chartLabels} values={chartRows.map((r) => num(r.metrics[c.key] ?? 0))} />
+                ))}
+            </div>
+          </ReportBody>
+        </ReportCard>
       </div>
-    </div>
+    </>
   );
 }

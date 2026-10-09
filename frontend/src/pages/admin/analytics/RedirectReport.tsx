@@ -15,9 +15,13 @@
  * ProductsReport.tsx / RefundsReport.tsx (components/EmptyShellTable.tsx) rather than wiring up a
  * live query that could only ever return zero rows.
  */
-import { Filter, MoreVertical } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '../../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShellTable';
+import { daysAgo, todayStr } from '../../../shared-components/primitives/ReportPageKit';
+import { useAutoDateRange } from '../reportView';
+import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 
 const COLUMNS = [
   'Originating Offer / Fail Offer', 'Imp', 'RPM', 'CPM', 'Gross Clicks', 'Clicks', 'Uniq. Clicks',
@@ -26,50 +30,40 @@ const COLUMNS = [
 ];
 
 export default function RedirectReport() {
+  // Nothing to fetch, but the range behaves like every other report's (applies on its own, no Run Report).
+  const range = useAutoDateRange(daysAgo(7), todayStr());
+
   return (
     <>
-      <PageHeader title="Redirect Report" subtitle="Analytics › Redirect" action={
-        <button title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-          <MoreVertical size={15} />
-        </button>
-      } />
+      <PageHeader title="Redirect Report" subtitle="Analytics › Redirect" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input title="Not available yet" type="date" className="input" defaultValue="" />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input title="Not available yet" type="date" className="input" defaultValue="" />
-          </div>
-          <div>
-            <label className="label">Parent <span className="text-danger-text">*</span></label>
-            <button title="Not available yet" className="input flex items-center justify-between !py-2 text-left text-fg-muted">Originating Offer</button>
-          </div>
-          <div>
-            <label className="label">Child <span className="text-danger-text">*</span></label>
-            <button title="Not available yet" className="input flex items-center justify-between !py-2 text-left text-fg-muted">Fail Offer</button>
-          </div>
-          <button title="Not available yet" className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <Filter size={15} />
+      <ReportCard>
+        <ReportControls problem={range.problem} actions={<>
+          {/* Inert, like the rest of this shell — filtering isn't available yet. */}
+          <FiltersButton disabled title="Not available yet" />
+          <button type="button" title="Not available yet" className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+            <MoreVertical size={15} />
           </button>
-          <div className="flex-1" />
-          <button title="Not available yet" className="btn-primary">Run Report</button>
-        </div>
-      </div>
+        </>}>
+          <DateRangeField idPrefix="redirect-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+          <ControlField label="Parent" htmlFor="redirect-report-parent" className="w-full sm:w-48">
+            <button id="redirect-report-parent" type="button" title="Not available yet" className={`input ${CONTROL} flex items-center text-left text-fg-muted`}>Originating Offer</button>
+          </ControlField>
+          <ControlField label="Child" htmlFor="redirect-report-child" className="w-full sm:w-48">
+            <button id="redirect-report-child" type="button" title="Not available yet" className={`input ${CONTROL} flex items-center text-left text-fg-muted`}>Fail Offer</button>
+          </ControlField>
+        </ReportControls>
 
-      <div className="card mb-4">
-        <p className="text-small text-fg-muted">
-          Offer-to-offer failure redirects aren't tracked yet — Forwarding Rules and SmartSwitch (configurable per offer) exist but aren't applied to live traffic in this network, so no click has ever been recorded as redirected from a failing offer to a fallback.
-        </p>
-      </div>
+        <ResultsBar title="Detailed Report" />
 
-      <div className="card">
-        <h3 className="mb-3 text-h3 font-medium text-fg">Detailed Report</h3>
-        <EmptyShellTable columns={COLUMNS} search={false} />
-      </div>
+        <ReportBody>
+          <p className="mb-4 text-small text-fg-muted">
+            Offer-to-offer failure redirects aren't tracked yet — Forwarding Rules and SmartSwitch (configurable per offer) exist but aren't applied to live traffic in this network, so no click has ever been recorded as redirected from a failing offer to a fallback.
+          </p>
+          <EmptyShellTable columns={COLUMNS} search={false} />
+        </ReportBody>
+      </ReportCard>
     </>
   );
 }

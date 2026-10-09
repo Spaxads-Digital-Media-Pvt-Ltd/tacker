@@ -21,7 +21,7 @@
  */
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, MoreVertical, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight, MoreVertical, Search } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { api } from '../../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
@@ -36,6 +36,9 @@ import {
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
 import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
+import { useAutoDateRange } from '../reportView';
+import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 
 interface SmartLink { id: string; name: string }
 
@@ -160,9 +163,9 @@ function mergeRows(currentRows: { dimensions: Record<string, string | null>; met
 function SingleSelectDropdown({ label, value, onChange, allowNone }: { label: string; value: DimKey | null; onChange: (k: DimKey | null) => void; allowNone?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
+    <div className="relative w-full sm:w-44">
       <label className="label">{label} {!allowNone && <span className="text-danger-text">*</span>}</label>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
+      <button type="button" onClick={() => setOpen((o) => !o)} className={`input flex items-center justify-between text-left ${CONTROL}`}>
         {value ? DIM_OPTIONS.find((d) => d.key === value)?.label : 'None'} <ChevronDown size={13} className="text-fg-muted" />
       </button>
       {open && (
@@ -242,34 +245,40 @@ export default function VarianceReport() {
   const opts = useReportOpts();
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks?.map((s: { value: string; label: string }) => [s.value, s.label]) ?? []), [opts.smartLinks]);
 
+  // No "Run Report": both ranges apply on their own once valid (debounced, see useAutoDateRange) and
+  // every other control applies immediately. The table pages with the Current range's hook, so a new
+  // Current range lands on page 1 in the same render (one request).
+  const current = useAutoDateRange(todayStr(), todayStr());
+  const previous = useAutoDateRange(daysAgo(1), daysAgo(1));
+  const { page, setPage, toFirstPage } = current;
   const [parentDim, setParentDim] = useState<DimKey>('publisher');
   const [childDim, setChildDim] = useState<DimKey | null>(null);
-  const [currentFrom, setCurrentFrom] = useState(todayStr());
-  const [currentTo, setCurrentTo] = useState(todayStr());
-  const [previousFrom, setPreviousFrom] = useState(daysAgo(1));
-  const [previousTo, setPreviousTo] = useState(daysAgo(1));
-  const [appliedParentDim, setAppliedParentDim] = useState<DimKey>('publisher');
-  const [appliedChildDim, setAppliedChildDim] = useState<DimKey | null>(null);
-  const [appliedCurrentFrom, setAppliedCurrentFrom] = useState(currentFrom);
-  const [appliedCurrentTo, setAppliedCurrentTo] = useState(currentTo);
-  const [appliedPreviousFrom, setAppliedPreviousFrom] = useState(previousFrom);
-  const [appliedPreviousTo, setAppliedPreviousTo] = useState(previousTo);
   const [filters, setFilters] = useState<FilterValues>({});
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>({});
   const [exclusions, setExclusions] = useState<FilterValues>({});
-  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>({});
   const [metricFilters, setMetricFilters] = useState<MetricFilters>({});
-  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>({});
   const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(false);
-  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [q, setQ] = useState('');
   const [mode, setMode] = useState<'pct' | 'num'>('pct');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showApiRequest, setShowApiRequest] = useState(false);
-  const [page, setPage] = useState(1);
   const pageSize = 20;
+
+  // The Previous range the report uses. The Previous hook has no say over the table's page, so when it
+  // commits a new range the page goes back to 1 (and expanded rows collapse) right here, during render
+  // — React re-renders before committing, so no request is ever made for the new range on the old page.
+  const [previousRange, setPreviousRange] = useState({ from: previous.appliedFrom, to: previous.appliedTo });
+  if (previousRange.from !== previous.appliedFrom || previousRange.to !== previous.appliedTo) {
+    setPreviousRange({ from: previous.appliedFrom, to: previous.appliedTo });
+    toFirstPage(); setExpanded(new Set());
+  }
+  // A new Current range is already on page 1 (its hook); collapse expanded rows the same way.
+  const currentKey = `${current.appliedFrom}|${current.appliedTo}`;
+  const [seenCurrentKey, setSeenCurrentKey] = useState(currentKey);
+  if (seenCurrentKey !== currentKey) { setSeenCurrentKey(currentKey); setExpanded(new Set()); }
+  const currentFrom = current.appliedFrom; const currentTo = current.appliedTo;
+  const previousFrom = previousRange.from; const previousTo = previousRange.to;
 
   const { data: offers } = useQuery<{ id: string; name: string }[]>('/api/offers');
   const { data: publishers } = useQuery<{ id: string; name: string }[]>('/api/publishers');
@@ -289,25 +298,25 @@ export default function VarianceReport() {
     { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [offers, advertisers, publishers, smartLinksList, countryOptions]);
 
-  const excludeOfferId = appliedExclusions['offer']?.join(',');
-  const excludeAdvertiserId = appliedExclusions['advertiser']?.join(',');
-  const excludePublisherId = appliedExclusions['partner']?.join(',');
-  const excludeSmartLinkId = appliedExclusions['smartLink']?.join(',');
-  const excludeCountry = appliedExclusions['country']?.join(',');
-  const excludeDevice = appliedExclusions['device']?.join(',');
+  const excludeOfferId = exclusions['offer']?.join(',');
+  const excludeAdvertiserId = exclusions['advertiser']?.join(',');
+  const excludePublisherId = exclusions['partner']?.join(',');
+  const excludeSmartLinkId = exclusions['smartLink']?.join(',');
+  const excludeCountry = exclusions['country']?.join(',');
+  const excludeDevice = exclusions['device']?.join(',');
   const dimParams = {
-    offerId: appliedFilters['offer']?.join(','), advertiserId: appliedFilters['advertiser']?.join(','),
-    publisherId: appliedFilters['partner']?.join(','), smartLinkId: appliedFilters['smartLink']?.join(','),
-    country: appliedFilters['country']?.join(','), device: appliedFilters['device']?.join(','),
+    offerId: filters['offer']?.join(','), advertiserId: filters['advertiser']?.join(','),
+    publisherId: filters['partner']?.join(','), smartLinkId: filters['smartLink']?.join(','),
+    country: filters['country']?.join(','), device: filters['device']?.join(','),
     excludeOfferId, excludeAdvertiserId, excludePublisherId, excludeSmartLinkId, excludeCountry, excludeDevice,
-    excludeInvalid: appliedIgnoreFailTraffic ? 1 : undefined,
+    excludeInvalid: ignoreFailTraffic ? 1 : undefined,
   };
 
   const qs = (extra: Record<string, string | number | undefined>) => buildQs(extra).toString();
 
   // Summary: one exact grand-total row per period (groupBy=none), not a sum of a truncated grouping.
-  const curSummaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedCurrentFrom), to: toIso(appliedCurrentTo, true), ...dimParams });
-  const prevSummaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedPreviousFrom), to: toIso(appliedPreviousTo, true), ...dimParams });
+  const curSummaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(currentFrom), to: toIso(currentTo, true), ...dimParams });
+  const prevSummaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(previousFrom), to: toIso(previousTo, true), ...dimParams });
   const { data: curSummaryData, loading: curSummaryLoading, error: curSummaryError } = useQuery<AggResult>(`/api/reports?${curSummaryQs}`);
   const { data: prevSummaryData, loading: prevSummaryLoading, error: prevSummaryError } = useQuery<AggResult>(`/api/reports?${prevSummaryQs}`);
   const summaryLoading = curSummaryLoading || prevSummaryLoading;
@@ -318,20 +327,27 @@ export default function VarianceReport() {
   // Previous result had no activity there — a real 0, not a top-N truncation artefact). Page size
   // stays ≤ 20: comma-bearing text keys go as repeated `key[]` params, which the API caps at 20.
   const curTableQs = qs({
-    groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedCurrentFrom), to: toIso(appliedCurrentTo, true), ...dimParams,
+    groupBy: parentDim, metrics: METRICS_PARAM, from: toIso(currentFrom), to: toIso(currentTo, true), ...dimParams,
     orderBy: 'clicks', orderDir: 'desc', limit: pageSize, offset: (page - 1) * pageSize,
   });
   const { data: curData, loading: curLoading, error: curError } = useQuery<AggResult>(`/api/reports?${curTableQs}`);
-  const pageKeys = useMemo(() => Array.from(new Set((curData?.rows ?? []).map((r) => r.dimensions[appliedParentDim]).filter((v): v is string => Boolean(v)))),
-    [curData, appliedParentDim]);
+  // useQuery keeps the last response while the next one loads (its `loading` flips one render late)
+  // and after a failed request, so tag `curData` with the query it answers and build on it only while
+  // that is the current query — e.g. a new Previous range on page 1 must not first fetch Previous
+  // values for the old page's groups.
+  const [curDataTag, setCurDataTag] = useState<{ data: AggResult | null; qs: string }>({ data: null, qs: '' });
+  if (curDataTag.data !== curData) setCurDataTag({ data: curData, qs: curTableQs });
+  const curFresh = curDataTag.data === curData && curDataTag.qs === curTableQs && !curLoading && !curError;
+  const pageKeys = useMemo(() => (curFresh ? Array.from(new Set((curData?.rows ?? []).map((r) => r.dimensions[parentDim]).filter((v): v is string => Boolean(v)))) : []),
+    [curFresh, curData, parentDim]);
   const prevTableQs = useMemo(() => {
     if (!pageKeys.length) return null;
-    const params = buildQs({ groupBy: appliedParentDim, metrics: METRICS_PARAM, from: toIso(appliedPreviousFrom), to: toIso(appliedPreviousTo, true), ...dimParams, limit: pageKeys.length });
-    setFilterValues(params, DIM_OPTIONS.find((o) => o.key === appliedParentDim)!.filterParam, pageKeys);
+    const params = buildQs({ groupBy: parentDim, metrics: METRICS_PARAM, from: toIso(previousFrom), to: toIso(previousTo, true), ...dimParams, limit: pageKeys.length });
+    setFilterValues(params, DIM_OPTIONS.find((o) => o.key === parentDim)!.filterParam, pageKeys);
     return params.toString();
-  // dimParams is rebuilt each render; its content is fully determined by the applied filter state below.
+  // dimParams is rebuilt each render; its content is fully determined by the filter state below.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageKeys, appliedParentDim, appliedPreviousFrom, appliedPreviousTo, appliedFilters, appliedExclusions, appliedIgnoreFailTraffic]);
+  }, [pageKeys, parentDim, previousFrom, previousTo, filters, exclusions, ignoreFailTraffic]);
   // Fetched by hand (not useQuery) so the result is tagged with the query it answers — a previous
   // page's Previous-period data must never be joined to the new page's rows, even for one render.
   const [prevState, setPrevState] = useState<{ qs: string; data: AggResult | null; error: string | null } | null>(null);
@@ -348,11 +364,11 @@ export default function VarianceReport() {
   const prevData = prevTableQs && prevReady ? prevState?.data ?? null : null;
   const prevError = prevTableQs && prevReady ? prevState?.error ?? null : null;
 
-  const rows = useMemo((): VarianceRow[] => (curLoading || !prevReady ? [] : joinPrevious(curData?.rows ?? [], prevData?.rows ?? [], appliedParentDim))
-    .map((r) => ({ raw: r.raw, name: resolveName(appliedParentDim, r.raw, opts, smartLinkMap), current: r.current, previous: r.previous }))
+  const rows = useMemo((): VarianceRow[] => (!curFresh || !prevReady ? [] : joinPrevious(curData?.rows ?? [], prevData?.rows ?? [], parentDim))
+    .map((r) => ({ raw: r.raw, name: resolveName(parentDim, r.raw, opts, smartLinkMap), current: r.current, previous: r.previous }))
     .filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))
-    .filter((r) => passesMetricFilters(r.current, appliedMetricFilters)),
-  [curLoading, curData, prevReady, prevData, appliedParentDim, opts, smartLinkMap, q, appliedMetricFilters]);
+    .filter((r) => passesMetricFilters(r.current, metricFilters)),
+  [curFresh, curData, prevReady, prevData, parentDim, opts, smartLinkMap, q, metricFilters]);
 
   const summary = useMemo(() => {
     const cur = curSummaryData?.rows?.[0]?.metrics ?? {};
@@ -362,35 +378,28 @@ export default function VarianceReport() {
     return { current, previous };
   }, [curSummaryData, prevSummaryData]);
 
-  const canRun = !!parentDim;
-  const runReport = () => {
-    if (!canRun) return;
-    setAppliedParentDim(parentDim); setAppliedChildDim(childDim);
-    setAppliedCurrentFrom(currentFrom); setAppliedCurrentTo(currentTo);
-    setAppliedPreviousFrom(previousFrom); setAppliedPreviousTo(previousTo);
-    setAppliedFilters(filters); setAppliedExclusions(exclusions); setAppliedMetricFilters(metricFilters); setAppliedIgnoreFailTraffic(ignoreFailTraffic);
-    setExpanded(new Set()); setPage(1);
-  };
+  // Every applied change below returns to page 1 and collapses expanded rows (as Run Report did).
+  const changePage = (p: number) => { setPage(p); setExpanded(new Set()); };
+  const changeParent = (k: DimKey) => { setParentDim(k); toFirstPage(); setExpanded(new Set()); };
+  const changeChild = (k: DimKey | null) => { setChildDim(k); toFirstPage(); setExpanded(new Set()); };
+  // Both ranges, dimensions and every Reporting Filter reset in one render → one request per query.
+  // The debounced ranges catch up to the same values later and are then a no-op.
   const clearAll = () => {
+    current.reset({ from: todayStr(), to: todayStr() });
+    previous.reset({ from: daysAgo(1), to: daysAgo(1) });
     setParentDim('publisher'); setChildDim(null);
-    setCurrentFrom(todayStr()); setCurrentTo(todayStr()); setPreviousFrom(daysAgo(1)); setPreviousTo(daysAgo(1));
     setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
-    setAppliedParentDim('publisher'); setAppliedChildDim(null);
-    setAppliedCurrentFrom(todayStr()); setAppliedCurrentTo(todayStr()); setAppliedPreviousFrom(daysAgo(1)); setAppliedPreviousTo(daysAgo(1));
-    setAppliedFilters({}); setAppliedExclusions({}); setAppliedMetricFilters({}); setAppliedIgnoreFailTraffic(false);
-    setExpanded(new Set()); setPage(1);
+    setExpanded(new Set());
   };
-  // Chip row ⇄ every applied Reporting Filter (incl. metric filters and Ignore Fail Traffic), so
-  // removing a chip or "Clear all" changes exactly what the requests and the table use.
-  const appliedReporting: ReportingFiltersValue = { filters: appliedFilters, exclusions: appliedExclusions, metricFilters: appliedMetricFilters, ignoreFailTraffic: appliedIgnoreFailTraffic };
+  // Flyout Apply, chip removal and the chips' "Clear all" change exactly what the requests and the
+  // table use, at once.
+  const reporting: ReportingFiltersValue = { filters, exclusions, metricFilters, ignoreFailTraffic };
   const setReporting = (v: ReportingFiltersValue) => {
-    setFilters(v.filters); setAppliedFilters(v.filters);
-    setExclusions(v.exclusions); setAppliedExclusions(v.exclusions);
-    setMetricFilters(v.metricFilters); setAppliedMetricFilters(v.metricFilters);
-    setIgnoreFailTraffic(v.ignoreFailTraffic); setAppliedIgnoreFailTraffic(v.ignoreFailTraffic);
-    changePage(1);
+    setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic);
+    toFirstPage(); setExpanded(new Set());
   };
   const toggleExpand = (raw: string) => setExpanded((s) => { const n = new Set(s); if (n.has(raw)) n.delete(raw); else n.add(raw); return n; });
+  const problem = [current.problem && `Current: ${current.problem}`, previous.problem && `Previous: ${previous.problem}`].filter(Boolean).join(' ') || null;
 
   const SUMMARY_TILES: { key: string; label: string; real: boolean; get?: (d: DerivedRow) => number; format?: (v: number) => string }[] = [
     { key: 'mbc', label: 'Media Buying Cost', real: false },
@@ -416,112 +425,87 @@ export default function VarianceReport() {
     { key: 'grossSales', label: 'Gross Sales', real: false },
   ];
 
-  const loading = curLoading || prevLoading;
-  const changePage = (p: number) => { setPage(p); setExpanded(new Set()); };
+  // `!curFresh` (not just `curLoading`): also covers the render before useQuery flags the new request.
+  const loading = (!curFresh && !curError) || prevLoading;
 
   return (
     <>
-      <PageHeader title="Variance Report" subtitle="Analytics › Variance" action={
-        <button type="button" title="Page Actions" onClick={() => setShowApiRequest(true)}
-          className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-          <MoreVertical size={15} />
-        </button>
-      } />
+      <PageHeader title="Variance Report" subtitle="Analytics › Variance" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">Current <span className="text-danger-text">*</span></label>
-            <div className="flex items-center gap-1.5">
-              <input type="date" className="input !w-40" value={currentFrom} max={currentTo} onChange={(e) => setCurrentFrom(e.target.value)} />
-              <span className="text-fg-muted">–</span>
-              <input type="date" className="input !w-40" value={currentTo} min={currentFrom} max={todayStr()} onChange={(e) => setCurrentTo(e.target.value)} />
-            </div>
-          </div>
-          <div>
-            <label className="label">Previous <span className="text-danger-text">*</span></label>
-            <div className="flex items-center gap-1.5">
-              <input type="date" className="input !w-40" value={previousFrom} max={previousTo} onChange={(e) => setPreviousFrom(e.target.value)} />
-              <span className="text-fg-muted">–</span>
-              <input type="date" className="input !w-40" value={previousTo} min={previousFrom} onChange={(e) => setPreviousTo(e.target.value)} />
-            </div>
-          </div>
-          <SingleSelectDropdown label="Parent" value={parentDim} onChange={(k) => k && setParentDim(k)} />
-          <SingleSelectDropdown label="Child" value={childDim} onChange={setChildDim} allowNone />
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic }) > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic })}
-                </span>
-              )}
-            </button>
+      <ReportCard className="mb-4">
+        <ReportControls problem={problem} actions={<>
+          <ClearButton onClick={clearAll} title="Reset dates, dimensions and filters" />
+          <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
                 dimCategories={FILTER_CATEGORIES}
-                value={{ filters, exclusions, metricFilters, ignoreFailTraffic }}
-                onApply={(v) => { setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic); }}
+                value={reporting}
+                onApply={setReporting}
                 onClose={() => setFilterOpen(false)}
               />
             )}
-          </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-          <div className="flex-1" />
+          </FiltersButton>
+          <button type="button" title="Page Actions" aria-label="Show API Request" onClick={() => setShowApiRequest(true)}
+            className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+            <MoreVertical size={15} />
+          </button>
+        </>}>
+          <DateRangeField idPrefix="variance-current" label="Current (UTC)" from={current.from} to={current.to} max={todayStr()}
+            invalid={current.problem !== null} onFrom={current.setFrom} onTo={current.setTo} />
+          <DateRangeField idPrefix="variance-previous" label="Previous (UTC)" from={previous.from} to={previous.to} max={todayStr()}
+            invalid={previous.problem !== null} onFrom={previous.setFrom} onTo={previous.setTo} />
+          <SingleSelectDropdown label="Parent" value={parentDim} onChange={(k) => { if (k) changeParent(k); }} />
+          <SingleSelectDropdown label="Child" value={childDim} onChange={changeChild} allowNone />
+        </ReportControls>
+
+        <div className="border-t border-border px-5 py-4 sm:px-6">
+          <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
+            <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
+          </button>
+          {summaryOpen && (
+            summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+              <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 md:grid-cols-5">
+                {SUMMARY_TILES.map((t) => {
+                  const curr = t.real && t.get ? t.get(summary.current) : 0;
+                  const prev = t.real && t.get ? t.get(summary.previous) : 0;
+                  return (
+                    <div key={t.key}>
+                      <p className="text-tiny uppercase tracking-wide text-fg-muted">{t.label}</p>
+                      {!t.real ? <p className="mt-1 text-h3 font-medium text-fg-muted">{DASH}</p> : (
+                        <>
+                          <p className="mt-1 text-h3 font-medium text-fg">{t.format!(curr)}</p>
+                          <p className="text-tiny"><VarianceBadge prev={prev} curr={curr} mode="pct" /></p>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          )}
         </div>
-        <button type="button" className="btn-primary w-full" disabled={!canRun} onClick={runReport}>Run Report</button>
-      </div>
+      </ReportCard>
 
-      <div className="card mb-4">
-        <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
-          <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
-        </button>
-        {summaryOpen && (
-          summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
-            <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 md:grid-cols-5">
-              {SUMMARY_TILES.map((t) => {
-                const curr = t.real && t.get ? t.get(summary.current) : 0;
-                const prev = t.real && t.get ? t.get(summary.previous) : 0;
-                return (
-                  <div key={t.key}>
-                    <p className="text-tiny uppercase tracking-wide text-fg-muted">{t.label}</p>
-                    {!t.real ? <p className="mt-1 text-h3 font-medium text-fg-muted">{DASH}</p> : (
-                      <>
-                        <p className="mt-1 text-h3 font-medium text-fg">{t.format!(curr)}</p>
-                        <p className="text-tiny"><VarianceBadge prev={prev} curr={curr} mode="pct" /></p>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )
-        )}
-      </div>
-
-      <div className="card">
-        <ActiveFilterChips className="mb-3"
-          chips={reportingChips(FILTER_CATEGORIES, appliedReporting)}
-          onRemove={(c) => setReporting(withoutReportingChip(appliedReporting, c))}
-          onClearAll={() => setReporting(EMPTY_REPORTING_FILTERS)} />
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-            <p className="text-tiny text-fg-muted">Groups with activity in the Current period, compared with their Previous-period values.</p>
+      <ReportCard>
+        <ResultsBar position="top" title="Detailed Report" loading={loading} actions={<>
+          <div className="flex h-10 overflow-hidden rounded-[var(--radius)] border border-border" role="group" aria-label="Variance as">
+            <button type="button" onClick={() => setMode('pct')} title="Variance as %" className={`px-3 text-tiny font-medium ${mode === 'pct' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>%</button>
+            <button type="button" onClick={() => setMode('num')} title="Variance as a number" className={`px-3 text-tiny font-medium ${mode === 'num' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>#</button>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-              <button type="button" onClick={() => setMode('pct')} className={`px-2.5 py-1.5 text-tiny font-medium ${mode === 'pct' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>%</button>
-              <button type="button" onClick={() => setMode('num')} className={`px-2.5 py-1.5 text-tiny font-medium ${mode === 'num' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>#</button>
-            </div>
-            <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
+          <div className="relative min-w-0 flex-1 sm:flex-none">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
+              aria-label="Search this page" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-        </div>
+        </>}>
+          <ActiveFilterChips
+            chips={reportingChips(FILTER_CATEGORIES, reporting)}
+            onRemove={(c) => setReporting(withoutReportingChip(reporting, c))}
+            onClearAll={() => setReporting(EMPTY_REPORTING_FILTERS)} />
+        </ResultsBar>
 
+        <ReportBody>
+        <p className="mb-3 text-tiny text-fg-muted">Groups with activity in the Current period, compared with their Previous-period values.</p>
         {loading ? <StateBlock><Spinner /></StateBlock>
           : curError ? <StateBlock>{curError}</StateBlock>
           : prevError ? <StateBlock>{prevError}</StateBlock>
@@ -531,7 +515,7 @@ export default function VarianceReport() {
               <table className="premium-table">
                 <thead>
                   <tr>
-                    <th rowSpan={2} className="align-bottom font-semibold">{DIM_OPTIONS.find((o) => o.key === appliedParentDim)?.label}</th>
+                    <th rowSpan={2} className="align-bottom font-semibold">{DIM_OPTIONS.find((o) => o.key === parentDim)?.label}</th>
                     {DETAIL_METRICS.map((m) => <th key={m.key} colSpan={3} className="whitespace-nowrap px-4 py-2 text-center font-semibold">{m.label}</th>)}
                   </tr>
                   <tr>
@@ -550,12 +534,12 @@ export default function VarianceReport() {
                       <tr>
                         <td >
                           <span className="flex items-center gap-1.5">
-                            {appliedChildDim && (
+                            {childDim && (
                               <button type="button" onClick={() => toggleExpand(r.raw)} className="text-fg-muted hover:text-fg">
                                 {expanded.has(r.raw) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                               </button>
                             )}
-                            {linkFor(appliedParentDim, r.raw) ? <Link to={linkFor(appliedParentDim, r.raw)!} className="text-accent-text hover:underline">{r.name}</Link> : r.name}
+                            {linkFor(parentDim, r.raw) ? <Link to={linkFor(parentDim, r.raw)!} className="text-accent-text hover:underline">{r.name}</Link> : r.name}
                           </span>
                         </td>
                         {DETAIL_METRICS.map((m) => {
@@ -572,13 +556,13 @@ export default function VarianceReport() {
                           );
                         })}
                       </tr>
-                      {appliedChildDim && expanded.has(r.raw) && (
+                      {childDim && expanded.has(r.raw) && (
                         <ExpandedChildRows
-                          childDim={appliedChildDim}
-                          parentFilterParam={DIM_OPTIONS.find((o) => o.key === appliedParentDim)!.filterParam}
+                          childDim={childDim}
+                          parentFilterParam={DIM_OPTIONS.find((o) => o.key === parentDim)!.filterParam}
                           parentRawId={r.raw}
-                          currentFrom={appliedCurrentFrom} currentTo={appliedCurrentTo}
-                          previousFrom={appliedPreviousFrom} previousTo={appliedPreviousTo}
+                          currentFrom={currentFrom} currentTo={currentTo}
+                          previousFrom={previousFrom} previousTo={previousTo}
                           dimParams={dimParams} mode={mode} opts={opts} smartLinkMap={smartLinkMap}
                         />
                       )}
@@ -589,16 +573,18 @@ export default function VarianceReport() {
             </div>
           )}
         <div className="mt-3 flex justify-end">
+          {/* A failed request keeps the previous `data` in useQuery — never show its total as current. */}
           <Pagination total={curError ? 0 : (curData?.total ?? 0)} page={page} pageSize={pageSize} onPageChange={changePage} />
         </div>
-      </div>
+        </ReportBody>
+      </ReportCard>
 
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports?${curTableQs}`} appliedFilters={{
-        currentFrom: appliedCurrentFrom, currentTo: appliedCurrentTo, previousFrom: appliedPreviousFrom, previousTo: appliedPreviousTo,
-        parent: appliedParentDim, child: appliedChildDim ?? undefined,
+        currentFrom, currentTo, previousFrom, previousTo,
+        parent: parentDim, child: childDim ?? undefined,
         offer: dimParams.offerId, advertiser: dimParams.advertiserId, partner: dimParams.publisherId, smartLink: dimParams.smartLinkId, country: dimParams.country, device: dimParams.device,
         excludeOffer: excludeOfferId, excludeAdvertiser: excludeAdvertiserId, excludePartner: excludePublisherId, excludeSmartLink: excludeSmartLinkId, excludeCountry, excludeDevice,
-        ignoreFailTraffic: appliedIgnoreFailTraffic ? 'true' : undefined,
+        ignoreFailTraffic: ignoreFailTraffic ? 'true' : undefined,
       }} />}
     </>
   );

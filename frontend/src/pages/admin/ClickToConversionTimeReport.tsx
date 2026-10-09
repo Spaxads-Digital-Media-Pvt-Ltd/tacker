@@ -15,20 +15,25 @@
  * seen on the reference are implemented here rather than guessing the other three unit's ranges.
  *
  * Row kebab has one real item (View Offer), matching the reference.
+ *
+ * No "Run Report": dates apply on their own once they form a valid range (see useAutoDateRange), the
+ * Offer filter and its chips immediately.
  */
-import { Fragment, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronRight, MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
-import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { SlidersHorizontal } from 'lucide-react';
+import { type FilterCategory } from '../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, Pagination, RowKebabMenu, fetchAllPages, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, Pagination, RowKebabMenu, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Offer, Publisher } from '../../types';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
-import { readUrlDate, readUrlIds, reportLink } from '../../lib/reportFilterState';
+import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
+import { useAutoDateRange } from './reportView';
+import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 
 interface BucketRow { key: string; b0: number; b1: number; b2: number; b3: number; b4: number; b5: number; b6: number; total: number }
 /** `total` = number of groups matching; `truncated` = more groups exist beyond limit+offset. */
@@ -71,7 +76,10 @@ function ExpandedPartnerRows({ offerId, publishers, from, to }: { offerId: strin
   );
 }
 
-/** Applied report state from the URL (Copy Link / deep links): dates + the Offer filter. */
+/** Filter-drawer category ⇄ URL/API param. */
+const URL_FILTER_PARAMS: [category: string, param: string][] = [['offer', 'offerId']];
+
+/** Applied report state from the URL (reload / shared link / deep links): dates + the Offer filter. */
 function readInitialState() {
   const sp = new URLSearchParams(window.location.search);
   const offerIds = readUrlIds(sp, 'offerId').slice(0, 1); // single-select
@@ -81,19 +89,28 @@ function readInitialState() {
 
 export default function ClickToConversionTimeReport() {
   const [init] = useState(readInitialState);
-  const [from, setFrom] = useState(init.from);
-  const [to, setTo] = useState(init.to);
-  const [appliedFrom, setAppliedFrom] = useState(init.from);
-  const [appliedTo, setAppliedTo] = useState(init.to);
+  // Dates apply on their own once they form a valid range; the filter applies immediately and
+  // returns to page 1.
+  const range = useAutoDateRange(init.from, init.to);
+  const { from, to, appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
   const [filters, setFilters] = useState<Record<string, string[]>>(init.filters);
-  const [appliedFilters, setAppliedFilters] = useState<Record<string, string[]>>(init.filters);
+  // The applied report lives in the URL (replace, not push), so reload and a shared address-bar
+  // link keep it — this replaces the old "Copy Link".
+  const [, setSearchParams] = useSearchParams();
+  const urlState = useMemo(() => {
+    const next = new URLSearchParams();
+    next.set('from', range.appliedFrom); next.set('to', range.appliedTo);
+    for (const [cat, param] of URL_FILTER_PARAMS) { const v = filters[cat]?.[0]; if (v) next.set(param, v); }
+    return next.toString();
+  }, [range.appliedFrom, range.appliedTo, filters]);
+  useEffect(() => {
+    if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
+  }, [urlState, setSearchParams]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
-  const [page, setPage] = useState(1);
   const pageSize = 25;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showApiRequest, setShowApiRequest] = useState(false);
-  const [copied, setCopied] = useState(false);
   const exp = useReportExport();
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
@@ -103,7 +120,8 @@ export default function ClickToConversionTimeReport() {
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
   ], [offers]);
-  const offerIdFilter = appliedFilters['offer']?.[0];
+  const offerIdFilter = filters['offer']?.[0];
+  const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
 
   const qs = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
@@ -137,65 +155,33 @@ export default function ClickToConversionTimeReport() {
   const graphTotals = useMemo(() => allRows.reduce<number[]>((acc, r) => bucketVals(r).map((v, i) => (acc[i] ?? 0) + v), [0, 0, 0, 0, 0, 0, 0]), [allRows]);
   const graphMax = Math.max(1, ...graphTotals);
 
-  const runReport = () => {
-    setAppliedFrom(from); setAppliedTo(to); setAppliedFilters(filters); setPage(1);
-  };
-  const clearAll = () => {
-    setFrom(daysAgo(7)); setTo(todayStr()); setFilters({});
-    setAppliedFrom(daysAgo(7)); setAppliedTo(todayStr()); setAppliedFilters({});
-    setPage(1);
-  };
+  // Reset dates and the filter in one render → one request.
+  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
   const toggleExpand = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const copyLink = async () => {
-    // The applied report (the address bar never reflects Run Report) — read back on load.
-    const link = reportLink({ from: appliedFrom, to: appliedTo, offerId: offerIdFilter });
-    await navigator.clipboard?.writeText(link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  };
 
   return (
     <>
-      <PageHeader title="Click to Conversion Time Report" subtitle="Reporting › Click To Conversion Time" action={
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => { copyLink(); }} className="text-small font-medium text-accent-text hover:underline">{copied ? 'Copied!' : 'Copy Link'}</button>
-          <button type="button" title="Show API Request" onClick={() => setShowApiRequest(true)}
-            className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+      <PageHeader title="Click to Conversion Time Report" subtitle="Reporting › Click To Conversion Time" />
+
+      <ReportCard className="mb-4">
+        <ReportControls problem={range.problem} actions={<>
+          <ClearButton onClick={clearAll} />
+          <FiltersButton count={activeFilterCount} onClick={() => setFilterOpen((o) => !o)}>
+            {filterOpen && (
+              <ReportingFiltersFlyout sections={['filters']} singleSelect dimCategories={FILTER_CATEGORIES}
+                value={{ ...EMPTY_REPORTING_FILTERS, filters }}
+                onApply={(v) => { setFilters(v.filters); toFirstPage(); }} onClose={() => setFilterOpen(false)} />
+            )}
+          </FiltersButton>
+          <button type="button" title="Show API Request" aria-label="Show API Request" onClick={() => setShowApiRequest(true)}
+            className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
             <MoreVertical size={15} />
           </button>
-        </div>
-      } />
-
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {Object.values(appliedFilters).reduce((n, arr) => n + (arr?.length ?? 0), 0) > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {Object.values(appliedFilters).reduce((n, arr) => n + (arr?.length ?? 0), 0)}
-                </span>
-              )}
-            </button>
-            {filterOpen && (
-              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters} singleSelectKeys={FILTER_CATEGORIES.map((c) => c.key)}
-                onApply={setFilters} onClose={() => setFilterOpen(false)} />
-            )}
-          </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-          <div className="flex-1" />
-          <button type="button" className="btn-primary" onClick={runReport}>Run Report</button>
-        </div>
-      </div>
+        </>}>
+          <DateRangeField idPrefix="click-to-conversion-time-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+        </ReportControls>
+      </ReportCard>
 
       <div className="card mb-4">
         <button type="button" onClick={() => setGraphOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
@@ -218,28 +204,29 @@ export default function ClickToConversionTimeReport() {
         )}
       </div>
 
-      <div className="card">
-        <ActiveFilterChips className="mb-3" chips={chipsFromValues(FILTER_CATEGORIES, appliedFilters)}
-          onRemove={(c) => { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); setPage(1); }}
-          onClearAll={() => { setFilters({}); setAppliedFilters({}); setPage(1); }} />
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-          <div className="flex items-center gap-2">
-            <button type="button" className="btn-ghost" disabled={exp.busy} onClick={() => runExport('csv')}>Export CSV</button>
-            <button type="button" className="btn-ghost" disabled={exp.busy} onClick={() => runExport('xlsx')}>Export Excel</button>
-          </div>
-        </div>
+      <ReportCard>
+        <ResultsBar position="top" title="Detailed Report" loading={loading} actions={<>
+          <button type="button" className={`btn-ghost ${CONTROL}`} disabled={exp.busy} onClick={() => runExport('csv')}>Export CSV</button>
+          <button type="button" className={`btn-ghost ${CONTROL}`} disabled={exp.busy} onClick={() => runExport('xlsx')}>Export Excel</button>
+        </>}>
+          <ActiveFilterChips chips={chipsFromValues(FILTER_CATEGORIES, filters)}
+            onRemove={(c) => { setFilters(withoutValue(filters, c.key, c.value)); toFirstPage(); }}
+            onClearAll={() => { setFilters({}); toFirstPage(); }} />
+        </ResultsBar>
+
+        <ReportBody>
         <ExportStatus {...exp} onDismiss={exp.dismiss} />
         {!loading && truncated && (
           <p role="status" className="mb-3 rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-tiny text-fg-secondary">
             Showing the first {allRows.length.toLocaleString()} of {totalGroups.toLocaleString()} offers (the Summary Graph covers these only) — narrow the filters to see the rest.
           </p>
         )}
-        {loading ? <StateBlock><Spinner /></StateBlock>
-          : error ? <StateBlock>{error}</StateBlock>
-          : !rows.length ? <StateBlock>No Record Found</StateBlock>
+        {error ? <StateBlock>{error}</StateBlock>
+          // While a new request runs, the previous rows stay (dimmed) instead of the table collapsing
+          // to a spinner and back.
+          : !rows.length ? (loading ? <StateBlock><Spinner /></StateBlock> : <StateBlock>No Record Found</StateBlock>)
           : (
-            <div className="overflow-x-auto rounded-card border border-border">
+            <div className={`overflow-x-auto rounded-card border border-border transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
               <table className="premium-table">
                 <thead>
                   <tr>
@@ -268,12 +255,13 @@ export default function ClickToConversionTimeReport() {
               </table>
             </div>
           )}
-        {!loading && allRows.length > 0 && (
+        {!error && allRows.length > 0 && (
           <div className="mt-3 flex justify-end">
             <Pagination total={allRows.length} page={page} pageSize={pageSize} onPageChange={setPage} />
           </div>
         )}
-      </div>
+        </ReportBody>
+      </ReportCard>
 
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/click-to-conversion-time?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter,
