@@ -22,6 +22,7 @@
 | Variable | Purpose | Default |
 |---|---|---|
 | `TRACKING_BASE_DOMAIN` | Base for tenant subdomains | `ourtracking.com` |
+| `TRACKING_TRUSTED_PROXIES` | Extra proxies (comma-separated IPv4/IPv6 IPs or CIDRs) allowed to set `X-Forwarded-For` on the tracking surface, e.g. an Nginx/LB not on the same host. Loopback + Cloudflare's published ranges are always trusted | — |
 | `SENTRY_DSN` | Error tracking (no-op if absent) | — |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry trace sampling | `0` |
 | `ANTHROPIC_API_KEY` | AI ops layer (Phase 7) | — |

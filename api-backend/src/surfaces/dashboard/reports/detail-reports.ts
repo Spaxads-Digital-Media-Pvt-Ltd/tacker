@@ -33,6 +33,18 @@ const pageKeys = {
   limit: z.coerce.number().int().min(1).max(DETAIL_PAGE_MAX).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 };
+/** Click IDs exactly as `/click` issues them (32 lower-case hex) — comma list, trimmed, de-duplicated, ≤ 100. */
+const MAX_CLICK_IDS = 100;
+const clickIdsParam = csvList(z.string().regex(/^[0-9a-f]{32}$/, 'click IDs are 32 lower-case hex characters'))
+  .refine((v) => v == null || v.length <= MAX_CLICK_IDS, `at most ${MAX_CLICK_IDS} click IDs`);
+/** One IP (v4 or v6), matched exactly against the stored `inet`. */
+const ipParam = z.string().trim().ip({ message: 'ip must be an IPv4 or IPv6 address' }).optional();
+/** Click-URL values captured at click time (`/click?source_id=…&fbclid=…&gclid=…`) — exact match. */
+const clickCaptureKeys = {
+  sourceId: z.string().trim().min(1).max(500).optional(),
+  fbclid: z.string().trim().min(1).max(500).optional(),
+  gclid: z.string().trim().min(1).max(500).optional(),
+};
 /** Attributes of the originating click (stored on `clicks`, not on conversions). */
 const clickAttrKeys = {
   smartLinkId: uuid,
@@ -81,6 +93,9 @@ const clicksSchema = z.object({
   isUnique: z.enum(['true', 'false']).optional(),
   fraudMin: z.coerce.number().int().min(0).max(100).optional(),
   conversionStatus: CONVERSION_STATUS.optional(),
+  clickIds: clickIdsParam,
+  ip: ipParam,
+  ...clickCaptureKeys,
   ...pageKeys,
 }).strict();
 type ClicksFilters = z.infer<typeof clicksSchema>;
@@ -158,6 +173,11 @@ const groupedSchema = z.object({
   country: csvList(z.string().regex(/^[A-Za-z]{2}$/).transform((s) => s.toUpperCase())),
   device: csvList(z.string().max(40)),
   conversionStatus: CONVERSION_STATUS.optional(),
+  // Same click-level filters as /clicks, so the Click report's filters mean the same in both modes.
+  clickIds: clickIdsParam,
+  ip: ipParam,
+  isUnique: z.enum(['true', 'false']).optional(),
+  ...clickCaptureKeys,
 }).strict();
 type Grouped = z.infer<typeof groupedSchema>;
 const merge = (...lists: (string[] | undefined)[]) => Array.from(new Set(lists.flatMap((l) => l ?? [])));
@@ -182,6 +202,11 @@ function groupedFilters(networkId: string, f: Grouped, isClicks: boolean) {
   pushIn(merge(f.smartLinkIds, f.smartLinkId), `${click}.smart_link_id`, 'uuid');
   pushIn(f.country ?? [], `${click}.country`, 'text');
   pushIn(f.device ?? [], `${click}.device`, 'text');
+  // Click IDs: conversions store their click_id, so no join is needed on that side.
+  pushIn(f.clickIds ?? [], `${a}.click_id`, 'text');
+  if (f.ip) { params.push(f.ip); where.push(`${click}.ip = $${params.length}::inet`); }
+  if (f.isUnique) { params.push(f.isUnique === 'true'); where.push(`${click}.is_unique = $${params.length}`); }
+  push(f.sourceId, `${click}.source_id`); push(f.fbclid, `${click}.fbclid`); push(f.gclid, `${click}.gclid`);
   // Conversion Status is a predicate on the CLICK. Clicks side: the click itself must pass. Conversions
   // side: a conversion is counted only when its originating click exists (same network) and passes —
   // so the conversions/money shown are exactly those of the filtered clicks (offline/import
@@ -215,7 +240,8 @@ export function mountDetailReports(r: Router): void {
     const needsOffers = f.groupBy === 'advertiser' || merge(f.advertiserIds, f.advertiserId).length > 0;
     const clicksJoin = needsOffers ? 'JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id' : '';
     const needsClick = f.groupBy === 'country' || f.groupBy === 'device' || (f.country?.length ?? 0) > 0
-      || (f.device?.length ?? 0) > 0 || merge(f.smartLinkIds, f.smartLinkId).length > 0;
+      || (f.device?.length ?? 0) > 0 || merge(f.smartLinkIds, f.smartLinkId).length > 0
+      || f.ip != null || f.isUnique != null || f.sourceId != null || f.fbclid != null || f.gclid != null;
     const convJoin = needsClick ? 'LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id' : '';
     const cf = groupedFilters(nid, f, true);
     const vf = groupedFilters(nid, f, false);
@@ -405,6 +431,7 @@ export function mountDetailReports(r: Router): void {
       { key: 'sub1', col: 'sub1' }, { key: 'sub2', col: 'sub2' }, { key: 'sub3', col: 'sub3' },
       { key: 'sub4', col: 'sub4' }, { key: 'sub5', col: 'sub5' },
       { key: 'isUnique', col: 'is_unique', bool: true }, { key: 'fraudMin', col: 'fraud_score', op: '>=' },
+      { key: 'sourceId', col: 'source_id' }, { key: 'fbclid', col: 'fbclid' }, { key: 'gclid', col: 'gclid' },
     ]);
     // Clicks don't store the advertiser — resolve it through the (same-network) offer.
     let clickWhere = where;
@@ -414,16 +441,22 @@ export function mountDetailReports(r: Router): void {
     }
     // Conversion Status filters the click rows; the `converted` column below stays "any status".
     if (f.conversionStatus) clickWhere += ` AND ${conversionStatusSql(f.conversionStatus, 'clicks.click_id', 'clicks.network_id', params)}`;
+    if (f.clickIds?.length) { params.push(f.clickIds); clickWhere += ` AND click_id = ANY($${params.length}::text[])`; }
+    // Rows return host(ip) — the plain address (no /32 mask) — so a value copied from the table filters.
+    if (f.ip) { params.push(f.ip); clickWhere += ` AND ip = $${params.length}::inet`; }
     params.push(f.limit, f.offset);
-    const { rows } = await query(
-      `SELECT click_id, created_at, offer_id, publisher_id, smart_link_id, ip::text AS ip, country, region, city, isp,
+    const { rows } = await query<{ referrer: string | null }>(
+      `SELECT click_id, created_at, offer_id, publisher_id, smart_link_id, host(ip) AS ip, country, region, city, isp,
               device, os, browser, is_unique, fraud_score, fraud_flags, sub1, sub2, sub3, sub4, sub5,
+              referrer, user_agent, currency, source_id, fbclid, gclid,
+              resolved_payout::text AS resolved_payout, resolved_revenue::text AS resolved_revenue,
               EXISTS(SELECT 1 FROM conversions cv WHERE cv.click_id = clicks.click_id AND cv.network_id = clicks.network_id) AS converted
          FROM clicks WHERE ${clickWhere}
         ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
-    sendOk(res, rows, { limit: f.limit, offset: f.offset });
+    // The referring page's URL can carry its own tokens — same redaction as postback URLs.
+    sendOk(res, rows.map((r) => ({ ...r, referrer: r.referrer == null ? null : redactUrl(r.referrer) })), { limit: f.limit, offset: f.offset });
   }));
 
   // ── Conversions report — row-level conversion log, incl. click-time context (geo/device/subs)

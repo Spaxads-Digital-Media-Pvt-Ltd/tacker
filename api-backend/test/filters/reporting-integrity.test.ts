@@ -394,6 +394,113 @@ describe('conversionStatus on /clicks and /grouped', () => {
   });
 });
 
+// ── Click Report filter modal: clickIds / ip / isUnique (Visibility) ──
+describe('Click Report filters: clickIds, ip, isUnique on /clicks and /grouped', () => {
+  const ID1 = 'a'.repeat(32);
+  const ID2 = '0123456789abcdef0123456789abcdef';
+  const clicksSql = () => calls().find((x) => /FROM clicks WHERE/.test(x.sql))!;
+
+  it('/clicks absent → unchanged filters; the row adds the stored referrer/user agent/currency/rates', async () => {
+    await request(reportsApp()).get('/clicks');
+    const { sql, params } = clicksSql();
+    expect(params).toEqual([NET, 100, 0]);
+    expect(sql).not.toMatch(/click_id = ANY|::inet/);
+    expect(sql).toMatch(/referrer, user_agent, currency, source_id, fbclid, gclid,\s+resolved_payout::text AS resolved_payout, resolved_revenue::text AS resolved_revenue/);
+    expect(sql).not.toMatch(/source_id = \$|fbclid = \$|gclid = \$/);
+  });
+
+  it('sourceId / fbclid / gclid: trimmed exact matches on the stored click-URL values', async () => {
+    for (const [k, col] of [['sourceId', 'source_id'], ['fbclid', 'fbclid'], ['gclid', 'gclid']] as const) {
+      queryMock.mockClear();
+      const res = await request(reportsApp()).get(`/clicks?${k}=${encodeURIComponent(' v-1 ')}`);
+      expect(res.status, k).toBe(200);
+      expect(clicksSql().sql, k).toContain(`AND ${col} = $2`);
+      expect(clicksSql().params, k).toEqual([NET, 'v-1', 100, 0]);
+    }
+    for (const bad of ['gclid=', `sourceId=${'x'.repeat(501)}`]) {
+      expect((await request(reportsApp()).get(`/clicks?${bad}`)).status, bad).toBe(422);
+    }
+  });
+
+  it('clickIds: trimmed, de-duplicated, empty entries dropped, bound as one text[]', async () => {
+    const res = await request(reportsApp()).get(`/clicks?clickIds=${encodeURIComponent(` ${ID1} ,,${ID2}, ${ID1}`)}`);
+    expect(res.status).toBe(200);
+    const { sql, params } = clicksSql();
+    expect(sql).toContain('AND click_id = ANY($2::text[])');
+    expect(params).toEqual([NET, [ID1, ID2], 100, 0]);
+  });
+
+  it('ip: exact inet match (v4 and v6)', async () => {
+    await request(reportsApp()).get('/clicks?ip=10.0.0.1');
+    expect(clicksSql().sql).toContain('AND ip = $2::inet');
+    expect(clicksSql().params).toEqual([NET, '10.0.0.1', 100, 0]);
+    queryMock.mockClear();
+    expect((await request(reportsApp()).get(`/clicks?ip=${encodeURIComponent('2001:db8::1')}`)).status).toBe(200);
+  });
+
+  it('combined with conversionStatus and isUnique, placeholders stay in order', async () => {
+    await request(reportsApp()).get(`/clicks?isUnique=false&conversionStatus=approved&clickIds=${ID1}&ip=10.0.0.1`);
+    const { sql, params } = clicksSql();
+    expect(params).toEqual([NET, false, 'approved', [ID1], '10.0.0.1', 100, 0]);
+    expect(sql).toContain('is_unique = $2');
+    expect(sql).toContain('cs.status = $3');
+    expect(sql).toContain('click_id = ANY($4::text[])');
+    expect(sql).toContain('ip = $5::inet');
+  });
+
+  it.each([
+    ['a malformed click id', `/clicks?clickIds=${ID1},nope`],
+    ['an upper-case click id (not the issued format)', `/clicks?clickIds=${ID1.toUpperCase()}`],
+    ['more than 100 click ids', `/clicks?clickIds=${Array.from({ length: 101 }, (_, i) => i.toString(16).padStart(32, '0')).join(',')}`],
+    ['an invalid ip', '/clicks?ip=10.0.0'],
+    ['an ip with a prefix', `/clicks?ip=${encodeURIComponent('10.0.0.1/32')}`],
+    ['grouped: a malformed click id', '/grouped?clickIds=nope'],
+    ['grouped: an invalid ip', '/grouped?ip=abc'],
+    ['grouped: an invalid isUnique', '/grouped?isUnique=yes'],
+  ])('%s → 422 before any query', async (_l, url) => {
+    expect((await request(reportsApp()).get(url)).status).toBe(422);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('the referrer in the response is redacted like postback URLs (stored row unchanged)', async () => {
+    queryMock.mockResolvedValue({ rows: [{ click_id: ID1, referrer: 'https://ref.example/p?token=SECRET&x=1' }], rowCount: 1 });
+    const res = await request(reportsApp()).get('/clicks');
+    expect(res.body.data[0].referrer).toBe('https://ref.example/p?token=[redacted]&x=1');
+    expect(JSON.stringify(res.body)).not.toContain('SECRET');
+  });
+
+  it('/grouped: clickIds on both sides (conversions use their own click_id); ip / isUnique join the click', async () => {
+    await request(reportsApp()).get(`/grouped?groupBy=offer&clickIds=${ID1}&ip=10.0.0.1&isUnique=true`);
+    const { sql, params } = calls()[0]!;
+    const cl = sql.slice(sql.indexOf('WITH cl AS'), sql.indexOf('), cv AS'));
+    const cv = sql.slice(sql.indexOf('), cv AS'), sql.indexOf('SELECT COALESCE(cl.k'));
+    expect(cl).toContain('c.click_id = ANY($2::text[])');
+    expect(cl).toContain('c.ip = $3::inet');
+    expect(cl).toContain('c.is_unique = $4');
+    expect(cv).toContain('LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id');
+    expect(cv).toContain('v.click_id = ANY($5::text[])');
+    expect(cv).toContain('k.ip = $6::inet');
+    expect(cv).toContain('k.is_unique = $7');
+    expect(params).toEqual([NET, [ID1], '10.0.0.1', true, [ID1], '10.0.0.1', true]);
+  });
+
+  it('/grouped: sourceId / fbclid / gclid filter the click on both sides (conversions via the joined click)', async () => {
+    await request(reportsApp()).get('/grouped?groupBy=offer&sourceId=s1&fbclid=f1&gclid=g1');
+    const { sql, params } = calls()[0]!;
+    const cl = sql.slice(sql.indexOf('WITH cl AS'), sql.indexOf('), cv AS'));
+    const cv = sql.slice(sql.indexOf('), cv AS'), sql.indexOf('SELECT COALESCE(cl.k'));
+    expect(cl).toContain('c.source_id = $2 AND c.fbclid = $3 AND c.gclid = $4');
+    expect(cv).toContain('LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id');
+    expect(cv).toContain('k.source_id = $5 AND k.fbclid = $6 AND k.gclid = $7');
+    expect(params).toEqual([NET, 's1', 'f1', 'g1', 's1', 'f1', 'g1']);
+  });
+
+  it('/grouped absent → no click join added for these filters', async () => {
+    await request(reportsApp()).get('/grouped?groupBy=offer');
+    expect(calls()[0]!.sql).not.toMatch(/LEFT JOIN clicks k|::inet|is_unique|source_id|fbclid|gclid/);
+  });
+});
+
 // ── Event report grouping ──
 describe('/goals groups by goal id; goal-less conversions are separate unmatched rows', () => {
   it('returns goal_id / unmatched / currencies per row and orders with a goal_id tie-break', async () => {

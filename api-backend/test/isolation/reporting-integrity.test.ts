@@ -264,6 +264,66 @@ d('reporting integrity (live DB)', () => {
       return id;
     }
 
+    describe('Click Report filters: clickIds, ip, isUnique (+ new click fields)', () => {
+      let offerCF: string;
+      const c: Record<string, string> = {};
+      const clickWith = async (networkId: string, offerId: string, ip: string, unique: boolean, extra: { referrer?: string; ua?: string; currency?: string; payout?: string } = {}) => {
+        const id = uid();
+        await query(
+          `INSERT INTO clicks (click_id, network_id, offer_id, publisher_id, created_at, ip, is_unique, referrer, user_agent, currency, resolved_payout)
+           VALUES ($1, $2, $3, NULL, now(), $4::inet, $5, $6, $7, $8, $9::numeric)`,
+          [id, networkId, offerId, ip, unique, extra.referrer ?? null, extra.ua ?? null, extra.currency ?? null, extra.payout ?? null]);
+        return id;
+      };
+      const ids = (res: { body: { data: { click_id: string }[] } }) => res.body.data.map((r) => r.click_id).sort();
+      beforeAll(async () => {
+        offerCF = await newOffer('Click filters');
+        c.v4 = await clickWith(fx.networkA, offerCF, '10.0.0.1', true, { referrer: 'https://r.example/p?api_key=K1&a=1', ua: 'QA-UA', currency: 'EUR', payout: '1.5' });
+        c.dup = await clickWith(fx.networkA, offerCF, '10.0.0.2', false);
+        c.v6 = await clickWith(fx.networkA, offerCF, '2001:db8::1', true);
+        // Another tenant's click with the same IP never appears.
+        c.other = await clickWith(fx.networkB, offerCF, '10.0.0.1', true);
+        await convFor({ offerId: offerCF, clickId: c.v4!, status: 'approved', payout: '2' });
+        await convFor({ offerId: offerCF, clickId: c.dup!, status: 'approved', payout: '3' });
+      });
+      const get = (qs: string) => request(app).get(`/api/reports/clicks?offerId=${offerCF}&limit=500&${qs}`).set(auth);
+
+      it('clickIds (comma list, spaces, duplicates) returns exactly those clicks', async () => {
+        const res = await get(`clickIds=${encodeURIComponent(` ${c.v4}, ${c.v6},${c.v4},`)}`);
+        expect(res.status).toBe(200);
+        expect(ids(res)).toEqual([c.v4!, c.v6!].sort());
+      });
+      it('ip matches exactly (IPv4 and IPv6) and stays inside the tenant', async () => {
+        expect(ids(await get('ip=10.0.0.1'))).toEqual([c.v4]);
+        expect(ids(await get(`ip=${encodeURIComponent('2001:db8::1')}`))).toEqual([c.v6]);
+        expect(ids(await get('ip=10.9.9.9'))).toEqual([]);
+        // The row's ip is the plain address (no /32), so it can be pasted straight into the filter.
+        expect((await get(`clickIds=${c.v4}`)).body.data[0].ip).toBe('10.0.0.1');
+      });
+      it('isUnique (Visibility): unique vs duplicate clicks; combined with clickIds', async () => {
+        expect(ids(await get('isUnique=false'))).toEqual([c.dup]);
+        expect(ids(await get('isUnique=true'))).toEqual([c.v4!, c.v6!].sort());
+        expect(ids(await get(`isUnique=true&clickIds=${c.v4},${c.dup}`))).toEqual([c.v4]);
+      });
+      it('rows carry the stored referrer (redacted), user agent, currency and click-time rates', async () => {
+        const row = (await get(`clickIds=${c.v4}`)).body.data[0];
+        expect(row).toMatchObject({ user_agent: 'QA-UA', currency: 'EUR', resolved_payout: '1.5000', referrer: 'https://r.example/p?api_key=[redacted]&a=1' });
+        const stored = (await query<{ referrer: string }>(`SELECT referrer FROM clicks WHERE click_id = $1`, [c.v4])).rows[0]!.referrer;
+        expect(stored).toContain('api_key=K1'); // the stored row is unchanged
+      });
+      it('/grouped applies the same filters to clicks and to their conversions', async () => {
+        const g = async (qs: string) => (await request(app).get(`/api/reports/grouped?groupBy=offer&offerId=${offerCF}&${qs}`).set(auth)).body.data.rows[0];
+        expect(await g(`clickIds=${c.v4}`)).toMatchObject({ clicks: 1, conversions: 1, payout: '2.0000' });
+        expect(await g('ip=10.0.0.2')).toMatchObject({ clicks: 1, conversions: 1, payout: '3.0000' });
+        expect(await g('isUnique=true')).toMatchObject({ clicks: 2, conversions: 1, payout: '2.0000' });
+      });
+      it('malformed values are 422s', async () => {
+        expect((await get('clickIds=nope')).status).toBe(422);
+        expect((await get('ip=10.0.0')).status).toBe(422);
+        expect((await request(app).get('/api/reports/grouped?isUnique=maybe').set(auth)).status).toBe(422);
+      });
+    });
+
     describe('conversionStatus', () => {
       let offerCS: string;
       const k: Record<string, string> = {};

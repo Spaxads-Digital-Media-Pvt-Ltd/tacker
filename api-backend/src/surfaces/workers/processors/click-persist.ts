@@ -30,10 +30,10 @@ async function persist(job: ClickJob): Promise<void> {
  click_id, network_id, offer_id, publisher_id, created_at, ip,
  country, region, city, isp, device, os, browser, referrer, user_agent,
  sub1, sub2, sub3, sub4, sub5, is_unique, fraud_score, fraud_flags,
- resolved_payout, resolved_revenue, currency, smart_link_id
+ resolved_payout, resolved_revenue, currency, smart_link_id, source_id, fbclid, gclid
  ) VALUES (
   $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
- $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
+ $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30
  )
   ON CONFLICT (click_id) DO NOTHING`,
  [
@@ -41,6 +41,7 @@ async function persist(job: ClickJob): Promise<void> {
  job.country, job.region, job.city, job.isp, job.device, job.os, job.browser, job.referrer, job.userAgent,
  job.sub1, job.sub2, job.sub3, job.sub4, job.sub5, job.isUnique, fraudScore, fraudFlags,
  job.resolvedPayout, job.resolvedRevenue, job.currency, job.smartLinkId,
+ job.sourceId ?? null, job.fbclid ?? null, job.gclid ?? null,
  ],
  );
 

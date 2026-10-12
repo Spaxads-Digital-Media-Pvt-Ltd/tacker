@@ -35,6 +35,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
+import { uaDimensionLabel } from '../../../lib/userAgentDisplay';
 import { Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { daysAgo, todayStr, toIso, DASH, num } from '../../../shared-components/primitives/ReportPageKit';
 import { combineCurrencies, currenciesOf, mixedTitle, resolveCurrency, showSortedWithinNote, withCurrenciesMetric, type RowCurrency } from '../../../lib/reportCurrency';
@@ -96,7 +97,7 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
   if (dim === 'country') return countryLabel(id);
-  return id;
+  return uaDimensionLabel(dim, id);
 }
 
 /** Add the query-string filter params from every OTHER dimension's active selection — a dimension

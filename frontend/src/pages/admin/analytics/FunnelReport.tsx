@@ -29,6 +29,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronDown, MoreVertical, Search } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
+import { uaDimensionLabel } from '../../../lib/userAgentDisplay';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
@@ -66,7 +67,7 @@ type ChildDim = (typeof CHILD_DIM_OPTIONS)[number]['key'];
 
 function resolveChildName(dim: ChildDim, raw: string, opts: Opts): string {
   if (dim === 'publisher') { const m = opts.pubMap.get(raw); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : raw.slice(0, 8) + '…'; }
-  return raw;
+  return uaDimensionLabel(dim, raw);
 }
 function linkForChild(dim: ChildDim, raw: string): string | null {
   return dim === 'publisher' ? `/app/publishers/${raw}` : null;

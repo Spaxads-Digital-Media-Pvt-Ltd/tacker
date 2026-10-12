@@ -26,6 +26,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
+import { displayBrowser, displayOs } from '../../lib/userAgentDisplay';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
@@ -249,7 +250,7 @@ export default function ConversionReport() {
     clickDate: r.click_created_at ? formatDate(r.click_created_at) : DASH, delta: formatDelta(r.delta_seconds),
     timezone: zone.tz,
     country: r.country ? countryName(r.country) : DASH, region: regionLabel(r), city: r.city ?? DASH, isp: r.isp ?? DASH,
-    device: r.device ?? DASH, os: r.os ?? DASH, browser: r.browser ?? DASH, fraud: r.fraud_score,
+    device: r.device ?? DASH, os: displayOs(r.os).text ?? DASH, browser: displayBrowser(r.browser).text ?? DASH, fraud: r.fraud_score,
     sub1: r.sub1 ?? DASH, sub2: r.sub2 ?? DASH, sub3: r.sub3 ?? DASH, sub4: r.sub4 ?? DASH, sub5: r.sub5 ?? DASH,
   });
   // Every conversion matching the applied filters, not just the visible page.
@@ -384,8 +385,8 @@ export default function ConversionReport() {
                       {shown.has('City') && <td className="px-4 py-3">{r.city ?? DASH}</td>}
                       {shown.has('ISP') && <td className="px-4 py-3">{r.isp ?? DASH}</td>}
                       {shown.has('Device') && <td className="px-4 py-3 capitalize">{r.device ?? DASH}</td>}
-                      {shown.has('OS') && <td className="px-4 py-3">{r.os ?? DASH}</td>}
-                      {shown.has('Browser') && <td className="px-4 py-3">{r.browser ?? DASH}</td>}
+                      {shown.has('OS') && <td className="px-4 py-3" title={displayOs(r.os).note}>{displayOs(r.os).text ?? DASH}</td>}
+                      {shown.has('Browser') && <td className="px-4 py-3" title={displayBrowser(r.browser).note}>{displayBrowser(r.browser).text ?? DASH}</td>}
                       {shown.has('Fraud') && <td className={`px-4 py-3 text-right ${r.fraud_score >= 40 ? 'text-danger-text' : r.fraud_score > 0 ? 'text-warning-text' : ''}`}>{r.fraud_score}</td>}
                       {shown.has('Sub1') && <td className="px-4 py-3">{r.sub1 ?? DASH}</td>}
                       {shown.has('Sub2') && <td className="px-4 py-3">{r.sub2 ?? DASH}</td>}

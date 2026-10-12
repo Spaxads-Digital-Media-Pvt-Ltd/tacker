@@ -31,6 +31,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronRight, MoreVertical, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
+import { uaDimensionLabel } from '../../../lib/userAgentDisplay';
 import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
@@ -90,7 +91,7 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'publisher') { const m = opts.pubMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
-  return id;
+  return uaDimensionLabel(dim, id);
 }
 
 function linkFor(dim: DimKey, id: string): string | null {

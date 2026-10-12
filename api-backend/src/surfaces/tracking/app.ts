@@ -15,6 +15,8 @@ import { lookupGeo, geoAvailable, carrierAvailable } from '../../lib/geo/geoip.j
 import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
 import { parseUA } from '../../lib/ua.js';
+import { logger } from '../../lib/logger.js';
+import { buildTrustedProxyCheck } from './trusted-proxy.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
@@ -87,52 +89,19 @@ function divertToCatchAll(reply: FastifyReply, catchAllOfferId: string | null): 
 // X-Forwarded-For headers cannot be trusted unless the immediate socket peer is a known proxy.
 // Cloudflare + nginx must be the only direct front-ends. A direct-connect attacker who bypasses
 // them hits this check regardless of host-header spoofing. Skipped in dev/test for local work.
-const CLOUDFLARE_IPV4 = [
- '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
- '141.101.64.0/18', '188.114.96.0/19', '190.93.240.0/20', '197.234.240.0/22',
- '198.41.128.0/17', '162.158.0.0/16', '104.16.0.0/12', '108.162.192.0/18',
- '131.0.72.0/22', '141.0.0.0/9', '162.247.74.0/23', '172.64.0.0/13',
- '173.0.0.0/8', '185.45.0.0/22', '188.68.0.0/22', '194.36.144.0/20',
- '197.0.0.0/9', '198.51.100.0/24', '203.119.32.0/22', '203.32.120.0/22',
-];
-
-function ipInCidr(ip: string, cidr: string): boolean {
- const [net, bits] = cidr.split('/');
- const bitsNum = Number(bits ?? '0');
- const mask = bitsNum === 0 ? 0 : (~0 << (32 - bitsNum)) >>> 0;
- const ipNum = ip.split('.').reduce((a, b) => (a << 8) + Number(b), 0) >>> 0;
- const netParts = net!.split('.');
- const netNum = netParts.reduce((a, b) => (a << 8) + Number(b), 0) >>> 0;
- return (ipNum & mask) === (netNum & mask);
-}
-
-function isTrustedProxy(ip: string): boolean {
- if (!ip) return false;
- const bare = ip.replace(/^::ffff:/i, '').replace(/^::1$/, '127.0.0.1');
- const parts = bare.split('.');
- const allNumeric = parts.length === 4 && parts.every(p => /^\d+$/.test(p));
- if (allNumeric) {
- if (bare === '127.0.0.1' || bare === '0.0.0.0') return true;
- for (const cidr of CLOUDFLARE_IPV4) {
- if (ipInCidr(bare, cidr)) return true;
- }
- }
- if (env.TRACKING_TRUSTED_PROXIES) {
- for (const extra of env.TRACKING_TRUSTED_PROXIES.split(',').map(s => s.trim()).filter(Boolean)) {
- if (extra.includes('/')) {
- if (allNumeric && ipInCidr(bare, extra)) return true;
- } else {
- if (bare === extra) return true;
- }
- }
- }
- return false;
-}
+// Loopback, Cloudflare's published ranges (IPv4 + IPv6) and TRACKING_TRUSTED_PROXIES — see trusted-proxy.ts.
+const isTrustedProxy = buildTrustedProxyCheck(env.TRACKING_TRUSTED_PROXIES, (entry) =>
+ logger.warn({ entry }, 'TRACKING_TRUSTED_PROXIES: ignoring malformed entry (not an IP or CIDR)'));
 
 export function buildTrackingApp(): FastifyInstance {
  const app = Fastify({
  logger: { level: env.LOG_LEVEL },
- trustProxy: true, // Cloudflare → Nginx → us; req.ip is the real client IP.
+ // Cloudflare → Nginx → us. X-Forwarded-For is walked from the RIGHT and only hops from a trusted
+ // proxy (isTrustedProxy: loopback, Cloudflare, TRACKING_TRUSTED_PROXIES) are skipped, so req.ip is
+ // the first untrusted address — the real client. `true` trusted every hop and took the LEFTMOST
+ // entry, which the client itself can write (a spoofed "X-Forwarded-For: 1.2.3.4" became the click IP).
+ // A direct connection (no trusted proxy in front) keeps its socket address — e.g. 127.0.0.1 locally.
+ trustProxy: (address: string) => isTrustedProxy(address),
  disableRequestLogging: true, // hot path: we log our own compact line
  });
 
@@ -310,6 +279,8 @@ export function buildTrackingApp(): FastifyInstance {
  fraudFlags: tcMatch?.action === 'fail_traffic' ? [...fraud.flags, 'traffic_control'] : fraud.flags,
  resolvedPayout, resolvedRevenue, currency: offer.currency,
  smartLinkId,
+ // Taken verbatim from the click URL (already parsed — no extra work on the hot path); absent → null.
+ sourceId, fbclid: firstStr(q['fbclid']) ?? null, gclid: firstStr(q['gclid']) ?? null,
  ipqs: offer.attribution?.ipqs?.enabled ?? false,
  };
  await enqueueClick(job);

@@ -42,10 +42,11 @@
 **Why it matters**: Lower volume than `/click`, but under high smart-link traffic, this could be a latency issue.
 
 ### 7. Tracking Surface Trust Proxy
-**Location**: `api-backend/src/surfaces/tracking/app.ts:80`
-**Severity**: Info
-**Issue**: `trustProxy: true` is set on the Fastify instance, meaning `req.ip` reflects the real client IP behind Cloudflare/Nginx. If the tracking surface is ever exposed directly (without a proxy), `req.ip` would be wrong.
-**Why it matters**: IP-based geo lookups and fraud checks would be incorrect.
+**Location**: `api-backend/src/surfaces/tracking/trusted-proxy.ts` (used by `trustProxy` and the production direct-connection guard in `tracking/app.ts`)
+**Severity**: Info (fixed) / deployment assumption
+**Status**: Fixed. `trustProxy: true` (took the client-writable LEFTMOST `X-Forwarded-For` entry as the click IP) became a trust check that walks the chain from the right and stops at the first untrusted hop; the hand-made Cloudflare list (bogus ranges such as `173.0.0.0/8`, `141.0.0.0/9`, TEST-NET-2, no IPv6) was replaced by Cloudflare's published IPv4 + IPv6 ranges (tests: `test/isolation/trusted-proxy.test.ts`, `test/integration/click-capture.test.ts`).
+**Remaining**: (1) Cloudflare's ranges are pinned in code — re-check https://www.cloudflare.com/ips-v4/ and /ips-v6/ when they change. (2) The repo has no Nginx config, so the topology is assumed: Nginx on the same host (loopback) appending to `X-Forwarded-For` (`proxy_add_x_forwarded_for`). If Nginx/a load balancer runs on another host, add its address to `TRACKING_TRUSTED_PROXIES`, or every click IP will be that proxy (and the production guard will reject it). If Nginx overwrites `X-Forwarded-For` with `$remote_addr`, the click IP becomes the Cloudflare edge. (3) Loopback is trusted, so in local dev a client on loopback can set `X-Forwarded-For`.
+**Why it matters**: IP-based geo lookups, fraud checks and IP filters depend on `req.ip`.
 
 ### 8. Redis Cache Staleness
 **Location**: `api-backend/src/surfaces/tracking/offer-cache.ts`
