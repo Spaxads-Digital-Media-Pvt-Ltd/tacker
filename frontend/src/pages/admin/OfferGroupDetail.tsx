@@ -2,8 +2,8 @@
  * Offers › Groups › Offer Group Details — matches the reference's own dedicated page (verified live
  * at /offers/groups/3): General/Offers/History tabs, a "General" card (Edit), a "Stats" card (real,
  * from the same today-aggregate as the list page), a "Caps" card rendering the real Click/
- * Conversion/Payout/Revenue × Daily/Weekly/Monthly/Global matrix, and an "Offers" tab listing the
- * group's real member offers.
+ * Conversion/Payout/Revenue × Daily/Weekly/Monthly/Global matrix (marked "Not enforced": nothing reads
+ * group caps on the click or conversion path), and an "Offers" tab listing the group's real member offers.
  */
 import { useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
@@ -11,18 +11,32 @@ import { Pencil } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../shared-components/primitives/ui';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
+import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedBadge';
 import { fmtDateTime, fmtMoney, CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL, type OfferGroup } from '../../data/offerGroups';
 import type { Advertiser, Offer } from '../../types';
+import { parseMoneyByCurrency, resolveCurrency } from '../../lib/reportCurrency';
+import { Money } from '../../shared-components/primitives/ReportMoney';
 
 function DateTimeValue({ iso }: { iso: string }) {
   const { date, time } = fmtDateTime(iso);
   return <>{date}<span className="mt-0.5 block text-tiny text-fg-secondary">{time}</span></>;
 }
 
-interface Stats { revenue: string; payout: string; margin: string; clicks: number; cv: number; cvr: number }
+/** `currencies` / `moneyByCurrency` (newer API): the conversions' own currencies and the money per currency. */
+interface Stats { revenue: string; payout: string; margin: string; clicks: number; cv: number; cvr: number; currencies?: string[]; moneyByCurrency?: unknown }
 
-function StatsCard({ id }: { id: string }) {
+/**
+ * Today's stats are conversion money — in the conversions' currency, not the group's (`currency`,
+ * used only when there are none). Several currencies → per-currency amounts, never one sum. An older
+ * API without `currencies` keeps the previous "$" display.
+ */
+function StatsCard({ id, currency }: { id: string; currency: string }) {
   const { data } = useQuery<Stats>(`/api/offer-groups/${id}/stats`);
+  const rc = data?.currencies ? resolveCurrency(data.currencies, currency) : null;
+  const breakdown = parseMoneyByCurrency(data?.moneyByCurrency);
+  const cell = (field: 'revenue' | 'payout' | 'margin') => (rc
+    ? <Money value={Number(data?.[field] ?? 0)} rc={rc} breakdown={breakdown} field={field} roomy />
+    : fmtMoney(data?.[field]));
   const today = new Date().toISOString().slice(0, 10);
   return (
     <InfoCard title="Stats" action={
@@ -38,7 +52,7 @@ function StatsCard({ id }: { id: string }) {
           </thead>
           <tbody className="tabular-nums">
             <tr>
-              <td className="pr-4 pt-1">{fmtMoney(data?.revenue)}</td><td className="pr-4 pt-1">{fmtMoney(data?.payout)}</td><td className="pr-4 pt-1">{fmtMoney(data?.margin)}</td>
+              <td className="pr-4 pt-1">{cell('revenue')}</td><td className="pr-4 pt-1">{cell('payout')}</td><td className="pr-4 pt-1">{cell('margin')}</td>
               <td className="pr-4 pt-1">{data?.clicks ?? 0}</td><td className="pr-4 pt-1">{data?.cv ?? 0}</td><td className="pt-1">{((data?.cvr ?? 0) * 100).toFixed(2)}%</td>
             </tr>
           </tbody>
@@ -73,10 +87,8 @@ function CapsCard({ data, id, nav }: { data: OfferGroup; id: string; nav: (p: st
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-[11px] text-fg-muted">
-            Stored for reference and reporting. Group-level shared caps aren't enforced at the click hot path yet — only each
-            member offer's own Daily Click Cap is.
-          </p>
+          {/* Nothing reads offer-group caps on the click or conversion path — only the offers' own caps are enforced. */}
+          <NotEnforcedNote className="mt-2" />
         </>
       )}
     </InfoCard>
@@ -170,7 +182,7 @@ export default function OfferGroupDetail() {
                 <InfoRow label="Notes" value={data.notes} />
               </InfoGrid>
             </InfoCard>
-            <StatsCard id={id} />
+            <StatsCard id={id} currency={data.currency || 'USD'} />
             <div className="xl:col-span-2"><CapsCard data={data} id={id} nav={nav} /></div>
           </div>
         )}

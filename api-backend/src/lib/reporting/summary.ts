@@ -5,14 +5,14 @@
  * Owner scope is pinned via forceFilters (a publisher summary is always their own publisher_id).
  */
 import { getReportingProvider } from './index.js';
-import type { ReportAudience } from './request.js';
-import type { Metric, ReportFilters } from './types.js';
+import { audienceMoneyFields, type ReportAudience } from './request.js';
+import type { Metric, MoneyByCurrency, ReportFilters } from './types.js';
 
 const METRICS_BY_AUDIENCE: Record<ReportAudience, Metric[]> = {
-  admin: ['clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc'],
-  network: ['clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc'],
-  publisher: ['clicks', 'conversions', 'cr', 'payout', 'epc'],
-  advertiser: ['clicks', 'conversions', 'cr', 'revenue'],
+  admin: ['clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'currencies', 'money_by_currency'],
+  network: ['clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'currencies', 'money_by_currency'],
+  publisher: ['clicks', 'conversions', 'cr', 'payout', 'epc', 'currencies', 'money_by_currency'],
+  advertiser: ['clicks', 'conversions', 'cr', 'revenue', 'currencies', 'money_by_currency'],
 };
 
 export interface KpiSummary {
@@ -23,6 +23,10 @@ export interface KpiSummary {
   revenue?: string;
   margin?: string;
   epc?: number;
+  /** Distinct currencies of the approved conversions behind the money tiles (more than one = mixed sum). */
+  currencies: string[];
+  /** The same money split by currency — only the fields this audience may see; {} when none. */
+  moneyByCurrency: MoneyByCurrency;
 }
 
 export async function summary24h(
@@ -32,11 +36,14 @@ export async function summary24h(
   const metrics = METRICS_BY_AUDIENCE[audience];
   const result = await getReportingProvider().runReport({
     networkId, groupBy: [], metrics, filters: { from, ...forceFilters }, limit: 1, offset: 0,
+    moneyFields: audienceMoneyFields(audience),
   });
   const m = result.rows[0]?.metrics ?? {};
   const num = (k: string) => Number(m[k] ?? 0);
   const str = (k: string) => (m[k] == null ? undefined : String(m[k]));
-  const out: KpiSummary = { clicks: num('clicks'), conversions: num('conversions'), cr: num('cr') };
+  const cur = m['currencies'];
+  const out: KpiSummary = { clicks: num('clicks'), conversions: num('conversions'), cr: num('cr'), currencies: Array.isArray(cur) ? cur : [],
+    moneyByCurrency: (m['money_by_currency'] && typeof m['money_by_currency'] === 'object' && !Array.isArray(m['money_by_currency']) ? m['money_by_currency'] : {}) as MoneyByCurrency };
   if ('payout' in m) out.payout = str('payout');
   if ('revenue' in m) out.revenue = str('revenue');
   if ('margin' in m) out.margin = str('margin');

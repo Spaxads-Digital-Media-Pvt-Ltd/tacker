@@ -6,8 +6,14 @@
  * endpoint (api-backend/src/surfaces/dashboard/reports/detail-reports.ts) computing the real delta
  * between conversion.created_at and the originating click's created_at (via click_id), bucketed in
  * SQL — the same delta already surfaced per-row on Conversion Report, aggregated here into a
- * distribution. Conversions with no resolvable click (offline/manual) are honestly excluded rather
- * than bucketed as instant, since there's no click to measure a delta from.
+ * distribution. Only conversions that join to their click count: one with no resolvable click is
+ * left out rather than bucketed as instant (there's no click to measure from), while an
+ * offline/manual conversion entered with a real click ID is included like any other. The first
+ * bucket also takes conversions stamped up to a few seconds before their click (clock skew).
+ *
+ * Which statuses count: approved by default (no `status` param — the endpoint's own default);
+ * Reporting Filters › "Conversion Status" switches to pending, rejected or all statuses, sent as
+ * `status` and mirrored to the URL. The default is spelled out in the results bar, not implied.
  *
  * Summary Graph is a real bar chart of network-wide bucket totals, summed client-side from the same
  * rows already fetched for the table — no separate API call. The reference also has a unit switcher
@@ -17,7 +23,7 @@
  * Row kebab has one real item (View Offer), matching the reference.
  *
  * No "Run Report": dates apply on their own once they form a valid range (see useAutoDateRange), the
- * Offer filter and its chips immediately.
+ * Offer / Conversion Status filters and their chips immediately.
  */
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -34,6 +40,7 @@ import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
+import { C2C_DEFAULT_STATUS, C2C_STATUS_OPTIONS, C2C_STATUS_PARAM, readStatusParam, statusParamValue } from '../../lib/reportStatusFilters';
 
 interface BucketRow { key: string; b0: number; b1: number; b2: number; b3: number; b4: number; b5: number; b6: number; total: number }
 /** `total` = number of groups matching; `truncated` = more groups exist beyond limit+offset. */
@@ -49,10 +56,11 @@ function RowActionMenu({ offerId }: { offerId: string }) {
   return <RowKebabMenu items={[{ label: 'View Offer', onClick: () => nav(`/app/offers/${offerId}`) }]} />;
 }
 
-function ExpandedPartnerRows({ offerId, publishers, from, to }: { offerId: string; publishers: Publisher[]; from: string; to: string }) {
-  // Same date range as the parent row (it used to be all-time).
+function ExpandedPartnerRows({ offerId, publishers, from, to, status }: { offerId: string; publishers: Publisher[]; from: string; to: string; status: string | undefined }) {
+  // Same date range and Conversion Status as the parent row (it used to be all-time).
   const qs = new URLSearchParams({
     groupBy: 'publisher', offerId, from: toIso(from), to: toIso(to, true), limit: String(GROUP_LIMIT),
+    ...(status ? { [C2C_STATUS_PARAM]: status } : {}),
   }).toString();
   const { data, loading, error } = useQuery<BucketResult>(`/api/reports/click-to-conversion-time?${qs}`);
   const rows = data?.rows ?? [];
@@ -78,12 +86,16 @@ function ExpandedPartnerRows({ offerId, publishers, from, to }: { offerId: strin
 
 /** Filter-drawer category ⇄ URL/API param. */
 const URL_FILTER_PARAMS: [category: string, param: string][] = [['offer', 'offerId']];
+/** "Conversion Status" category key — its URL/API param is `status`, validated on read. */
+const STATUS_CATEGORY = 'status';
 
-/** Applied report state from the URL (reload / shared link / deep links): dates + the Offer filter. */
+/** Applied report state from the URL (reload / shared link / deep links): dates + the Offer / Status filters. */
 function readInitialState() {
   const sp = new URLSearchParams(window.location.search);
   const offerIds = readUrlIds(sp, 'offerId').slice(0, 1); // single-select
   const filters: Record<string, string[]> = offerIds.length ? { offer: offerIds } : {};
+  const status = readStatusParam(sp, C2C_STATUS_PARAM, C2C_STATUS_OPTIONS);
+  if (status) filters[STATUS_CATEGORY] = [status];
   return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
 }
 
@@ -101,6 +113,8 @@ export default function ClickToConversionTimeReport() {
     const next = new URLSearchParams();
     next.set('from', range.appliedFrom); next.set('to', range.appliedTo);
     for (const [cat, param] of URL_FILTER_PARAMS) { const v = filters[cat]?.[0]; if (v) next.set(param, v); }
+    const status = statusParamValue(filters[STATUS_CATEGORY], C2C_STATUS_OPTIONS);
+    if (status) next.set(C2C_STATUS_PARAM, status);
     return next.toString();
   }, [range.appliedFrom, range.appliedTo, filters]);
   useEffect(() => {
@@ -119,8 +133,12 @@ export default function ClickToConversionTimeReport() {
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
+    { key: STATUS_CATEGORY, label: 'Conversion Status', options: [...C2C_STATUS_OPTIONS] },
   ], [offers]);
   const offerIdFilter = filters['offer']?.[0];
+  // undefined = no param = the endpoint's default (approved only).
+  const statusFilter = statusParamValue(filters[STATUS_CATEGORY], C2C_STATUS_OPTIONS);
+  const statusLabel = C2C_STATUS_OPTIONS.find((o) => o.value === (statusFilter ?? C2C_DEFAULT_STATUS))?.label;
   const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
 
   const qs = (extra: Record<string, string | number | undefined>) => {
@@ -128,7 +146,7 @@ export default function ClickToConversionTimeReport() {
     for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
     return params.toString();
   };
-  const baseParams = { from: toIso(appliedFrom), to: toIso(appliedTo, true), groupBy: 'offer', offerId: offerIdFilter };
+  const baseParams = { from: toIso(appliedFrom), to: toIso(appliedTo, true), groupBy: 'offer', offerId: offerIdFilter, [C2C_STATUS_PARAM]: statusFilter };
   const tableQs = qs({ ...baseParams, limit: GROUP_LIMIT });
   // Every offer group matching the applied filters (pages past the 500 the table loads).
   const runExport = (format: 'csv' | 'xlsx') => {
@@ -140,6 +158,7 @@ export default function ClickToConversionTimeReport() {
           offer: offerMap.get(r.key) ?? r.key,
           ...Object.fromEntries(BUCKET_LABELS.map((l, i) => [l, bucketVals(r)[i]])),
           total: r.total,
+          conversionStatus: statusFilter ?? C2C_DEFAULT_STATUS, // which statuses these counts cover
         })),
       };
     });
@@ -209,6 +228,11 @@ export default function ClickToConversionTimeReport() {
           <button type="button" className={`btn-ghost ${CONTROL}`} disabled={exp.busy} onClick={() => runExport('csv')}>Export CSV</button>
           <button type="button" className={`btn-ghost ${CONTROL}`} disabled={exp.busy} onClick={() => runExport('xlsx')}>Export Excel</button>
         </>}>
+          {!statusFilter && (
+            <span className="text-tiny text-fg-muted" title="No Conversion Status filter — the report counts approved conversions only">
+              Conversion Status: {statusLabel}
+            </span>
+          )}
           <ActiveFilterChips chips={chipsFromValues(FILTER_CATEGORIES, filters)}
             onRemove={(c) => { setFilters(withoutValue(filters, c.key, c.value)); toFirstPage(); }}
             onClearAll={() => { setFilters({}); toFirstPage(); }} />
@@ -231,7 +255,10 @@ export default function ClickToConversionTimeReport() {
                 <thead>
                   <tr>
                     <th >Offer</th>
-                    {BUCKET_LABELS.map((l) => <th key={l} className="text-right font-semibold">{l}</th>)}
+                    {BUCKET_LABELS.map((l, i) => (
+                      <th key={l} className="text-right font-semibold"
+                        title={i === 0 ? 'Includes conversions recorded up to a few seconds before the click (clock skew)' : undefined}>{l}</th>
+                    ))}
                     <th className="w-9" />
                   </tr>
                 </thead>
@@ -248,7 +275,7 @@ export default function ClickToConversionTimeReport() {
                         {bucketVals(r).map((v, i) => <td key={i} className="px-4 py-3 text-right">{v.toLocaleString()}</td>)}
                         <td className="text-right"><RowActionMenu offerId={r.key} /></td>
                       </tr>
-                      {expanded.has(r.key) && <ExpandedPartnerRows offerId={r.key} publishers={publishers ?? []} from={appliedFrom} to={appliedTo} />}
+                      {expanded.has(r.key) && <ExpandedPartnerRows offerId={r.key} publishers={publishers ?? []} from={appliedFrom} to={appliedTo} status={statusFilter} />}
                     </Fragment>
                   ))}
                 </tbody>
@@ -264,7 +291,7 @@ export default function ClickToConversionTimeReport() {
       </ReportCard>
 
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/click-to-conversion-time?${tableQs}`} appliedFilters={{
-        from: appliedFrom, to: appliedTo, offer: offerIdFilter,
+        from: appliedFrom, to: appliedTo, offer: offerIdFilter, conversionStatus: statusLabel,
       }} />}
     </>
   );

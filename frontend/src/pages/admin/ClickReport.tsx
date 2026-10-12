@@ -8,7 +8,16 @@
  * detail-reports.ts) — already real, already filtered/parameterized, no rebuild needed there.
  *
  * Two small honest backend additions: a `converted` flag (EXISTS against conversions.click_id —
- * mirrors the reference's real "Converted" column) and `smart_link_id` in the row payload.
+ * mirrors the reference's real "Converted" column; any status, so pending/rejected count too, unlike
+ * the grouped mode's approved-only Conversions) and `smart_link_id` in the row payload.
+ *
+ * Reporting Filters › "Conversion Status" (both modes) sends `conversionStatus`: only clicks with a
+ * conversion in that status (Any / Approved / Pending / Rejected), or "Not converted" for clicks
+ * with none. No selection sends nothing — every click, as before. It narrows which clicks are
+ * listed; the Converted column itself still means "has a conversion of any status".
+ *
+ * Group-By money is in each group's own currency (`currencies` — lib/reportCurrency): a group whose
+ * conversions mix currencies shows "Mixed" instead of a cross-currency sum.
  *
  * Columns shown are a reduced, fully-backed subset of the reference's ~45 (Date, Converted, Offer,
  * Partner, Country, Region, City, ISP, Device, OS, Browser, Unique, Fraud, IP Address, Sub1-5) —
@@ -27,6 +36,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, MoreVertical, ChevronLeft, ChevronRight, Check, X } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
+import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
@@ -42,6 +52,9 @@ import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZon
 import { useReportTimeZone } from '../../lib/useReportTimeZone';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
+import { CONVERSION_STATUS_OPTIONS, CONVERSION_STATUS_PARAM, readStatusParam, statusParamValue } from '../../lib/reportStatusFilters';
+import { parseMoneyByCurrency, resolveCurrency, withRowCurrency, type RowCurrency } from '../../lib/reportCurrency';
+import { Money } from '../../shared-components/primitives/ReportMoney';
 
 interface SmartLink { id: string; name: string }
 interface ClickRow {
@@ -55,7 +68,13 @@ interface ClickRow {
 interface GroupedRow {
   key: string; id: number | null; label: string; currency: string;
   clicks: number; conversions: number; payout: string; revenue: string; profit: string; cr: number; epc: number;
+  /** Distinct currencies of the group's money-bearing conversions (newer API) — see lib/reportCurrency. */
+  currencies?: string[];
+  /** Per-currency payout/revenue/margin (newer API) — a mixed group lists them in its "Mixed" tooltip. */
+  moneyByCurrency?: unknown;
 }
+/** A group's money currency: its conversions' one currency, "mixed", or (none / older API) `currency`. */
+const groupedCurrency = (r: GroupedRow): RowCurrency => resolveCurrency(r.currencies, r.currency || 'USD');
 
 const ALL_COLUMNS = [
   'Converted', 'Offer', 'Partner', 'Country', 'Region', 'City', 'ISP', 'Device', 'OS', 'Browser',
@@ -74,6 +93,8 @@ const URL_FILTER_PARAMS: [category: string, param: string][] = [
   ['offer', 'offerId'], ['advertiser', 'advertiserId'], ['partner', 'publisherId'],
   ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
 ];
+/** "Conversion Status" category key — its URL/API param is `conversionStatus`, validated on read. */
+const CONVERSION_STATUS_CATEGORY = 'conversionStatus';
 
 /** Applied report state from the URL (reload / shared link / legacy deep links). */
 function readInitialState() {
@@ -84,6 +105,8 @@ function readInitialState() {
     const ids = readUrlIds(sp, param).slice(0, 1); // the drawer is single-select per category
     if (ids.length) filters[cat] = ids;
   }
+  const conversionStatus = readStatusParam(sp, CONVERSION_STATUS_PARAM, CONVERSION_STATUS_OPTIONS);
+  if (conversionStatus) filters[CONVERSION_STATUS_CATEGORY] = [conversionStatus];
   return {
     from: readUrlDate(sp, 'from', daysAgo(7)),
     to: readUrlDate(sp, 'to', todayStr()),
@@ -133,6 +156,7 @@ export default function ClickReport() {
     { key: 'smartLink', label: 'Smart Link', options: (smartLinks ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: countryOptions },
     { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
+    { key: CONVERSION_STATUS_CATEGORY, label: 'Conversion Status', options: [...CONVERSION_STATUS_OPTIONS] },
   ], [offers, advertisers, publishers, smartLinks, countryOptions]);
 
   const offerIdFilter = filters['offer']?.[0];
@@ -141,6 +165,7 @@ export default function ClickReport() {
   const smartLinkIdFilter = filters['smartLink']?.[0];
   const countryFilter = filters['country']?.[0];
   const deviceFilter = filters['device']?.[0];
+  const conversionStatusFilter = statusParamValue(filters[CONVERSION_STATUS_CATEGORY], CONVERSION_STATUS_OPTIONS);
   // Timestamps follow the filtered country's zone (else network/browser) — re-formatting only.
   const zone = useReportTimeZone(countryFilter);
   const regions = useRegions();
@@ -157,7 +182,7 @@ export default function ClickReport() {
   const baseParams = {
     from: toIso(appliedFrom), to: toIso(appliedTo, true),
     offerId: offerIdFilter, advertiserId: advertiserIdFilter, publisherId: publisherIdFilter, smartLinkId: smartLinkIdFilter,
-    country: countryFilter, device: deviceFilter,
+    country: countryFilter, device: deviceFilter, [CONVERSION_STATUS_PARAM]: conversionStatusFilter,
   };
   const tableQs = groupBy
     ? qs({ groupBy, ...baseParams })
@@ -171,8 +196,9 @@ export default function ClickReport() {
     next.set('from', appliedFrom); next.set('to', appliedTo);
     if (groupBy) next.set('groupBy', groupBy);
     for (const [cat, param] of URL_FILTER_PARAMS) { const v = filters[cat]?.[0]; if (v) next.set(param, v); }
+    if (conversionStatusFilter) next.set(CONVERSION_STATUS_PARAM, conversionStatusFilter);
     return next.toString();
-  }, [appliedFrom, appliedTo, groupBy, filters]);
+  }, [appliedFrom, appliedTo, groupBy, filters, conversionStatusFilter]);
   useEffect(() => {
     if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
   }, [urlState, setSearchParams]);
@@ -225,14 +251,17 @@ export default function ClickReport() {
     fraud: r.fraud_score, ip: r.ip ?? DASH,
     sub1: r.sub1 ?? DASH, sub2: r.sub2 ?? DASH, sub3: r.sub3 ?? DASH, sub4: r.sub4 ?? DASH, sub5: r.sub5 ?? DASH,
   });
-  // Every row matching the applied filters (not just this page); grouped mode exports the groups.
+  // Every row matching the applied filters (not just this page); grouped mode exports the groups,
+  // fetched for the applied filters at export time — the table's `groupedQ.data` still holds the
+  // previous filters' groups while a new request is in flight.
   const runExport = (format: 'csv' | 'xlsx') => {
     if (groupBy) {
       void exp.run(format, `click-report-by-${groupBy}`, async () => ({
-        rows: allGroupedRows.map((r) => ({
+        // Money in the group's currency — "MIXED" with payout/revenue/profit left empty when it mixes currencies.
+        rows: ((await api.get<{ rows: GroupedRow[] }>(`/api/reports/grouped?${qs({ groupBy, ...baseParams })}`))?.rows ?? []).map((r) => withRowCurrency({
           [groupByLabel(groupBy)]: groupedLabel(r), clicks: r.clicks, conversions: r.conversions,
           cr: `${r.cr.toFixed(2)}%`, payout: r.payout, revenue: r.revenue, profit: r.profit,
-        })),
+        }, groupedCurrency(r), ['payout', 'revenue', 'profit'])),
       }));
       return;
     }
@@ -343,9 +372,9 @@ export default function ClickReport() {
                     <td className="text-right tabular-nums">{r.clicks.toLocaleString()}</td>
                     <td className="text-right tabular-nums">{r.conversions.toLocaleString()}</td>
                     <td className="text-right tabular-nums">{r.cr.toFixed(2)}%</td>
-                    <td className="text-right tabular-nums">{r.payout}</td>
-                    <td className="text-right tabular-nums">{r.revenue}</td>
-                    <td className="text-right tabular-nums">{r.profit}</td>
+                    <td className="text-right tabular-nums"><Money value={Number(r.payout)} rc={groupedCurrency(r)} breakdown={parseMoneyByCurrency(r.moneyByCurrency)} field="payout" /></td>
+                    <td className="text-right tabular-nums"><Money value={Number(r.revenue)} rc={groupedCurrency(r)} breakdown={parseMoneyByCurrency(r.moneyByCurrency)} field="revenue" /></td>
+                    <td className="text-right tabular-nums"><Money value={Number(r.profit)} rc={groupedCurrency(r)} breakdown={parseMoneyByCurrency(r.moneyByCurrency)} field="margin" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -361,7 +390,7 @@ export default function ClickReport() {
                 <thead>
                   <tr>
                     <th title={zone.tz}>Date <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
-                    {shown.has('Converted') && <th >Converted</th>}
+                    {shown.has('Converted') && <th title="Has any conversion (approved, pending or rejected)">Converted</th>}
                     {shown.has('Offer') && <th >Offer</th>}
                     {shown.has('Partner') && <th >Partner</th>}
                     {shown.has('Country') && <th >Country</th>}
@@ -409,7 +438,9 @@ export default function ClickReport() {
               </table>
             </div>
           )}
-        {!groupBy && !displayError && rows.length > 0 && (
+        {/* Paging follows the loaded page, not "Search this page" (which can hide every row) — and stays
+           reachable on an emptied later page so Previous still works. */}
+        {!groupBy && !displayError && (filteredRows.length > 0 || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">
@@ -427,9 +458,10 @@ export default function ClickReport() {
         </ReportBody>
       </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`${groupBy ? '/api/reports/grouped' : '/api/reports/clicks'}?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, groupBy: groupBy || undefined, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
+        conversionStatus: CONVERSION_STATUS_OPTIONS.find((o) => o.value === conversionStatusFilter)?.label,
       }} />}
     </>
   );

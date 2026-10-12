@@ -19,7 +19,9 @@
  *
  * The Detailed Report's metric columns (Clicks, Total CV, RPA, CPA, CVR, Revenue, Payout, Profit,
  * Margin, EPC) are the reference's own fixed default set, not user-configurable there either — all
- * real, derived via the same `deriveRow` used by every other report page.
+ * real, derived via the same `deriveRow` used by every other report page. Money is in each row's own
+ * currency (`currencies` — lib/reportCurrency): a row mixing currencies shows "Mixed", the Summary
+ * shows per-currency amounts, and mixed revenue isn't plotted — never a cross-currency sum.
  *
  * No "Run Report": every control applies on its own — dates once they form a valid range (debounced),
  * columns / Reporting Filters / chips / sort immediately. The applied report is mirrored to the
@@ -33,7 +35,7 @@ import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-co
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
@@ -50,6 +52,11 @@ import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveF
 import { useAutoDateRange } from '../reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
+import {
+  combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
+  moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
+} from '../../../lib/reportCurrency';
+import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
 
 interface SmartLink { id: string; name: string }
 
@@ -94,19 +101,20 @@ function linkFor(dim: DimKey, id: string): string | null {
   return null;
 }
 
-function metricCells(d: DerivedRow) {
+/** One row's metric cells — only the shown columns (matching the header), money in the row's currency. */
+function metricCells(shown: Set<string>, d: DerivedRow, rc: RowCurrency) {
   return (
     <>
-      <td className="px-4 py-3 text-right">{d.clicks.toLocaleString()}</td>
-      <td className="px-4 py-3 text-right">{d.totalCv.toLocaleString()}</td>
-      <td className="px-4 py-3 text-right">{money(d.rpa)}</td>
-      <td className="px-4 py-3 text-right">{money(d.cpa)}</td>
-      <td className="px-4 py-3 text-right">{pct(d.cvr)}</td>
-      <td className="px-4 py-3 text-right">{money(d.revenue)}</td>
-      <td className="px-4 py-3 text-right">{money(d.payout)}</td>
-      <td className="px-4 py-3 text-right">{money(d.margin)}</td>
-      <td className="px-4 py-3 text-right">{pct(d.marginPct)}</td>
-      <td className="px-4 py-3 text-right">{money(d.epc)}</td>
+      {shown.has('Clicks') && <td className="px-4 py-3 text-right">{d.clicks.toLocaleString()}</td>}
+      {shown.has('Total CV') && <td className="px-4 py-3 text-right">{d.totalCv.toLocaleString()}</td>}
+      {shown.has('RPA') && <td className="px-4 py-3 text-right"><Money value={d.rpa} rc={rc} /></td>}
+      {shown.has('CPA') && <td className="px-4 py-3 text-right"><Money value={d.cpa} rc={rc} /></td>}
+      {shown.has('CVR') && <td className="px-4 py-3 text-right">{pct(d.cvr)}</td>}
+      {shown.has('Revenue') && <td className="px-4 py-3 text-right"><Money value={d.revenue} rc={rc} /></td>}
+      {shown.has('Payout') && <td className="px-4 py-3 text-right"><Money value={d.payout} rc={rc} /></td>}
+      {shown.has('Profit') && <td className="px-4 py-3 text-right"><Money value={d.margin} rc={rc} /></td>}
+      {shown.has('Margin') && <td className="px-4 py-3 text-right"><MoneyPct value={d.marginPct} rc={rc} /></td>}
+      {shown.has('EPC') && <td className="px-4 py-3 text-right"><Money value={d.epc} rc={rc} /></td>}
     </>
   );
 }
@@ -246,8 +254,12 @@ export default function FlexReport() {
     if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
   }, [urlState, setSearchParams]);
 
+  // Rows without money-bearing conversions (and older APIs) format in the network's default currency.
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
+  const currency = settings?.general?.defaultCurrency ?? 'USD';
+
   const groupByStr = dims.join(',');
-  const summaryQs = qs({ groupBy: 'none', metrics: 'clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics('clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -262,9 +274,12 @@ export default function FlexReport() {
     }, { clicks: 0, unique_clicks: 0, invalid_clicks: 0, conversions: 0, total_conversions: 0, payout: 0, revenue: 0, margin: 0 });
     return deriveRow(totals);
   }, [summaryData]);
+  // The summary's money currency ("Mixed" → per-currency amounts on the money tiles, newer API).
+  const summaryRc = useMemo(() => combineCurrencies((summaryData?.rows ?? []).map((r) => currenciesOf(r.metrics)), currency), [summaryData, currency]);
+  const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   const chronological = appliedFrom !== appliedTo;
-  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
+  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
   const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
     const dimKey = chronological ? 'day' : 'hour';
@@ -273,11 +288,13 @@ export default function FlexReport() {
       labels: rows.map((r) => (r.dimensions[dimKey] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
+      // Revenue across points in different currencies isn't one comparable series — not plotted then.
+      rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData, chronological]);
+  }, [graphData, chronological, currency]);
 
   const tableQsFor = (limit: number, offset: number) => qs({
-    groupBy: groupByStr, metrics: METRICS_PARAM,
+    groupBy: groupByStr, metrics: withCurrenciesMetric(METRICS_PARAM),
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
     orderBy, orderDir, limit, offset,
   });
@@ -289,12 +306,17 @@ export default function FlexReport() {
     key: dims.map((d) => r.dimensions[d] ?? '~').join('|'),
     dims: dims.map((d) => ({ dim: d, raw: r.dimensions[d] ?? null, name: resolveName(d, r.dimensions[d] ?? null, opts, smartLinkMap) })),
     derived: deriveRow(r.metrics),
+    rc: resolveCurrency(currenciesOf(r.metrics), currency),
   });
-  const rows = useMemo(() => (data?.rows ?? []).map(toRow)
-    .filter((r) => !q.trim() || r.dims.some((d) => d.name.toLowerCase().includes(q.trim().toLowerCase())))
-    .filter((r) => passesMetricFilters(r.derived, metricFilters)),
   // eslint-disable-next-line react-hooks/exhaustive-deps -- toRow only closes over the listed values
-  [data, dims, opts, smartLinkMap, q, metricFilters]);
+  const loadedRows = useMemo(() => (data?.rows ?? []).map(toRow), [data, dims, opts, smartLinkMap, currency]);
+  // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
+  // currencies (the flyout disables it and the results bar says so) — lib/reportCurrency.
+  const moneyBlocked = useMemo(() => moneyFilterBlockedBy(loadedRows.map((r) => r.rc)), [loadedRows]);
+  const rows = useMemo(() => loadedRows
+    .filter((r) => !q.trim() || r.dims.some((d) => d.name.toLowerCase().includes(q.trim().toLowerCase())))
+    .filter((r) => passesMetricFilters(r.derived, metricFilters, !!moneyBlocked)),
+  [loadedRows, q, metricFilters, moneyBlocked]);
 
   // Column picks apply at once and return to page 1.
   const addDim = (k: DimKey) => {
@@ -333,12 +355,14 @@ export default function FlexReport() {
   };
   // Export every row matching the applied filters (all pages), with the same client-side metric
   // filters as the table — but not the "Search this page" box, which only narrows the visible page.
+  // Money stays plain decimals with the row's currency in a trailing `currency` column ("MIXED",
+  // money columns left empty, for a row whose conversions mix currencies).
   const reportExport = useReportExport();
   const runExport = (format: 'csv' | 'xlsx') => {
     if (!dims.length) return;
     void reportExport.run(format, 'flex-report', async () => {
       const res = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${tableQsFor(limit, offset)}`, 200);
-      return { ...res, rows: res.rows.map(toRow).filter((r) => passesMetricFilters(r.derived, metricFilters)).map(toExportRow) };
+      return { ...res, rows: filterWithMoneyRule(res.rows.map(toRow), (r) => r.rc, (r, skip) => passesMetricFilters(r.derived, metricFilters, skip)).map((r) => withRowCurrency(toExportRow(r), r.rc)) };
     });
   };
 
@@ -373,6 +397,7 @@ export default function FlexReport() {
           <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
+                moneyFilterBlockedBy={moneyBlocked}
                 dimCategories={FILTER_CATEGORIES}
                 value={reporting}
                 onApply={setReporting}
@@ -447,7 +472,7 @@ export default function FlexReport() {
           </button>
           {summaryOpen && (
             summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
-              <SummaryGrid summary={summary} />
+              <SummaryGrid summary={summary} currency={currency} rc={summaryRc} breakdown={summaryBreakdown} />
             )
           )}
         </div>
@@ -461,10 +486,12 @@ export default function FlexReport() {
           graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
-                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>
+                {isMixed(graphSeries.rc)
+                  ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>
+                  : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>}
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
               </div>
-              <MiniChart labels={graphSeries.labels} revenue={graphSeries.revenue} clicks={graphSeries.clicks} />
+              <MiniChart labels={graphSeries.labels} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
             </div>
           )
         )}
@@ -501,6 +528,8 @@ export default function FlexReport() {
             )}
           </div>
         </>}>
+          <CurrencyNotes sortedWithin={showSortedWithinNote(data?.sortedWithinCurrency, loadedRows.map((r) => r.rc))}
+            moneyFilterBlockedBy={moneyBlocked} moneyFilterActive={hasMoneyFilter(metricFilters)} />
           <ActiveFilterChips
             chips={reportingChips(FILTER_CATEGORIES, reporting)}
             onRemove={(c) => setReporting(withoutReportingChip(reporting, c))}
@@ -539,7 +568,7 @@ export default function FlexReport() {
                           {d.raw != null && linkFor(d.dim, d.raw) ? <Link to={linkFor(d.dim, d.raw)!} className="text-accent-text hover:underline">{d.name}</Link> : d.name}
                         </td>
                       ))}
-                      {metricCells(r.derived)}
+                      {metricCells(shownMetrics, r.derived, r.rc)}
                     </tr>
                   ))}
                 </tbody>

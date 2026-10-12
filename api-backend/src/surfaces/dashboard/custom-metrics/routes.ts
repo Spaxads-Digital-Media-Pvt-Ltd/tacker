@@ -28,13 +28,46 @@ const tokenSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('op'), value: z.enum(['+', '-', '*', '/', '(', ')']) }),
   z.object({ type: z.literal('const'), value: z.number() }),
 ]);
+export type FormulaToken = z.infer<typeof tokenSchema>;
+
+/**
+ * Formula grammar check: the tokens must form a valid infix expression where an OPERAND is a
+ * `metric`, a `const`, or `(` expression `)`, joined by the binary operators + - * /. No unary
+ * operators (a negative number is a negative `const`), no empty `()`, balanced parentheses, and it
+ * must start with an operand or `(` and end with an operand or `)` — operands and operators alternate.
+ */
+export function isValidFormula(tokens: readonly FormulaToken[]): boolean {
+  if (tokens.length === 0) return false;
+  let depth = 0;
+  let expectOperand = true; // at the start, after '(' and after a binary operator
+  for (const t of tokens) {
+    if (t.type === 'metric' || t.type === 'const' || t.value === '(') {
+      if (!expectOperand) return false; // two operands in a row, or an operand right after ')'
+      if (t.type === 'op') depth++;
+      else expectOperand = false;
+    } else if (t.value === ')') {
+      if (expectOperand || depth === 0) return false; // empty `()`, `+)`, or an unmatched ')'
+      depth--;
+    } else {
+      if (expectOperand) return false; // leading / doubled / unary operator, or one right after '('
+      expectOperand = true;
+    }
+  }
+  return depth === 0 && !expectOperand;
+}
+
+const FORMULA_GRAMMAR_MESSAGE = 'formula is not a valid expression — use metrics/numbers joined by + - * /, with balanced, non-empty parentheses';
+const formulaSchema = z.array(tokenSchema).min(1).max(50).refine(isValidFormula, { message: FORMULA_GRAMMAR_MESSAGE });
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
-  formula: z.array(tokenSchema).min(1).max(50),
+  formula: formulaSchema,
   format: z.enum(['number', 'percentage', 'currency']).default('number'),
 });
-const updateSchema = createSchema.partial();
+// An empty patch has nothing to update — a 422, not a failed UPDATE with no SET columns.
+const updateSchema = createSchema.partial().refine((b) => Object.values(b).some((v) => v !== undefined), {
+  message: 'provide at least one of name, formula, format',
+});
 
 interface Row { id: string; ref: string; name: string; formula: unknown; format: string; created_at: string; updated_at: string }
 const dto = (r: Row) => ({

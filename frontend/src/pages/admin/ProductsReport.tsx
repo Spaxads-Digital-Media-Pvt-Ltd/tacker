@@ -33,9 +33,12 @@ export default function ProductsReport() {
         <ReportControls problem={range.problem} actions={<>
           {/* Inert, like the rest of this shell — filtering isn't available yet. */}
           <FiltersButton disabled title="Not available yet" />
-          <button title="Not available yet" className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <MoreVertical size={15} />
-          </button>
+          {/* Wrapped so the tooltip still shows — a disabled button gets no pointer events. */}
+          <span title="Not available yet">
+            <button type="button" disabled aria-label="Table Actions (not available yet)" className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary disabled:pointer-events-none disabled:opacity-50">
+              <MoreVertical size={15} />
+            </button>
+          </span>
         </>}>
           <DateRangeField idPrefix="products-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />

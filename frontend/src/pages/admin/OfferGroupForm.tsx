@@ -5,6 +5,10 @@
  * "Tracking & Controls" (an "Enable Caps" toggle guarding four cap-type sections — Click/Conversion/
  * Payout/Revenue — each a bracket-connected "+"-row list of Time Interval [Daily/Weekly/Monthly/
  * Global] + Value, the same pattern already used for Offer Templates' Prefilled Fields).
+ *
+ * The caps are stored and shown in Pacing but NOT enforced (nothing reads them on the click or
+ * conversion path) — the caps step says so. A new group's currency starts at the network's default
+ * currency (GET /api/settings, as the report pages read it); editing keeps the stored one.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -14,6 +18,7 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
 import { DualListPicker } from '../../shared-components/panels/DualListPicker';
 import { CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL, CURRENCIES, type OfferGroup } from '../../data/offerGroups';
+import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedBadge';
 import type { Advertiser, Offer } from '../../types';
 
 type CapType = (typeof CAP_TYPES)[number]['key'];
@@ -27,6 +32,7 @@ export default function OfferGroupForm() {
   const { data: existing } = useQuery<OfferGroup>(isEdit ? `/api/offer-groups/${id}` : null);
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: offers } = useQuery<Offer[]>('/api/offers');
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>(isEdit ? null : '/api/settings');
   const [searchParams] = useSearchParams();
 
   const [step, setStep] = useState<1 | 2>(searchParams.get('tab') === 'tracking' ? 2 : 1);
@@ -34,6 +40,14 @@ export default function OfferGroupForm() {
   const [status, setStatus] = useState<'active' | 'paused' | 'deleted'>('active');
   const [advertiserId, setAdvertiserId] = useState('');
   const [currency, setCurrency] = useState('USD');
+  // Create: preselect the network's default currency once it loads, unless the user already picked one.
+  const currencyTouched = useRef(false);
+  const networkCurrency = settings?.general?.defaultCurrency;
+  useEffect(() => {
+    if (!isEdit && networkCurrency && !currencyTouched.current) setCurrency(networkCurrency.toUpperCase());
+  }, [isEdit, networkCurrency]);
+  // The list has the common codes; a network/stored currency outside it is still offered as itself.
+  const currencyOptions = CURRENCIES.some((c) => c.value === currency) ? CURRENCIES : [...CURRENCIES, { value: currency, label: currency }];
   const [offerIds, setOfferIds] = useState<string[]>([]);
   const [labels, setLabels] = useState('');
   const [notes, setNotes] = useState('');
@@ -140,8 +154,8 @@ export default function OfferGroupForm() {
                 </select>
               </Field></div>
               <div className="w-56"><Field label="Currency *">
-                <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                  {CURRENCIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                <select className="input" value={currency} onChange={(e) => { currencyTouched.current = true; setCurrency(e.target.value); }}>
+                  {currencyOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </Field></div>
             </div>
@@ -163,10 +177,9 @@ export default function OfferGroupForm() {
                 <span className="rounded-full bg-surface px-2 py-1 shadow-sm">{capsEnabled ? 'Yes' : 'No'}</span>
               </button>
             </Field>
-            <p className="text-[11px] text-fg-muted">
-              Stored on the group for reference and reporting. Group-level shared caps aren't enforced at the click hot path yet —
-              only each offer's own Daily Click Cap is (Offer → Tracking &amp; Controls).
-            </p>
+            {/* Nothing reads offer-group caps on the click or conversion path; the offers' own caps
+                (Offer → Tracking & Controls) are the ones that block traffic. */}
+            <NotEnforcedNote />
 
             {capsEnabled && (
               <div className="rounded-card border border-border bg-page p-4">

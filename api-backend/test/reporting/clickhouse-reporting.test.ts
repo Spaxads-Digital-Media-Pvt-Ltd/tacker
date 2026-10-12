@@ -276,7 +276,16 @@ describe('ClickHouseReportingProvider — SQL structure', () => {
  orderBy: 'payout', orderDir: 'asc',
  });
  const sql = (querySpy.mock.calls[1]?.[0] as { query: string }).query;
- expect(sql).toMatch(/ORDER BY payout ASC/);
+ // Money metric: ordered within one currency at a time (single-currency → none → mixed).
+ expect(sql).toMatch(/ORDER BY money_bucket ASC, money_currency ASC, if\(money_bucket = 0, payout, NULL\) ASC NULLS LAST, d0/);
+
+ querySpy.mockClear();
+ await w.runReport({
+ networkId: NETWORK_A, groupBy: ['offer'], metrics: ['conversions', 'clicks'],
+ filters: {}, limit: 10, offset: 0,
+ orderBy: 'conversions', orderDir: 'asc',
+ });
+ expect((querySpy.mock.calls[1]?.[0] as { query: string }).query).toMatch(/ORDER BY conversions ASC, d0 LIMIT/);
  });
 
  it('excludes fraud-flagged clicks when excludeInvalid=true', async () => {

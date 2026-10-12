@@ -30,7 +30,7 @@ import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, money, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { countryName, countryOptions, regionName, useRegions } from '../../data/geo';
 import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
@@ -53,7 +53,15 @@ function ConversionActions({ row, onChanged }: { row: ConvRow; onChanged: () => 
   if (row.status === 'rejected') return <span className="text-tiny text-fg-muted">—</span>;
   const go = async (action: 'approve' | 'reject') => {
     const run = async () => { if (await act.run(action)) onChanged(); };
-    if (action !== 'reject') { await run(); return; }
+    // Both actions move money in the ledger, so both are confirmed.
+    if (action === 'approve') {
+      void confirm({
+        title: 'Approve conversion?',
+        message: 'This records payout/billing and fires the partner postback.',
+        confirmLabel: 'Approve', onConfirm: run,
+      });
+      return;
+    }
     void confirm({
       title: 'Reject conversion?',
       message: row.status === 'approved'
@@ -99,9 +107,10 @@ function formatDelta(seconds: number | null): string {
   const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
   return `${h}h ${m}m`;
 }
-function money(v: string | null): string {
+/** A conversion's money in its own currency (USD when the row has none). */
+function convMoney(v: string | null, currency: string | null): string {
   if (v == null) return DASH;
-  return `$${Number(v).toFixed(2)}`;
+  return money(Number(v), currency || 'USD');
 }
 
 const STATUS_OPTIONS = [
@@ -234,7 +243,8 @@ export default function ConversionReport() {
     offer: offerMap.get(r.offer_id) ?? r.offer_id, partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
     eventName: r.event_name ?? DASH, goal: r.goal_name ?? DASH, source: r.source,
-    revenue: money(r.revenue), payout: money(r.payout), currency: r.currency ?? DASH,
+    // Exact decimal text (spreadsheet-numeric); `currency` is the one the table formats them in.
+    revenue: r.revenue ?? DASH, payout: r.payout ?? DASH, currency: r.currency || 'USD',
     transactionId: r.transaction_id ?? DASH,
     clickDate: r.click_created_at ? formatDate(r.click_created_at) : DASH, delta: formatDelta(r.delta_seconds),
     timezone: zone.tz,
@@ -363,8 +373,8 @@ export default function ConversionReport() {
                       {shown.has('Event Name') && <td className="px-4 py-3">{r.event_name ?? DASH}</td>}
                       {shown.has('Goal') && <td className="px-4 py-3">{r.goal_name ?? DASH}</td>}
                       {shown.has('Source') && <td className="px-4 py-3 capitalize">{r.source}</td>}
-                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(r.revenue)}</td>}
-                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(r.payout)}</td>}
+                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{convMoney(r.revenue, r.currency)}</td>}
+                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{convMoney(r.payout, r.currency)}</td>}
                       {shown.has('Currency') && <td className="px-4 py-3">{r.currency ?? DASH}</td>}
                       {shown.has('Transaction ID') && <td className="font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
                       {shown.has('Click Date') && <td >{r.click_created_at ? formatDate(r.click_created_at) : DASH}</td>}
@@ -389,7 +399,9 @@ export default function ConversionReport() {
               </table>
             </div>
           )}
-        {!error && rows.length > 0 && (
+        {/* Paging follows the loaded page, not "Search this page" (which can hide every row) — and stays
+           reachable on an emptied later page so Previous still works. */}
+        {!error && (pageRows.length > 0 || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">
@@ -407,7 +419,7 @@ export default function ConversionReport() {
         </ReportBody>
       </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/conversions?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, status: statusFilter,
         smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,

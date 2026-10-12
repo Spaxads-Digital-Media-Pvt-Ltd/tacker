@@ -105,6 +105,21 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
   };
 }
 
+/**
+ * Network API-key consumers (Public API /api/v1/network/offers). Same fields as the admin dashboard
+ * DTO MINUS secrets: `securityCode` is the offer's postback secure code — whoever holds it can post
+ * conversions to /postback — so it is only ever shown in the session-authenticated dashboard (Offer
+ * edit / postback settings). Built by omission so a field added to the admin DTO stays visible here,
+ * and every secret added to it must be listed in NETWORK_API_OMITTED.
+ */
+export const NETWORK_API_OMITTED = ['securityCode'] as const;
+export type OfferNetworkApiDTO = Omit<OfferAdminDTO, (typeof NETWORK_API_OMITTED)[number]>;
+
+export function toNetworkApiDTO(row: OfferRow): OfferNetworkApiDTO {
+  const { securityCode: _secret, ...rest } = toAdminDTO(row);
+  return rest;
+}
+
 /** Advertiser portal: their own offer. Revenue (their cost) shown; publisher payout hidden. */
 export interface OfferAdvertiserDTO {
   id: string;

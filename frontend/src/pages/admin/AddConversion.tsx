@@ -5,7 +5,11 @@
  *
  * Field scope is limited to what `POST /api/offline/conversions` actually accepts
  * (api-backend/src/surfaces/dashboard/offline/routes.ts): offerId, publisherId, event, payout,
- * revenue, currency, status, txnId. The reference's Timezone/Now/Internal Notes/Sale Amount/Source
+ * revenue, currency, status, txnId. There is no currency control: the request omits `currency`, so the
+ * backend records the conversion in the SELECTED OFFER's currency (shown under the amounts). Payout
+ * and revenue are checked as you type with the backend's rule (lib/moneyInput.ts — non-negative,
+ * ≤ 4 decimals, no thousands separators); a 422 the backend still returns is shown with its field
+ * details. The reference's Timezone/Now/Internal Notes/Sale Amount/Source
  * ID/Sub Parameters/Adv Parameters/Email/Coupon Code toggles have no backing field on this app's
  * `conversions` table for a manually-recorded row, so they're omitted rather than shown as inert
  * controls that would silently do nothing on submit. "Number of Conversions" IS real — it fires the
@@ -13,7 +17,8 @@
  */
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
+import { checkMoneyInput } from '../../lib/moneyInput';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Field } from '../../shared-components/primitives/ui';
 import type { Offer, Publisher } from '../../types';
@@ -30,13 +35,23 @@ function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolea
 }
 
 interface FormState {
-  offerId: string; event: string; publisherId: string; count: string; status: string; currency: string;
+  offerId: string; event: string; publisherId: string; count: string; status: string;
   revenueOn: boolean; revenue: string;
   payoutOn: boolean; payout: string;
   txnOn: boolean; txnId: string;
 }
+/** An API error's message plus its per-field details (a 422 from zod: `{ payout: ['…'] }`). */
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return 'Request failed';
+  if (!(err instanceof ApiError) || !err.details || typeof err.details !== 'object') return err.message;
+  const parts = Object.entries(err.details as Record<string, unknown>)
+    .filter(([, v]) => Array.isArray(v) && v.length > 0)
+    .map(([k, v]) => `${k === '_errors' ? '' : `${k}: `}${(v as unknown[]).join(', ')}`);
+  return parts.length ? `${err.message} — ${parts.join('; ')}` : err.message;
+}
+
 const INITIAL: FormState = {
-  offerId: '', event: '', publisherId: '', count: '1', status: 'approved', currency: 'USD',
+  offerId: '', event: '', publisherId: '', count: '1', status: 'approved',
   revenueOn: false, revenue: '', payoutOn: false, payout: '', txnOn: false, txnId: '',
 };
 
@@ -45,15 +60,23 @@ export default function AddConversion() {
   const [searchParams] = useSearchParams();
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
-  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
-  const [form, setForm] = useState<FormState>(() => ({ ...INITIAL, offerId: searchParams.get('offerId') ?? '', currency: settings?.general?.defaultCurrency ?? 'USD' }));
+  const [form, setForm] = useState<FormState>(() => ({ ...INITIAL, offerId: searchParams.get('offerId') ?? '' }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
 
+  // The backend records the conversion in the selected offer's currency (the request sends none).
+  const offerCurrency = (offers ?? []).find((o) => o.id === form.offerId)?.currency?.trim().toUpperCase() || null;
+  // An amount switched on but left empty is simply not sent (as before); a typed one must be valid.
+  const revenueCheck = form.revenueOn && form.revenue.trim() !== '' ? checkMoneyInput(form.revenue) : null;
+  const payoutCheck = form.payoutOn && form.payout.trim() !== '' ? checkMoneyInput(form.payout) : null;
+  const amountsInvalid = revenueCheck?.ok === false || payoutCheck?.ok === false;
+  const amountHint = offerCurrency ? `In ${offerCurrency} — the offer's currency` : "In the selected offer's currency";
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (amountsInvalid) return;
     setBusy(true);
     setError(null);
     const base: Record<string, unknown> = {
@@ -61,9 +84,9 @@ export default function AddConversion() {
       publisherId: form.publisherId || null,
       event: form.event || null,
       status: form.status,
-      currency: form.currency,
-      ...(form.revenueOn && form.revenue ? { revenue: form.revenue } : {}),
-      ...(form.payoutOn && form.payout ? { payout: form.payout } : {}),
+      // No `currency`: the backend uses the selected offer's currency.
+      ...(revenueCheck?.ok ? { revenue: revenueCheck.value } : {}),
+      ...(payoutCheck?.ok ? { payout: payoutCheck.value } : {}),
     };
     const n = Math.max(1, Math.min(500, Number(form.count) || 1));
     // Transaction ID is unique per offer (real DB constraint) — a real user creating N conversions
@@ -76,7 +99,7 @@ export default function AddConversion() {
       }
       nav('/app/reports/offline');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Request failed');
+      setError(errorText(err));
     } finally {
       setBusy(false);
     }
@@ -118,13 +141,29 @@ export default function AddConversion() {
               <span className="text-small text-fg">Revenue Amount per Conversion</span>
               <YesNoToggle value={form.revenueOn} onChange={(v) => set('revenueOn', v)} />
             </div>
-            {form.revenueOn && <div className="pb-3"><input className="input" placeholder="8.00" value={form.revenue} onChange={(e) => set('revenue', e.target.value)} /></div>}
+            {form.revenueOn && (
+              <div className="pb-3">
+                <input className="input" inputMode="decimal" placeholder="8.00" value={form.revenue} onChange={(e) => set('revenue', e.target.value)}
+                  aria-invalid={revenueCheck?.ok === false} aria-describedby="revenue-help" />
+                <p id="revenue-help" className={`mt-1 text-tiny ${revenueCheck?.ok === false ? 'text-danger-text' : 'text-fg-muted'}`}>
+                  {revenueCheck?.ok === false ? revenueCheck.error : amountHint}
+                </p>
+              </div>
+            )}
 
             <div className="flex items-center justify-between py-3">
               <span className="text-small text-fg">Payout Amount per Conversion</span>
               <YesNoToggle value={form.payoutOn} onChange={(v) => set('payoutOn', v)} />
             </div>
-            {form.payoutOn && <div className="pb-3"><input className="input" placeholder="5.00" value={form.payout} onChange={(e) => set('payout', e.target.value)} /></div>}
+            {form.payoutOn && (
+              <div className="pb-3">
+                <input className="input" inputMode="decimal" placeholder="5.00" value={form.payout} onChange={(e) => set('payout', e.target.value)}
+                  aria-invalid={payoutCheck?.ok === false} aria-describedby="payout-help" />
+                <p id="payout-help" className={`mt-1 text-tiny ${payoutCheck?.ok === false ? 'text-danger-text' : 'text-fg-muted'}`}>
+                  {payoutCheck?.ok === false ? payoutCheck.error : amountHint}
+                </p>
+              </div>
+            )}
 
             <div className="flex items-center justify-between py-3">
               <span className="text-small text-fg">Transaction ID</span>
@@ -137,11 +176,15 @@ export default function AddConversion() {
             <select className="input" value={form.status} onChange={(e) => set('status', e.target.value)}>
               {['approved', 'pending', 'rejected'].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
+            <p className="mt-1 text-tiny text-fg-muted">
+              On offers with Manually Approve Conversions on, "approved" is saved as pending until someone approves it. A partner
+              must be active and allowed on the offer (approved on private or request-access offers). No partner postback fires.
+            </p>
           </Field>
 
           <div className="flex justify-end gap-2 border-t border-border pt-4">
             <Link to="/app/reports/offline" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy || !form.offerId}>{busy ? 'Adding…' : 'Add'}</button>
+            <button type="submit" className="btn-primary" disabled={busy || !form.offerId || amountsInvalid}>{busy ? 'Adding…' : 'Add'}</button>
           </div>
         </form>
       </div>

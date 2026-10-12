@@ -14,6 +14,12 @@
  * Server-side pagination: `/goals` returns `{ rows, total, truncated }` for one limit/offset page of
  * (goal × offer) groups, so the "N Total" footer is the real group count of the full result set.
  *
+ * Rows are per (offer, goal_id). Conversions recorded without a goal (imports / manual entry with no
+ * matching goal) come as their own rows — `goal_id: null`, `unmatched: true`, labelled by their
+ * event name — marked "(no goal)" here so they aren't mistaken for a configured goal (lib/goalRows).
+ * Money is in the row's own currency (`currencies` — lib/reportCurrency); a row whose conversions
+ * mix currencies shows "Mixed" rather than a cross-currency sum.
+ *
  * No "Run Report": every control applies on its own — dates once they form a valid range (debounced,
  * since the native date input reports each typed segment), filters / chips immediately. The applied
  * report is mirrored to the address bar, so the URL itself is the shareable link.
@@ -30,13 +36,26 @@ import type { Offer, Publisher } from '../../types';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
 import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
+import { flexReportPath } from '../../lib/flexReportLink';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
+import { goalRowKey, isUnmatchedGoalRow, UNMATCHED_GOAL_TITLE } from '../../lib/goalRows';
+import { parseMoneyByCurrency, resolveCurrency, withRowCurrency, type MoneyField, type RowCurrency } from '../../lib/reportCurrency';
+import { Money, MixedMoney } from '../../shared-components/primitives/ReportMoney';
 
 interface GoalRow {
   goal: string; offer_id: string; conversions: number; payout: string; revenue: string; margin: string;
   clicks: number; cvr: number; marginPct: number;
+  /** The offer's currency (newer API); older responses omit it → the network currency. */
+  currency?: string;
+  /** Goal the conversions matched; null (with `unmatched: true`) for conversions without a goal. Older APIs omit both. */
+  goal_id?: string | null;
+  unmatched?: boolean;
+  /** Distinct currencies of the row's approved conversions (newer API) — see lib/reportCurrency. */
+  currencies?: string[];
+  /** Per-currency payout/revenue/margin (newer API) — a mixed row lists them in its "Mixed" tooltip. */
+  moneyByCurrency?: unknown;
 }
 interface GoalsResult { rows: GoalRow[]; total: number; truncated: boolean }
 
@@ -59,19 +78,16 @@ const ALL_COLUMNS = [
   'Revenue', 'Payout', 'Profit', 'Margin', 'Gross Sales (from Clicks)', 'Gross Sales (from VT)',
 ] as const;
 
-function money(v: string | number): string {
-  return `$${Number(v).toFixed(2)}`;
-}
 function pct(v: number): string {
   return `${v.toFixed(2)} %`;
 }
 
-function RowActionMenu({ offerId }: { offerId: string }) {
+function RowActionMenu({ offerId, flexHref }: { offerId: string; flexHref: string }) {
   const nav = useNavigate();
   return (
     <RowKebabMenu items={[
       { label: 'View Offer', onClick: () => nav(`/app/offers/${offerId}`) },
-      { label: 'Open Flex Report', onClick: () => nav(`/app/analytics?tab=flex&offerId=${offerId}`) },
+      { label: 'Open Flex Report', onClick: () => nav(flexHref) },
     ]} />
   );
 }
@@ -98,6 +114,18 @@ export default function EventReport() {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const offerMap = useMemo(() => new Map((offers ?? []).map((o) => [o.id, o.name])), [offers]);
+  // Each row is one offer × event, so its money is in that offer's currency (when the API sends it),
+  // else the network's default currency — the same fallback the aggregate reports use.
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
+  const networkCurrency = settings?.general?.defaultCurrency ?? 'USD';
+  // `currencies` (newer API) wins: the row's conversions' one currency, or "mixed" (no sum shown).
+  const rowCurrency = (r: GoalRow): RowCurrency => resolveCurrency(r.currencies, r.currency || networkCurrency);
+  const rowMoney = (r: GoalRow, field: MoneyField) => <Money value={Number(r[field])} rc={rowCurrency(r)} breakdown={parseMoneyByCurrency(r.moneyByCurrency)} field={field} />;
+  // Margin % compares two money sums, so a mixed-currency row has none either.
+  const rowMargin = (r: GoalRow) => {
+    const rc = rowCurrency(r);
+    return rc.kind === 'mixed' ? <MixedMoney currencies={rc.currencies} /> : pct(r.marginPct);
+  };
 
   const FILTER_CATEGORIES: FilterCategory[] = useMemo(() => [
     { key: 'offer', label: 'Offer', options: (offers ?? []).map((o) => ({ value: o.id, label: o.name })) },
@@ -143,13 +171,16 @@ export default function EventReport() {
   const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const toExportRow = (r: GoalRow) => ({
+  const toExportRow = (r: GoalRow) => withRowCurrency({
     offer: offerMap.get(r.offer_id) ?? r.offer_id, impressions: DASH, clicks: r.clicks, ctr: DASH,
-    totalFromVt: DASH, events: r.goal, totalFromClicks: r.conversions, cvr: pct(r.cvr), evr: DASH,
-    revenue: money(r.revenue), payout: money(r.payout), profit: money(r.margin), margin: pct(r.marginPct),
+    totalFromVt: DASH, events: r.goal, goalId: r.goal_id ?? '', unmatched: isUnmatchedGoalRow(r) ? 'Yes' : 'No',
+    totalFromClicks: r.conversions, cvr: pct(r.cvr), evr: DASH,
+    revenue: r.revenue, payout: r.payout, profit: r.margin, margin: pct(r.marginPct),
     grossSalesClicks: DASH, grossSalesVt: DASH,
-  });
-  // Every (goal × offer) group matching the applied filters, not just the visible page.
+  }, rowCurrency(r), ['revenue', 'payout', 'profit', 'margin']);
+  // Every (goal × offer) group matching the applied filters, not just the visible page. Money is
+  // the API's exact decimal text; `currency` is the one the table formats that row in ("MIXED", with
+  // the money columns left empty, when the row's conversions mix currencies).
   const runExport = (format: 'csv' | 'xlsx') => {
     void exp.run(format, 'event-report', async () => {
       const res = await fetchAllPages<GoalRow>((limit, offset) => `/api/reports/goals?${qs({ ...baseParams, limit, offset })}`, 500);
@@ -227,7 +258,7 @@ export default function EventReport() {
                   <tr>
                     <th >Offer</th>
                     {shown.has('Impressions') && <th className="text-right font-semibold">Impressions</th>}
-                    {shown.has('Clicks') && <th className="text-right font-semibold">Clicks</th>}
+                    {shown.has('Clicks') && <th className="text-right font-semibold" title="Offer clicks — repeated on each event row of the offer; don't sum">Clicks</th>}
                     {shown.has('CTR') && <th className="text-right font-semibold">CTR</th>}
                     {shown.has('Total (from VT)') && <th className="text-right font-semibold">Total (from VT)</th>}
                     {shown.has('Events') && <th >Events</th>}
@@ -245,23 +276,30 @@ export default function EventReport() {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={`${r.offer_id}-${r.goal}`} className="hover:bg-accent-subtle/40">
+                    <tr key={goalRowKey(r)} className="hover:bg-accent-subtle/40">
                       <td className="font-medium"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>
                       {shown.has('Impressions') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
                       {shown.has('Clicks') && <td className="px-4 py-3 text-right">{r.clicks.toLocaleString()}</td>}
                       {shown.has('CTR') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
                       {shown.has('Total (from VT)') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
-                      {shown.has('Events') && <td className="px-4 py-3">{r.goal}</td>}
+                      {shown.has('Events') && (
+                        <td className="px-4 py-3">
+                          {r.goal}
+                          {isUnmatchedGoalRow(r) && <span className="ml-1.5 text-tiny text-fg-muted" title={UNMATCHED_GOAL_TITLE}>(no goal)</span>}
+                        </td>
+                      )}
                       {shown.has('Total (from Clicks)') && <td className="px-4 py-3 text-right">{r.conversions.toLocaleString()}</td>}
                       {shown.has('CVR') && <td className="px-4 py-3 text-right">{pct(r.cvr)}</td>}
                       {shown.has('EVR') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
-                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(r.revenue)}</td>}
-                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(r.payout)}</td>}
-                      {shown.has('Profit') && <td className="px-4 py-3 text-right">{money(r.margin)}</td>}
-                      {shown.has('Margin') && <td className="px-4 py-3 text-right">{pct(r.marginPct)}</td>}
+                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{rowMoney(r, 'revenue')}</td>}
+                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{rowMoney(r, 'payout')}</td>}
+                      {shown.has('Profit') && <td className="px-4 py-3 text-right">{rowMoney(r, 'margin')}</td>}
+                      {shown.has('Margin') && <td className="px-4 py-3 text-right">{rowMargin(r)}</td>}
                       {shown.has('Gross Sales (from Clicks)') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
                       {shown.has('Gross Sales (from VT)') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
-                      <td className="text-right"><RowActionMenu offerId={r.offer_id} /></td>
+                      {/* Flex opens on this page's applied range + Partner filter, with the row's offer. */}
+                      <td className="text-right"><RowActionMenu offerId={r.offer_id}
+                        flexHref={flexReportPath({ from: appliedFrom, to: appliedTo, reporting: { filters, exclusions: {}, ignoreFailTraffic: false }, entity: ['offer', r.offer_id] })} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -276,7 +314,7 @@ export default function EventReport() {
         </ReportBody>
       </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/goals?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, partner: publisherIdFilter,
       }} />}

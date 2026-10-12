@@ -15,7 +15,7 @@ import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import type { PublisherRow } from '../../../domain/entities.js';
 import { requireRole, requirePortal } from '../auth.js';
-import { accountBalance } from '../../../lib/ledger/ledger.js';
+import { balanceSummary, type CurrencyBalance } from '../../../lib/ledger/ledger.js';
 import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
@@ -147,16 +147,18 @@ export function publishersAdminRoutes(): Router {
     const db = dbForRequest(req);
     const networkId = db.scope.networkId;
     const b = req.body as z.infer<typeof requestBalancesSchema>;
-    const results: { publisherId: string; balance: string }[] = [];
+    // Never a cross-currency sum: balance/currency are null when the balance spans several
+    // currencies; `balances` is always the per-currency split.
+    const results: { publisherId: string; balance: string | null; currency: string | null; balances: CurrencyBalance[] }[] = [];
     for (const publisherId of b.publisherIds) {
       const pub = await db.selectOne<PublisherRow>(TABLE, { id: publisherId });
       if (!pub) continue;
-      const balance = await accountBalance(networkId, 'publisher', publisherId, 'approved');
+      const { balance, currency, balances } = await balanceSummary(networkId, 'publisher', publisherId, 'approved');
       await writeAudit(req, {
         action: 'publisher.request_balance', entityType: 'publisher', entityId: publisherId,
-        after: { balance },
+        after: { balance, currency, balances },
       });
-      results.push({ publisherId, balance });
+      results.push({ publisherId, balance, currency, balances });
     }
     sendOk(res, { requested: results });
   }));
@@ -433,7 +435,8 @@ export function publisherPortalRoutes(): Router {
     asyncHandler(async (req, res) => {
       const ownerId = ownerIdOf(req);
       const networkId = req.scope!.networkId;
-      const balance = await accountBalance(networkId, 'publisher', ownerId, 'approved');
+      // balance/currency: single-currency value, null when mixed (then read `balances`).
+      const { balance, currency, balances } = await balanceSummary(networkId, 'publisher', ownerId, 'approved');
       const rows = await dbForRequest(req).selectMany<{
         entry_type: string; direction: string; amount: string; currency: string;
         status: string; created_at: string;
@@ -445,7 +448,7 @@ export function publisherPortalRoutes(): Router {
         type: e.entry_type, direction: e.direction, amount: e.amount,
         currency: e.currency, status: e.status, createdAt: e.created_at,
       }));
-      sendOk(res, { balance, statement });
+      sendOk(res, { balance, currency, balances, statement });
     }),
   );
 
@@ -465,11 +468,13 @@ export function publisherPortalRoutes(): Router {
     asyncHandler(async (req, res) => {
       const ownerId = ownerIdOf(req);
       const networkId = req.scope!.networkId;
-      const [kpi, balance] = await Promise.all([
+      const [kpi, bal] = await Promise.all([
         summary24h(networkId, 'publisher', { publisherId: ownerId }),
-        accountBalance(networkId, 'publisher', ownerId, 'approved'),
+        balanceSummary(networkId, 'publisher', ownerId, 'approved'),
       ]);
-      sendOk(res, { ...kpi, balance });
+      // The kpi already has `currencies` (24h conversions), so the balance's currency is
+      // `balanceCurrency` (null when mixed) and its per-currency split is `balances`.
+      sendOk(res, { ...kpi, balance: bal.balance, balanceCurrency: bal.currency, balances: bal.balances });
     }),
   );
 

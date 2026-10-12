@@ -27,7 +27,7 @@ import { type FilterCategory, type FilterValues } from '../../shared-components/
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters,
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
@@ -39,10 +39,17 @@ import {
   IGNORE_FAIL_PARAM, readUrlFlag,
 } from '../../lib/reportFilterState';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
+import {
+  combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
+  moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
+} from '../../lib/reportCurrency';
+import { CurrencyNotes, Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import { countryLabel } from '../../data/geo';
+import { flexReportPath } from '../../lib/flexReportLink';
+import { formatReportHour, reportBucketDay } from '../../lib/reportTime';
 
 /** Max hours the Performance Graph pages in (200 per request, ~93 days); past this it shows a "narrow the range" note. */
 const GRAPH_HOUR_CAP = 24 * 93;
@@ -72,7 +79,7 @@ const ALL_COLUMNS = [
 ] as const;
 type OrderMetric = 'clicks' | 'unique_clicks' | 'invalid_clicks' | 'conversions' | 'total_conversions' | 'payout' | 'revenue' | 'margin' | 'avg_fraud_score';
 
-function metricCells(shown: Set<string>, d: DerivedRow) {
+function metricCells(shown: Set<string>, d: DerivedRow, rc: RowCurrency) {
   return (
     <>
       {shown.has('Imp') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
@@ -89,43 +96,40 @@ function metricCells(shown: Set<string>, d: DerivedRow) {
       {shown.has('CTR') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('Throttle') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('CVR') && <td className="px-4 py-3 text-right">{pct(d.cvr)}</td>}
-      {shown.has('CPC') && <td className="px-4 py-3 text-right">{money(d.cpc)}</td>}
-      {shown.has('CPA') && <td className="px-4 py-3 text-right">{money(d.cpa)}</td>}
-      {shown.has('RPC') && <td className="px-4 py-3 text-right">{money(d.rpc)}</td>}
-      {shown.has('RPA') && <td className="px-4 py-3 text-right">{money(d.rpa)}</td>}
-      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(d.revenue)}</td>}
-      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(d.payout)}</td>}
-      {shown.has('Profit') && <td className="px-4 py-3 text-right">{money(d.margin)}</td>}
-      {shown.has('Margin') && <td className="px-4 py-3 text-right">{pct(d.marginPct)}</td>}
+      {shown.has('CPC') && <td className="px-4 py-3 text-right"><Money value={d.cpc} rc={rc} /></td>}
+      {shown.has('CPA') && <td className="px-4 py-3 text-right"><Money value={d.cpa} rc={rc} /></td>}
+      {shown.has('RPC') && <td className="px-4 py-3 text-right"><Money value={d.rpc} rc={rc} /></td>}
+      {shown.has('RPA') && <td className="px-4 py-3 text-right"><Money value={d.rpa} rc={rc} /></td>}
+      {shown.has('Revenue') && <td className="px-4 py-3 text-right"><Money value={d.revenue} rc={rc} /></td>}
+      {shown.has('Payout') && <td className="px-4 py-3 text-right"><Money value={d.payout} rc={rc} /></td>}
+      {shown.has('Profit') && <td className="px-4 py-3 text-right"><Money value={d.margin} rc={rc} /></td>}
+      {shown.has('Margin') && <td className="px-4 py-3 text-right"><MoneyPct value={d.marginPct} rc={rc} /></td>}
       {shown.has('CC') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('Fraud') && <td className={`px-4 py-3 text-right ${d.fraudScore >= 40 ? 'text-danger-text' : d.fraudScore > 0 ? 'text-warning-text' : ''}`}>{d.fraudScore.toFixed(0)}</td>}
     </>
   );
 }
 
-function RowActionMenu() {
+function RowActionMenu({ flexHref }: { flexHref: string }) {
   const nav = useNavigate();
   return (
     <RowKebabMenu items={[
-      { label: 'Open Flex Report', onClick: () => nav('/app/analytics?tab=flex') },
+      { label: 'Open Flex Report', onClick: () => nav(flexHref) },
     ]} />
   );
 }
 
-type SavedConfig = SavedReportConfig<OrderMetric>;
+// `orderBy: ''` = the default chronological order, saved as such (not as a Clicks sort).
+type SavedConfig = SavedReportConfig<OrderMetric | ''>;
 
-function formatHour(iso: string): string {
-  const d = new Date(iso);
-  const date = `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${d.getUTCFullYear()}`;
-  const time = `${String(d.getUTCHours()).padStart(2, '0')}:00`;
-  return `${date} ${time}`;
-}
+/** "MM/DD/YYYY HH:00" (UTC) — Postgres ISO and ClickHouse zone-less bucket strings alike (lib/reportTime). */
+const formatHour = formatReportHour;
 
 /** API rows → table rows (shared by the table and the all-rows export). */
-function toHourRows(src: AggRow[]) {
+function toHourRows(src: AggRow[], currency: string) {
   return src
     .filter((r) => r.dimensions['hour'])
-    .map((r) => ({ hour: r.dimensions['hour']!, derived: deriveRow(r.metrics) }));
+    .map((r) => ({ hour: r.dimensions['hour']!, derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) }));
 }
 
 export default function HourlyReport() {
@@ -163,7 +167,7 @@ export default function HourlyReport() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
-  const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric>('hourly-report'));
+  const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric | ''>('hourly-report'));
   const pageMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!pageMenuOpen) return;
@@ -235,7 +239,7 @@ export default function HourlyReport() {
     excludeInvalid: ignoreFailTraffic ? 1 : undefined,
   };
 
-  const summaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -250,10 +254,14 @@ export default function HourlyReport() {
     }, { clicks: 0, unique_clicks: 0, invalid_clicks: 0, conversions: 0, total_conversions: 0, payout: 0, revenue: 0, margin: 0 });
     return deriveRow(totals);
   }, [summaryData]);
+  // The summary's money is in its conversions' currency — "Mixed" (no total) when they differ.
+  const summaryRc = useMemo(() => combineCurrencies((summaryData?.rows ?? []).map((r) => currenciesOf(r.metrics)), currency), [summaryData, currency]);
+  // …and, when mixed, its per-currency amounts (newer API) for the Payout/Revenue/Profit tiles.
+  const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   // Graph pages through every hour in range (200 per request, chronological default order) up to
   // GRAPH_HOUR_CAP — a single limit=200 request showed only the oldest ~8 days of a longer range.
-  const graphQs = qs({ groupBy: 'hour', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const graphQs = qs({ groupBy: 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
   const [graph, setGraph] = useState<{ rows: AggRow[]; capped: boolean; error: string | null } | null>(null);
   useEffect(() => {
     if (!graphOpen) return;
@@ -270,21 +278,27 @@ export default function HourlyReport() {
       labels: rows.map((r) => (r.dimensions['hour'] ?? '').slice(0, 13)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
+      // Revenue across days in different currencies isn't one comparable series — not plotted then.
+      rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graph]);
+  }, [graph, currency]);
 
   const tableParams = {
-    groupBy: 'hour', metrics: METRICS_PARAM,
+    groupBy: 'hour', metrics: withCurrenciesMetric(METRICS_PARAM),
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
     orderBy: orderBy || undefined, orderDir,
   };
   const tableQs = qs({ ...tableParams, limit: pageSize, offset: (page - 1) * pageSize });
   const { data, loading, error } = useQuery<AggResult>(`/api/reports?${tableQs}`);
 
-  const rows = useMemo(() => toHourRows(data?.rows ?? [])
+  const loadedRows = useMemo(() => toHourRows(data?.rows ?? [], currency), [data, currency]);
+  // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
+  // currencies (the flyout disables it and the results bar says so) — lib/reportCurrency.
+  const moneyBlocked = useMemo(() => moneyFilterBlockedBy(loadedRows.map((r) => r.rc)), [loadedRows]);
+  const rows = useMemo(() => loadedRows
     .filter((r) => !q.trim() || formatHour(r.hour).includes(q.trim()))
-    .filter((r) => passesMetricFilters(r.derived, metricFilters)),
-  [data, q, metricFilters]);
+    .filter((r) => passesMetricFilters(r.derived, metricFilters, !!moneyBlocked)),
+  [loadedRows, q, metricFilters, moneyBlocked]);
 
   // Reset dates and filters in one render → one request. The debounced range catches up to the same
   // values later and is then a no-op.
@@ -310,13 +324,15 @@ export default function HourlyReport() {
     margin: pct(r.derived.marginPct), cc: DASH, fraud: r.derived.fraudScore.toFixed(0),
   });
   // Export every row matching the applied filters (all pages), not just the visible page — the
-  // search box is a page-local filter and does not apply here.
+  // search box is a page-local filter and does not apply here. Money stays plain decimals; the
+  // row's currency rides along in a trailing `currency` column — "MIXED", with the money columns
+  // left empty, for a row whose conversions mix currencies (lib/reportCurrency).
   const exp = useReportExport();
   const runExport = (format: 'csv' | 'xlsx') => {
     setTableActionsOpen(false); setExportOpen(false);
     void exp.run(format, 'hourly-report', async () => {
       const r = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${qs({ ...tableParams, limit, offset })}`, 200);
-      return { rows: toHourRows(r.rows).filter((x) => passesMetricFilters(x.derived, metricFilters)).map(exportRow), capped: r.capped, total: r.total };
+      return { rows: filterWithMoneyRule(toHourRows(r.rows, currency), (x) => x.rc, (x, skip) => passesMetricFilters(x.derived, metricFilters, skip)).map((x) => withRowCurrency(exportRow(x), x.rc)), capped: r.capped, total: r.total };
     });
   };
   const reporting: ReportingFiltersValue = { filters, exclusions, metricFilters, ignoreFailTraffic };
@@ -332,7 +348,7 @@ export default function HourlyReport() {
   );
 
   const saveReport = (name: string) => {
-    const config: SavedConfig = { from: appliedFrom, to: appliedTo, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy: orderBy || 'clicks', orderDir, hiddenColumns: [...hiddenColumns] };
+    const config: SavedConfig = { from: appliedFrom, to: appliedTo, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns] };
     const next = [...savedReports.filter((s) => s.name !== name), { name, config }];
     setSavedReports(next);
     persistSavedReports('hourly-report', next);
@@ -361,6 +377,7 @@ export default function HourlyReport() {
           <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
+                moneyFilterBlockedBy={moneyBlocked}
                 dimCategories={FILTER_CATEGORIES}
                 value={reporting}
                 onApply={setReporting}
@@ -409,7 +426,7 @@ export default function HourlyReport() {
           </button>
           {summaryOpen && (
             summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
-              <SummaryGrid summary={summary} />
+              <SummaryGrid summary={summary} currency={currency} rc={summaryRc} breakdown={summaryBreakdown} />
             )
           )}
         </div>
@@ -424,17 +441,19 @@ export default function HourlyReport() {
             <div className="pt-4">
               {graph.capped && <p className="mb-2 text-tiny text-fg-muted">Graph shows the first {graphSeries.labels.length.toLocaleString()} hours — narrow the date range to see the rest.</p>}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
-                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>
+                {isMixed(graphSeries.rc)
+                  ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>
+                  : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>}
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
               </div>
-              <MiniChart labels={graphSeries.labels} revenue={graphSeries.revenue} clicks={graphSeries.clicks} />
+              <MiniChart labels={graphSeries.labels} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
             </div>
           )
         )}
       </div>
 
       <ReportCard>
-        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title="Report times are UTC">· UTC · {currency}</span></>} loading={loading} actions={<>
+        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title={`Report times are UTC. Money is shown in each row’s own currency (network default ${currency} for rows without conversions); rows mixing currencies show Mixed.`}>· UTC · row currency</span></>} loading={loading} actions={<>
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
@@ -464,6 +483,8 @@ export default function HourlyReport() {
             )}
           </div>
         </>}>
+          <CurrencyNotes sortedWithin={showSortedWithinNote(data?.sortedWithinCurrency, loadedRows.map((r) => r.rc))}
+            moneyFilterBlockedBy={moneyBlocked} moneyFilterActive={hasMoneyFilter(metricFilters)} />
           <ActiveFilterChips
             chips={reportingChips(FILTER_CATEGORIES, reporting)}
             onRemove={(c) => setReporting(withoutReportingChip(reporting, c))}
@@ -512,8 +533,9 @@ export default function HourlyReport() {
                   {rows.map((r) => (
                     <tr key={r.hour} className="hover:bg-accent-subtle/40">
                       <td className="font-medium text-fg">{formatHour(r.hour)}</td>
-                      {metricCells(shown, r.derived)}
-                      <td className="text-right"><RowActionMenu /></td>
+                      {metricCells(shown, r.derived, r.rc)}
+                      {/* Flex reports whole UTC days, so the hour's day is the closest range it can take. */}
+                      <td className="text-right"><RowActionMenu flexHref={flexReportPath({ from: reportBucketDay(r.hour), to: reportBucketDay(r.hour), reporting })} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -527,7 +549,7 @@ export default function HourlyReport() {
         </ReportBody>
       </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
         excludeOffer: excludeOfferId, excludeAdvertiser: excludeAdvertiserId, excludePartner: excludePublisherId, excludeSmartLink: excludeSmartLinkId, excludeCountry, excludeDevice,

@@ -10,7 +10,9 @@
  *
  * Column mapping: Pixel ID → the log row's own id (real); Payload → the actual fired postback URL
  * with its substituted macros, which for this app's GET-style postbacks *is* the payload (real,
- * truncated); Level → `attempt` (the retry attempt number, real). The reference's "Type" has no
+ * truncated); the reference's "Level" is shown as "Attempt" → `attempt` (the retry attempt number,
+ * real — it is not a postback level). Rows the worker logs when the partner has no postback configured
+ * (url `(none)`, error `no_postback_configured`) show a neutral "Not configured", not "Failed". The reference's "Type" has no
  * clean backing — postback_logs doesn't record an HTTP method — so it's omitted rather than guessed.
  * A real "Error" column is also added beyond the reference's confirmed set (rejection/failure reason
  * — genuinely useful and already returned by the endpoint).
@@ -22,7 +24,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, MoreVertical, ChevronRight, ChevronLeft, Check, X } from 'lucide-react';
+import { Search, MoreVertical, ChevronRight, ChevronLeft, Check, X, Minus } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
@@ -42,7 +44,16 @@ interface PbRow {
   offer_id: string | null; event_name: string | null;
 }
 
-const ALL_COLUMNS = ['Partner', 'Offer', 'Event Name', 'Payload', 'Status', 'Level', 'Error'] as const;
+const ALL_COLUMNS = ['Partner', 'Offer', 'Event Name', 'Payload', 'Status', 'Attempt', 'Error'] as const;
+
+/** Logged by the outbound-postback worker (url `(none)`) when the partner has no postback set up —
+ *  nothing was sent, so it isn't a delivery failure. */
+const NOT_CONFIGURED_ERROR = 'no_postback_configured';
+type PbStatus = 'Success' | 'Failed' | 'Not configured';
+function pbStatus(r: PbRow): PbStatus {
+  if (r.success) return 'Success';
+  return r.error === NOT_CONFIGURED_ERROR ? 'Not configured' : 'Failed';
+}
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -149,7 +160,7 @@ export default function PartnerPostbackReport() {
     partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     offer: r.offer_id ? (offerMap.get(r.offer_id) ?? r.offer_id) : DASH,
     eventName: r.event_name ?? DASH, payload: r.url && r.url !== '(none)' ? r.url : DASH,
-    status: r.success ? 'Success' : 'Failed', statusCode: r.status_code ?? DASH, level: r.attempt,
+    status: pbStatus(r), statusCode: r.status_code ?? DASH, attempt: r.attempt,
     error: r.error ?? DASH,
   });
   // Every log row matching the applied filters, not just the visible page.
@@ -235,12 +246,12 @@ export default function PartnerPostbackReport() {
                     {shown.has('Event Name') && <th >Event Name</th>}
                     {shown.has('Payload') && <th >Payload</th>}
                     {shown.has('Status') && <th >Status</th>}
-                    {shown.has('Level') && <th className="text-right font-semibold">Level</th>}
+                    {shown.has('Attempt') && <th className="text-right font-semibold">Attempt</th>}
                     {shown.has('Error') && <th >Error</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
+                  {rows.map((r) => { const status = pbStatus(r); return (
                     <tr key={r.id} className="hover:bg-accent-subtle/40">
                       <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
                       <td className="font-mono text-tiny text-fg-secondary">{r.id.slice(0, 8)}…</td>
@@ -250,21 +261,23 @@ export default function PartnerPostbackReport() {
                       {shown.has('Payload') && <td className="max-w-xs truncate px-4 py-3 font-mono text-tiny" title={r.url ?? ''}>{r.url && r.url !== '(none)' ? r.url : DASH}</td>}
                       {shown.has('Status') && (
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 text-small ${r.success ? 'text-success-text' : 'text-danger-text'}`}>
-                            {r.success ? <Check size={13} /> : <X size={13} />}
-                            {r.success ? 'Success' : 'Failed'}{r.status_code != null ? ` (${r.status_code})` : ''}
+                          <span className={`inline-flex items-center gap-1 text-small ${status === 'Success' ? 'text-success-text' : status === 'Failed' ? 'text-danger-text' : 'text-fg-secondary'}`}>
+                            {status === 'Success' ? <Check size={13} /> : status === 'Failed' ? <X size={13} /> : <Minus size={13} />}
+                            {status}{r.status_code != null ? ` (${r.status_code})` : ''}
                           </span>
                         </td>
                       )}
-                      {shown.has('Level') && <td className="px-4 py-3 text-right">{r.attempt}</td>}
-                      {shown.has('Error') && <td className="max-w-xs truncate px-4 py-3 text-danger-text" title={r.error ?? ''}>{r.error ?? DASH}</td>}
+                      {shown.has('Attempt') && <td className="px-4 py-3 text-right">{r.attempt}</td>}
+                      {shown.has('Error') && <td className={`max-w-xs truncate px-4 py-3 ${status === 'Not configured' ? 'text-fg-secondary' : 'text-danger-text'}`} title={r.error ?? ''}>{r.error ?? DASH}</td>}
                     </tr>
-                  ))}
+                  ); })}
                 </tbody>
               </table>
             </div>
           )}
-        {!error && rows.length > 0 && (
+        {/* Paging follows the loaded page, not "Search this page" (which can hide every row) — and stays
+           reachable on an emptied later page so Previous still works. */}
+        {!error && (pageRows.length > 0 || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">
@@ -282,7 +295,7 @@ export default function PartnerPostbackReport() {
         </ReportBody>
       </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/postback-logs?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, partner: publisherIdFilter, success: successFilter,
       }} />}

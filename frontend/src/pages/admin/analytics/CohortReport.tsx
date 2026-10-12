@@ -31,7 +31,7 @@ import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import {
-  DASH, DEVICE_OPTIONS, money, toIso, daysAgo, todayStr,
+  DASH, DEVICE_OPTIONS, toIso, daysAgo, todayStr,
   dimCount, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { readUrlFilters, readUrlDate, writeUrlFilters } from '../../../lib/reportFilterState';
@@ -42,10 +42,17 @@ import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 import { useAutoDateRange } from '../reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
+import { resolveCurrency, type RowCurrency } from '../../../lib/reportCurrency';
+import { Money } from '../../../shared-components/primitives/ReportMoney';
 
 interface SmartLink { id: string; name: string }
-interface CohortRow { date: string; topLevel: number; days: (number | null)[] }
-interface CohortResult { maxDay: number; rows: CohortRow[] }
+/**
+ * `currencies` (newer API): the currencies of the approved conversions behind the row's Payout /
+ * Revenue cells — one → its cells are in it; several → "Mixed" (no cross-currency sums); absent or
+ * empty → the network currency.
+ */
+interface CohortRow { date: string; topLevel: number; days: (number | null)[]; currencies?: string[] }
+interface CohortResult { maxDay: number; rows: CohortRow[]; currencies?: string[] }
 
 const TOP_LEVEL_OPTIONS = [
   { key: 'clicks', label: 'Clicks' },
@@ -60,10 +67,13 @@ const METRIC_OPTIONS = [
 ] as const;
 type MetricKey = (typeof METRIC_OPTIONS)[number]['key'];
 
-function fmtCell(v: number | null, metric: MetricKey): string {
-  if (v == null) return DASH;
-  if (metric === 'payout' || metric === 'revenue') return money(v);
-  return v.toLocaleString();
+const isMoneyMetric = (metric: MetricKey) => metric === 'payout' || metric === 'revenue';
+
+/** A day cell: money in the row's currency ("Mixed" when the row's conversions mix currencies). */
+function CohortCell({ v, metric, rc }: { v: number | null; metric: MetricKey; rc: RowCurrency }) {
+  if (v == null) return <>{DASH}</>;
+  if (isMoneyMetric(metric)) return <Money value={v} rc={rc} />;
+  return <>{v.toLocaleString()}</>;
 }
 
 /** Initial report state from the URL (reload / shared link) — what the address-bar sync writes. */
@@ -94,6 +104,8 @@ export default function CohortReport() {
   const [filters, setFilters] = useState<FilterValues>(init.filters);
   const [filterOpen, setFilterOpen] = useState(false);
 
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
+  const currency = settings?.general?.defaultCurrency ?? 'USD';
   const { data: offers } = useQuery<{ id: string; name: string }[]>('/api/offers');
   const { data: publishers } = useQuery<{ id: string; name: string }[]>('/api/publishers');
   const { data: advertisers } = useQuery<{ id: string; name: string }[]>('/api/advertisers');
@@ -209,6 +221,9 @@ export default function CohortReport() {
                 <tbody>
                   {data.rows.map((r) => {
                     const max = rowMax(r);
+                    const rc = resolveCurrency(r.currencies, currency);
+                    // A mixed row's money cells show "Mixed" — no heat shading from cross-currency sums.
+                    const shade = !(isMoneyMetric(metric) && rc.kind === 'mixed');
                     return (
                       <tr key={r.date}>
                         <td className="font-medium text-fg">{new Date(r.date).toISOString().slice(0, 10)}</td>
@@ -218,8 +233,8 @@ export default function CohortReport() {
                           const intensity = v != null && v > 0 ? Math.min(1, v / max) : 0;
                           return (
                             <td key={n} className="px-4 py-3 text-right"
-                              style={v != null && v > 0 ? { backgroundColor: `rgb(var(--accent) / ${0.08 + intensity * 0.22})` } : undefined}>
-                              {fmtCell(v, metric)}
+                              style={shade && v != null && v > 0 ? { backgroundColor: `rgb(var(--accent) / ${0.08 + intensity * 0.22})` } : undefined}>
+                              <CohortCell v={v} metric={metric} rc={rc} />
                             </td>
                           );
                         })}

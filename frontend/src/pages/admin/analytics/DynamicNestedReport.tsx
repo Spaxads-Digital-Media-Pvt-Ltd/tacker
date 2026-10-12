@@ -27,7 +27,7 @@ import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-co
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
@@ -44,6 +44,11 @@ import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveF
 import { useAutoDateRange } from '../reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
+import {
+  combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
+  moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
+} from '../../../lib/reportCurrency';
+import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
 
 interface SmartLink { id: string; name: string }
 
@@ -89,7 +94,8 @@ function linkFor(dim: DimKey, id: string): string | null {
   if (dim === 'smartLink') return `/app/smart-links/${id}`;
   return null;
 }
-function metricCells(shown: Set<string>, d: DerivedRow) {
+/** One row's metric cells; money in the row's own currency ("Mixed" when its conversions mix currencies). */
+function metricCells(shown: Set<string>, d: DerivedRow, rc: RowCurrency) {
   return (
     <>
       {shown.has('Imp') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
@@ -106,14 +112,14 @@ function metricCells(shown: Set<string>, d: DerivedRow) {
       {shown.has('CTR') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('Throttle') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('CVR') && <td className="px-4 py-3 text-right">{pct(d.cvr)}</td>}
-      {shown.has('CPC') && <td className="px-4 py-3 text-right">{money(d.cpc)}</td>}
-      {shown.has('CPA') && <td className="px-4 py-3 text-right">{money(d.cpa)}</td>}
-      {shown.has('RPC') && <td className="px-4 py-3 text-right">{money(d.rpc)}</td>}
-      {shown.has('RPA') && <td className="px-4 py-3 text-right">{money(d.rpa)}</td>}
-      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(d.revenue)}</td>}
-      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(d.payout)}</td>}
-      {shown.has('Profit') && <td className="px-4 py-3 text-right">{money(d.margin)}</td>}
-      {shown.has('Margin') && <td className="px-4 py-3 text-right">{pct(d.marginPct)}</td>}
+      {shown.has('CPC') && <td className="px-4 py-3 text-right"><Money value={d.cpc} rc={rc} /></td>}
+      {shown.has('CPA') && <td className="px-4 py-3 text-right"><Money value={d.cpa} rc={rc} /></td>}
+      {shown.has('RPC') && <td className="px-4 py-3 text-right"><Money value={d.rpc} rc={rc} /></td>}
+      {shown.has('RPA') && <td className="px-4 py-3 text-right"><Money value={d.rpa} rc={rc} /></td>}
+      {shown.has('Revenue') && <td className="px-4 py-3 text-right"><Money value={d.revenue} rc={rc} /></td>}
+      {shown.has('Payout') && <td className="px-4 py-3 text-right"><Money value={d.payout} rc={rc} /></td>}
+      {shown.has('Profit') && <td className="px-4 py-3 text-right"><Money value={d.margin} rc={rc} /></td>}
+      {shown.has('Margin') && <td className="px-4 py-3 text-right"><MoneyPct value={d.marginPct} rc={rc} /></td>}
     </>
   );
 }
@@ -144,26 +150,26 @@ function SingleSelectDropdown({ id, value, onChange }: { id: string; value: DimK
 }
 
 function ExpandedChildRows({
-  childDim, parentFilterParam, parentRawId, from, to, opts, smartLinkMap, shown, dimParams,
+  childDim, parentFilterParam, parentRawId, from, to, opts, smartLinkMap, shown, dimParams, currency,
 }: {
   childDim: DimKey; parentFilterParam: string; parentRawId: string; from: string; to: string;
   dimParams: Record<string, string | number | undefined>;
-  opts: Opts; smartLinkMap: Map<string, string>; shown: Set<string>;
+  opts: Opts; smartLinkMap: Map<string, string>; shown: Set<string>; currency: string;
 }) {
   // Child rows use the page's filters + date range, narrowed to this parent. The parent value is set
   // last (overrides a page filter on the same dimension). Text values may contain commas ("Comcast
   // Cable, LLC"), so they're sent as `key[]=value`, which the API takes literally instead of splitting.
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(dimParams)) if (v !== undefined && v !== '' && k !== parentFilterParam) params.set(k, String(v));
-  params.set('groupBy', childDim); params.set('metrics', METRICS_PARAM);
+  params.set('groupBy', childDim); params.set('metrics', withCurrenciesMetric(METRICS_PARAM));
   params.set('from', toIso(from)); params.set('to', toIso(to, true)); params.set('limit', '200');
   if (/Id$/.test(parentFilterParam)) params.set(parentFilterParam, parentRawId);
   else params.append(`${parentFilterParam}[]`, parentRawId);
   const { data, loading, error } = useQuery<AggResult>(`/api/reports?${params.toString()}`);
   const rows = useMemo(() => (data?.rows ?? [])
     .filter((r) => r.dimensions[childDim])
-    .map((r) => ({ raw: r.dimensions[childDim]!, name: resolveName(childDim, r.dimensions[childDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics) })),
-  [data, childDim, opts, smartLinkMap]);
+    .map((r) => ({ raw: r.dimensions[childDim]!, name: resolveName(childDim, r.dimensions[childDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) })),
+  [data, childDim, opts, smartLinkMap, currency]);
 
   if (loading) return <tr><td colSpan={1 + ALL_COLUMNS.length + 1} className="px-4 py-3 text-center"><Spinner /></td></tr>;
   if (error) return <tr><td colSpan={1 + ALL_COLUMNS.length + 1} className="px-4 py-3 text-small text-danger-text">{error}</td></tr>;
@@ -173,7 +179,7 @@ function ExpandedChildRows({
       {rows.map((r, i) => (
         <tr key={i} className="bg-page/60 text-small text-fg-secondary">
           <td className="py-2 pl-10 pr-4">{r.name}</td>
-          {metricCells(shown, r.derived)}
+          {metricCells(shown, r.derived, r.rc)}
           <td />
         </tr>
       ))}
@@ -319,7 +325,11 @@ export default function DynamicNestedReport() {
     if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
   }, [urlState, setSearchParams]);
 
-  const summaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  // Rows without money-bearing conversions (and older APIs) format in the network's default currency.
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
+  const currency = settings?.general?.defaultCurrency ?? 'USD';
+
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -334,9 +344,12 @@ export default function DynamicNestedReport() {
     }, { clicks: 0, unique_clicks: 0, invalid_clicks: 0, conversions: 0, total_conversions: 0, payout: 0, revenue: 0, margin: 0 });
     return deriveRow(totals);
   }, [summaryData]);
+  // The summary's money currency ("Mixed" → per-currency amounts on the money tiles, newer API).
+  const summaryRc = useMemo(() => combineCurrencies((summaryData?.rows ?? []).map((r) => currenciesOf(r.metrics)), currency), [summaryData, currency]);
+  const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   const chronological = appliedFrom !== appliedTo;
-  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
+  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
   const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
     const dimKey = chronological ? 'day' : 'hour';
@@ -345,11 +358,13 @@ export default function DynamicNestedReport() {
       labels: rows.map((r) => (r.dimensions[dimKey] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
+      // Revenue across points in different currencies isn't one comparable series — not plotted then.
+      rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData, chronological]);
+  }, [graphData, chronological, currency]);
 
   const tableQsFor = (limit: number, offset: number) => qs({
-    groupBy: parentDim, metrics: METRICS_PARAM,
+    groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM),
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
     orderBy, orderDir, limit, offset,
   });
@@ -358,12 +373,16 @@ export default function DynamicNestedReport() {
 
   const toParentRows = (src: AggRow[]) => src
     .filter((r) => r.dimensions[parentDim])
-    .map((r) => ({ raw: r.dimensions[parentDim]!, name: resolveName(parentDim, r.dimensions[parentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics) }));
-  const rows = useMemo(() => toParentRows(data?.rows ?? [])
-    .filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))
-    .filter((r) => passesMetricFilters(r.derived, metricFilters)),
+    .map((r) => ({ raw: r.dimensions[parentDim]!, name: resolveName(parentDim, r.dimensions[parentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- toParentRows only closes over the listed values
-  [data, parentDim, opts, smartLinkMap, q, metricFilters]);
+  const loadedRows = useMemo(() => toParentRows(data?.rows ?? []), [data, parentDim, opts, smartLinkMap, currency]);
+  // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
+  // currencies (the flyout disables it and the results bar says so) — lib/reportCurrency.
+  const moneyBlocked = useMemo(() => moneyFilterBlockedBy(loadedRows.map((r) => r.rc)), [loadedRows]);
+  const rows = useMemo(() => loadedRows
+    .filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .filter((r) => passesMetricFilters(r.derived, metricFilters, !!moneyBlocked)),
+  [loadedRows, q, metricFilters, moneyBlocked]);
 
   // A new Parent re-keys every row, so expanded rows of the old Parent are dropped. A new Child keeps
   // them open (they re-fetch broken down by the new Child) and doesn't touch the parent table.
@@ -398,10 +417,12 @@ export default function DynamicNestedReport() {
   const runExport = (format: 'csv' | 'xlsx') => {
     void reportExport.run(format, 'nested-report', async () => {
       const res = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${tableQsFor(limit, offset)}`, 200);
-      return { ...res, rows: exportRows(toParentRows(res.rows).filter((r) => passesMetricFilters(r.derived, metricFilters))) };
+      return { ...res, rows: exportRows(filterWithMoneyRule(toParentRows(res.rows), (r) => r.rc, (r, skip) => passesMetricFilters(r.derived, metricFilters, skip))) };
     });
   };
-  const exportRows = (list: ReturnType<typeof toParentRows>) => list.map((r) => ({
+  // Money stays plain decimals with the row's currency in a trailing `currency` column ("MIXED",
+  // money columns left empty, for a row whose conversions mix currencies).
+  const exportRows = (list: ReturnType<typeof toParentRows>) => list.map((r) => withRowCurrency({
     [DIM_OPTIONS.find((d) => d.key === parentDim)?.label ?? parentDim]: r.name,
     imp: DASH, rpm: DASH, cpm: DASH, grossClicks: r.derived.clicksGross, clicks: r.derived.clicks,
     uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks, invalidClicks: r.derived.invalidClicks,
@@ -410,7 +431,7 @@ export default function DynamicNestedReport() {
     rpc: r.derived.rpc.toFixed(2), rpa: r.derived.rpa.toFixed(2),
     revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2), profit: r.derived.margin.toFixed(2),
     margin: pct(r.derived.marginPct),
-  }));
+  }, r.rc));
 
   const sortIcon = (m: OrderMetric) => (orderBy === m ? (orderDir === 'desc' ? '↓' : '↑') : '');
   const sortableHeader = (label: string, m: OrderMetric) => (
@@ -451,6 +472,7 @@ export default function DynamicNestedReport() {
           <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
+                moneyFilterBlockedBy={moneyBlocked}
                 dimCategories={FILTER_CATEGORIES}
                 value={reporting}
                 onApply={setReporting}
@@ -503,7 +525,7 @@ export default function DynamicNestedReport() {
           </button>
           {summaryOpen && (
             summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
-              <SummaryGrid summary={summary} />
+              <SummaryGrid summary={summary} currency={currency} rc={summaryRc} breakdown={summaryBreakdown} />
             )
           )}
         </div>
@@ -517,10 +539,12 @@ export default function DynamicNestedReport() {
           graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
-                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>
+                {isMixed(graphSeries.rc)
+                  ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>
+                  : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>}
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
               </div>
-              <MiniChart labels={graphSeries.labels} revenue={graphSeries.revenue} clicks={graphSeries.clicks} />
+              <MiniChart labels={graphSeries.labels} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
             </div>
           )
         )}
@@ -557,6 +581,8 @@ export default function DynamicNestedReport() {
             )}
           </div>
         </>}>
+          <CurrencyNotes sortedWithin={showSortedWithinNote(data?.sortedWithinCurrency, loadedRows.map((r) => r.rc))}
+            moneyFilterBlockedBy={moneyBlocked} moneyFilterActive={hasMoneyFilter(metricFilters)} />
           <ActiveFilterChips
             chips={reportingChips(FILTER_CATEGORIES, reporting)}
             onRemove={(c) => setReporting(withoutReportingChip(reporting, c))}
@@ -611,7 +637,7 @@ export default function DynamicNestedReport() {
                             {r.name}
                           </button>
                         </td>
-                        {metricCells(shown, r.derived)}
+                        {metricCells(shown, r.derived, r.rc)}
                         <td className="text-right">
                           <RowActionMenu dim={parentDim} id={r.raw} label={r.name} />
                         </td>
@@ -619,7 +645,7 @@ export default function DynamicNestedReport() {
                       {expanded.has(r.raw) && (
                         <ExpandedChildRows
                           childDim={childDim} parentFilterParam={parentOpt.filterParam} parentRawId={r.raw}
-                          from={appliedFrom} to={appliedTo} opts={opts} smartLinkMap={smartLinkMap} shown={shown} dimParams={dimParams}
+                          from={appliedFrom} to={appliedTo} opts={opts} smartLinkMap={smartLinkMap} shown={shown} dimParams={dimParams} currency={currency}
                         />
                       )}
                     </Fragment>

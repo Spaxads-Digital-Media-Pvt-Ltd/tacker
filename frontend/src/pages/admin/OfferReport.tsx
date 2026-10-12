@@ -29,7 +29,7 @@ import { type FilterCategory, type FilterValues } from '../../shared-components/
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters,
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
@@ -41,7 +41,13 @@ import {
   IGNORE_FAIL_PARAM, readUrlFlag,
 } from '../../lib/reportFilterState';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
+import {
+  combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
+  moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
+} from '../../lib/reportCurrency';
+import { CurrencyNotes, Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { countryLabel } from '../../data/geo';
+import { flexReportPath } from '../../lib/flexReportLink';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
@@ -52,7 +58,7 @@ const ALL_COLUMNS = [
 ] as const;
 type OrderMetric = 'clicks' | 'unique_clicks' | 'invalid_clicks' | 'conversions' | 'total_conversions' | 'payout' | 'revenue' | 'margin' | 'avg_fraud_score';
 
-function metricCells(shown: Set<string>, d: DerivedRow) {
+function metricCells(shown: Set<string>, d: DerivedRow, rc: RowCurrency) {
   return (
     <>
       {shown.has('Clicks') && <td className="px-4 py-3 text-right">{d.clicks.toLocaleString()}</td>}
@@ -64,38 +70,43 @@ function metricCells(shown: Set<string>, d: DerivedRow) {
       {shown.has('Throttle') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('Events') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('CVR') && <td className="px-4 py-3 text-right">{pct(d.cvr)}</td>}
-      {shown.has('CPC') && <td className="px-4 py-3 text-right">{money(d.cpc)}</td>}
-      {shown.has('CPA') && <td className="px-4 py-3 text-right">{money(d.cpa)}</td>}
-      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(d.revenue)}</td>}
-      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(d.payout)}</td>}
-      {shown.has('Profit') && <td className="px-4 py-3 text-right">{money(d.margin)}</td>}
-      {shown.has('Margin') && <td className="px-4 py-3 text-right">{pct(d.marginPct)}</td>}
+      {shown.has('CPC') && <td className="px-4 py-3 text-right"><Money value={d.cpc} rc={rc} /></td>}
+      {shown.has('CPA') && <td className="px-4 py-3 text-right"><Money value={d.cpa} rc={rc} /></td>}
+      {shown.has('Revenue') && <td className="px-4 py-3 text-right"><Money value={d.revenue} rc={rc} /></td>}
+      {shown.has('Payout') && <td className="px-4 py-3 text-right"><Money value={d.payout} rc={rc} /></td>}
+      {shown.has('Profit') && <td className="px-4 py-3 text-right"><Money value={d.margin} rc={rc} /></td>}
+      {shown.has('Margin') && <td className="px-4 py-3 text-right"><MoneyPct value={d.marginPct} rc={rc} /></td>}
       {shown.has('Fraud') && <td className={`px-4 py-3 text-right ${d.fraudScore >= 40 ? 'text-danger-text' : d.fraudScore > 0 ? 'text-warning-text' : ''}`}>{d.fraudScore.toFixed(0)}</td>}
     </>
   );
 }
 
-interface PartnerRow { publisherId: string; publisherName: string; derived: DerivedRow }
-function ExpandedPartnerRows({ offerId, colSpanBefore, shown, dimParams, from, to }: { offerId: string; colSpanBefore: number; shown: Set<string>; dimParams: Record<string, string | number | undefined>; from: string; to: string }) {
+/** Labels for traffic grouped under a null key — kept as rows so the table agrees with Summary/total. */
+const NO_OFFER = '(No offer)';
+const NO_PARTNER = '(No partner)';
+
+interface PartnerRow { publisherId: string | null; publisherName: string; derived: DerivedRow; rc: RowCurrency }
+function ExpandedPartnerRows({ offerId, colSpanBefore, shown, dimParams, from, to, currency }: { offerId: string; colSpanBefore: number; shown: Set<string>; dimParams: Record<string, string | number | undefined>; from: string; to: string; currency: string }) {
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   // Same date range + filters as the parent table; the row's own offer is set last so a page-level
   // Offer filter can't override it.
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(dimParams)) if (v !== undefined && v !== '') p.set(k, String(v));
-    p.set('groupBy', 'publisher'); p.set('metrics', METRICS_PARAM);
+    p.set('groupBy', 'publisher'); p.set('metrics', withCurrenciesMetric(METRICS_PARAM));
     p.set('from', toIso(from)); p.set('to', toIso(to, true)); p.set('limit', '200');
     p.set('offerId', offerId);
     return p.toString();
   }, [offerId, dimParams, from, to]);
   const { data, loading } = useQuery<AggResult>(`/api/reports?${qs}`);
-  const rows: PartnerRow[] = useMemo(() => (data?.rows ?? [])
-    .filter((r) => r.dimensions['publisher'])
-    .map((r) => ({
-      publisherId: r.dimensions['publisher']!,
-      publisherName: publishers?.find((p) => p.id === r.dimensions['publisher'])?.name ?? r.dimensions['publisher']!.slice(0, 8),
-      derived: deriveRow(r.metrics),
-    })), [data, publishers]);
+  const rows: PartnerRow[] = useMemo(() => (data?.rows ?? []).map((r) => {
+    const id = r.dimensions['publisher'] ?? null;
+    return {
+      publisherId: id,
+      publisherName: id ? (publishers?.find((p) => p.id === id)?.name ?? id.slice(0, 8)) : NO_PARTNER,
+      derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency),
+    };
+  }), [data, publishers, currency]);
 
   if (loading) return <tr><td colSpan={colSpanBefore + ALL_COLUMNS.length} className="px-4 py-3 text-center"><Spinner /></td></tr>;
   if (!rows.length) return <tr><td colSpan={colSpanBefore + ALL_COLUMNS.length} className="px-4 py-3 text-small text-fg-muted">No partner activity for this offer in the selected period.</td></tr>;
@@ -103,9 +114,9 @@ function ExpandedPartnerRows({ offerId, colSpanBefore, shown, dimParams, from, t
   return (
     <>
       {rows.map((r) => (
-        <tr key={r.publisherId} className="bg-page/60 text-small text-fg-secondary">
-          <td className="py-2 pl-10 pr-4">{r.publisherName}</td>
-          {metricCells(shown, r.derived)}
+        <tr key={r.publisherId ?? '__no-partner__'} className="bg-page/60 text-small text-fg-secondary">
+          <td className={`py-2 pl-10 pr-4${r.publisherId ? '' : ' italic'}`}>{r.publisherName}</td>
+          {metricCells(shown, r.derived, r.rc)}
           <td />
         </tr>
       ))}
@@ -208,8 +219,8 @@ function AdjustVisibilityModal({ offer, publishers, onClose, onSaved }: { offer:
   );
 }
 
-interface RowActionMenuProps { offer: { id: string; name: string; visibility?: string }; publishers: Publisher[]; onChanged: () => void }
-function RowActionMenu({ offer, publishers, onChanged }: RowActionMenuProps) {
+interface RowActionMenuProps { offer: { id: string; name: string; visibility?: string }; publishers: Publisher[]; onChanged: () => void; flexHref: string }
+function RowActionMenu({ offer, publishers, onChanged, flexHref }: RowActionMenuProps) {
   const [visModalOpen, setVisModalOpen] = useState(false);
   const nav = useNavigate();
 
@@ -218,7 +229,7 @@ function RowActionMenu({ offer, publishers, onChanged }: RowActionMenuProps) {
       <RowKebabMenu items={[
         { label: 'View Offer', onClick: () => nav(`/app/offers/${offer.id}`) },
         { label: 'Adjust Visibility', onClick: () => setVisModalOpen(true) },
-        { label: 'Open Flex Report', onClick: () => nav(`/app/analytics?tab=flex&offerId=${offer.id}`) },
+        { label: 'Open Flex Report', onClick: () => nav(flexHref) },
         { label: 'Add Conversion', onClick: () => nav(`/app/conversions/add?offerId=${offer.id}`) },
       ]} />
       {visModalOpen && <AdjustVisibilityModal offer={offer} publishers={publishers} onClose={() => setVisModalOpen(false)} onSaved={onChanged} />}
@@ -352,7 +363,7 @@ export default function OfferReport() {
 
   // Summary tiles: one exact grand-total row (groupBy=none) — summing the top-N grouped rows
   // undercounted as soon as there were more groups than the page limit.
-  const summaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -367,8 +378,12 @@ export default function OfferReport() {
     }, { clicks: 0, unique_clicks: 0, invalid_clicks: 0, conversions: 0, total_conversions: 0, payout: 0, revenue: 0, margin: 0 });
     return deriveRow(totals);
   }, [summaryData]);
+  // The summary's money is in its conversions' currency — "Mixed" (no total) when they differ.
+  const summaryRc = useMemo(() => combineCurrencies((summaryData?.rows ?? []).map((r) => currenciesOf(r.metrics)), currency), [summaryData, currency]);
+  // …and, when mixed, its per-currency amounts (newer API) for the Payout/Revenue/Profit tiles.
+  const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
-  const graphQs = qs({ groupBy: 'day', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
+  const graphQs = qs({ groupBy: 'day', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
   const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
     const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions['day'] ?? '').localeCompare(b.dimensions['day'] ?? ''));
@@ -376,27 +391,34 @@ export default function OfferReport() {
       labels: rows.map((r) => (r.dimensions['day'] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
+      // Revenue across days in different currencies isn't one comparable series — not plotted then.
+      rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData]);
+  }, [graphData, currency]);
 
   const tableParams = {
-    groupBy: 'offer', metrics: METRICS_PARAM,
+    groupBy: 'offer', metrics: withCurrenciesMetric(METRICS_PARAM),
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
     orderBy, orderDir,
   };
   const tableQs = qs({ ...tableParams, limit: pageSize, offset: (page - 1) * pageSize });
   const { data, loading, error, refetch: refetchTable } = useQuery<AggResult>(`/api/reports?${tableQs}`);
 
-  const toRows = useCallback((src: AggRow[]) => src
-    .filter((r) => r.dimensions['offer'])
-    .map((r) => {
-      const offer = offers?.find((o) => o.id === r.dimensions['offer']);
-      return { offerId: r.dimensions['offer']!, offerName: offer?.name ?? r.dimensions['offer']!.slice(0, 8), offerStatus: offer?.status, offerVisibility: offer?.visibility, derived: deriveRow(r.metrics) };
-    }), [offers]);
-  const rows = useMemo(() => toRows(data?.rows ?? [])
+  // Traffic with no offer groups under a null key — kept as a "(No offer)" row (offerId null: not
+  // expandable, no row actions) so the table agrees with Summary/total.
+  const toRows = useCallback((src: AggRow[]) => src.map((r) => {
+    const id = r.dimensions['offer'] ?? null;
+    const offer = id ? offers?.find((o) => o.id === id) : undefined;
+    return { offerId: id, offerName: id ? (offer?.name ?? id.slice(0, 8)) : NO_OFFER, offerStatus: offer?.status, offerVisibility: offer?.visibility, derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) };
+  }), [offers, currency]);
+  const loadedRows = useMemo(() => toRows(data?.rows ?? []), [data, toRows]);
+  // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
+  // currencies (the flyout disables it and the results bar says so) — lib/reportCurrency.
+  const moneyBlocked = useMemo(() => moneyFilterBlockedBy(loadedRows.map((r) => r.rc)), [loadedRows]);
+  const rows = useMemo(() => loadedRows
     .filter((r) => !q.trim() || r.offerName.toLowerCase().includes(q.trim().toLowerCase()))
-    .filter((r) => passesMetricFilters(r.derived, metricFilters)),
-  [data, toRows, q, metricFilters]);
+    .filter((r) => passesMetricFilters(r.derived, metricFilters, !!moneyBlocked)),
+  [loadedRows, q, metricFilters, moneyBlocked]);
 
   // Reset dates and every Reporting Filter in one render → one request per query. The debounced
   // range catches up to the same values later and is then a no-op.
@@ -421,13 +443,15 @@ export default function OfferReport() {
     margin: pct(r.derived.marginPct), fraud: r.derived.fraudScore.toFixed(0),
   });
   // Export every row matching the applied filters (all pages), not just the visible page — the
-  // search box is a page-local filter and does not apply here.
+  // search box is a page-local filter and does not apply here. Money stays plain decimals; the
+  // row's currency rides along in a trailing `currency` column — "MIXED", with the money columns
+  // left empty, for a row whose conversions mix currencies (lib/reportCurrency).
   const exp = useReportExport();
   const runExport = (format: 'csv' | 'xlsx') => {
     setTableActionsOpen(false); setExportOpen(false);
     void exp.run(format, 'offer-report', async () => {
       const r = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${qs({ ...tableParams, limit, offset })}`, 200);
-      return { rows: toRows(r.rows).filter((x) => passesMetricFilters(x.derived, metricFilters)).map(exportRow), capped: r.capped, total: r.total };
+      return { rows: filterWithMoneyRule(toRows(r.rows), (x) => x.rc, (x, skip) => passesMetricFilters(x.derived, metricFilters, skip)).map((x) => withRowCurrency(exportRow(x), x.rc)), capped: r.capped, total: r.total };
     });
   };
   const reporting: ReportingFiltersValue = { filters, exclusions, metricFilters, ignoreFailTraffic };
@@ -473,6 +497,7 @@ export default function OfferReport() {
           <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
+                moneyFilterBlockedBy={moneyBlocked}
                 dimCategories={FILTER_CATEGORIES}
                 value={reporting}
                 onApply={setReporting}
@@ -521,7 +546,7 @@ export default function OfferReport() {
           </button>
           {summaryOpen && (
             summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
-              <SummaryGrid summary={summary} />
+              <SummaryGrid summary={summary} currency={currency} rc={summaryRc} breakdown={summaryBreakdown} />
             )
           )}
         </div>
@@ -536,17 +561,19 @@ export default function OfferReport() {
             <div className="pt-4">
               {graphSeries.labels.length >= 200 && <p className="mb-2 text-tiny text-fg-muted">Graph shows the first {graphSeries.labels.length} days — narrow the date range to see the rest.</p>}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
-                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>
+                {isMixed(graphSeries.rc)
+                  ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>
+                  : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>}
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
               </div>
-              <MiniChart labels={graphSeries.labels} revenue={graphSeries.revenue} clicks={graphSeries.clicks} />
+              <MiniChart labels={graphSeries.labels} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
             </div>
           )
         )}
       </div>
 
       <ReportCard>
-        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title="Report times are UTC">· UTC · {currency}</span></>} loading={loading} actions={<>
+        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title={`Report times are UTC. Money is shown in each row’s own currency (network default ${currency} for rows without conversions); rows mixing currencies show Mixed.`}>· UTC · row currency</span></>} loading={loading} actions={<>
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
@@ -576,6 +603,8 @@ export default function OfferReport() {
             )}
           </div>
         </>}>
+          <CurrencyNotes sortedWithin={showSortedWithinNote(data?.sortedWithinCurrency, loadedRows.map((r) => r.rc))}
+            moneyFilterBlockedBy={moneyBlocked} moneyFilterActive={hasMoneyFilter(metricFilters)} />
           <ActiveFilterChips
             chips={reportingChips(FILTER_CATEGORIES, reporting)}
             onRemove={(c) => setReporting(withoutReportingChip(reporting, c))}
@@ -615,24 +644,37 @@ export default function OfferReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <Fragment key={r.offerId}>
-                      <tr>
-                        <td >
-                          <button type="button" onClick={() => toggleExpand(r.offerId)} className="inline-flex items-center gap-1.5 text-fg hover:text-accent-text">
-                            <ChevronRight size={13} className={`transition-transform ${expanded.has(r.offerId) ? 'rotate-90' : ''}`} />
-                            <span className={`h-2 w-2 rounded-full ${r.offerStatus === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />
-                            {r.offerName}
-                          </button>
-                        </td>
-                        {metricCells(shown, r.derived)}
-                        <td className="text-right">
-                          <RowActionMenu offer={{ id: r.offerId, name: r.offerName, visibility: r.offerVisibility }} publishers={publishers ?? []} onChanged={() => { refetchOffers(); refetchTable(); }} />
-                        </td>
-                      </tr>
-                      {expanded.has(r.offerId) && <ExpandedPartnerRows offerId={r.offerId} colSpanBefore={1} shown={shown} dimParams={dimParams} from={appliedFrom} to={appliedTo} />}
-                    </Fragment>
-                  ))}
+                  {rows.map((r) => {
+                    const id = r.offerId;
+                    if (id === null) {
+                      return (
+                        <tr key="__no-offer__">
+                          <td><span className="inline-flex items-center gap-1.5 pl-[19px] italic text-fg-secondary" title="Traffic not attributed to an offer">{r.offerName}</span></td>
+                          {metricCells(shown, r.derived, r.rc)}
+                          <td />
+                        </tr>
+                      );
+                    }
+                    return (
+                      <Fragment key={id}>
+                        <tr>
+                          <td >
+                            <button type="button" onClick={() => toggleExpand(id)} className="inline-flex items-center gap-1.5 text-fg hover:text-accent-text">
+                              <ChevronRight size={13} className={`transition-transform ${expanded.has(id) ? 'rotate-90' : ''}`} />
+                              <span className={`h-2 w-2 rounded-full ${r.offerStatus === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />
+                              {r.offerName}
+                            </button>
+                          </td>
+                          {metricCells(shown, r.derived, r.rc)}
+                          <td className="text-right">
+                            <RowActionMenu offer={{ id, name: r.offerName, visibility: r.offerVisibility }} publishers={publishers ?? []} onChanged={() => { refetchOffers(); refetchTable(); }}
+                              flexHref={flexReportPath({ from: appliedFrom, to: appliedTo, reporting, entity: ['offer', id] })} />
+                          </td>
+                        </tr>
+                        {expanded.has(id) && <ExpandedPartnerRows offerId={id} colSpanBefore={1} shown={shown} dimParams={dimParams} from={appliedFrom} to={appliedTo} currency={currency} />}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -644,7 +686,7 @@ export default function OfferReport() {
         </ReportBody>
       </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, country: countryFilter, device: deviceFilter,
         excludeOffer: excludeOfferId, excludeAdvertiser: excludeAdvertiserId, excludePartner: excludePublisherId, excludeCountry, excludeDevice,

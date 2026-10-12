@@ -10,10 +10,22 @@
  *   - Payout:     offer_groups.daily_payout_cap  (offer-group, daily only)
  *   - Revenue:    offer_groups.daily_revenue_cap (offer-group, daily only)
  *
- * The reference's Summary has four periods (Daily/Weekly/Monthly/Global); this schema only tracks
- * daily caps plus one all-time ("global") conversion cap — no weekly/monthly cap concept exists
- * anywhere in this app, so those two columns are omitted rather than faked, and Global is shown as
- * "—" for Click/Payout/Revenue (no all-time cap tracked for those).
+ * The reference's Summary has four periods (Daily/Weekly/Monthly/Global). Offer groups do carry
+ * weekly/monthly/global caps too (`offer_groups.caps`), but this report's endpoint only measures
+ * daily usage (plus the offer-level all-time conversion cap as Global), so Weekly/Monthly are left
+ * out rather than faked, and Global is "—" for Click/Payout/Revenue. The Summary is always today
+ * (UTC) across every capped offer — it ignores the date range and the Offer filter (see the
+ * endpoint); only the Detailed Report follows them.
+ *
+ * Payout/Revenue caps are money in the row's currency (the offer group's) when the API sends one,
+ * else the network's default currency. The actual is in its conversions' own currency
+ * (`currencies` — lib/reportCurrency): when they mix currencies, or differ from the cap's, the
+ * actual / % used are shown as unavailable rather than comparing unlike money. The Summary's pooled
+ * Payout/Revenue % comes back as `mixedCurrency` (no %) in that case.
+ *
+ * Offer-group (Payout/Revenue) caps are NOT enforced anywhere — nothing on the click or conversion
+ * path reads them — so they carry a "Not enforced" badge here. The offer-level Click/Conversion caps
+ * are enforced and keep their plain labels.
  *
  * No Performance Graph section — the reference's graph would need a cap-usage-over-time metric this
  * report doesn't have a ready-made time series for beyond the Detailed Report rows themselves, so
@@ -29,26 +41,35 @@ import { MoreVertical } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, Pagination, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, money, Pagination, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import type { Offer } from '../../types';
+import { comparableTo, mixedTitle, parseMoneyByCurrency, resolveCurrency, withRowCurrency, type RowCurrency } from '../../lib/reportCurrency';
+import { MixedMoney, Money } from '../../shared-components/primitives/ReportMoney';
+import { NotEnforcedBadge } from '../../shared-components/primitives/NotEnforcedBadge';
 
 type Category = 'click' | 'conversion' | 'payout' | 'revenue';
-interface SummaryRow { category: Category; dailyUsedPct: number | null; globalUsedPct: number | null }
-interface DetailRow { date: string; entity: string; entityId: string; cap: number; actual: number; usedPct: number }
+/** `mixedCurrency` (Payout/Revenue, newer API): the pooled caps/actuals span currencies — no % is given. */
+interface SummaryRow { category: Category; dailyUsedPct: number | null; globalUsedPct: number | null; mixedCurrency?: boolean }
+/** `cap`/`actual`: counts (numbers) for Click/Conversion; money as exact decimal text for Payout/Revenue. */
+/** `currency`: Payout/Revenue rows' money currency (newer API) — absent → the network currency. */
+/** `currencies`: Payout/Revenue rows' conversions' own currencies (newer API) — see lib/reportCurrency. */
+/** `moneyByCurrency`: the actual's per-currency amounts (newer API) — listed in a mixed actual's tooltip. */
+interface DetailRow { date: string; entity: string; entityId: string; cap: number | string; actual: number | string; usedPct: number; currency?: string; currencies?: string[]; moneyByCurrency?: unknown }
 interface PacingResult { summary: SummaryRow[]; category: Category; rows: DetailRow[] }
 
 const CATEGORY_LABELS: Record<Category, string> = {
   click: 'Click', conversion: 'Conversion', payout: 'Payout', revenue: 'Revenue',
 };
-const CAP_UNIT: Record<Category, (n: number) => string> = {
-  click: (n) => n.toLocaleString(), conversion: (n) => n.toLocaleString(),
-  payout: (n) => `$${n.toFixed(2)}`, revenue: (n) => `$${n.toFixed(2)}`,
-};
+const isMoneyCategory = (c: Category) => c === 'payout' || c === 'revenue';
+/** A cap/actual cell: a count for Click/Conversion, money in `currency` for Payout/Revenue. */
+function capValue(c: Category, v: number | string, currency: string): string {
+  return isMoneyCategory(c) ? money(Number(v), currency) : Number(v).toLocaleString();
+}
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -89,6 +110,30 @@ export default function PacingReport() {
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const offerName = (id: string) => offers?.find((o) => o.id === id)?.name ?? id;
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
+  // The cap's currency (the offer group's), and the actual's: its conversions' one currency or "mixed".
+  const rowCurrency = (r: DetailRow) => r.currency || (settings?.general?.defaultCurrency ?? 'USD');
+  const actualCurrency = (r: DetailRow): RowCurrency => resolveCurrency(r.currencies, rowCurrency(r));
+  /** Why a money row's actual can't be set against its cap (mixed / other currency), or null when it can. */
+  const notComparable = (r: DetailRow): string | null => {
+    const rc = actualCurrency(r);
+    if (rc.kind === 'mixed') return mixedTitle(rc.currencies);
+    return comparableTo(rc, rowCurrency(r)) ? null
+      : `Conversions are in ${rc.kind === 'single' ? rc.currency : '?'}, the cap in ${rowCurrency(r)} — not compared; no FX conversion yet`;
+  };
+  // Payout/Revenue cells: the cap in its own currency; the actual in its conversions' currency
+  // ("Mixed" when they differ); % used only when the two are comparable.
+  const moneyCapCells = (r: DetailRow, field: 'payout' | 'revenue') => {
+    const rc = actualCurrency(r);
+    const why = notComparable(r);
+    return <>
+      <td className="px-4 py-3 text-right">
+        {rc.kind === 'mixed' ? <MixedMoney currencies={rc.currencies} /> : why ? <span className="text-fg-muted" title={why}>{DASH}</span> : pctCell(r.usedPct)}
+      </td>
+      <td className="px-4 py-3 text-right">{money(Number(r.cap), rowCurrency(r))}</td>
+      <td className="px-4 py-3 text-right"><Money value={Number(r.actual)} rc={rc} breakdown={parseMoneyByCurrency(r.moneyByCurrency)} field={field} /></td>
+    </>;
+  };
 
   const qs = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
@@ -125,13 +170,20 @@ export default function PacingReport() {
   const clearOffer = () => changeOffer('');
 
   // The endpoint returns every detail row (no paging) — export all of them, not the visible page.
+  // Caps/actuals stay plain numbers / exact decimal text (spreadsheet-numeric); money rows add the
+  // `currency` the table formats them in.
+  // Money rows: `capCurrency` is the cap's; `currency` the actual's — "MIXED" with the actual and
+  // % used left empty when its conversions mix currencies (% used also empty when the currencies differ).
   const runExport = (format: 'csv' | 'xlsx') => {
     const entityKey = rowCategory === 'click' || rowCategory === 'conversion' ? 'offer' : 'offerGroup';
     void exp.run(format, `pacing-report-${rowCategory}`, async () => ({
-      rows: allRows.map((r) => ({
-        date: formatDate(r.date), [entityKey]: r.entity, dailyCapUsed: pctCell(r.usedPct),
-        dailyCap: CAP_UNIT[rowCategory](r.cap), actual: CAP_UNIT[rowCategory](r.actual),
-      })),
+      rows: allRows.map((r) => {
+        const row = { date: formatDate(r.date), [entityKey]: r.entity, dailyCapUsed: pctCell(r.usedPct), dailyCap: r.cap, actual: r.actual };
+        if (!isMoneyCategory(rowCategory)) return row;
+        return withRowCurrency({
+          ...row, dailyCapUsed: notComparable(r) ? '' : row.dailyCapUsed, capCurrency: rowCurrency(r), capEnforced: 'No',
+        }, actualCurrency(r), ['actual', 'dailyCapUsed']);
+      }),
     }));
   };
 
@@ -168,7 +220,10 @@ export default function PacingReport() {
         </ReportControls>
 
         <div className="border-t border-border px-5 py-4 sm:px-6">
-          <h3 className="mb-3 text-small font-medium text-fg">Summary</h3>
+          {/* The endpoint computes the Summary for today across every capped offer, whatever the range/Offer. */}
+          <h3 className="mb-3 text-small font-medium text-fg">
+            Summary <span className="ml-1 font-normal text-fg-muted" title="Ignores the date range and the Offer filter">· Today (UTC) · all capped offers</span>
+          </h3>
           {error ? <p className="text-small text-danger-text">{error}</p>
             : !result ? (loading ? <div className="pt-2"><Spinner /></div> : null) : (
             <div className={`overflow-x-auto rounded-card border border-border transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
@@ -183,8 +238,15 @@ export default function PacingReport() {
                 <tbody>
                   {result.summary.map((s) => (
                     <tr key={s.category}>
-                      <td className="px-4 py-3 font-medium text-fg">{CATEGORY_LABELS[s.category]}</td>
-                      <td className="px-4 py-3 text-right">{pctCell(s.dailyUsedPct)}</td>
+                      <td className="px-4 py-3 font-medium text-fg">
+                        {CATEGORY_LABELS[s.category]}
+                        {isMoneyCategory(s.category) && <NotEnforcedBadge className="ml-2" />}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {s.mixedCurrency
+                          ? <span className="text-fg-muted" title="Today's capped offer groups and their conversions span more than one currency — not added together; no FX conversion yet">Unavailable — mixed currencies</span>
+                          : pctCell(s.dailyUsedPct)}
+                      </td>
                       <td className="px-4 py-3 text-right">{pctCell(s.globalUsedPct)}</td>
                     </tr>
                   ))}
@@ -219,7 +281,9 @@ export default function PacingReport() {
                     <th >Date</th>
                     <th >{rowCategory === 'click' || rowCategory === 'conversion' ? 'Offer' : 'Offer Group'}</th>
                     <th className="text-right font-semibold">% Daily {CATEGORY_LABELS[rowCategory]} Cap Used</th>
-                    <th className="text-right font-semibold">Daily {CATEGORY_LABELS[rowCategory]} Cap</th>
+                    <th className="text-right font-semibold">
+                      Daily {CATEGORY_LABELS[rowCategory]} Cap{isMoneyCategory(rowCategory) && <NotEnforcedBadge className="ml-1.5" />}
+                    </th>
                     <th className="text-right font-semibold">{rowCategory === 'click' ? 'Clicks' : rowCategory === 'conversion' ? 'Conversions' : CATEGORY_LABELS[rowCategory]}</th>
                   </tr>
                 </thead>
@@ -228,9 +292,11 @@ export default function PacingReport() {
                     <tr key={`${r.date}-${r.entityId}`} className="hover:bg-accent-subtle/40">
                       <td className="font-medium text-fg">{formatDate(r.date)}</td>
                       <td className="px-4 py-3"><Link to={entityHref(r)} className="text-accent-text hover:underline">{r.entity}</Link></td>
-                      <td className="px-4 py-3 text-right">{pctCell(r.usedPct)}</td>
-                      <td className="px-4 py-3 text-right">{CAP_UNIT[rowCategory](r.cap)}</td>
-                      <td className="px-4 py-3 text-right">{CAP_UNIT[rowCategory](r.actual)}</td>
+                      {rowCategory === 'payout' || rowCategory === 'revenue' ? moneyCapCells(r, rowCategory) : <>
+                        <td className="px-4 py-3 text-right">{pctCell(r.usedPct)}</td>
+                        <td className="px-4 py-3 text-right">{capValue(rowCategory, r.cap, rowCurrency(r))}</td>
+                        <td className="px-4 py-3 text-right">{capValue(rowCategory, r.actual, rowCurrency(r))}</td>
+                      </>}
                     </tr>
                   ))}
                 </tbody>

@@ -15,13 +15,11 @@
  * renders empty isn't a gap unique to this app; it's page shell + an honest explanation of why,
  * rather than 40 fabricated columns that could never hold real values here.
  */
-import { useState } from 'react';
-import { Search, Info } from 'lucide-react';
+import { Info } from 'lucide-react';
 import { PageHeader } from '../../shared-components/primitives/ui';
 import { daysAgo, todayStr } from '../../shared-components/primitives/ReportPageKit';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
-import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 
 const COLUMNS = ['Date', 'Offer', 'Partner', 'Country', 'Device', 'IP Address', 'Sub1', 'Sub2'] as const;
 
@@ -29,7 +27,6 @@ export default function ImpressionReport() {
   // No "Run Report": the range applies on its own like every other report (there's simply nothing
   // to fetch for it here — see above).
   const range = useAutoDateRange(daysAgo(7), todayStr());
-  const [q, setQ] = useState('');
 
   return (
     <>
@@ -41,12 +38,8 @@ export default function ImpressionReport() {
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
-        <ResultsBar title="Detailed Report" actions={
-          <div className="relative min-w-0 flex-1 sm:flex-none">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search…" aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-        } />
+        {/* No search box: there are no rows to search (see above). */}
+        <ResultsBar title="Detailed Report" />
 
         <ReportBody>
           <div className="mb-4 flex items-start gap-3">

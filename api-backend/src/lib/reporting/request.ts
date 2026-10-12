@@ -7,19 +7,30 @@
 import { z } from 'zod';
 import { MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../http/pagination.js';
 import { queryBool, queryDate } from '../http/query-params.js';
-import type { Dimension, Metric, ReportRequest, ReportFilters, FilterValue } from './types.js';
+import { MONEY_FIELDS } from './types.js';
+import type { Dimension, Metric, MoneyField, ReportRequest, ReportFilters, FilterValue } from './types.js';
 
 export type ReportAudience = 'admin' | 'network' | 'publisher' | 'advertiser';
 
 const ALL_DIMS: Dimension[] = ['offer', 'publisher', 'advertiser', 'smartLink', 'country', 'device', 'city', 'region', 'isp', 'browser', 'os', 'day', 'hour', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'];
-const ALL_METRICS: Metric[] = ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'invalid_clicks', 'total_conversions', 'avg_fraud_score'];
+const ALL_METRICS: Metric[] = ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'invalid_clicks', 'total_conversions', 'avg_fraud_score', 'currencies', 'money_by_currency'];
+// `currencies` / `money_by_currency` describe the money columns per currency rather than being one
+// figure: returned only when asked for by name (an omitted `metrics` keeps today's set) and never a
+// sort key. `money_by_currency` only ever carries the money fields the audience may see (moneyFields).
+const OPT_IN_METRICS = new Set<Metric>(['currencies', 'money_by_currency']);
 
 const METRIC_POLICY: Record<ReportAudience, Metric[]> = {
   admin: ALL_METRICS,
   network: ALL_METRICS,
-  publisher: ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'epc'], // NO revenue/margin
-  advertiser: ['clicks', 'unique_clicks', 'conversions', 'cr', 'revenue'],      // NO payout/margin/epc
+  publisher: ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'epc', 'currencies', 'money_by_currency'], // NO revenue/margin
+  advertiser: ['clicks', 'unique_clicks', 'conversions', 'cr', 'revenue', 'currencies', 'money_by_currency'],      // NO payout/margin/epc
 };
+
+/** The money fields an audience may see — what `money_by_currency` carries for it. */
+export function audienceMoneyFields(audience: ReportAudience): MoneyField[] {
+  const allowed = METRIC_POLICY[audience] as string[];
+  return MONEY_FIELDS.filter((f) => allowed.includes(f));
+}
 
 const DIM_POLICY: Record<ReportAudience, Dimension[]> = {
   admin: ALL_DIMS,
@@ -146,9 +157,9 @@ export function buildReportRequest(
   const totalsOnly = raw.groupBy?.trim() === 'none';
   const groupBy = totalsOnly ? [] : csv<Dimension>(raw.groupBy, allowedDims).slice(0, MAX_GROUP_BY);
   const metricsReq = csv<Metric>(raw.metrics, allowedMetrics);
-  const metrics = metricsReq.length ? metricsReq : allowedMetrics;
+  const metrics = metricsReq.length ? metricsReq : allowedMetrics.filter((m) => !OPT_IN_METRICS.has(m));
 
-  const orderBy = raw.orderBy && (allowedMetrics as string[]).includes(raw.orderBy)
+  const orderBy = raw.orderBy && (allowedMetrics as string[]).includes(raw.orderBy) && !OPT_IN_METRICS.has(raw.orderBy as Metric)
     ? (raw.orderBy as Metric) : undefined;
 
   const user: ReportFilters = {
@@ -201,5 +212,8 @@ export function buildReportRequest(
     offset: raw.offset,
     ...(orderBy ? { orderBy } : {}),
     ...(raw.orderDir ? { orderDir: raw.orderDir } : {}),
+    // From the audience policy, never the caller's metric list: a publisher's `money_by_currency` is
+    // payout-only and an advertiser's revenue-only.
+    moneyFields: audienceMoneyFields(audience),
   };
 }

@@ -38,7 +38,13 @@ import type {
  ReportResult,
  ReportRow,
  ReportingProvider,
+ MetricValue,
+ MoneyByCurrency,
 } from './types.js';
+import { MONEY_SORT_METRICS, moneyFieldsOf, money4 } from './types.js';
+
+/** Metrics computed by the per-side aggregates (`money_by_currency` is assembled separately below). */
+type SideMetric = Exclude<Metric, 'money_by_currency'>;
 
 // --- dimension → SQL fragments -------------------------------------------
 
@@ -88,7 +94,7 @@ const DIM_SQL_CONV: Record<Dimension, string> = {
 
 // ClickHouse doesn't have a `FILTER (WHERE ...)` clause like Postgres. We use
 // conditional aggregation: SUM(IF(condition, value, 0)).
-const METRIC_CLICKS: Record<Metric, string> = {
+const METRIC_CLICKS: Record<SideMetric, string> = {
  clicks: 'COUNT(*)',
  unique_clicks: 'COUNTIf(c.is_unique = 1)',
  conversions: '0',
@@ -100,9 +106,10 @@ const METRIC_CLICKS: Record<Metric, string> = {
  invalid_clicks: 'COUNTIf(length(c.fraud_flags) > 0)',
  total_conversions: '0',
  avg_fraud_score: 'AVG(c.fraud_score)',
+ currencies: 'CAST([], \'Array(String)\')',
 };
 
-const METRIC_CONV: Record<Metric, string> = {
+const METRIC_CONV: Record<SideMetric, string> = {
  clicks: '0',
  unique_clicks: '0',
  conversions: "COUNTIf(k.status = 'approved')",
@@ -114,11 +121,15 @@ const METRIC_CONV: Record<Metric, string> = {
  invalid_clicks: '0',
  total_conversions: 'COUNT(*)',
  avg_fraud_score: 'AVG(k.fraud_score)',
+ // Distinct currencies of exactly the conversions behind payout/revenue/margin (approved), sorted.
+ currencies: 'arraySort(groupUniqArrayIf(toString(assumeNotNull(k.currency)), k.status = \'approved\' AND isNotNull(k.currency)))',
 };
 
 // ORDER BY expressions over the outer select's aliases. cr/epc order by the derived ratio itself
 // (computed the same way as `derivedExpr` below) — not by clicks.
-const ORDER_COL: Record<Metric, string> = {
+// `currencies` / `money_by_currency` are never sort keys (request.ts refuses them as orderBy).
+type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'>;
+const ORDER_COL: Record<OrderMetric, string> = {
  clicks: 'clicks',
  unique_clicks: 'unique_clicks',
  conversions: 'conversions',
@@ -250,9 +261,12 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  const gbHas = gb.length > 0;
  const groupIdx = gb.map((_, i) => `d${i}`).join(', ');
 
- const ALL_METRICS: Metric[] = [
+ // `currencies` (opt-in) is only computed when asked for, so the default SQL is unchanged.
+ const wantCurrencies = req.metrics.includes('currencies');
+ const ALL_METRICS: SideMetric[] = [
  'clicks','unique_clicks','invalid_clicks','avg_fraud_score',
  'conversions','total_conversions','payout','revenue',
+ ...(wantCurrencies ? ['currencies' as const] : []),
  ];
 
  const clickSel = gb.map((d, i) => `${clickDim(d)} AS d${i}`).join(', ');
@@ -265,8 +279,22 @@ export class ClickHouseReportingProvider implements ReportingProvider {
 
  const convSel = gb.map((d, i) => `${DIM_SQL_CONV[d]} AS d${i}`).join(', ');
  const convMetrics = ALL_METRICS.map(m => `${METRIC_CONV[m]} AS ${m}`).join(', ');
+ // `money_by_currency` (opt-in): one sumMap per group over the approved conversions with a currency —
+ // keys = currency, values = payout, revenue and a row count. The count keeps a currency whose
+ // payout and revenue both sum to 0 (sumMap drops keys whose values are all zero).
+ const wantMbc = req.metrics.includes('money_by_currency');
+ const approvedCur = "k.status = 'approved' AND isNotNull(k.currency)";
+ const mbcSql = wantMbc
+ ? `, sumMapIf([CAST(assumeNotNull(k.currency) AS String)], [coalesce(k.payout, toDecimal32(0, 4))], [coalesce(k.revenue, toDecimal32(0, 4))], [toUInt64(1)], ${approvedCur}) AS mbc`
+ : '';
+ // Money sort (payout/revenue/margin/epc): classify each group's approved conversions as one
+ // currency / none / mixed-or-unknown so currencies are never compared (see the ORDER BY below).
+ const moneySort = req.orderBy != null && MONEY_SORT_METRICS.has(req.orderBy);
+ const sortSql = moneySort
+ ? `, uniqExactIf(k.currency, ${approvedCur}) AS cur_n, countIf(k.status = 'approved' AND isNull(k.currency)) AS cur_null, minIf(CAST(assumeNotNull(k.currency) AS String), ${approvedCur}) AS cur_one`
+ : '';
  const conversionsCte =
- `SELECT ${gbHas ? convSel + ',' : ''}${convMetrics}
+ `SELECT ${gbHas ? convSel + ',' : ''}${convMetrics}${mbcSql}${sortSql}
  FROM tracker.conversions k
  WHERE ${convWhere.join(' AND ')}
  ${gbHas ? `GROUP BY ${groupIdx}` : ''}`;
@@ -288,7 +316,7 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  const outerMetrics = req.metrics.filter((m) => derivedExpr[m]).map((m) => `${derivedExpr[m]} AS ${m}`).join(', ');
 
  const chronological = gbHas && gb.length === 1 && (gb[0] === 'day' || gb[0] === 'hour');
- const orderCol = req.orderBy ? ORDER_COL[req.orderBy] : (chronological ? 'd0' : 'clicks');
+ const orderCol = req.orderBy && req.orderBy in ORDER_COL ? ORDER_COL[req.orderBy as OrderMetric] : (chronological ? 'd0' : 'clicks');
  const orderDir = req.orderDir
  ? (req.orderDir === 'asc' ? 'ASC' : 'DESC')
  : (chronological ? 'ASC' : 'DESC');
@@ -304,34 +332,50 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  COALESCE(cv.total_conversions, 0) AS total_conversions,
  COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0) AS payout,
  COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) AS revenue,
- COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) - (COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0)) AS margin${outerMetrics ? `,
+ COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) - (COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0)) AS margin${wantCurrencies ? `,
+ cv.currencies AS currencies` : ''}${wantMbc ? `,
+ arrayMap((cur, p, r) -> tuple(cur, toString(p), toString(r), toString(r - p)), tupleElement(cv.mbc, 1), tupleElement(cv.mbc, 2), tupleElement(cv.mbc, 3)) AS money_by_currency` : ''}${moneySort ? `,
+ multiIf(COALESCE(cv.conversions, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket,
+ if(COALESCE(cv.conversions, 0) > 0 AND COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, cv.cur_one, '') AS money_currency` : ''}${outerMetrics ? `,
  ${outerMetrics}` : ''}
  FROM cl ${joinType} cv ${onClause}`;
 
+ // FULL OUTER JOIN of the click and conversion aggregates: without join_use_nulls an unmatched
+ // side's columns read as type defaults instead of NULL, so a conversion-only group's dimension
+ // came back as the click side's default (zero UUID / '') rather than its real value.
+ const settings = { join_use_nulls: 1 } as const;
  const qp: Record<string, unknown> = Object.fromEntries(
  params.map((v, i) => [`p${i + 1}`, v]),
  );
  const countSql = `SELECT COUNT(*)::UInt64 AS total FROM (${baseSql}) AS sub`;
- const countRes = await this.client.query({ query: countSql, query_params: qp, format: 'JSON' });
+ const countRes = await this.client.query({ query: countSql, query_params: qp, format: 'JSON', clickhouse_settings: settings });
  const total = Number(((await countRes.json<{ total: number }>()) as { data: { total: number }[] }).data[0]?.total ?? 0);
 
  const pageParams = [...params, req.limit, req.offset];
  // Stable tie-break on the group key so paging never repeats/skips rows with equal metrics.
  const tieBreak = gb.map((_, i) => `d${i}`).filter((d) => d !== orderCol).join(', ');
- const pageSql = `${baseSql} ORDER BY ${orderCol} ${orderDir}${tieBreak ? `, ${tieBreak}` : ''} LIMIT {p${params.length + 1}:UInt32} OFFSET {p${params.length + 2}:UInt32}`;
+ // Money sort: single-currency rows first (by currency code, then the value within it), then
+ // no-money rows, then mixed-currency rows in tie-break order — before LIMIT/OFFSET.
+ const orderSql = moneySort
+ ? `money_bucket ASC, money_currency ASC, if(money_bucket = 0, ${orderCol}, NULL) ${orderDir} NULLS LAST`
+ : `${orderCol} ${orderDir}`;
+ const pageSql = `${baseSql} ORDER BY ${orderSql}${tieBreak ? `, ${tieBreak}` : ''} LIMIT {p${params.length + 1}:UInt32} OFFSET {p${params.length + 2}:UInt32}`;
  const pageQp = Object.fromEntries(pageParams.map((v, i) => [`p${i + 1}`, v]));
- const res = await this.client.query({ query: pageSql, query_params: pageQp, format: 'JSON' });
+ const res = await this.client.query({ query: pageSql, query_params: pageQp, format: 'JSON', clickhouse_settings: settings });
  const rows = ((await res.json<Record<string, unknown>>()) as { data: Record<string, unknown>[] }).data;
 
+ const moneyFields = moneyFieldsOf(req);
  const out: ReportRow[] = rows.map((row) => {
  const dimensions: Record<string, string | null> = {};
  gb.forEach((d, i) => {
  const v = row[`d${i}`];
  dimensions[d] = v == null ? null : String(v);
  });
- const metrics: Record<string, string | number> = {};
+ const metrics: Record<string, MetricValue> = {};
  req.metrics.forEach((m) => {
  const v = row[m];
+ if (m === 'currencies') { metrics[m] = Array.isArray(v) ? v.map(String) : []; return; }
+ if (m === 'money_by_currency') { metrics[m] = moneyByCurrencyOf(v, moneyFields); return; }
  if (v == null) return;
  if (m === 'avg_fraud_score') metrics[m] = Number(v);
  else if (['cr', 'epc'].includes(m)) metrics[m] = Number(v);
@@ -340,6 +384,19 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  return { dimensions, metrics };
  });
 
- return { groupBy: gb, metrics: req.metrics, rows: out, total };
+ return { groupBy: gb, metrics: req.metrics, rows: out, total, ...(moneySort ? { sortedWithinCurrency: true as const } : {}) };
  }
+}
+
+/** [[currency, payout, revenue, margin], …] (JSON of the money_by_currency tuples) → the audience's fields. */
+function moneyByCurrencyOf(v: unknown, fields: ReturnType<typeof moneyFieldsOf>): MoneyByCurrency {
+ const out: MoneyByCurrency = {};
+ if (!Array.isArray(v)) return out;
+ for (const t of v) {
+ const [cur, payout, revenue, margin] = (Array.isArray(t) ? t : Object.values(t as object)) as unknown[];
+ if (cur == null || cur === '') continue;
+ const all = { payout: money4(payout), revenue: money4(revenue), margin: money4(margin) };
+ out[String(cur)] = Object.fromEntries(fields.map((f) => [f, all[f]]));
+ }
+ return out;
 }

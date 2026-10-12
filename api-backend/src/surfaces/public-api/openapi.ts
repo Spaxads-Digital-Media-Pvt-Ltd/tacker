@@ -59,12 +59,37 @@ export function openApiSpec(): Record<string, unknown> {
       },
       '/publisher/offers': { get: op('publisher', 'List offers available to you (payout only)', ['offers:read']) },
       '/publisher/conversions': { get: op('publisher', 'List your conversions (payout only)', ['conversions:read']) },
-      '/publisher/earnings': { get: { tags: ['publisher'], summary: 'Your balance + statement (no revenue)', security: secured, 'x-required-scopes': ['earnings:read'], responses: { '200': { description: 'OK' } } } },
-      '/network/offers': { get: op('network', 'List all offers (full detail incl. margin)', ['offers:read']) },
+      '/publisher/earnings': { get: { tags: ['publisher'], summary: 'Your balance + statement (no revenue)', description: '`balances` is your approved balance per currency ([{ currency, balance }]). `balance` / `currency` are the single-currency value, or null when your balance spans several currencies (never a cross-currency sum).', security: secured, 'x-required-scopes': ['earnings:read'], responses: { '200': { description: 'OK: { balance (string|null), currency (string|null), balances, statement }' } } } },
+      '/network/offers': { get: op('network', 'List all offers (full detail incl. margin; never the postback security code)', ['offers:read']) },
       '/network/publishers': { get: op('network', 'List all publishers', ['publishers:read']) },
       '/network/advertisers': { get: op('network', 'List all advertisers', ['advertisers:read']) },
       '/network/reports/summary': { get: { tags: ['network'], summary: 'Network report summary (30d, incl. margin)', security: secured, 'x-required-scopes': ['reports:read'], responses: { '200': { description: 'OK' } } } },
-      '/network/payouts': { post: { tags: ['network'], summary: 'Trigger a payout run', security: secured, 'x-required-scopes': ['payouts:write'], responses: { '201': { description: 'Created' } } } },
+      '/network/payouts': {
+        post: {
+          tags: ['network'], summary: 'Trigger a payout run (ONE currency per run, no FX)',
+          description:
+            'Pays each eligible publisher\'s positive approved balance in ONE currency: a batch + one payout line + one ledger ' +
+            'payout debit per publisher, in a single transaction (fx_rate 1, nothing is converted). `currency` omitted → the ' +
+            'single currency of the payable balances (the network default when there are none); when they span several ' +
+            'currencies the run is refused with 422 and nothing is written — run one payout per currency. Balances in other ' +
+            'currencies are untouched and listed in `otherCurrencies`; balances with an invalid currency code are never paid and ' +
+            'listed in `skipped`. Concurrent runs are serialised per network; a repeat run pays nothing (balances are zero).',
+          security: secured, 'x-required-scopes': ['payouts:write'],
+          requestBody: { required: false, content: { 'application/json': { schema: {
+            type: 'object',
+            properties: {
+              publisherIds: { type: 'array', items: { type: 'string', format: 'uuid' }, description: 'Restrict the run to these publishers (all must be yours, else 403).' },
+              note: { type: 'string' },
+              currency: { type: 'string', pattern: '^[A-Z]{3}$', example: 'EUR', description: 'Pay only balances in this currency.' },
+            },
+          } } } },
+          responses: {
+            '201': { description: 'Created: { batchId, currency, total, lines: [{ publisherId, amount }], skipped: [{ publisherId, currency, amount }], otherCurrencies: [{ currency, publishers, total }] }' },
+            '403': { description: 'A publisherId is not in your network / wrong audience or scope' },
+            '422': { description: 'Invalid `currency`, or payable balances span several currencies and no `currency` was given (details.currencies)' },
+          },
+        },
+      },
     },
   };
 }

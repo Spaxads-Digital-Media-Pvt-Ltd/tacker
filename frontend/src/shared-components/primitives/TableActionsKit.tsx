@@ -1,21 +1,23 @@
 /**
  * Shared widgets for "Manage X" list pages' Table Actions kebab (Everflow-style), first built for
  * Manage Offers and reused for Manage Partners: a "Table Columns" modal (search, toggle switches,
- * drag-to-reorder, Reset to default) and a "Table Request" modal (shows the actual request the page
- * issues, honestly noting when filtering happens client-side rather than as query params).
+ * drag-to-reorder where the table supports it, Reset to default) and a "Table Request" modal (shows
+ * the actual request the page issues and the filters applied to it).
  */
 import { useEffect, useRef, useState } from 'react';
 import { GripVertical, Search as SearchIcon, MoreVertical } from 'lucide-react';
 import { Modal, MenuPopover } from './ui';
 
 export function ColumnsModal({
-  allColumns, order, hidden, onClose, onApply,
+  allColumns, order, hidden, onClose, onApply, reorderable = true,
 }: {
   allColumns: readonly string[];
   order: string[];
   hidden: Set<string>;
   onClose: () => void;
   onApply: (order: string[], hidden: Set<string>) => void;
+  /** False for tables with a fixed column order (the report pages): no drag handles that do nothing. */
+  reorderable?: boolean;
 }) {
   const [draftOrder, setDraftOrder] = useState(order);
   const [draftHidden, setDraftHidden] = useState(hidden);
@@ -55,13 +57,13 @@ export function ColumnsModal({
             return (
               <div
                 key={c}
-                draggable
-                onDragStart={() => { dragIndex.current = idx; }}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => onDrop(idx)}
+                draggable={reorderable}
+                onDragStart={reorderable ? () => { dragIndex.current = idx; } : undefined}
+                onDragOver={reorderable ? (e) => e.preventDefault() : undefined}
+                onDrop={reorderable ? () => onDrop(idx) : undefined}
                 className="flex items-center gap-2 rounded-[var(--radius)] border border-border bg-surface px-2.5 py-2 text-small text-fg"
               >
-                <GripVertical size={14} className="shrink-0 cursor-grab text-fg-muted" />
+                {reorderable && <GripVertical size={14} className="shrink-0 cursor-grab text-fg-muted" />}
                 <span className="flex-1">{c}</span>
                 <button type="button" role="switch" aria-checked={!draftHidden.has(c)} onClick={() => toggle(c)}
                   className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${!draftHidden.has(c) ? 'bg-success' : 'bg-border'}`}>
@@ -80,8 +82,7 @@ export function ColumnsModal({
   );
 }
 
-/** Shows the actual request this page issues — filtering happens client-side today, so that's
- * called out rather than faked as server-side query params. */
+/** Shows the actual request this page issues, plus the filters currently applied to it. */
 export function ApiRequestModal({
   onClose, path, appliedFilters,
 }: { onClose: () => void; path: string; appliedFilters: Record<string, string | undefined> }) {
@@ -99,7 +100,7 @@ export function ApiRequestModal({
         <pre className="overflow-x-auto rounded-card border border-border bg-page p-3 text-tiny text-fg"><code>{curl}</code></pre>
         {activeFilters.length > 0 && (
           <div>
-            <p className="mb-1 text-tiny font-semibold uppercase text-fg-secondary">Applied on this page (client-side, not query params)</p>
+            <p className="mb-1 text-tiny font-semibold uppercase text-fg-secondary">Applied filters</p>
             <ul className="space-y-0.5 text-small text-fg">
               {activeFilters.map(([k, v]) => <li key={k}><span className="text-fg-secondary">{k}:</span> {v}</li>)}
             </ul>

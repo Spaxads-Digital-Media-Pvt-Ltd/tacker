@@ -30,7 +30,7 @@ import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, money, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
@@ -55,8 +55,9 @@ function formatDate(iso: string): string {
   const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
   return `${date} ${time}`;
 }
-function money(v: string | null): string {
-  return v == null ? DASH : `$${Number(v).toFixed(2)}`;
+/** A conversion's money in its own currency (USD when the row has none). */
+function convMoney(v: string | null, currency: string | null): string {
+  return v == null ? DASH : money(Number(v), currency || 'USD');
 }
 function payloadPreview(p: Record<string, unknown> | null): string {
   if (!p || Object.keys(p).length === 0) return DASH;
@@ -174,7 +175,8 @@ export default function AdvertiserPostbackReport() {
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
     payload: payloadPreview(r.raw_params), conversionId: r.conversion_id, transactionId: r.transaction_id ?? DASH,
     status: r.status, cvMethod: METHOD_OPTIONS.find((m) => m.value === r.source)?.label ?? r.source,
-    revenue: money(r.revenue), payout: money(r.payout),
+    // Exact decimal text (spreadsheet-numeric); `currency` is the one the table formats them in.
+    revenue: r.revenue ?? DASH, payout: r.payout ?? DASH, currency: r.currency || 'USD',
   });
   // Every row matching the applied filters, not just the visible page.
   const runExport = (format: 'csv' | 'xlsx') => {
@@ -277,15 +279,17 @@ export default function AdvertiserPostbackReport() {
                       {shown.has('Transaction ID') && <td className="font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3"><Badge value={r.status} /></td>}
                       {shown.has('CV Method') && <td className="px-4 py-3">{METHOD_OPTIONS.find((m) => m.value === r.source)?.label ?? r.source}</td>}
-                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(r.revenue)}</td>}
-                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(r.payout)}</td>}
+                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{convMoney(r.revenue, r.currency)}</td>}
+                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{convMoney(r.payout, r.currency)}</td>}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-        {!error && rows.length > 0 && (
+        {/* Paging follows the loaded page, not "Search this page" (which can hide every row) — and stays
+           reachable on an emptied later page so Previous still works. */}
+        {!error && (pageRows.length > 0 || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">
@@ -303,9 +307,10 @@ export default function AdvertiserPostbackReport() {
         </ReportBody>
       </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/conversions?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, method: methodFilter,
+        excludeMethod: baseParams.excludeSource,
       }} />}
     </>
   );

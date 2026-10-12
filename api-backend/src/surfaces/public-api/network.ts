@@ -7,12 +7,13 @@ import { Router } from 'express';
 import { query } from '../../lib/db/pool.js';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
-import { forbidden } from '../../lib/http/errors.js';
+import { forbidden, validationFailed } from '../../lib/http/errors.js';
 import { validateQuery } from '../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../lib/http/pagination.js';
-import { toAdminDTO } from '../dashboard/offers/dto.js';
+import { toNetworkApiDTO } from '../dashboard/offers/dto.js';
 import type { OfferRow } from '../../domain/entities.js';
 import { createPayoutRun } from '../../lib/ledger/ledger.js';
+import { CURRENCY_RE } from '../../lib/money.js';
 import { reportQuerySchema, buildReportRequest } from '../../lib/reporting/request.js';
 import { getReportingProvider } from '../../lib/reporting/index.js';
 import { requireScope, apiIdentity } from './auth.js';
@@ -35,7 +36,8 @@ export function networkApi(): Router {
  }),
  ] as const;
 
- r.get('/offers', ...list('offers', 'offers:read', (o: OfferRow) => toAdminDTO(o)));
+ // Offers go through the API-key DTO: the admin DTO's postback securityCode never leaves the dashboard.
+ r.get('/offers', ...list('offers', 'offers:read', (o: OfferRow) => toNetworkApiDTO(o)));
  r.get('/publishers', ...list('publishers', 'publishers:read',
  (p: { id: string; name: string; status: string }) => ({ id: p.id, name: p.name, status: p.status })));
  r.get('/advertisers', ...list('advertisers', 'advertisers:read',
@@ -88,7 +90,13 @@ export function networkApi(): Router {
  requireScope('payouts:write'),
  asyncHandler(async (req, res) => {
  const id = apiIdentity(req);
- const b = (req.body ?? {}) as { publisherIds?: string[]; note?: string };
+ const b = (req.body ?? {}) as { publisherIds?: string[]; note?: string; currency?: unknown };
+ // A batch carries ONE currency (no FX). Omitted = the single currency of the payable balances
+ // (422 when they span several). An invalid code is a 422 before anything else runs.
+ if (b.currency !== undefined && (typeof b.currency !== 'string' || !CURRENCY_RE.test(b.currency))) {
+ throw validationFailed('currency must be a 3-letter upper-case code (e.g. USD)', { currency: ['Invalid currency'] });
+ }
+ const currency = b.currency as string | undefined;
  const publisherIds: string[] | undefined = b.publisherIds?.filter(
  (x): x is string => typeof x === 'string',
  );
@@ -110,6 +118,7 @@ export function networkApi(): Router {
  const result = await createPayoutRun(id.networkId, {
  ...(publisherIds ? { publisherIds } : {}),
  ...(b.note ? { note: b.note } : {}),
+ ...(currency ? { currency } : {}),
  createdBy: `apikey:${id.keyId}`,
  });
  sendOk(res, result, undefined, 201);
