@@ -11,7 +11,7 @@ import { validateQuery } from '../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../lib/http/pagination.js';
 import { toPublisherDTO } from '../dashboard/offers/dto.js';
 import type { OfferRow } from '../../domain/entities.js';
-import { accountBalance } from '../../lib/ledger/ledger.js';
+import { balanceSummary } from '../../lib/ledger/ledger.js';
 import { reportQuerySchema, buildReportRequest } from '../../lib/reporting/request.js';
 import { getReportingProvider } from '../../lib/reporting/index.js';
 import { requireScope, apiIdentity } from './auth.js';
@@ -68,7 +68,8 @@ export function publisherApi(): Router {
     requireScope('earnings:read'),
     asyncHandler(async (req, res) => {
       const id = apiIdentity(req);
-      const balance = await accountBalance(id.networkId, 'publisher', id.ownerId, 'approved');
+      // balance/currency: single-currency value, null when mixed (then read `balances`).
+      const { balance, currency, balances } = await balanceSummary(id.networkId, 'publisher', id.ownerId, 'approved');
       const { rows } = await query<{
         entry_type: string; direction: string; amount: string; currency: string; status: string; created_at: string;
       }>(
@@ -79,7 +80,7 @@ export function publisherApi(): Router {
         [id.networkId, id.ownerId],
       );
       sendOk(res, {
-        balance,
+        balance, currency, balances,
         statement: rows.map((e) => ({
           type: e.entry_type, direction: e.direction, amount: e.amount,
           currency: e.currency, status: e.status, createdAt: e.created_at,

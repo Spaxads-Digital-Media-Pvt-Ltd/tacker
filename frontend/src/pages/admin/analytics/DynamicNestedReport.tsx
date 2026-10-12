@@ -14,29 +14,42 @@
  * Carrier, Connection Type, DMA, Is Proxy, ZIP, Adv1-10, Attribution Method, Click/Conversion Error
  * Code, Device Brand/Model/Platform, User ID, ...) has no backing anywhere in this schema and is
  * omitted rather than faked (matches the exhaustive audit already done for Dimensional/Flex).
+ *
+ * No "Run Report": every control applies on its own — dates once they form a valid range (debounced),
+ * Parent / Child / Reporting Filters / chips / sort immediately. The applied report is mirrored to
+ * the address bar (keeping `tab=nested`), so the URL itself is the shareable link.
  */
-import { Fragment, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronRight, MoreVertical, Search, SlidersHorizontal } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ChevronDown, ChevronRight, MoreVertical, Search } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
+import { uaDimensionLabel } from '../../../lib/userAgentDisplay';
 import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
+  type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
   fetchAllPages, useReportExport, ExportStatus,
 } from '../../../shared-components/primitives/ReportPageKit';
 import {
-  readUrlFilters, readUrlDate, readUrlMetricFilters, writeUrlMetricFilters,
-  IGNORE_FAIL_PARAM, readUrlFlag, reportLink, urlFilterParams,
+  readUrlFilters, writeUrlFilters, readUrlDate, readUrlMetricFilters, writeUrlMetricFilters,
+  IGNORE_FAIL_PARAM, readUrlFlag,
 } from '../../../lib/reportFilterState';
 import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
 import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
-import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
+import { useAutoDateRange } from '../reportView';
+import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
+import {
+  combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
+  moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
+} from '../../../lib/reportCurrency';
+import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
 
 interface SmartLink { id: string; name: string }
 
@@ -73,7 +86,7 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'publisher') { const m = opts.pubMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
-  return id;
+  return uaDimensionLabel(dim, id);
 }
 function linkFor(dim: DimKey, id: string): string | null {
   if (dim === 'offer') return `/app/offers/${id}`;
@@ -82,7 +95,8 @@ function linkFor(dim: DimKey, id: string): string | null {
   if (dim === 'smartLink') return `/app/smart-links/${id}`;
   return null;
 }
-function metricCells(shown: Set<string>, d: DerivedRow) {
+/** One row's metric cells; money in the row's own currency ("Mixed" when its conversions mix currencies). */
+function metricCells(shown: Set<string>, d: DerivedRow, rc: RowCurrency) {
   return (
     <>
       {shown.has('Imp') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
@@ -99,30 +113,30 @@ function metricCells(shown: Set<string>, d: DerivedRow) {
       {shown.has('CTR') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('Throttle') && <td className="px-4 py-3 text-right text-fg-muted">{DASH}</td>}
       {shown.has('CVR') && <td className="px-4 py-3 text-right">{pct(d.cvr)}</td>}
-      {shown.has('CPC') && <td className="px-4 py-3 text-right">{money(d.cpc)}</td>}
-      {shown.has('CPA') && <td className="px-4 py-3 text-right">{money(d.cpa)}</td>}
-      {shown.has('RPC') && <td className="px-4 py-3 text-right">{money(d.rpc)}</td>}
-      {shown.has('RPA') && <td className="px-4 py-3 text-right">{money(d.rpa)}</td>}
-      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(d.revenue)}</td>}
-      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(d.payout)}</td>}
-      {shown.has('Profit') && <td className="px-4 py-3 text-right">{money(d.margin)}</td>}
-      {shown.has('Margin') && <td className="px-4 py-3 text-right">{pct(d.marginPct)}</td>}
+      {shown.has('CPC') && <td className="px-4 py-3 text-right"><Money value={d.cpc} rc={rc} /></td>}
+      {shown.has('CPA') && <td className="px-4 py-3 text-right"><Money value={d.cpa} rc={rc} /></td>}
+      {shown.has('RPC') && <td className="px-4 py-3 text-right"><Money value={d.rpc} rc={rc} /></td>}
+      {shown.has('RPA') && <td className="px-4 py-3 text-right"><Money value={d.rpa} rc={rc} /></td>}
+      {shown.has('Revenue') && <td className="px-4 py-3 text-right"><Money value={d.revenue} rc={rc} /></td>}
+      {shown.has('Payout') && <td className="px-4 py-3 text-right"><Money value={d.payout} rc={rc} /></td>}
+      {shown.has('Profit') && <td className="px-4 py-3 text-right"><Money value={d.margin} rc={rc} /></td>}
+      {shown.has('Margin') && <td className="px-4 py-3 text-right"><MoneyPct value={d.marginPct} rc={rc} /></td>}
     </>
   );
 }
 
-function SingleSelectDropdown({ label, value, onChange }: { label: string; value: DimKey; onChange: (k: DimKey) => void }) {
+/** Single-dimension picker for the controls row (label comes from the surrounding ControlField). */
+function SingleSelectDropdown({ id, value, onChange }: { id: string; value: DimKey; onChange: (k: DimKey) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <label className="label">{label} <span className="text-danger-text">*</span></label>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="input flex items-center justify-between !py-2 text-left">
+      <button id={id} type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className={`input ${CONTROL} flex items-center justify-between text-left`}>
         {DIM_OPTIONS.find((d) => d.key === value)?.label} <ChevronDown size={13} className="text-fg-muted" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-48 overflow-y-auto rounded-card border border-border bg-elevated py-1 shadow-elevated">
+          <div className="absolute left-0 top-full z-40 mt-1 max-h-72 w-full overflow-y-auto rounded-card border border-border bg-elevated py-1 shadow-elevated">
             {DIM_OPTIONS.map((d) => (
               <button key={d.key} onClick={() => { onChange(d.key); setOpen(false); }}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-small hover:bg-accent-subtle ${d.key === value ? 'text-accent-text' : 'text-fg'}`}>
@@ -137,26 +151,26 @@ function SingleSelectDropdown({ label, value, onChange }: { label: string; value
 }
 
 function ExpandedChildRows({
-  childDim, parentFilterParam, parentRawId, from, to, opts, smartLinkMap, shown, dimParams,
+  childDim, parentFilterParam, parentRawId, from, to, opts, smartLinkMap, shown, dimParams, currency,
 }: {
   childDim: DimKey; parentFilterParam: string; parentRawId: string; from: string; to: string;
   dimParams: Record<string, string | number | undefined>;
-  opts: Opts; smartLinkMap: Map<string, string>; shown: Set<string>;
+  opts: Opts; smartLinkMap: Map<string, string>; shown: Set<string>; currency: string;
 }) {
   // Child rows use the page's filters + date range, narrowed to this parent. The parent value is set
   // last (overrides a page filter on the same dimension). Text values may contain commas ("Comcast
   // Cable, LLC"), so they're sent as `key[]=value`, which the API takes literally instead of splitting.
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(dimParams)) if (v !== undefined && v !== '' && k !== parentFilterParam) params.set(k, String(v));
-  params.set('groupBy', childDim); params.set('metrics', METRICS_PARAM);
+  params.set('groupBy', childDim); params.set('metrics', withCurrenciesMetric(METRICS_PARAM));
   params.set('from', toIso(from)); params.set('to', toIso(to, true)); params.set('limit', '200');
   if (/Id$/.test(parentFilterParam)) params.set(parentFilterParam, parentRawId);
   else params.append(`${parentFilterParam}[]`, parentRawId);
   const { data, loading, error } = useQuery<AggResult>(`/api/reports?${params.toString()}`);
   const rows = useMemo(() => (data?.rows ?? [])
     .filter((r) => r.dimensions[childDim])
-    .map((r) => ({ raw: r.dimensions[childDim]!, name: resolveName(childDim, r.dimensions[childDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics) })),
-  [data, childDim, opts, smartLinkMap]);
+    .map((r) => ({ raw: r.dimensions[childDim]!, name: resolveName(childDim, r.dimensions[childDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) })),
+  [data, childDim, opts, smartLinkMap, currency]);
 
   if (loading) return <tr><td colSpan={1 + ALL_COLUMNS.length + 1} className="px-4 py-3 text-center"><Spinner /></td></tr>;
   if (error) return <tr><td colSpan={1 + ALL_COLUMNS.length + 1} className="px-4 py-3 text-small text-danger-text">{error}</td></tr>;
@@ -166,7 +180,7 @@ function ExpandedChildRows({
       {rows.map((r, i) => (
         <tr key={i} className="bg-page/60 text-small text-fg-secondary">
           <td className="py-2 pl-10 pr-4">{r.name}</td>
-          {metricCells(shown, r.derived)}
+          {metricCells(shown, r.derived, r.rc)}
           <td />
         </tr>
       ))}
@@ -190,7 +204,7 @@ type SavedConfig = SavedReportConfig<OrderMetric> & { parentDim: DimKey; childDi
 const ORDER_METRICS: OrderMetric[] = ['clicks', 'unique_clicks', 'invalid_clicks', 'conversions', 'total_conversions', 'payout', 'revenue', 'margin'];
 const isDimKey = (v: string | null): v is DimKey => DIM_OPTIONS.some((d) => d.key === v);
 
-/** Initial report state from the URL — what "Copy Link to Report" writes. */
+/** Initial report state from the URL — what the page mirrors to the address bar. */
 function readNestedUrl() {
   const sp = new URLSearchParams(window.location.search);
   let from = readUrlDate(sp, 'from', daysAgo(7));
@@ -216,43 +230,45 @@ export default function DynamicNestedReport() {
   const opts = useReportOpts();
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks?.map((s: { value: string; label: string }) => [s.value, s.label]) ?? []), [opts.smartLinks]);
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [init] = useState(readNestedUrl);
+  // Dates apply on their own once they form a valid range (see useAutoDateRange); Parent / Child,
+  // Reporting Filters and sort apply immediately and return to page 1. `page` lives with the range,
+  // so a new range and the page reset land in one render (one request).
+  const range = useAutoDateRange(init.from, init.to);
+  const { appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
   const [parentDim, setParentDim] = useState<DimKey>(init.parentDim);
   const [childDim, setChildDim] = useState<DimKey>(init.childDim);
-  const [appliedParentDim, setAppliedParentDim] = useState<DimKey>(parentDim);
-  const [appliedChildDim, setAppliedChildDim] = useState<DimKey>(childDim);
-  const [from, setFrom] = useState(init.from);
-  const [to, setTo] = useState(init.to);
-  const [appliedFrom, setAppliedFrom] = useState(from);
-  const [appliedTo, setAppliedTo] = useState(to);
   const [filters, setFilters] = useState<FilterValues>(init.filters);
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
   const [exclusions, setExclusions] = useState<FilterValues>(init.exclusions);
-  const [appliedExclusions, setAppliedExclusions] = useState<FilterValues>(init.exclusions);
   const [metricFilters, setMetricFilters] = useState<MetricFilters>(init.metricFilters);
-  const [appliedMetricFilters, setAppliedMetricFilters] = useState<MetricFilters>(init.metricFilters);
   const [ignoreFailTraffic, setIgnoreFailTraffic] = useState(init.ignoreFail);
-  const [appliedIgnoreFailTraffic, setAppliedIgnoreFailTraffic] = useState(init.ignoreFail);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [hasRun, setHasRun] = useState(true);
   const [summaryOpen, setSummaryOpen] = useState(true);
   const [graphOpen, setGraphOpen] = useState(false);
   const [q, setQ] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [orderBy, setOrderBy] = useState<OrderMetric>(init.orderBy);
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(init.orderDir);
-  const [page, setPage] = useState(1);
   const pageSize = 25;
   const [showColumns, setShowColumns] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  // Page ⋮ menu: Save / Load / Show API Request. No separate Copy Link — the applied report is
+  // mirrored to the address bar, so the URL is the link.
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric>('nested-report') as unknown as { name: string; config: SavedConfig }[]);
-  const [copied, setCopied] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const pageMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pageMenuOpen) return;
+    const onDown = (e: MouseEvent) => { if (!pageMenuRef.current?.contains(e.target as Node)) { setPageMenuOpen(false); setLoadOpen(false); } };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [pageMenuOpen]);
 
   const { data: offers } = useQuery<{ id: string; name: string }[]>('/api/offers');
   const { data: publishers } = useQuery<{ id: string; name: string }[]>('/api/publishers');
@@ -277,22 +293,45 @@ export default function DynamicNestedReport() {
     for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
     return params.toString();
   };
-  const excludeOfferId = appliedExclusions['offer']?.join(',');
-  const excludeAdvertiserId = appliedExclusions['advertiser']?.join(',');
-  const excludePublisherId = appliedExclusions['partner']?.join(',');
-  const excludeSmartLinkId = appliedExclusions['smartLink']?.join(',');
-  const excludeCountry = appliedExclusions['country']?.join(',');
-  const excludeDevice = appliedExclusions['device']?.join(',');
+  const excludeOfferId = exclusions['offer']?.join(',');
+  const excludeAdvertiserId = exclusions['advertiser']?.join(',');
+  const excludePublisherId = exclusions['partner']?.join(',');
+  const excludeSmartLinkId = exclusions['smartLink']?.join(',');
+  const excludeCountry = exclusions['country']?.join(',');
+  const excludeDevice = exclusions['device']?.join(',');
   const dimParams = {
-    offerId: appliedFilters['offer']?.join(','), advertiserId: appliedFilters['advertiser']?.join(','),
-    publisherId: appliedFilters['partner']?.join(','), smartLinkId: appliedFilters['smartLink']?.join(','),
-    country: appliedFilters['country']?.join(','), device: appliedFilters['device']?.join(','),
+    offerId: filters['offer']?.join(','), advertiserId: filters['advertiser']?.join(','),
+    publisherId: filters['partner']?.join(','), smartLinkId: filters['smartLink']?.join(','),
+    country: filters['country']?.join(','), device: filters['device']?.join(','),
     excludeOfferId, excludeAdvertiserId, excludePublisherId, excludeSmartLinkId, excludeCountry, excludeDevice,
-    excludeInvalid: appliedIgnoreFailTraffic ? 1 : undefined,
+    excludeInvalid: ignoreFailTraffic ? 1 : undefined,
   };
 
-  const summaryQs = qs({ groupBy: 'none', metrics: METRICS_PARAM, from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
-  const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(hasRun ? `/api/reports?${summaryQs}` : null);
+  // The applied report lives in the address bar (replace, not push), so reload / back / a pasted
+  // link reopen it. `tab` is kept, or the Analytics shell would switch tabs.
+  const tab = searchParams.get('tab');
+  const urlState = useMemo(() => {
+    const next = new URLSearchParams();
+    if (tab) next.set('tab', tab);
+    next.set('from', appliedFrom); next.set('to', appliedTo);
+    next.set('parent', parentDim); next.set('child', childDim);
+    writeUrlFilters(next, 'f', filters);
+    writeUrlFilters(next, 'x', exclusions);
+    writeUrlMetricFilters(next, metricFilters);
+    if (ignoreFailTraffic) next.set(IGNORE_FAIL_PARAM, '1');
+    next.set('orderBy', orderBy); next.set('orderDir', orderDir);
+    return next.toString();
+  }, [tab, appliedFrom, appliedTo, parentDim, childDim, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir]);
+  useEffect(() => {
+    if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
+  }, [urlState, setSearchParams]);
+
+  // Rows without money-bearing conversions (and older APIs) format in the network's default currency.
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
+  const currency = settings?.general?.defaultCurrency ?? 'USD';
+
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
     if (!rows.length) return null;
@@ -306,10 +345,13 @@ export default function DynamicNestedReport() {
     }, { clicks: 0, unique_clicks: 0, invalid_clicks: 0, conversions: 0, total_conversions: 0, payout: 0, revenue: 0, margin: 0 });
     return deriveRow(totals);
   }, [summaryData]);
+  // The summary's money currency ("Mixed" → per-currency amounts on the money tiles, newer API).
+  const summaryRc = useMemo(() => combineCurrencies((summaryData?.rows ?? []).map((r) => currenciesOf(r.metrics)), currency), [summaryData, currency]);
+  const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   const chronological = appliedFrom !== appliedTo;
-  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: 'clicks,revenue', from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: graphData } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
+  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
+  const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
     const dimKey = chronological ? 'day' : 'hour';
     const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions[dimKey] ?? '').localeCompare(b.dimensions[dimKey] ?? ''));
@@ -317,42 +359,55 @@ export default function DynamicNestedReport() {
       labels: rows.map((r) => (r.dimensions[dimKey] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
+      // Revenue across points in different currencies isn't one comparable series — not plotted then.
+      rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData, chronological]);
+  }, [graphData, chronological, currency]);
 
   const tableQsFor = (limit: number, offset: number) => qs({
-    groupBy: appliedParentDim, metrics: METRICS_PARAM,
+    groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM),
     from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
     orderBy, orderDir, limit, offset,
   });
   const tableQs = tableQsFor(pageSize, (page - 1) * pageSize);
-  const { data, loading, error } = useQuery<AggResult>(hasRun ? `/api/reports?${tableQs}` : null);
+  const { data, loading, error } = useQuery<AggResult>(`/api/reports?${tableQs}`);
 
   const toParentRows = (src: AggRow[]) => src
-    .filter((r) => r.dimensions[appliedParentDim])
-    .map((r) => ({ raw: r.dimensions[appliedParentDim]!, name: resolveName(appliedParentDim, r.dimensions[appliedParentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics) }));
-  const rows = useMemo(() => toParentRows(data?.rows ?? [])
-    .filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))
-    .filter((r) => passesMetricFilters(r.derived, appliedMetricFilters)),
+    .filter((r) => r.dimensions[parentDim])
+    .map((r) => ({ raw: r.dimensions[parentDim]!, name: resolveName(parentDim, r.dimensions[parentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- toParentRows only closes over the listed values
-  [data, appliedParentDim, opts, smartLinkMap, q, appliedMetricFilters]);
+  const loadedRows = useMemo(() => toParentRows(data?.rows ?? []), [data, parentDim, opts, smartLinkMap, currency]);
+  // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
+  // currencies (the flyout disables it and the results bar says so) — lib/reportCurrency.
+  const moneyBlocked = useMemo(() => moneyFilterBlockedBy(loadedRows.map((r) => r.rc)), [loadedRows]);
+  const rows = useMemo(() => loadedRows
+    .filter((r) => !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .filter((r) => passesMetricFilters(r.derived, metricFilters, !!moneyBlocked)),
+  [loadedRows, q, metricFilters, moneyBlocked]);
 
-  const runReport = () => {
-    setAppliedFrom(from); setAppliedTo(to); setAppliedParentDim(parentDim); setAppliedChildDim(childDim); setAppliedFilters(filters);
-    setAppliedExclusions(exclusions); setAppliedMetricFilters(metricFilters); setAppliedIgnoreFailTraffic(ignoreFailTraffic);
-    setHasRun(true); setPage(1); setExpanded(new Set());
+  // A new Parent re-keys every row, so expanded rows of the old Parent are dropped. A new Child keeps
+  // them open (they re-fetch broken down by the new Child) and doesn't touch the parent table.
+  const changeParent = (k: DimKey) => {
+    if (k === parentDim) return;
+    setParentDim(k); setExpanded(new Set()); toFirstPage();
   };
+  // Reset dates, Parent/Child and every Reporting Filter in one render → one request per query. The
+  // debounced range catches up to the same values later and is then a no-op.
   const clearAll = () => {
-    setFrom(daysAgo(7)); setTo(todayStr()); setParentDim('offer'); setChildDim('publisher');
+    range.reset({ from: daysAgo(7), to: todayStr() });
+    setParentDim('offer'); setChildDim('publisher'); setExpanded(new Set());
     setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
-    setAppliedFrom(daysAgo(7)); setAppliedTo(todayStr()); setAppliedParentDim('offer'); setAppliedChildDim('publisher');
-    setAppliedFilters({}); setAppliedExclusions({}); setAppliedMetricFilters({}); setAppliedIgnoreFailTraffic(false);
-    setPage(1);
   };
   const toggleSort = (m: OrderMetric) => {
     if (orderBy === m) setOrderDir((d) => (d === 'desc' ? 'asc' : 'desc'));
     else { setOrderBy(m); setOrderDir('desc'); }
-    setPage(1);
+    toFirstPage();
+  };
+  const reporting: ReportingFiltersValue = { filters, exclusions, metricFilters, ignoreFailTraffic };
+  // Flyout Apply, chip removal and the chips' "Clear all" apply at once and return to page 1.
+  const setReporting = (v: ReportingFiltersValue) => {
+    setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic);
+    toFirstPage();
   };
   const toggleExpand = (key: string) => setExpanded((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
@@ -363,11 +418,13 @@ export default function DynamicNestedReport() {
   const runExport = (format: 'csv' | 'xlsx') => {
     void reportExport.run(format, 'nested-report', async () => {
       const res = await fetchAllPages<AggRow>((limit, offset) => `/api/reports?${tableQsFor(limit, offset)}`, 200);
-      return { ...res, rows: exportRows(toParentRows(res.rows).filter((r) => passesMetricFilters(r.derived, appliedMetricFilters))) };
+      return { ...res, rows: exportRows(filterWithMoneyRule(toParentRows(res.rows), (r) => r.rc, (r, skip) => passesMetricFilters(r.derived, metricFilters, skip))) };
     });
   };
-  const exportRows = (list: ReturnType<typeof toParentRows>) => list.map((r) => ({
-    [DIM_OPTIONS.find((d) => d.key === appliedParentDim)?.label ?? appliedParentDim]: r.name,
+  // Money stays plain decimals with the row's currency in a trailing `currency` column ("MIXED",
+  // money columns left empty, for a row whose conversions mix currencies).
+  const exportRows = (list: ReturnType<typeof toParentRows>) => list.map((r) => withRowCurrency({
+    [DIM_OPTIONS.find((d) => d.key === parentDim)?.label ?? parentDim]: r.name,
     imp: DASH, rpm: DASH, cpm: DASH, grossClicks: r.derived.clicksGross, clicks: r.derived.clicks,
     uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks, invalidClicks: r.derived.invalidClicks,
     totalCv: r.derived.totalCv, cv: r.derived.cv, vtCv: DASH, ctr: DASH, throttle: DASH,
@@ -375,7 +432,7 @@ export default function DynamicNestedReport() {
     rpc: r.derived.rpc.toFixed(2), rpa: r.derived.rpa.toFixed(2),
     revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2), profit: r.derived.margin.toFixed(2),
     margin: pct(r.derived.marginPct),
-  }));
+  }, r.rc));
 
   const sortIcon = (m: OrderMetric) => (orderBy === m ? (orderDir === 'desc' ? '↓' : '↑') : '');
   const sortableHeader = (label: string, m: OrderMetric) => (
@@ -383,187 +440,159 @@ export default function DynamicNestedReport() {
   );
 
   const saveReport = (name: string) => {
-    const config: SavedConfig = { from, to, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns], parentDim, childDim };
+    const config: SavedConfig = { from: appliedFrom, to: appliedTo, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns], parentDim, childDim };
     const next = [...savedReports.filter((s) => s.name !== name), { name, config }];
     setSavedReports(next);
     persistSavedReports('nested-report', next as unknown as { name: string; config: SavedReportConfig<OrderMetric> }[]);
     setPageMenuOpen(false);
   };
   const applySavedReport = (config: SavedConfig) => {
-    setFrom(config.from); setTo(config.to); setFilters(config.filters); setParentDim(config.parentDim); setChildDim(config.childDim);
+    // range.reset sets the inputs, the applied range and page 1 together — one render, one request.
+    range.reset({ from: config.from, to: config.to });
+    setFilters(config.filters); setParentDim(config.parentDim); setChildDim(config.childDim); setExpanded(new Set());
     setExclusions(config.exclusions ?? {}); setMetricFilters(config.metricFilters ?? {}); setIgnoreFailTraffic(config.ignoreFailTraffic ?? false);
-    setAppliedFrom(config.from); setAppliedTo(config.to); setAppliedFilters(config.filters); setAppliedParentDim(config.parentDim); setAppliedChildDim(config.childDim);
-    setAppliedExclusions(config.exclusions ?? {}); setAppliedMetricFilters(config.metricFilters ?? {}); setAppliedIgnoreFailTraffic(config.ignoreFailTraffic ?? false);
     setOrderBy(config.orderBy); setOrderDir(config.orderDir); setHiddenColumns(new Set(config.hiddenColumns));
-    setPage(1); setPageMenuOpen(false); setLoadOpen(false);
+    setPageMenuOpen(false); setLoadOpen(false);
   };
   const deleteSavedReport = (name: string) => {
     const next = savedReports.filter((s) => s.name !== name);
     setSavedReports(next);
     persistSavedReports('nested-report', next as unknown as { name: string; config: SavedReportConfig<OrderMetric> }[]);
   };
-  const copyLink = async () => {
-    const mf = new URLSearchParams();
-    writeUrlMetricFilters(mf, appliedMetricFilters);
-    await navigator.clipboard?.writeText(reportLink({
-      from: appliedFrom, to: appliedTo, parent: appliedParentDim, child: appliedChildDim,
-      ...urlFilterParams('f', appliedFilters), ...urlFilterParams('x', appliedExclusions),
-      ...Object.fromEntries(mf), [IGNORE_FAIL_PARAM]: appliedIgnoreFailTraffic,
-      orderBy, orderDir,
-    }));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  };
 
-  const parentOpt = DIM_OPTIONS.find((d) => d.key === appliedParentDim)!;
-  const childOpt = DIM_OPTIONS.find((d) => d.key === appliedChildDim)!;
+  const parentOpt = DIM_OPTIONS.find((d) => d.key === parentDim)!;
+  const childOpt = DIM_OPTIONS.find((d) => d.key === childDim)!;
 
   return (
     <>
-      <PageHeader title="Dynamic Nested Report" subtitle="Analytics › Dynamic Nested" action={
-        <div className="relative">
-          <button type="button" title="Page Actions" onClick={() => setPageMenuOpen((o) => !o)}
-            className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <MoreVertical size={15} />
-          </button>
-          {pageMenuOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setLoadOpen(false)}>
-              <button onClick={() => { setPageMenuOpen(false); setSaveModalOpen(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Save</button>
-              <div className="relative" onMouseEnter={() => setLoadOpen(true)}>
-                <button disabled={!savedReports.length} onClick={() => setLoadOpen((s) => !s)}
-                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
-                  Load{savedReports.length ? ` (${savedReports.length})` : ''} <ChevronRight size={13} className="text-fg-muted" />
-                </button>
-                {loadOpen && savedReports.length > 0 && (
-                  <div className="absolute right-full top-0 mr-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                    {savedReports.map((s) => (
-                      <div key={s.name} className="flex items-center justify-between px-3 py-1.5 text-small hover:bg-accent-subtle">
-                        <button onClick={() => applySavedReport(s.config)} className="flex-1 truncate text-left text-fg">{s.name}</button>
-                        <button onClick={() => deleteSavedReport(s.name)} className="ml-2 text-fg-muted hover:text-danger-text">×</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button onClick={() => { copyLink(); setPageMenuOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">{copied ? 'Copied!' : 'Copy Link to Report'}</button>
-              <button onClick={() => { setPageMenuOpen(false); setShowApiRequest(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Show API Request</button>
-            </div>
-          )}
-        </div>
-      } />
+      <PageHeader title="Dynamic Nested Report" subtitle="Analytics › Dynamic Nested" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <SingleSelectDropdown label="Parent" value={parentDim} onChange={setParentDim} />
-          <SingleSelectDropdown label="Child" value={childDim} onChange={setChildDim} />
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic }) > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {reportingFiltersCount({ filters, exclusions, metricFilters, ignoreFailTraffic })}
-                </span>
-              )}
-            </button>
+      <ReportCard className="mb-4">
+        <ReportControls problem={range.problem} actions={<>
+          <ClearButton onClick={clearAll} title="Reset dates, Parent / Child and filters" />
+          <FiltersButton count={reportingFiltersCount(reporting)} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
               <ReportingFiltersFlyout
+                moneyFilterBlockedBy={moneyBlocked}
                 dimCategories={FILTER_CATEGORIES}
-                value={{ filters, exclusions, metricFilters, ignoreFailTraffic }}
-                onApply={(v) => { setFilters(v.filters); setExclusions(v.exclusions); setMetricFilters(v.metricFilters); setIgnoreFailTraffic(v.ignoreFailTraffic); }}
+                value={reporting}
+                onApply={setReporting}
                 onClose={() => setFilterOpen(false)}
               />
             )}
+          </FiltersButton>
+          <div ref={pageMenuRef} className="relative">
+            <button type="button" title="Page Actions" aria-label="Page Actions" onClick={() => setPageMenuOpen((o) => !o)}
+              className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+              <MoreVertical size={15} />
+            </button>
+            {pageMenuOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                <button onClick={() => { setPageMenuOpen(false); setSaveModalOpen(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Save</button>
+                <div className="relative" onMouseEnter={() => setLoadOpen(true)} onMouseLeave={() => setLoadOpen(false)}>
+                  <button disabled={!savedReports.length} onClick={() => setLoadOpen((s) => !s)}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:text-fg-muted">
+                    Load{savedReports.length ? ` (${savedReports.length})` : ''} <ChevronRight size={13} className="text-fg-muted" />
+                  </button>
+                  {loadOpen && savedReports.length > 0 && (
+                    <div className="absolute right-full top-0 mr-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                      {savedReports.map((s) => (
+                        <div key={s.name} className="flex items-center justify-between px-3 py-1.5 text-small hover:bg-accent-subtle">
+                          <button onClick={() => applySavedReport(s.config)} className="flex-1 truncate text-left text-fg">{s.name}</button>
+                          <button onClick={() => deleteSavedReport(s.name)} className="ml-2 text-fg-muted hover:text-danger-text">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => { setPageMenuOpen(false); setShowApiRequest(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Show API Request</button>
+              </div>
+            )}
           </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-          <div className="flex-1" />
-          <button type="button" className="btn-primary" onClick={runReport}>Run Report</button>
-        </div>
-      </div>
+        </>}>
+          <DateRangeField idPrefix="nested-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+          <ControlField label="Parent" htmlFor="nested-report-parent" className="w-full sm:w-44">
+            <SingleSelectDropdown id="nested-report-parent" value={parentDim} onChange={changeParent} />
+          </ControlField>
+          <ControlField label="Child" htmlFor="nested-report-child" className="w-full sm:w-44">
+            <SingleSelectDropdown id="nested-report-child" value={childDim} onChange={setChildDim} />
+          </ControlField>
+        </ReportControls>
 
-      <div className="card mb-4">
-        <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
-          <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
-        </button>
-        {summaryOpen && (
-          summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
-            <SummaryGrid summary={summary} />
-          )
-        )}
-      </div>
+        <div className="border-t border-border px-5 py-4 sm:px-6">
+          <button type="button" onClick={() => setSummaryOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
+            <ChevronDown size={14} className={`transition-transform ${summaryOpen ? '' : '-rotate-90'}`} /> Summary
+          </button>
+          {summaryOpen && (
+            summaryLoading ? <div className="pt-4"><Spinner /></div> : summaryError ? <p className="pt-3 text-small text-danger-text">{summaryError}</p> : !summary ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+              <SummaryGrid summary={summary} currency={currency} rc={summaryRc} breakdown={summaryBreakdown} />
+            )
+          )}
+        </div>
+      </ReportCard>
 
       <div className="card mb-4">
         <button type="button" onClick={() => setGraphOpen((o) => !o)} className="flex w-full items-center gap-2 text-small font-medium text-fg">
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          !graphData ? <div className="pt-4"><Spinner /></div> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
-                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>
+                {isMixed(graphSeries.rc)
+                  ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>
+                  : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>}
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
               </div>
-              <MiniChart labels={graphSeries.labels} revenue={graphSeries.revenue} clicks={graphSeries.clicks} />
+              <MiniChart labels={graphSeries.labels} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
             </div>
           )
         )}
       </div>
 
-      <div className="card">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <ActiveFilterChips className="mb-3"
-            chips={[...chipsFromValues(FILTER_CATEGORIES, appliedFilters), ...chipsFromValues(FILTER_CATEGORIES, appliedExclusions, { exclude: true })]}
-            onRemove={(c) => {
-              if (c.exclude) { const n = withoutValue(appliedExclusions, c.key, c.value); setExclusions(n); setAppliedExclusions(n); }
-              else { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); } setPage(1);
-            }}
-            onClearAll={() => { setFilters({}); setAppliedFilters({}); setExclusions({}); setAppliedExclusions({}); setPage(1); }} />
-          <div>
-            <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-            <p className="text-tiny text-fg-muted">Learn more about <Link to="/app/reports/custom-metrics" className="text-accent-text hover:underline">Custom Reporting Metrics</Link></p>
+      <ReportCard>
+        <ResultsBar position="top" loading={loading} title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted">· Learn more about <Link to="/app/reports/custom-metrics" className="text-accent-text hover:underline">Custom Reporting Metrics</Link></span></>} actions={<>
+          <div className="relative min-w-0 flex-1 sm:flex-none">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
+              aria-label="Search this page" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-            <div className="relative">
-              <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
-                className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-                <MoreVertical size={15} />
-              </button>
-              {tableActionsOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
-                  <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
-                  <div className="relative" onMouseEnter={() => setExportOpen(true)}>
-                    <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                      Export <ChevronRight size={13} className="text-fg-muted" />
-                    </button>
-                    {exportOpen && (
-                      <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button disabled={reportExport.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
-                        <button disabled={reportExport.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
+          <div className="relative">
+            <button type="button" title="Table Actions" aria-label="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
+              className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+              <MoreVertical size={15} />
+            </button>
+            {tableActionsOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
+                <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
+                <div className="relative" onMouseEnter={() => setExportOpen(true)}>
+                  <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
+                    Export <ChevronRight size={13} className="text-fg-muted" />
+                  </button>
+                  {exportOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                      <button disabled={reportExport.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                      <button disabled={reportExport.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+                <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
+              </div>
+            )}
           </div>
-        </div>
+        </>}>
+          <CurrencyNotes sortedWithin={showSortedWithinNote(data?.sortedWithinCurrency, loadedRows.map((r) => r.rc))}
+            moneyFilterBlockedBy={moneyBlocked} moneyFilterActive={hasMoneyFilter(metricFilters)} />
+          <ActiveFilterChips
+            chips={reportingChips(FILTER_CATEGORIES, reporting)}
+            onRemove={(c) => setReporting(withoutReportingChip(reporting, c))}
+            onClearAll={() => setReporting(EMPTY_REPORTING_FILTERS)} />
+        </ResultsBar>
 
+        <ReportBody>
         <ExportStatus busy={reportExport.busy} note={reportExport.note} error={reportExport.error} onDismiss={reportExport.dismiss} />
-        {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
-          : loading ? <StateBlock><Spinner /></StateBlock>
+        {loading ? <StateBlock><Spinner /></StateBlock>
           : error ? <StateBlock>{error}</StateBlock>
           : !rows.length ? <StateBlock>No Record Found</StateBlock>
           : (
@@ -609,15 +638,15 @@ export default function DynamicNestedReport() {
                             {r.name}
                           </button>
                         </td>
-                        {metricCells(shown, r.derived)}
+                        {metricCells(shown, r.derived, r.rc)}
                         <td className="text-right">
-                          <RowActionMenu dim={appliedParentDim} id={r.raw} label={r.name} />
+                          <RowActionMenu dim={parentDim} id={r.raw} label={r.name} />
                         </td>
                       </tr>
                       {expanded.has(r.raw) && (
                         <ExpandedChildRows
-                          childDim={appliedChildDim} parentFilterParam={parentOpt.filterParam} parentRawId={r.raw}
-                          from={appliedFrom} to={appliedTo} opts={opts} smartLinkMap={smartLinkMap} shown={shown} dimParams={dimParams}
+                          childDim={childDim} parentFilterParam={parentOpt.filterParam} parentRawId={r.raw}
+                          from={appliedFrom} to={appliedTo} opts={opts} smartLinkMap={smartLinkMap} shown={shown} dimParams={dimParams} currency={currency}
                         />
                       )}
                     </Fragment>
@@ -627,16 +656,18 @@ export default function DynamicNestedReport() {
             </div>
           )}
         <div className="mt-3 flex justify-end">
-          <Pagination total={data?.total ?? 0} page={page} pageSize={pageSize} onPageChange={setPage} />
+          {/* A failed request keeps the previous `data` in useQuery — never show its total as current. */}
+          <Pagination total={error ? 0 : (data?.total ?? 0)} page={page} pageSize={pageSize} onPageChange={setPage} />
         </div>
-      </div>
+        </ReportBody>
+      </ReportCard>
 
       {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports?${tableQs}`} appliedFilters={{
-        from: appliedFrom, to: appliedTo, parent: appliedParentDim, child: appliedChildDim,
+        from: appliedFrom, to: appliedTo, parent: parentDim, child: childDim,
         offer: dimParams.offerId, advertiser: dimParams.advertiserId, partner: dimParams.publisherId, smartLink: dimParams.smartLinkId, country: dimParams.country, device: dimParams.device,
         excludeOffer: excludeOfferId, excludeAdvertiser: excludeAdvertiserId, excludePartner: excludePublisherId, excludeSmartLink: excludeSmartLinkId, excludeCountry, excludeDevice,
-        ignoreFailTraffic: appliedIgnoreFailTraffic ? 'true' : undefined,
+        ignoreFailTraffic: ignoreFailTraffic ? 'true' : undefined,
       }} />}
       <PromptModal open={saveModalOpen} onClose={() => setSaveModalOpen(false)} title="Save Report" message="Name this saved report:" placeholder="e.g. Nested Overview" onConfirm={saveReport} />
     </>

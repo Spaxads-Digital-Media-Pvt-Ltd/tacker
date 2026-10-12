@@ -16,6 +16,7 @@ import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { CV_TEXT_OPERATORS, CV_NUMBER_OPERATORS } from '../../../lib/customer-value/evaluate.js';
+import { isSensitiveParamKey } from '../../../lib/reporting/redact.js';
 
 const DATA_POINTS_TABLE = 'customer_data_points';
 const RULES_TABLE = 'customer_value_rules';
@@ -31,7 +32,10 @@ const dataPointDto = (r: DataPointRow) => ({
 const dataPointSchema = z.object({
   name: z.string().min(1).max(200),
   dataType: z.enum(['text', 'number']),
-  parameterKey: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_]+$/, 'letters, numbers, underscore only'),
+  parameterKey: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_]+$/, 'letters, numbers, underscore only')
+    // A data point's values are shown back in the Conversion Events Report — a secret param (the
+    // advertiser's postback secure_code, a token, an api key…) must never be one.
+    .refine((k) => !isSensitiveParamKey(k), 'this parameter carries a secret (e.g. secure_code) and cannot be a data point'),
 });
 
 // ---- Payout & Revenue Rules ----
@@ -247,21 +251,30 @@ export function customerValueRoutes(): Router {
     const limit = q.limit;
     const offset = q.offset;
 
-    const { rows: dataPoints } = await query<DataPointRow>(
+    // Safe-field allowlist: only the configured, non-secret data-point keys are read out of
+    // raw_params (in SQL — the full bag, which holds the advertiser's secure_code, never leaves the
+    // DB). A sensitive data point that predates the create/update check is simply never shown.
+    const { rows: allDataPoints } = await query<DataPointRow>(
       `SELECT id, name, data_type, parameter_key FROM ${DATA_POINTS_TABLE} WHERE network_id = $1`, [networkId],
     );
+    const dataPoints = allDataPoints.filter((dp) => !isSensitiveParamKey(dp.parameter_key));
     const params: unknown[] = [networkId, userId];
     let where = `c.network_id = $1 AND c.raw_params->>'user_id' = $2`;
     if (from) { params.push(from); where += ` AND c.created_at >= $${params.length}`; }
     if (to) { params.push(to); where += ` AND c.created_at <= $${params.length}`; }
+    params.push(dataPoints.map((dp) => dp.parameter_key));
+    const keysParam = `$${params.length}`;
     params.push(limit, offset);
     const { rows } = await query<{
       conversion_id: string; created_at: string; offer_id: string; offer_name: string;
       event_name: string | null; status: string; payout: string | null; revenue: string | null;
-      raw_params: Record<string, unknown>; rule_id: string | null; rule_name: string | null;
+      dp_values: (string | null)[]; rule_id: string | null; rule_name: string | null;
     }>(
+      // dp_values[i] = raw_params->>(dataPoints[i].parameter_key), in the same order.
       `SELECT c.conversion_id, c.created_at, c.offer_id, o.name AS offer_name, c.event_name, c.status,
-              c.payout, c.revenue, c.raw_params, f.rule_id, cvr.name AS rule_name
+              c.payout, c.revenue,
+              ARRAY(SELECT c.raw_params->>k.key FROM unnest(${keysParam}::text[]) WITH ORDINALITY AS k(key, i) ORDER BY k.i) AS dp_values,
+              f.rule_id, cvr.name AS rule_name
          FROM conversions c
          JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
          LEFT JOIN customer_value_rule_firings f ON f.conversion_id = c.conversion_id AND f.network_id = c.network_id
@@ -276,8 +289,8 @@ export function customerValueRoutes(): Router {
         conversionId: row.conversion_id, createdAt: row.created_at, offerId: row.offer_id, offerName: row.offer_name,
         eventName: row.event_name, status: row.status, payout: row.payout, revenue: row.revenue,
         dataPoints: dataPoints
-          .filter((dp) => row.raw_params[dp.parameter_key] != null)
-          .map((dp) => ({ name: dp.name, parameterKey: dp.parameter_key, value: String(row.raw_params[dp.parameter_key]) })),
+          .map((dp, i) => ({ name: dp.name, parameterKey: dp.parameter_key, value: row.dp_values?.[i] ?? null }))
+          .filter((dp): dp is { name: string; parameterKey: string; value: string } => dp.value != null),
         ruleName: row.rule_name,
       })),
     });

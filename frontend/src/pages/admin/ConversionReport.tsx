@@ -14,27 +14,42 @@
  * IDFA/Google Ad ID/Android ID, DMA, Attribution Method, etc. have no real source in this schema and
  * are omitted rather than faked.
  *
+ * Conversion ID and Click ID are available through Columns Customization (off by default) and are
+ * always in the export. Money is shown in the currency stored on the conversion — one recorded
+ * without a currency is a plain amount, never an assumed USD (lib/conversionReport.ts). Approve /
+ * Reject appear only for the roles the API allows (admin, finance — from GET /api/me).
+ *
  * Pagination is "has more" (overfetch by one row), matching Click Report — the shared API client
- * discards response pagination metadata app-wide.
+ * discards response pagination metadata app-wide. The API orders by created_at, then conversion_id,
+ * so pages (and the paged export) never repeat or skip a conversion when timestamps tie.
+ *
+ * No "Run Report": every control applies on its own — dates once they form a valid range (debounced,
+ * since the native date input reports each typed segment), filters / chips immediately. The applied
+ * report is mirrored to the address bar, so the URL itself is the shareable link.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, MoreVertical, ChevronRight, ChevronLeft, SlidersHorizontal } from 'lucide-react';
+import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
+import { displayBrowser, displayOs } from '../../lib/userAgentDisplay';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
-import { CategoryFilterDrawer, type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategoryFilterDrawer';
+import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { countryName, countryOptions, regionName, useRegions } from '../../data/geo';
-import { readUrlDate, readUrlIds, reportLink } from '../../lib/reportFilterState';
+import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
+import { useAutoDateRange } from './reportView';
+import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import { formatDateTime } from '../../lib/datetime';
 import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZone';
 import { useReportTimeZone } from '../../lib/useReportTimeZone';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
+import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta } from '../../lib/conversionReport';
 
 /**
  * Approve a pending conversion (writes publisher earning + advertiser billing and fires the partner
@@ -46,7 +61,15 @@ function ConversionActions({ row, onChanged }: { row: ConvRow; onChanged: () => 
   if (row.status === 'rejected') return <span className="text-tiny text-fg-muted">—</span>;
   const go = async (action: 'approve' | 'reject') => {
     const run = async () => { if (await act.run(action)) onChanged(); };
-    if (action !== 'reject') { await run(); return; }
+    // Both actions move money in the ledger, so both are confirmed.
+    if (action === 'approve') {
+      void confirm({
+        title: 'Approve conversion?',
+        message: 'This records payout/billing and fires the partner postback.',
+        confirmLabel: 'Approve', onConfirm: run,
+      });
+      return;
+    }
     void confirm({
       title: 'Reject conversion?',
       message: row.status === 'approved'
@@ -79,23 +102,14 @@ interface ConvRow {
 }
 
 const ALL_COLUMNS = [
+  'Conversion ID', 'Click ID',
   'Status', 'Reason', 'Offer', 'Partner', 'Advertiser', 'Event Name', 'Goal', 'Source',
   'Revenue', 'Payout', 'Currency', 'Transaction ID', 'Click Date', 'Delta',
   'Country', 'Region', 'City', 'ISP', 'Device', 'OS', 'Browser', 'Fraud',
   'Sub1', 'Sub2', 'Sub3', 'Sub4', 'Sub5',
 ] as const;
-
-function formatDelta(seconds: number | null): string {
-  if (seconds == null) return DASH;
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-function money(v: string | null): string {
-  if (v == null) return DASH;
-  return `$${Number(v).toFixed(2)}`;
-}
+/** Available via Columns Customization (and always in the export); off by default to keep the table narrow. */
+const DEFAULT_HIDDEN = ['Conversion ID', 'Click ID'];
 
 const STATUS_OPTIONS = [
   { value: 'approved', label: 'Approved' },
@@ -114,7 +128,7 @@ const URL_FILTER_PARAMS: [category: string, param: string][] = [
   ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
 ];
 
-/** Applied report state from the URL (Copy Link / reload / legacy deep links). */
+/** Applied report state from the URL (reload / shared link / legacy deep links). */
 function readInitialState() {
   const sp = new URLSearchParams(window.location.search);
   const filters: FilterValues = {};
@@ -129,24 +143,36 @@ function readInitialState() {
 export default function ConversionReport() {
   const [init] = useState(readInitialState);
   const [, setSearchParams] = useSearchParams();
-  const [from, setFrom] = useState(init.from);
-  const [to, setTo] = useState(init.to);
-  const [appliedFrom, setAppliedFrom] = useState(init.from);
-  const [appliedTo, setAppliedTo] = useState(init.to);
+  // Dates apply on their own once they form a valid range (see useAutoDateRange); filters apply
+  // immediately and return to page 1.
+  const range = useAutoDateRange(init.from, init.to);
+  const { from, to, appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
+
   const [filters, setFilters] = useState<FilterValues>(init.filters);
-  const [appliedFilters, setAppliedFilters] = useState<FilterValues>(init.filters);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [hasRun, setHasRun] = useState(true);
   const [q, setQ] = useState('');
-  const [page, setPage] = useState(1);
   const pageSize = 25;
   const [showColumns, setShowColumns] = useState(false);
-  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set(DEFAULT_HIDDEN));
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
-  const [copied, setCopied] = useState(false);
   const exp = useReportExport();
+  // Table Actions closes on an outside click / tap or Escape (mouse-leave alone never fires on touch
+  // screens and leaves keyboard users without a way out).
+  const tableActionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!tableActionsOpen) return;
+    const close = () => { setTableActionsOpen(false); setExportOpen(false); };
+    const onDown = (e: PointerEvent) => { if (!tableActionsRef.current?.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [tableActionsOpen]);
+  // Approve / Reject only for the roles the API allows (admin, finance) — the role the backend enforces.
+  const { data: me } = useQuery<{ identity?: { role?: string } }>('/api/me');
+  const canModerate = canModerateConversions(me?.identity?.role);
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
@@ -169,13 +195,13 @@ export default function ConversionReport() {
     { key: 'device', label: 'Device', options: DEVICE_OPTIONS },
   ], [offers, advertisers, publishers, smartLinks, allCountryOptions]);
 
-  const offerIdFilter = appliedFilters['offer']?.[0];
-  const advertiserIdFilter = appliedFilters['advertiser']?.[0];
-  const publisherIdFilter = appliedFilters['partner']?.[0];
-  const statusFilter = appliedFilters['status']?.[0];
-  const smartLinkIdFilter = appliedFilters['smartLink']?.[0];
-  const countryFilter = appliedFilters['country']?.[0];
-  const deviceFilter = appliedFilters['device']?.[0];
+  const offerIdFilter = filters['offer']?.[0];
+  const advertiserIdFilter = filters['advertiser']?.[0];
+  const publisherIdFilter = filters['partner']?.[0];
+  const statusFilter = filters['status']?.[0];
+  const smartLinkIdFilter = filters['smartLink']?.[0];
+  const countryFilter = filters['country']?.[0];
+  const deviceFilter = filters['device']?.[0];
   // Timestamps follow the filtered country's zone (else network/browser) — re-formatting only.
   const zone = useReportTimeZone(countryFilter);
   const regions = useRegions();
@@ -199,14 +225,15 @@ export default function ConversionReport() {
   const urlState = useMemo(() => {
     const next = new URLSearchParams();
     next.set('from', appliedFrom); next.set('to', appliedTo);
-    for (const [cat, param] of URL_FILTER_PARAMS) { const v = appliedFilters[cat]?.[0]; if (v) next.set(param, v); }
+    for (const [cat, param] of URL_FILTER_PARAMS) { const v = filters[cat]?.[0]; if (v) next.set(param, v); }
     return next.toString();
-  }, [appliedFrom, appliedTo, appliedFilters]);
+  }, [appliedFrom, appliedTo, filters]);
   useEffect(() => {
     if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
   }, [urlState, setSearchParams]);
-  const { data, loading, error, refetch } = useQuery<ConvRow[]>(hasRun ? `/api/reports/conversions?${tableQs}` : null);
+  const { data, loading, error, refetch } = useQuery<ConvRow[]>(`/api/reports/conversions?${tableQs}`);
   const hasNextPage = (data?.length ?? 0) > pageSize;
+  const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
   const pageRows = (data ?? []).slice(0, pageSize);
 
   const rows = useMemo(() => pageRows.filter((r) => {
@@ -215,32 +242,29 @@ export default function ConversionReport() {
     const offerName = offerMap.get(r.offer_id) ?? '';
     const pubName = r.publisher_id ? (pubMap.get(r.publisher_id) ?? '') : '';
     const advName = r.advertiser_id ? (advMap.get(r.advertiser_id) ?? '') : '';
-    return [offerName, pubName, advName, r.transaction_id, r.country, r.country ? countryName(r.country) : null, r.city, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
+    return [offerName, pubName, advName, r.transaction_id, r.conversion_id, r.click_id, r.event_name, r.country, r.country ? countryName(r.country) : null, r.city, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
       .some((v) => (v ?? '').toLowerCase().includes(needle));
   }), [pageRows, q, offerMap, pubMap, advMap]);
 
-  const runReport = () => {
-    setAppliedFrom(from); setAppliedTo(to); setAppliedFilters(filters);
-    setHasRun(true); setPage(1);
-  };
-  const clearAll = () => {
-    setFrom(daysAgo(7)); setTo(todayStr()); setFilters({});
-    setAppliedFrom(daysAgo(7)); setAppliedTo(todayStr()); setAppliedFilters({});
-    setPage(1);
-  };
+  // Reset dates and filters in one render → one request. The debounced range catches up to the same
+  // values later and is then a no-op.
+  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: ConvRow) => ({
-    date: formatDate(r.created_at), status: r.status, reason: r.reason ?? DASH,
+    date: formatDate(r.created_at), conversionId: r.conversion_id, clickId: r.click_id ?? DASH,
+    status: r.status, reason: r.reason ?? DASH,
     offer: offerMap.get(r.offer_id) ?? r.offer_id, partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
     eventName: r.event_name ?? DASH, goal: r.goal_name ?? DASH, source: r.source,
-    revenue: money(r.revenue), payout: money(r.payout), currency: r.currency ?? DASH,
+    // Exact decimal text (spreadsheet-numeric); `currency` is the one the table formats them in.
+    // No currency on the conversion → "—" (never an assumed USD).
+    revenue: r.revenue ?? DASH, payout: r.payout ?? DASH, currency: conversionCurrency(r.currency),
     transactionId: r.transaction_id ?? DASH,
     clickDate: r.click_created_at ? formatDate(r.click_created_at) : DASH, delta: formatDelta(r.delta_seconds),
     timezone: zone.tz,
     country: r.country ? countryName(r.country) : DASH, region: regionLabel(r), city: r.city ?? DASH, isp: r.isp ?? DASH,
-    device: r.device ?? DASH, os: r.os ?? DASH, browser: r.browser ?? DASH, fraud: r.fraud_score,
+    device: r.device ?? DASH, os: displayOs(r.os).text ?? DASH, browser: displayBrowser(r.browser).text ?? DASH, fraud: r.fraud_score,
     sub1: r.sub1 ?? DASH, sub2: r.sub2 ?? DASH, sub3: r.sub3 ?? DASH, sub4: r.sub4 ?? DASH, sub5: r.sub5 ?? DASH,
   });
   // Every conversion matching the applied filters, not just the visible page.
@@ -251,112 +275,80 @@ export default function ConversionReport() {
     });
   };
 
-  const copyLink = async () => {
-    // The link carries the applied report (dates + filters) — the page reads these back on load.
-    const link = reportLink({
-      from: appliedFrom, to: appliedTo,
-      ...Object.fromEntries(URL_FILTER_PARAMS.map(([cat, param]) => [param, appliedFilters[cat]?.[0]])),
-    });
-    await navigator.clipboard?.writeText(link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  };
-
   return (
     <>
-      <PageHeader title="Conversion Report" subtitle="Reporting › Conversion" action={
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => { copyLink(); }} className="text-small font-medium text-accent-text hover:underline">{copied ? 'Copied!' : 'Copy Link'}</button>
-          <button type="button" title="Show API Request" onClick={() => setShowApiRequest(true)}
-            className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <MoreVertical size={15} />
-          </button>
-        </div>
-      } />
+      <PageHeader title="Conversion Report" subtitle="Reporting › Conversion" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="label">From (UTC)</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To (UTC)</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {Object.values(appliedFilters).reduce((n, arr) => n + (arr?.length ?? 0), 0) > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {Object.values(appliedFilters).reduce((n, arr) => n + (arr?.length ?? 0), 0)}
-                </span>
-              )}
-            </button>
+      <ReportCard>
+        <ReportControls problem={range.problem} actions={<>
+          <ClearButton onClick={clearAll} />
+          <FiltersButton count={activeFilterCount} onClick={() => setFilterOpen((o) => !o)}>
             {filterOpen && (
-              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters} singleSelectKeys={FILTER_CATEGORIES.map((c) => c.key)}
-                onApply={setFilters} onClose={() => setFilterOpen(false)} />
+              <ReportingFiltersFlyout sections={['filters']} singleSelect dimCategories={FILTER_CATEGORIES}
+                value={{ ...EMPTY_REPORTING_FILTERS, filters }}
+                onApply={(v) => { setFilters(v.filters); toFirstPage(); }} onClose={() => setFilterOpen(false)} />
+            )}
+          </FiltersButton>
+        </>}>
+          <DateRangeField idPrefix="conversion-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} />
+        </ReportControls>
+
+        <ResultsBar title="Detailed Report" loading={loading} actions={<>
+          {/* min-w-0 / max-w: the long "Auto — …" option text truncates instead of stretching the bar. */}
+          <div className="min-w-0 max-w-full"><TimeZoneSelect zone={zone} selectClassName={`${CONTROL} min-w-0 max-w-full text-small sm:max-w-[22rem]`} /></div>
+          <div className="relative min-w-0 flex-1 sm:flex-none">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
+              aria-label="Search this page" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <div className="relative" ref={tableActionsRef}>
+            <button type="button" title="Table Actions" aria-label="Table Actions" aria-haspopup="menu" aria-expanded={tableActionsOpen}
+              onClick={() => setTableActionsOpen((o) => !o)}
+              className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+              <MoreVertical size={15} />
+            </button>
+            {tableActionsOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated"
+                onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
+                <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
+                <div className="relative" onMouseEnter={() => setExportOpen(true)}>
+                  <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
+                    Export <ChevronRight size={13} className="text-fg-muted" />
+                  </button>
+                  {exportOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                      <button disabled={exp.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
+                      <button disabled={exp.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
+                <button onClick={() => { setTableActionsOpen(false); setShowApiRequest(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Show API Request</button>
+              </div>
             )}
           </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-          <div className="flex-1" />
-          <button type="button" className="btn-primary" onClick={runReport}>Run Report</button>
-        </div>
-      </div>
+        </>}>
+          <ActiveFilterChips
+            chips={chipsFromValues(FILTER_CATEGORIES, filters)}
+            onRemove={(c) => { setFilters(withoutValue(filters, c.key, c.value)); toFirstPage(); }}
+            onClearAll={() => { setFilters({}); toFirstPage(); }} />
+        </ResultsBar>
 
-      <div className="card">
-        <ActiveFilterChips className="mb-3"
-          chips={chipsFromValues(FILTER_CATEGORIES, appliedFilters)}
-          onRemove={(c) => { const n = withoutValue(appliedFilters, c.key, c.value); setFilters(n); setAppliedFilters(n); setPage(1); }}
-          onClearAll={() => { setFilters({}); setAppliedFilters({}); setPage(1); }} />
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <TimeZoneSelect zone={zone} />
-            <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search this page…" title="Filters only the rows on the current page"
-                value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-            <div className="relative">
-              <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
-                className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-                <MoreVertical size={15} />
-              </button>
-              {tableActionsOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated"
-                  onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
-                  <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
-                  <div className="relative" onMouseEnter={() => setExportOpen(true)}>
-                    <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                      Export <ChevronRight size={13} className="text-fg-muted" />
-                    </button>
-                    {exportOpen && (
-                      <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <button disabled={exp.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">CSV</button>
-                        <button disabled={exp.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Excel</button>
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
+        <ReportBody>
         <ExportStatus {...exp} onDismiss={exp.dismiss} />
-        {!hasRun ? <StateBlock>Set parameters and run report</StateBlock>
-          : loading ? <StateBlock><Spinner /></StateBlock>
-          : error ? <StateBlock>{error}</StateBlock>
-          : !rows.length ? <StateBlock>No Record Found</StateBlock>
+        {error ? <StateBlock>{error}</StateBlock>
+          // While a new request runs (or an approve/reject refetch), the previous rows stay (dimmed)
+          // instead of the table collapsing to a spinner and back.
+          : !rows.length ? (loading ? <StateBlock><Spinner /></StateBlock> : <StateBlock>No Record Found</StateBlock>)
           : (
-            <div className="overflow-x-auto rounded-card border border-border">
+            <div className={`overflow-x-auto rounded-card border border-border transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
               <table className="premium-table">
                 <thead>
                   <tr>
                     <th title={zone.tz}>Date <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
+                    {shown.has('Conversion ID') && <th >Conversion ID</th>}
+                    {shown.has('Click ID') && <th title="The click this conversion was attributed to">Click ID</th>}
                     {shown.has('Status') && <th >Status</th>}
                     {shown.has('Reason') && <th >Reason</th>}
                     {shown.has('Offer') && <th >Offer</th>}
@@ -365,8 +357,8 @@ export default function ConversionReport() {
                     {shown.has('Event Name') && <th >Event Name</th>}
                     {shown.has('Goal') && <th >Goal</th>}
                     {shown.has('Source') && <th >Source</th>}
-                    {shown.has('Revenue') && <th className="text-right font-semibold">Revenue</th>}
-                    {shown.has('Payout') && <th className="text-right font-semibold">Payout</th>}
+                    {shown.has('Revenue') && <th className="text-right font-semibold" title="Advertiser revenue recorded on the conversion, in its currency">Revenue</th>}
+                    {shown.has('Payout') && <th className="text-right font-semibold" title="Partner payout recorded on the conversion, in its currency">Payout</th>}
                     {shown.has('Currency') && <th >Currency</th>}
                     {shown.has('Transaction ID') && <th >Transaction ID</th>}
                     {shown.has('Click Date') && <th >Click Date</th>}
@@ -384,13 +376,15 @@ export default function ConversionReport() {
                     {shown.has('Sub3') && <th >Sub3</th>}
                     {shown.has('Sub4') && <th >Sub4</th>}
                     {shown.has('Sub5') && <th >Sub5</th>}
-                    <th>Actions</th>
+                    {canModerate && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.conversion_id} className="hover:bg-accent-subtle/40">
                       <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
+                      {shown.has('Conversion ID') && <td className="font-mono text-tiny">{r.conversion_id}</td>}
+                      {shown.has('Click ID') && <td className="font-mono text-tiny">{r.click_id ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3"><Badge value={r.status} /></td>}
                       {shown.has('Reason') && <td className="px-4 py-3">{r.reason ?? DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
@@ -399,9 +393,9 @@ export default function ConversionReport() {
                       {shown.has('Event Name') && <td className="px-4 py-3">{r.event_name ?? DASH}</td>}
                       {shown.has('Goal') && <td className="px-4 py-3">{r.goal_name ?? DASH}</td>}
                       {shown.has('Source') && <td className="px-4 py-3 capitalize">{r.source}</td>}
-                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(r.revenue)}</td>}
-                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(r.payout)}</td>}
-                      {shown.has('Currency') && <td className="px-4 py-3">{r.currency ?? DASH}</td>}
+                      {shown.has('Revenue') && (() => { const m = conversionMoney(r.revenue, r.currency); return <td className="px-4 py-3 text-right tabular-nums" title={m.title}>{m.text}</td>; })()}
+                      {shown.has('Payout') && (() => { const m = conversionMoney(r.payout, r.currency); return <td className="px-4 py-3 text-right tabular-nums" title={m.title}>{m.text}</td>; })()}
+                      {shown.has('Currency') && <td className="px-4 py-3">{conversionCurrency(r.currency)}</td>}
                       {shown.has('Transaction ID') && <td className="font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
                       {shown.has('Click Date') && <td >{r.click_created_at ? formatDate(r.click_created_at) : DASH}</td>}
                       {shown.has('Delta') && <td >{formatDelta(r.delta_seconds)}</td>}
@@ -410,39 +404,42 @@ export default function ConversionReport() {
                       {shown.has('City') && <td className="px-4 py-3">{r.city ?? DASH}</td>}
                       {shown.has('ISP') && <td className="px-4 py-3">{r.isp ?? DASH}</td>}
                       {shown.has('Device') && <td className="px-4 py-3 capitalize">{r.device ?? DASH}</td>}
-                      {shown.has('OS') && <td className="px-4 py-3">{r.os ?? DASH}</td>}
-                      {shown.has('Browser') && <td className="px-4 py-3">{r.browser ?? DASH}</td>}
+                      {shown.has('OS') && <td className="px-4 py-3" title={displayOs(r.os).note}>{displayOs(r.os).text ?? DASH}</td>}
+                      {shown.has('Browser') && <td className="px-4 py-3" title={displayBrowser(r.browser).note}>{displayBrowser(r.browser).text ?? DASH}</td>}
                       {shown.has('Fraud') && <td className={`px-4 py-3 text-right ${r.fraud_score >= 40 ? 'text-danger-text' : r.fraud_score > 0 ? 'text-warning-text' : ''}`}>{r.fraud_score}</td>}
                       {shown.has('Sub1') && <td className="px-4 py-3">{r.sub1 ?? DASH}</td>}
                       {shown.has('Sub2') && <td className="px-4 py-3">{r.sub2 ?? DASH}</td>}
                       {shown.has('Sub3') && <td className="px-4 py-3">{r.sub3 ?? DASH}</td>}
                       {shown.has('Sub4') && <td className="px-4 py-3">{r.sub4 ?? DASH}</td>}
                       {shown.has('Sub5') && <td className="px-4 py-3">{r.sub5 ?? DASH}</td>}
-                      <td className="px-4 py-3"><ConversionActions row={r} onChanged={refetch} /></td>
+                      {canModerate && <td className="px-4 py-3"><ConversionActions row={r} onChanged={refetch} /></td>}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-        {hasRun && !error && rows.length > 0 && (
+        {/* Paging follows the loaded page, not "Search this page" (which can hide every row) — and stays
+           reachable on an emptied later page so Previous still works. */}
+        {!error && (pageRows.length > 0 || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
-            <span>Page {page}</span>
+            <span aria-live="polite">Page {page}</span>
             <div className="flex items-center gap-1">
-              <button type="button" title="Previous page" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+              <button type="button" title="Previous page" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronLeft size={14} />
               </button>
-              <button type="button" title="Next page" disabled={!hasNextPage} onClick={() => setPage((p) => p + 1)}
+              <button type="button" title="Next page" aria-label="Next page" disabled={!hasNextPage || loading} onClick={() => setPage(page + 1)}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronRight size={14} />
               </button>
             </div>
           </div>
         )}
-      </div>
+        </ReportBody>
+      </ReportCard>
 
-      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
+      {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/conversions?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, status: statusFilter,
         smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,

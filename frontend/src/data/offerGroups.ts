@@ -8,7 +8,12 @@ export interface OfferGroup {
   id: string; ref: number; name: string; advertiserId: string | null; offerIds: string[];
   currency: string; labels: string | null; notes: string | null; status: string;
   capsEnabled: boolean; caps: Caps; createdAt: string; updatedAt: string;
-  today?: { clicks: number; payout: string; revenue: string };
+  /**
+   * Today's conversion money. `currencies` / `moneyByCurrency` (newer API): the conversions' own
+   * currencies and the money split by currency — the stats are in THOSE currencies, not the group's
+   * (`currency` is the group's own setting, used for its caps). Several → never one summed figure.
+   */
+  today?: { clicks: number; payout: string; revenue: string; currencies?: string[]; moneyByCurrency?: unknown };
 }
 
 export const CURRENCIES = [

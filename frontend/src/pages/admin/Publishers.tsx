@@ -395,6 +395,7 @@ export default function Publishers() {
             }}
             onExport={(kind, format) => { void exportRows(kind, format); }}
             onBalancesRequested={(msg) => { setToast(msg); refetch(); }}
+            partnerName={(id) => rows.find((p) => p.id === id)?.name ?? id}
             appliedFilters={{ status: statuses.join(', ') || undefined, search: searchQ || undefined, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v.length).map(([k, v]) => [k, v.map((x) => filterValueLabel(k, x)).join(', ')])) }}
           />
         </div>

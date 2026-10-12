@@ -17,7 +17,7 @@
  * type — creating a conversion with no originating click — maps directly onto this app's existing
  * source='manual' offline-conversion path, so it's included as "Create Offline Conversions"):
  *   - Create Offline Conversions (offerRef, event, payout, revenue, transactionId, publisherRef?)
- *   - Update Revenue/Payout By Transaction ID (transactionId, payout?, revenue?)
+ *   - Update Revenue/Payout By Transaction ID (transactionId, payout?, revenue?, offerRef?)
  *   - Update Revenue/Payout By Conversion ID (conversionId, payout?, revenue?)
  */
 import { useState } from 'react';
@@ -25,11 +25,12 @@ import { Plus } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, Modal } from '../../shared-components/primitives/ui';
+import { parseCsv } from '../../lib/csvImport';
 
 type ImportType = 'create' | 'update_by_transaction_id' | 'update_by_conversion_id';
 const TYPE_OPTIONS: { value: ImportType; label: string; columns: string }[] = [
-  { value: 'create', label: 'Create Offline Conversions', columns: 'offerRef, event, payout, revenue, transactionId, publisherRef (optional)' },
-  { value: 'update_by_transaction_id', label: 'Update Revenue/Payout By Transaction ID', columns: 'transactionId, payout (optional), revenue (optional)' },
+  { value: 'create', label: 'Create Offline Conversions', columns: 'offerRef, event, payout, revenue, transactionId, publisherRef (optional), status (optional: approved|pending|rejected), currency (optional), advertiserRef (optional — must be the offer’s advertiser)' },
+  { value: 'update_by_transaction_id', label: 'Update Revenue/Payout By Transaction ID', columns: 'transactionId, payout (optional), revenue (optional), offerRef (optional — needed when a transaction ID repeats across offers)' },
   { value: 'update_by_conversion_id', label: 'Update Revenue/Payout By Conversion ID', columns: 'conversionId, payout (optional), revenue (optional)' },
 ];
 
@@ -39,30 +40,15 @@ interface ImportJob {
   created_at: string; processed_at: string | null; created_by_name: string | null; created_by_email: string | null;
 }
 
-/** Minimal CSV parser — header row + comma-separated values, double-quote escaping for commas. No
- * external dependency; this app has no other CSV *parsing* need (only export), so a small
- * purpose-built parser is simpler than adding a library for one screen. */
-function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2) return [];
-  const splitLine = (line: string): string[] => {
-    const out: string[] = []; let cur = ''; let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') inQuotes = !inQuotes;
-      else if (c === ',' && !inQuotes) { out.push(cur); cur = ''; }
-      else cur += c;
-    }
-    out.push(cur);
-    return out.map((s) => s.trim());
-  };
-  const headers = splitLine(lines[0]!);
-  return lines.slice(1).map((line) => {
-    const cells = splitLine(line);
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { if (cells[i]) row[h] = cells[i]!; });
-    return row;
-  });
+/** Server limit per import (`rows: z.array(...).max(1000)` in conversion-imports/routes.ts). */
+const MAX_IMPORT_ROWS = 1000;
+
+/** Parsed CSV → the request rows: blank cells are left out (the server treats a missing column as
+ *  "not provided"), and a row left with nothing in it is dropped (the server rejects empty rows). */
+function toImportRows(text: string): Record<string, string>[] {
+  return parseCsv(text)
+    .map((r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v !== '')))
+    .filter((r) => Object.keys(r).length > 0);
 }
 
 function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
@@ -71,11 +57,12 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   const [result, setResult] = useState<ImportJob | null>(null);
   const run = useMutation((body: Record<string, unknown>) => api.post<ImportJob>('/api/conversion-imports', body));
 
-  const rows = parseCsv(csvText);
+  const rows = toImportRows(csvText);
+  const tooMany = rows.length > MAX_IMPORT_ROWS;
   const typeInfo = TYPE_OPTIONS.find((t) => t.value === type)!;
 
   const submit = async () => {
-    if (!rows.length) return;
+    if (!rows.length || tooMany) return;
     const res = await run.run({ type, rows });
     if (res) { setResult(res); onDone(); }
   };
@@ -114,17 +101,25 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
             {TYPE_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
           <p className="mt-1 text-tiny text-fg-muted">Expected columns: <span className="font-mono">{typeInfo.columns}</span></p>
+          {type === 'create' && (
+            <p className="mt-1 text-tiny text-fg-muted">
+              Offers with Manually Approve Conversions on import as pending, even when status is approved. Partners must be active
+              and allowed on the offer. Imports fire no partner postbacks and aren’t limited by caps, but they count toward caps.
+            </p>
+          )}
         </div>
         <div>
           <label className="label">CSV (with header row)</label>
           <textarea className="input h-40 resize-y font-mono text-tiny" value={csvText} onChange={(e) => setCsvText(e.target.value)}
             placeholder={type === 'create' ? 'offerRef,event,payout,revenue,transactionId\n2,sale,5.00,10.00,txn-001' : 'transactionId,payout,revenue\ntxn-001,5.00,10.00'} />
-          <p className="mt-1 text-tiny text-fg-muted">{rows.length > 0 ? `${rows.length} row${rows.length === 1 ? '' : 's'} parsed.` : 'Paste CSV text above, including a header row.'}</p>
+          {tooMany
+            ? <p className="mt-1 text-tiny text-danger-text" role="alert">{rows.length.toLocaleString()} rows parsed — an import can hold at most {MAX_IMPORT_ROWS.toLocaleString()} rows. Split the file and import it in parts.</p>
+            : <p className="mt-1 text-tiny text-fg-muted">{rows.length > 0 ? `${rows.length} row${rows.length === 1 ? '' : 's'} parsed.` : 'Paste CSV text above, including a header row.'}</p>}
         </div>
         {run.error && <p className="text-small text-danger-text">{run.error}</p>}
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={run.busy || !rows.length} onClick={submit}>
+          <button type="button" className="btn-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={run.busy || !rows.length || tooMany} onClick={submit}>
             {run.busy ? 'Importing…' : `Import ${rows.length || ''} Row${rows.length === 1 ? '' : 's'}`}
           </button>
         </div>

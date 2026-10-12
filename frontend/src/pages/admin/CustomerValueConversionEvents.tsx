@@ -4,9 +4,9 @@
  * activity, all Data Points received (like geo, deposit, etc.), and which rules were applied."
  *
  * Structured as the same real detailed-report shell already verified live against the reference
- * on Reporting › Conversion (see ConversionReport.tsx): a filter card (date range + User ID +
- * Run Report/Clear) above a Detailed Report card (Search + Table Actions kebab + table +
- * pagination) — the Customer Value module itself is gated on the public demo account (a direct
+ * on Reporting › Conversion (see ConversionReport.tsx): one report card — controls (User ID + date
+ * range + Clear; no Run Report, each applies on its own) over a results bar (Search + Table Actions
+ * kebab) and the table + pagination — the Customer Value module itself is gated on the public demo account (a direct
  * URL is accepted by the router but renders blank), but this report shell is the one real,
  * confirmed convention every other detailed report in this app follows, so this page follows it
  * too instead of a bespoke layout.
@@ -21,6 +21,10 @@ import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { daysAgo, todayStr, toIso, DASH } from '../../shared-components/primitives/ReportPageKit';
 import { useQuery } from '../../lib/useApi';
+import { useDebounced } from './pagedList';
+import { useAutoDateRange } from './reportView';
+import { ReportCard, ReportControls, ControlField, DateRangeField, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
+import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 
 interface EventRow {
   conversionId: string; createdAt: string; offerId: string; offerName: string;
@@ -44,16 +48,14 @@ function money(v: string | null): string {
 }
 
 export default function CustomerValueConversionEvents() {
+  // No Run Report: the date range commits on its own once valid (useAutoDateRange) and the User ID
+  // once typing settles; there is nothing to fetch until a User ID is entered.
+  const range = useAutoDateRange(daysAgo(30), todayStr());
+  const { appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
   const [userIdInput, setUserIdInput] = useState('');
-  const [from, setFrom] = useState(daysAgo(30));
-  const [to, setTo] = useState(todayStr());
-  const [appliedUserId, setAppliedUserId] = useState('');
-  const [appliedFrom, setAppliedFrom] = useState(from);
-  const [appliedTo, setAppliedTo] = useState(to);
-  const [hasRun, setHasRun] = useState(false);
+  const userId = useDebounced(userIdInput.trim(), 500);
 
   const [q, setQ] = useState('');
-  const [page, setPage] = useState(1);
   const [showColumns, setShowColumns] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
@@ -65,10 +67,10 @@ export default function CustomerValueConversionEvents() {
     return params.toString();
   };
   const tableQs = qs({
-    userId: appliedUserId, from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    userId, from: toIso(appliedFrom), to: toIso(appliedTo, true),
     limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE,
   });
-  const { data, loading } = useQuery<Report>(hasRun ? `/api/customer-value/conversion-events?${tableQs}` : null);
+  const { data, loading } = useQuery<Report>(userId ? `/api/customer-value/conversion-events?${tableQs}` : null);
 
   const allEvents = data?.events ?? [];
   const hasNextPage = allEvents.length > PAGE_SIZE;
@@ -79,15 +81,7 @@ export default function CustomerValueConversionEvents() {
     return [e.offerName, e.eventName, e.ruleName, e.conversionId].some((v) => (v ?? '').toLowerCase().includes(needle));
   }), [pageEvents, q]);
 
-  const runReport = () => {
-    setAppliedUserId(userIdInput.trim()); setAppliedFrom(from); setAppliedTo(to);
-    setHasRun(true); setPage(1);
-  };
-  const clearAll = () => {
-    setUserIdInput(''); setFrom(daysAgo(30)); setTo(todayStr());
-    setAppliedUserId(''); setAppliedFrom(daysAgo(30)); setAppliedTo(todayStr());
-    setHasRun(false); setPage(1); setQ('');
-  };
+  const clearAll = () => { setUserIdInput(''); range.reset({ from: daysAgo(30), to: todayStr() }); setQ(''); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const exportRows = () => rows.map((e) => ({
@@ -100,67 +94,54 @@ export default function CustomerValueConversionEvents() {
     <>
       <PageHeader title="Conversion Events Report" subtitle="Customer Value › Conversion Events Report" />
 
-      <div className="card mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-56">
-            <label className="label">User ID *</label>
-            <input className="input" placeholder="e.g. cust_778" value={userIdInput} onChange={(e) => setUserIdInput(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">From</label>
-            <input type="date" className="input" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">To</label>
-            <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <button type="button" className="text-small font-medium text-accent-text hover:underline" onClick={clearAll}>Clear</button>
-          <div className="flex-1" />
-          <button type="button" className="btn-primary" disabled={!userIdInput.trim()} onClick={runReport}>Run Report</button>
-        </div>
-      </div>
+      <ReportCard>
+        <ReportControls problem={range.problem} actions={<ClearButton onClick={clearAll} title="Reset User ID and dates" />}>
+          <ControlField label="User ID *" htmlFor="cv-events-user-id">
+            <input id="cv-events-user-id" className={`input ${CONTROL}`} placeholder="e.g. cust_778" value={userIdInput}
+              onChange={(e) => { setUserIdInput(e.target.value); toFirstPage(); }} />
+          </ControlField>
+          <DateRangeField idPrefix="cv-events-report" label="Date range" from={range.from} to={range.to} max={todayStr()}
+            invalid={range.problem !== null} onFrom={range.setFrom} onTo={range.setTo} />
+        </ReportControls>
 
-      <div className="card">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-h3 font-medium text-fg">Detailed Report</h3>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-56 !pl-8" placeholder="Search this page…" aria-label="Search this page" title="Filters only the events on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-            <div className="relative">
-              <button type="button" title="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
-                className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-                <MoreVertical size={15} />
-              </button>
-              {tableActionsOpen && (
-                <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated"
-                  onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
-                  <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
-                  <div className="relative" onMouseEnter={() => setExportOpen(true)}>
-                    <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                      Export <ChevronRight size={13} className="text-fg-muted" />
-                    </button>
-                    {exportOpen && (
-                      <div className="absolute right-full top-0 mr-1 w-44 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                        <p className="px-3 py-1 text-tiny text-fg-muted">Current page only</p>
-                        <button onClick={() => { downloadCsv('conversion-events-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV (current page)</button>
-                        <button onClick={() => { downloadXlsx('conversion-events-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel (current page)</button>
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
+        <ResultsBar title="Detailed Report" loading={loading} actions={<>
+          <div className="relative min-w-0 flex-1 sm:flex-none">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" aria-label="Search this page" title="Filters only the events on the current page" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <div className="relative">
+            <button type="button" title="Table Actions" aria-label="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
+              className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
+              <MoreVertical size={15} />
+            </button>
+            {tableActionsOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated"
+                onMouseLeave={() => { setTableActionsOpen(false); setExportOpen(false); }}>
+                <div className="px-3 py-1 text-tiny font-semibold uppercase text-fg-secondary">Table Actions</div>
+                <div className="relative" onMouseEnter={() => setExportOpen(true)}>
+                  <button onClick={() => setExportOpen((s) => !s)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
+                    Export <ChevronRight size={13} className="text-fg-muted" />
+                  </button>
+                  {exportOpen && (
+                    <div className="absolute right-full top-0 mr-1 w-44 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                      <p className="px-3 py-1 text-tiny text-fg-muted">Current page only</p>
+                      <button onClick={() => { downloadCsv('conversion-events-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV (current page)</button>
+                      <button onClick={() => { downloadXlsx('conversion-events-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel (current page)</button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+                <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
+              </div>
+            )}
           </div>
-        </div>
+        </>} />
 
-        {!hasRun ? <StateBlock>Enter a User ID and run the report to see that customer's full activity log.</StateBlock>
-          : loading ? <StateBlock><Spinner /></StateBlock>
+        <ReportBody>
+        {!userId ? <StateBlock>Enter a User ID to see that customer's full activity log.</StateBlock>
+          : loading && !rows.length ? <StateBlock><Spinner /></StateBlock>
           : !rows.length ? <StateBlock>{q.trim() && pageEvents.length > 0 ? 'No events on this page match your search.' : 'No Record Found'}</StateBlock>
           : (
-            <div className="overflow-x-auto rounded-card border border-border">
+            <div className={`overflow-x-auto rounded-card border border-border transition-opacity ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
               <table className="premium-table">
                 <thead>
                   <tr>
@@ -205,22 +186,23 @@ export default function CustomerValueConversionEvents() {
               </table>
             </div>
           )}
-        {hasRun && (rows.length > 0 || hasNextPage || page > 1) && (
+        {userId && (rows.length > 0 || hasNextPage || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">
-              <button type="button" title="Previous page" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+              <button type="button" title="Previous page" disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronLeft size={14} />
               </button>
-              <button type="button" title="Next page" disabled={!hasNextPage} onClick={() => setPage((p) => p + 1)}
+              <button type="button" title="Next page" disabled={!hasNextPage || loading} onClick={() => setPage(page + 1)}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronRight size={14} />
               </button>
             </div>
           </div>
         )}
-      </div>
+        </ReportBody>
+      </ReportCard>
 
       {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} onApply={(_o, h) => setHiddenColumns(h)} />}
     </>

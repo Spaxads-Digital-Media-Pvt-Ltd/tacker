@@ -33,6 +33,11 @@ export interface ClickJob {
   resolvedRevenue: string | null;
   currency: string | null;
   smartLinkId: string | null;
+  /** Click-URL values (?source_id|source|src, ?fbclid, ?gclid). Optional: a job queued by an older
+   *  tracking build has none and persists NULL. */
+  sourceId?: string | null;
+  fbclid?: string | null;
+  gclid?: string | null;
   /** Offer has IPQualityScore enrichment on — the click-persist worker looks the IP up (async). */
   ipqs?: boolean;
 }

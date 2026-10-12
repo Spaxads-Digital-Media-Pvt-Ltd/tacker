@@ -86,7 +86,11 @@ export function catalogRoutes(): Router {
   return r;
 }
 
-/** Invoices derived from the append-only ledger: advertiser billing + affiliate payable, per account. */
+/**
+ * Invoices derived from the append-only ledger: advertiser billing + affiliate payable, per account
+ * and currency. Rows are ordered by currency, then by the NUMERIC amount (largest first), then
+ * account — never by the ::text amount (string order) and never comparing amounts across currencies.
+ */
 export function invoiceRoutes(): Router {
   const r = Router();
   r.get('/', asyncHandler(async (req, res) => {
@@ -98,7 +102,8 @@ export function invoiceRoutes(): Router {
          FROM ledger_entries a
          JOIN advertisers adv ON adv.id = a.account_id AND adv.network_id = a.network_id
         WHERE a.network_id = $1 AND a.account_type = 'advertiser' AND a.status = 'approved'
-        GROUP BY a.account_id, adv.name, a.currency ORDER BY 3 DESC`, [networkId]);
+        GROUP BY a.account_id, adv.name, a.currency
+        ORDER BY a.currency, COALESCE(SUM(a.amount) FILTER (WHERE a.direction = 'debit'),0) DESC, a.account_id`, [networkId]);
     const publishers = await query(
       `SELECT a.account_id AS id, pub.name,
               COALESCE(SUM(CASE WHEN a.direction = 'credit' THEN a.amount ELSE -a.amount END),0)::text AS amount,
@@ -106,7 +111,8 @@ export function invoiceRoutes(): Router {
          FROM ledger_entries a
          JOIN publishers pub ON pub.id = a.account_id AND pub.network_id = a.network_id
         WHERE a.network_id = $1 AND a.account_type = 'publisher' AND a.status = 'approved'
-        GROUP BY a.account_id, pub.name, a.currency ORDER BY 3 DESC`, [networkId]);
+        GROUP BY a.account_id, pub.name, a.currency
+        ORDER BY a.currency, COALESCE(SUM(CASE WHEN a.direction = 'credit' THEN a.amount ELSE -a.amount END),0) DESC, a.account_id`, [networkId]);
     sendOk(res, { advertiserBilling: advertisers.rows, affiliatePayable: publishers.rows });
   }));
   return r;

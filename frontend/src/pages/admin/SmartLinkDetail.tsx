@@ -12,7 +12,9 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
-import { METRICS_PARAM, deriveRow, money, pct, toIso, todayStr, type AggResult } from '../../shared-components/primitives/ReportPageKit';
+import { METRICS_PARAM, deriveRow, pct, toIso, todayStr, type AggResult } from '../../shared-components/primitives/ReportPageKit';
+import { combineCurrencies, currenciesOf, moneyByCurrencyOf, withBreakdownMetrics } from '../../lib/reportCurrency';
+import { Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
 import { fmtDateTime, REDIRECT_MECHANISMS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
 import { SmartLinkTrackingLinksModal } from './SmartLinkTrackingLinksModal';
@@ -51,9 +53,13 @@ function RunRecordTab() {
 
 function StatsCard({ id }: { id: string }) {
   const today = todayStr();
-  const { data } = useQuery<AggResult>(`/api/reports?groupBy=smartLink&metrics=${METRICS_PARAM}&smartLinkId=${id}&from=${toIso(today)}&to=${toIso(today, true)}`);
+  const { data } = useQuery<AggResult>(`/api/reports?groupBy=smartLink&metrics=${withBreakdownMetrics(METRICS_PARAM)}&smartLinkId=${id}&from=${toIso(today)}&to=${toIso(today, true)}`);
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
   const row = data?.rows[0];
   const d = deriveRow(row?.metrics ?? {});
+  // Money in its conversions' currency; mixed → per-currency amounts (newer API), never a summed total.
+  const rc = combineCurrencies([currenciesOf(row?.metrics)], settings?.general?.defaultCurrency ?? 'USD');
+  const breakdown = moneyByCurrencyOf(row?.metrics);
   return (
     <InfoCard title="Stats" action={
       <div className="flex items-center gap-3 text-tiny text-fg-secondary">
@@ -68,7 +74,9 @@ function StatsCard({ id }: { id: string }) {
           </thead>
           <tbody>
             <tr>
-              <td className="pr-4 pt-1">{money(d.revenue)}</td><td className="pr-4 pt-1">{money(d.payout)}</td><td className="pr-4 pt-1">{pct(d.marginPct)}</td>
+              <td className="pr-4 pt-1"><Money value={d.revenue} rc={rc} breakdown={breakdown} field="revenue" roomy /></td>
+              <td className="pr-4 pt-1"><Money value={d.payout} rc={rc} breakdown={breakdown} field="payout" roomy /></td>
+              <td className="pr-4 pt-1"><MoneyPct value={d.marginPct} rc={rc} /></td>
               <td className="pr-4 pt-1"><a href={`/app/reports/smartlink?smartLinkId=${id}`} className="text-accent-text hover:underline">{d.clicks}</a></td>
               <td className="pr-4 pt-1"><a href={`/app/reports/smartlink?smartLinkId=${id}`} className="text-accent-text hover:underline">{d.cv}</a></td>
               <td className="pt-1">{pct(d.cvr)}</td>

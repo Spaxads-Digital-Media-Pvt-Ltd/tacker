@@ -41,8 +41,39 @@ never be cached either. Do **not** enable "Cache Everything" on the tracking zon
   `/postback` (server-to-server callers are not browsers and will fail a JS challenge).
 - **Firewall**: only expose 80/443 at origin; lock the origin to Cloudflare IP ranges (or use
   **cloudflared** tunnel) so nobody bypasses the edge to hit the origin directly.
-- Pass the real client IP to origin via `CF-Connecting-IP`; the origin runs with `trustProxy` so
-  `req.ip` already reflects it.
+
+## Client IP at the origin (how `req.ip` is derived)
+
+The tracking server does **not** read `CF-Connecting-IP` (or `True-Client-IP` / `X-Real-IP`). It
+derives the click IP from **`X-Forwarded-For` only**, via Fastify's `trustProxy` with the check in
+`src/surfaces/tracking/trusted-proxy.ts`:
+
+1. Start from the TCP socket peer. If it is not a trusted proxy, that address **is** the client
+   and `X-Forwarded-For` is ignored entirely (in production such a direct connection is also
+   rejected with 403 by the guard in `tracking/app.ts`).
+2. Otherwise walk `X-Forwarded-For` from the **right**, skipping trusted proxies; the first
+   untrusted address is the client. Entries to its left (anything the client wrote itself) are
+   never used.
+
+Trusted proxies: loopback (`127.0.0.1`, `::1`), Cloudflare's published IPv4 + IPv6 ranges
+(pinned in `trusted-proxy.ts` from <https://www.cloudflare.com/ips-v4/> and `/ips-v6/` — re-check
+when Cloudflare changes them), plus `TRACKING_TRUSTED_PROXIES` (comma-separated IPs/CIDRs).
+
+Cloudflare appends the visitor's IP to `X-Forwarded-For` by default, so no edge rule is needed.
+What the **origin proxy** (Nginx / load balancer) must do — confirm against the real deployment,
+this repository contains no Nginx config:
+
+| Origin setup | Result | Action |
+|---|---|---|
+| Nginx on the same host, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` | Correct client IP | None |
+| Nginx with `real_ip` (`set_real_ip_from` Cloudflare ranges, `real_ip_header CF-Connecting-IP`) then `$proxy_add_x_forwarded_for` | Correct client IP | None |
+| Nginx / LB on **another host or container** | Click IP = the proxy; production guard returns 403 | Add its address(es) to `TRACKING_TRUSTED_PROXIES` |
+| Nginx **overwrites** `X-Forwarded-For` with `$remote_addr` (no `real_ip`) | Click IP = a Cloudflare edge address | Append instead (`$proxy_add_x_forwarded_for`) |
+| Cloudflare connects straight to the tracking port (no origin proxy) | Correct client IP | None (the tracking server speaks plain HTTP — TLS must terminate somewhere) |
+
+Local development: a direct request keeps its real socket address (`127.0.0.1`). Because loopback
+is trusted, a local client can still set `X-Forwarded-For`; that is expected in dev and is why
+loopback must only ever be the same-host Nginx in production.
 
 ## Headers the origin sets (do not override at the edge)
 

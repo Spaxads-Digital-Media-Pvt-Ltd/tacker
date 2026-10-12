@@ -16,6 +16,7 @@
  * be dishonest; the field is real, persisted data, just not yet a second evaluation path.
  */
 import { query } from '../db/pool.js';
+import { isSensitiveParamKey } from '../reporting/redact.js';
 
 export const CV_TEXT_OPERATORS = ['exact_match'] as const;
 export const CV_NUMBER_OPERATORS = ['greater_than', 'greater_than_or_equal_to', 'less_than', 'less_than_or_equal_to', 'equal_to'] as const;
@@ -211,7 +212,10 @@ export async function evaluateCustomerValueRules(ctx: CvContext): Promise<CvResu
   const { rows: dataPoints } = await query<DataPointRow>(
     `SELECT id, name, data_type, parameter_key FROM customer_data_points WHERE network_id = $1`, [ctx.networkId],
   );
-  const dpById = new Map(dataPoints.map((d) => [d.id, d]));
+  // A data point on a secret param (secure_code, token…) is rejected at create/update; one that
+  // predates that check is treated as missing, so its condition never matches — a rule must not be
+  // usable as an oracle on the advertiser's postback secret.
+  const dpById = new Map(dataPoints.filter((d) => !isSensitiveParamKey(d.parameter_key)).map((d) => [d.id, d]));
   const now = new Date();
 
   for (const rule of rules) {

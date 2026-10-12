@@ -20,9 +20,14 @@ import { chipsFromValues, withoutValue, type ChipCategory, type FilterChip } fro
 import { cleanFilterValues } from '../../lib/reportFilterState';
 import { api } from '../../lib/api';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
+import { isMoneyMetricKey, MIXED_LABEL, mixedTitle, moneyFilterNote, moneyText, type MoneyByCurrency, type RowCurrency } from '../../lib/reportCurrency';
 
 export interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
-export interface AggResult { rows: AggRow[]; total?: number }
+/**
+ * `sortedWithinCurrency` (newer API): ordered by a money metric, the rows come back partitioned —
+ * single-currency rows grouped by currency, sorted within each; then rows without money; mixed last.
+ */
+export interface AggResult { rows: AggRow[]; total?: number; sortedWithinCurrency?: boolean }
 
 export const METRICS_PARAM = 'clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score,epc';
 export const DASH = '—';
@@ -33,49 +38,14 @@ const DEVICE_LABEL: Record<string, string> = { smarttv: 'Smart TV' };
 export const deviceLabel = (d: string): string => DEVICE_LABEL[d] ?? d.charAt(0).toUpperCase() + d.slice(1);
 export const DEVICE_OPTIONS: { value: string; label: string }[] = DEVICES.map((d) => ({ value: d, label: deviceLabel(d) }));
 
-export const money = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-export const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
-export const num = (v: string | number) => Number(v);
+// Report math + formatting live in lib/reportMath.ts (pure, unit-tested); re-exported here so pages
+// keep importing them from the kit.
+import { money, pct, num, toIso, daysAgo, todayStr, deriveRow, type DerivedRow } from '../../lib/reportMath';
+export { money, pct, num, toIso, daysAgo, todayStr, deriveRow, type DerivedRow };
 
-export function toIso(dateStr: string, endOfDay = false): string {
-  return endOfDay ? `${dateStr}T23:59:59.999Z` : `${dateStr}T00:00:00.000Z`;
-}
-export function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-}
-export function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-export function deriveRow(m: Record<string, string | number>) {
-  const clicksGross = num(m['clicks'] ?? 0);
-  const uniqueClicks = num(m['unique_clicks'] ?? 0);
-  const invalidClicks = num(m['invalid_clicks'] ?? 0);
-  const clicks = Math.max(0, clicksGross - invalidClicks); // net/valid clicks
-  const dupClicks = Math.max(0, clicksGross - uniqueClicks);
-  const totalCv = num(m['total_conversions'] ?? 0);
-  const cv = num(m['conversions'] ?? 0); // approved only
-  const payout = num(m['payout'] ?? 0);
-  const revenue = num(m['revenue'] ?? 0);
-  const margin = num(m['margin'] ?? 0);
-  const fraudScore = num(m['avg_fraud_score'] ?? 0); // 0-100, avg of clicks.fraud_score for the group
-  const epc = num(m['epc'] ?? 0); // real backend metric: payout / clicks
-  return {
-    clicksGross, clicks, uniqueClicks, dupClicks, invalidClicks, totalCv, cv, payout, revenue, margin, fraudScore, epc,
-    cvr: clicks > 0 ? totalCv / clicks : 0,
-    cpc: clicks > 0 ? payout / clicks : 0,
-    cpa: cv > 0 ? payout / cv : 0,
-    rpc: clicks > 0 ? revenue / clicks : 0,
-    rpa: totalCv > 0 ? revenue / totalCv : 0,
-    invalidPct: clicksGross > 0 ? invalidClicks / clicksGross : 0,
-    marginPct: revenue > 0 ? margin / revenue : 0,
-  };
-}
-export type DerivedRow = ReturnType<typeof deriveRow>;
-
-export function MiniChart({ labels, revenue, clicks }: { labels: string[]; revenue: number[]; clicks: number[] }) {
+/** `revenue: null` = not plotted (e.g. the days mix currencies, so their totals aren't comparable). */
+export function MiniChart({ labels, revenue: revenueIn, clicks }: { labels: string[]; revenue: number[] | null; clicks: number[] }) {
+  const revenue = revenueIn ?? [];
   const w = 900, h = 220, padL = 40, padR = 40, padT = 12, padB = 24;
   const plotW = w - padL - padR, plotH = h - padT - padB;
   const n = Math.max(1, labels.length);
@@ -94,8 +64,8 @@ export function MiniChart({ labels, revenue, clicks }: { labels: string[]; reven
   // hex fallback in both themes — an accent mismatch, not a deliberate color.)
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height: 240 }}>
-      <path d={revArea} fill="rgb(var(--accent-text))" opacity={0.15} />
-      <path d={revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} fill="none" stroke="rgb(var(--accent-text))" strokeWidth={2} />
+      {revenue.length > 0 && <path d={revArea} fill="rgb(var(--accent-text))" opacity={0.15} />}
+      {revenue.length > 0 && <path d={revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} fill="none" stroke="rgb(var(--accent-text))" strokeWidth={2} />}
       <path d={clickLine} fill="none" stroke="rgb(var(--text-muted))" strokeWidth={1.5} strokeDasharray="4 3" />
       {labels.map((l, i) => (i % step === 0 ? (
         <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="rgb(var(--text-secondary))">{l.slice(5)}</text>
@@ -104,17 +74,32 @@ export function MiniChart({ labels, revenue, clicks }: { labels: string[]; reven
   );
 }
 
-export function SummaryTile({ label, value }: { label: string; value: string }) {
+/** `compact`: a longer value (a per-currency breakdown) in a smaller face so the grid keeps its shape. */
+export function SummaryTile({ label, value, title, compact = false }: { label: string; value: string; title?: string; compact?: boolean }) {
   return (
     <div>
       <p className="text-tiny uppercase text-fg-secondary">{label}</p>
-      <p className={`text-h3 font-semibold ${value === DASH ? 'text-fg-muted' : 'text-fg'}`}>{value}</p>
+      <p className={`${compact ? 'break-words text-body' : 'text-h3'} font-semibold ${value === DASH || value === MIXED_LABEL ? 'text-fg-muted' : 'text-fg'}`} title={title}>{value}</p>
     </div>
   );
 }
 
-/** The fixed 21-tile Summary grid, identical across every report type on the live reference. */
-export function SummaryGrid({ summary }: { summary: DerivedRow }) {
+/**
+ * The fixed 21-tile Summary grid, identical across every report type on the live reference. Money
+ * tiles are in the summary's own currency (`rc`, from the API's `currencies` — lib/reportCurrency)
+ * or, without one, `currency` (the network's default, ISO 4217). Mixed currencies — never a
+ * cross-currency sum: Payout / Revenue / Profit show their per-currency amounts ("€30.25 · $13.00")
+ * when the API sent a breakdown (`breakdown`, the `money_by_currency` metric), else "Mixed"; the
+ * ratios (CPC/CPA/RPC/RPA/Margin) stay "Mixed".
+ */
+export function SummaryGrid({ summary, currency = 'USD', rc, breakdown }: { summary: DerivedRow; currency?: string; rc?: RowCurrency; breakdown?: MoneyByCurrency | null }) {
+  const cur: RowCurrency = rc ?? { kind: 'none', currency };
+  const mixed = cur.kind === 'mixed' ? mixedTitle(cur.currencies) : undefined;
+  const m = (v: number) => (cur.kind === 'mixed' ? MIXED_LABEL : money(v, cur.currency));
+  const total = (label: string, v: number, field: 'payout' | 'revenue' | 'margin') => {
+    const t = moneyText(v, cur, { breakdown, field, roomy: true });
+    return <SummaryTile label={label} value={t.text} title={t.title} compact={cur.kind === 'mixed' && !t.muted} />;
+  };
   return (
     <div className="grid grid-cols-2 gap-4 pt-4 sm:grid-cols-4 lg:grid-cols-7">
       <SummaryTile label="Media Buying Cost" value={DASH} />
@@ -126,16 +111,16 @@ export function SummaryGrid({ summary }: { summary: DerivedRow }) {
       <SummaryTile label="CTR" value={DASH} />
       <SummaryTile label="Event" value={DASH} />
       <SummaryTile label="CVR" value={pct(summary.cvr)} />
-      <SummaryTile label="CPC" value={money(summary.cpc)} />
-      <SummaryTile label="CPA" value={money(summary.cpa)} />
-      <SummaryTile label="RPC" value={money(summary.rpc)} />
+      <SummaryTile label="CPC" value={m(summary.cpc)} title={mixed} />
+      <SummaryTile label="CPA" value={m(summary.cpa)} title={mixed} />
+      <SummaryTile label="RPC" value={m(summary.rpc)} title={mixed} />
       <SummaryTile label="CPM" value={DASH} />
       <SummaryTile label="RPM" value={DASH} />
-      <SummaryTile label="RPA" value={money(summary.rpa)} />
-      <SummaryTile label="Payout" value={money(summary.payout)} />
-      <SummaryTile label="Revenue" value={money(summary.revenue)} />
-      <SummaryTile label="Profit" value={money(summary.margin)} />
-      <SummaryTile label="Margin" value={pct(summary.marginPct)} />
+      <SummaryTile label="RPA" value={m(summary.rpa)} title={mixed} />
+      {total('Payout', summary.payout, 'payout')}
+      {total('Revenue', summary.revenue, 'revenue')}
+      {total('Profit', summary.margin, 'margin')}
+      <SummaryTile label="Margin" value={mixed ? MIXED_LABEL : pct(summary.marginPct)} title={mixed} />
       <SummaryTile label="Avg. Sale Value" value={DASH} />
       <SummaryTile label="Gross Sales" value={DASH} />
     </div>
@@ -162,12 +147,18 @@ const OP_LABEL: Record<MetricOp, string> = { '>': '>', '>=': '≥', '<': '<', '<
 const OP_TEST: Record<MetricOp, (a: number, b: number) => boolean> = {
   '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b,
 };
-export function passesMetricFilters(d: DerivedRow, metricFilters: MetricFilters): boolean {
+/**
+ * `skipMoney`: the loaded rows span more than one currency (lib/reportCurrency moneyFilterBlockedBy),
+ * so a Payout/Revenue threshold — which has no currency — is NOT applied (the page shows that it
+ * isn't); the other metric filters still are. With one currency, money filters apply normally.
+ */
+export function passesMetricFilters(d: DerivedRow, metricFilters: MetricFilters, skipMoney = false): boolean {
   for (const f of METRIC_FILTER_FIELDS) {
     const entry = metricFilters[f.key];
     if (!entry || entry.value === '') continue;
     const threshold = Number(entry.value);
     if (Number.isNaN(threshold)) continue;
+    if (skipMoney && isMoneyMetricKey(f.key)) continue;
     if (!OP_TEST[entry.op](d[f.key], threshold)) return false;
   }
   return true;
@@ -302,16 +293,29 @@ type FlyoutSection = 'filters' | 'metric' | 'exclusions' | 'others';
 const ALL_SECTIONS: FlyoutSection[] = ['filters', 'metric', 'exclusions', 'others'];
 
 export function ReportingFiltersFlyout({
-  dimCategories, value, onApply, onClose, sections = ALL_SECTIONS, singleSelect = false,
+  dimCategories, value, onApply, onClose, sections = ALL_SECTIONS, singleSelect = false, moneyFilterBlockedBy = null,
 }: {
   dimCategories: FilterCategory[]; value: ReportingFiltersValue; onApply: (v: ReportingFiltersValue) => void; onClose: () => void;
+  /**
+   * The currencies the loaded rows span when there are several (lib/reportCurrency
+   * moneyFilterBlockedBy): the Payout/Revenue inputs are disabled then — a threshold has no currency.
+   */
+  moneyFilterBlockedBy?: readonly string[] | null;
   /** Only the sections this page's API actually honours — never show controls that do nothing. */
   sections?: FlyoutSection[];
   /** One value per category, for endpoints that accept a single id per filter. */
   singleSelect?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [path, setPath] = useState<string[]>([]);
+  // With a single section (and, for Filters/Exclusions, a single category) the root menu would offer
+  // one choice — open straight on it instead, and never step back above it.
+  const [startPath] = useState<string[]>(() => {
+    if (sections.length !== 1) return [];
+    const only = sections[0]!;
+    return (only === 'filters' || only === 'exclusions') && dimCategories.length === 1 ? [only, dimCategories[0]!.key] : [only];
+  });
+  const [path, setPath] = useState<string[]>(startPath);
+  const atStart = path.length <= startPath.length;
   const [draftFilters, setDraftFilters] = useState<FilterValues>(value.filters);
   const [draftExclusions, setDraftExclusions] = useState<FilterValues>(value.exclusions);
   const [draftMetric, setDraftMetric] = useState<MetricFilters>(value.metricFilters);
@@ -321,13 +325,28 @@ export function ReportingFiltersFlyout({
 
   useEffect(() => { setCatSearch(''); setLeafSearch(''); }, [path]);
   useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    // The flyout is rendered next to its trigger (FiltersButton wraps both). A press on the trigger
+    // is left to the button's own toggle — closing here on mousedown would let its click reopen it.
+    const onDown = (e: MouseEvent) => {
+      const host = ref.current?.parentElement ?? ref.current;
+      if (!host?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [onClose]);
 
   const push = (seg: string) => setPath((p) => [...p, seg]);
-  const pop = () => setPath((p) => p.slice(0, -1));
+  const pop = () => setPath((p) => (p.length > startPath.length ? p.slice(0, -1) : p));
+  /** Submenu header: a back link, or — when this is where the flyout opened — the panel title. */
+  const backHeader = (label: string, detail?: string) => (atStart
+    ? <h3 className="text-small font-semibold text-fg">Reporting Filters{detail && <span className="font-normal text-fg-muted"> · {detail}</span>}</h3>
+    : (
+      <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
+        <ChevronLeft size={15} /> {label}
+      </button>
+    ));
   const metricCount = Object.values(draftMetric).filter((m) => m?.value).length;
   const total = dimCount(draftFilters) + dimCount(draftExclusions) + metricCount + (draftIgnoreFail ? 1 : 0);
   const clearAll = () => { setDraftFilters({}); setDraftExclusions({}); setDraftMetric({}); setDraftIgnoreFail(false); };
@@ -376,9 +395,7 @@ export function ReportingFiltersFlyout({
       body = (
         <div className="w-72">
           <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronLeft size={15} /> {isExclude ? 'Exclusions' : 'Filters'}
-            </button>
+            {backHeader(isExclude ? 'Exclusions' : 'Filters')}
             <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraft({})}>Clear</button>
           </div>
           <div className="relative border-b border-border px-3 py-2">
@@ -413,9 +430,7 @@ export function ReportingFiltersFlyout({
       body = (
         <div className="w-80">
           <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-              <ChevronLeft size={15} /> {cat.label}
-            </button>
+            {backHeader(cat.label, cat.label)}
             <div className="flex items-center gap-2 text-tiny">
               {!singleSelect && <>
                 <button type="button" className="font-medium text-accent-text hover:underline disabled:opacity-40" disabled={filteredOptions.length === 0} onClick={selectVisible}>
@@ -434,12 +449,21 @@ export function ReportingFiltersFlyout({
             {filteredOptions.length === 0 && <p className="px-3 py-3 text-small text-fg-muted">No options.</p>}
             {filteredOptions.map((o) => (
               <label key={o.value} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small text-fg hover:bg-accent-subtle">
-                <input type={singleSelect ? 'radio' : 'checkbox'} name={singleSelect ? `rf-${cat.key}` : undefined} className="chk"
-                  checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
+                {singleSelect ? (
+                  // A radio fires no change event when it's already checked — use click, so pressing the
+                  // selected option again clears it (as the old single-select drawer allowed).
+                  <input type="radio" name={`rf-${cat.key}`} className="chk" checked={selected.includes(o.value)}
+                    onChange={() => {}} onClick={() => toggle(o.value)} />
+                ) : (
+                  <input type="checkbox" className="chk" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
+                )}
                 {o.label}
               </label>
             ))}
           </div>
+          {singleSelect && selected.length > 0 && (
+            <p className="border-t border-border px-3 py-1.5 text-tiny text-fg-muted">One value per filter — click the selected one again to clear it.</p>
+          )}
           {!singleSelect && selected.length > 1 && (
             <p className="border-t border-border px-3 py-1.5 text-tiny text-fg-muted">Matches any of the {selected.length} selected (other categories are combined with AND).</p>
           )}
@@ -451,28 +475,28 @@ export function ReportingFiltersFlyout({
     body = (
       <div className="w-96">
         <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-          <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-            <ChevronLeft size={15} /> Metric Filters
-          </button>
+          {backHeader('Metric Filters')}
           <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraftMetric({})}>Clear</button>
         </div>
-        <p className="border-b border-border px-3 py-2 text-tiny text-fg-muted">Applied to the rows already loaded on this page (after the server-side filters).</p>
+        <p className="border-b border-border px-3 py-2 text-tiny text-fg-muted">Applied to the rows already loaded on this page (after the server-side filters). Payout and Revenue filters apply only while every row is in one currency — a threshold has no currency.</p>
+        {moneyFilterBlockedBy && <p className="border-b border-border bg-warning-bg px-3 py-2 text-tiny text-warning-text" role="status">{moneyFilterNote(moneyFilterBlockedBy)}</p>}
         <div className="max-h-80 space-y-2.5 overflow-y-auto p-3">
           {METRIC_FILTER_FIELDS.map((f) => {
             const entry = draftMetric[f.key];
+            const off = !!moneyFilterBlockedBy && isMoneyMetricKey(f.key);
             return (
-              <div key={f.key} className="flex items-center gap-2">
+              <div key={f.key} className={`flex items-center gap-2 ${off ? 'opacity-60' : ''}`} title={off ? moneyFilterNote(moneyFilterBlockedBy!) : undefined}>
                 <span className="w-28 shrink-0 text-small text-fg">{f.label}</span>
                 <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
                   {(['>', '>=', '<', '<='] as MetricOp[]).map((op) => (
-                    <button key={op} type="button"
+                    <button key={op} type="button" disabled={off}
                       onClick={() => setDraftMetric((m) => ({ ...m, [f.key]: { op, value: m[f.key]?.value ?? '' } }))}
-                      className={`px-2 py-1 text-tiny ${entry?.op === op ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>
+                      className={`px-2 py-1 text-tiny disabled:cursor-not-allowed ${entry?.op === op ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>
                       {OP_LABEL[op]}
                     </button>
                   ))}
                 </div>
-                <input type="number" className="input !w-24" placeholder="Value" value={entry?.value ?? ''}
+                <input type="number" className="input !w-24 disabled:cursor-not-allowed" placeholder="Value" value={entry?.value ?? ''} disabled={off}
                   onChange={(e) => setDraftMetric((m) => ({ ...m, [f.key]: { op: m[f.key]?.op ?? '>', value: e.target.value } }))} />
               </div>
             );
@@ -485,9 +509,7 @@ export function ReportingFiltersFlyout({
     body = (
       <div className="w-72">
         <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-          <button type="button" onClick={pop} className="flex items-center gap-1 text-small font-semibold text-fg hover:text-accent-text">
-            <ChevronLeft size={15} /> Others
-          </button>
+          {backHeader('Others')}
           <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setDraftIgnoreFail(false)}>Clear</button>
         </div>
         <label className="flex cursor-pointer items-center gap-2 px-3 py-3 text-small text-fg hover:bg-accent-subtle">
@@ -624,7 +646,8 @@ export function loadSavedReports<OrderMetric extends string>(key: string): { nam
         exclusions: cleanFilterValues(config['exclusions']),
         metricFilters: (config['metricFilters'] && typeof config['metricFilters'] === 'object' ? config['metricFilters'] : {}) as MetricFilters,
         ignoreFailTraffic: config['ignoreFailTraffic'] === true,
-        orderBy: str(config['orderBy'], 'clicks') as OrderMetric,
+        // '' is kept: it's the Daily/Hourly default order (chronological), not a missing value.
+        orderBy: (typeof config['orderBy'] === 'string' ? config['orderBy'] : 'clicks') as OrderMetric,
         orderDir: config['orderDir'] === 'asc' ? 'asc' : 'desc',
         hiddenColumns: Array.isArray(config['hiddenColumns']) ? (config['hiddenColumns'] as unknown[]).filter((c): c is string => typeof c === 'string') : [],
       },

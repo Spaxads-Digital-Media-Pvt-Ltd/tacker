@@ -7,7 +7,9 @@
  * Dimension/metric names come ONLY from the whitelists below; all VALUES are parameterized.
  */
 import { query } from '../db/pool.js';
-import type { Dimension, Metric, ReportRequest, ReportResult, ReportRow, ReportingProvider } from './types.js';
+import { MONEY_SORT_METRICS, moneyFieldsOf } from './types.js';
+import { mbcJsonSql } from './money-by-currency.js';
+import type { Dimension, Metric, MetricValue, MoneyByCurrency, ReportRequest, ReportResult, ReportRow, ReportingProvider, SortOnlyKey } from './types.js';
 
 const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers?: boolean }> = {
   offer: { click: 'clicks.offer_id', conv: 'c.offer_id' },
@@ -31,8 +33,12 @@ const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers
 };
 
 // ORDER BY expressions over the outer `s` row (cr/epc are ratios, computed the same way as below).
-const ORDER_COL: Record<Metric, string> = {
+// `currencies` / `money_by_currency` are never sort keys (request.ts refuses them as orderBy).
+type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'> | SortOnlyKey;
+const ORDER_COL: Record<OrderMetric, string> = {
   clicks: 's.clicks', unique_clicks: 's.unique_clicks', conversions: 's.conversions',
+  // Sort-only: net (valid) clicks — what the admin reports' "Clicks" column shows.
+  valid_clicks: '(s.clicks - s.invalid_clicks)',
   payout: 's.payout', revenue: 's.revenue', margin: 's.margin',
   cr: 's.conversions::numeric / NULLIF(s.clicks, 0)', epc: 's.payout / NULLIF(s.clicks, 0)',
   invalid_clicks: 's.invalid_clicks', total_conversions: 's.total_conversions', avg_fraud_score: 's.avg_fraud_score',
@@ -118,15 +124,46 @@ export class PostgresReportingProvider implements ReportingProvider {
         WHERE ${clickWhere.join(' AND ')}
         ${gb.length ? `GROUP BY ${groupIdx}` : ''}`;
 
+    // `currencies` (opt-in): the distinct currencies of exactly the conversions that feed payout /
+    // revenue / margin (approved), so a caller can tell a single-currency sum from a mixed one.
+    const wantCurrencies = req.metrics.includes('currencies');
+    // A money sort (payout/revenue/margin/epc) must never compare currencies: each group's approved
+    // conversions are classified as one currency (cur_n = 1, none without a currency) / none / mixed.
+    const moneySort = req.orderBy != null && MONEY_SORT_METRICS.has(req.orderBy);
+    const convFrom = `FROM conversions c LEFT JOIN clicks k ON k.click_id = c.click_id AND k.network_id = c.network_id
+        WHERE ${convWhere.join(' AND ')}`;
     const convCte =
       `SELECT ${gb.map((d, i) => `${DIM_SQL[d].conv} AS d${i}`).join(', ')}${gb.length ? ',' : ''}
               COUNT(*) AS total_conversions,
               COUNT(*) FILTER (WHERE c.status = 'approved') AS conversions,
               COALESCE(SUM(c.payout) FILTER (WHERE c.status = 'approved'), 0) AS payout,
-              COALESCE(SUM(c.revenue) FILTER (WHERE c.status = 'approved'), 0) AS revenue
-         FROM conversions c LEFT JOIN clicks k ON k.click_id = c.click_id AND k.network_id = c.network_id
-        WHERE ${convWhere.join(' AND ')}
+              COALESCE(SUM(c.revenue) FILTER (WHERE c.status = 'approved'), 0) AS revenue${wantCurrencies ? `,
+              array_agg(DISTINCT c.currency ORDER BY c.currency) FILTER (WHERE c.status = 'approved' AND c.currency IS NOT NULL) AS currencies` : ''}${moneySort ? `,
+              COUNT(DISTINCT c.currency) FILTER (WHERE c.status = 'approved') AS cur_n,
+              COUNT(*) FILTER (WHERE c.status = 'approved' AND c.currency IS NULL) AS cur_null,
+              MIN(c.currency) FILTER (WHERE c.status = 'approved') AS cur_one` : ''}
+         ${convFrom}
         ${gb.length ? `GROUP BY ${groupIdx}` : ''}`;
+
+    // `money_by_currency` (opt-in): the same approved conversions summed per (group, currency) — NULL
+    // currency excluded — then folded into one jsonb object per group carrying only the audience's
+    // money fields (whitelisted names; values numeric(14,4) text).
+    const wantMbc = req.metrics.includes('money_by_currency');
+    const mbcCtes = wantMbc
+      ? `, cm AS (
+         SELECT ${gb.map((d, i) => `${DIM_SQL[d].conv} AS d${i}, `).join('')}c.currency AS cur,
+                COALESCE(SUM(c.payout), 0) AS p, COALESCE(SUM(c.revenue), 0) AS r
+         ${convFrom} AND c.status = 'approved' AND c.currency IS NOT NULL
+         GROUP BY ${gb.map((_, i) => `d${i}, `).join('')}cur
+       ), cmj AS (
+         SELECT ${gb.map((_, i) => `cm.d${i}, `).join('')}${mbcJsonSql('cm', moneyFieldsOf(req))} AS mbc
+           FROM cm ${gb.length ? `GROUP BY ${gb.map((_, i) => `cm.d${i}`).join(', ')}` : ''}
+       )`
+      : '';
+    // cm's groups are a subset of cv's, so they attach on the merged group key (same NULL sentinel).
+    const mbcJoin = !wantMbc ? '' : gb.length
+      ? 'LEFT JOIN cmj ON ' + gb.map((_, i) => `COALESCE(COALESCE(cl.d${i}, cv.d${i})::text, '~NULL~') = COALESCE(cmj.d${i}::text, '~NULL~')`).join(' AND ')
+      : 'CROSS JOIN cmj';
 
     // FULL JOIN needs a hash/merge-joinable condition — Postgres rejects IS NOT DISTINCT FROM. Use
     // text-coalesced equality (NULL → sentinel) so null-dimension groups line up. Grand total
@@ -139,11 +176,11 @@ export class PostgresReportingProvider implements ReportingProvider {
     // A day/hour-only report reads naturally in chronological order — default to that (the group's
     // own dimension column) rather than clicks-desc when the caller hasn't asked for a specific sort.
     const chronological = gb.length === 1 && (gb[0] === 'day' || gb[0] === 'hour');
-    const orderCol = req.orderBy ? ORDER_COL[req.orderBy] : (chronological ? 's.d0' : ORDER_COL['clicks']);
+    const orderCol = req.orderBy && req.orderBy in ORDER_COL ? ORDER_COL[req.orderBy as OrderMetric] : (chronological ? 's.d0' : ORDER_COL['clicks']);
     const orderDir = req.orderDir ? (req.orderDir === 'asc' ? 'ASC' : 'DESC') : (chronological && !req.orderBy ? 'ASC' : 'DESC');
 
     const baseSql =
-      `WITH cl AS (${clicksCte}), cv AS (${convCte})
+      `WITH cl AS (${clicksCte}), cv AS (${convCte})${mbcCtes}
        SELECT ${dimSelect ? dimSelect + ',' : ''}
               COALESCE(cl.clicks,0)::int AS clicks,
               COALESCE(cl.unique_clicks,0)::int AS unique_clicks,
@@ -153,8 +190,14 @@ export class PostgresReportingProvider implements ReportingProvider {
               COALESCE(cv.total_conversions,0)::int AS total_conversions,
               COALESCE(cv.payout,0)::numeric(14,4) AS payout,
               COALESCE(cv.revenue,0)::numeric(14,4) AS revenue,
-              (COALESCE(cv.revenue,0) - COALESCE(cv.payout,0))::numeric(14,4) AS margin
-         FROM cl ${joinType} cv ${onClause}`;
+              (COALESCE(cv.revenue,0) - COALESCE(cv.payout,0))::numeric(14,4) AS margin${wantCurrencies ? `,
+              COALESCE(cv.currencies, '{}'::text[]) AS currencies` : ''}${wantMbc ? `,
+              COALESCE(cmj.mbc, '{}'::jsonb) AS money_by_currency` : ''}${moneySort ? `,
+              -- 0 = money in exactly one currency, 1 = no approved conversion, 2 = mixed / unknown currency.
+              CASE WHEN COALESCE(cv.conversions, 0) = 0 THEN 1
+                   WHEN cv.cur_n = 1 AND cv.cur_null = 0 THEN 0 ELSE 2 END AS money_bucket,
+              CASE WHEN COALESCE(cv.conversions, 0) > 0 AND cv.cur_n = 1 AND cv.cur_null = 0 THEN cv.cur_one END AS money_currency` : ''}
+         FROM cl ${joinType} cv ${onClause} ${mbcJoin}`;
 
     const countParams = [...params];
     const { rows: countRows } = await query<{ total: number }>(`SELECT COUNT(*)::int AS total FROM (${baseSql}) AS sub`, countParams);
@@ -167,8 +210,14 @@ export class PostgresReportingProvider implements ReportingProvider {
     const offP = `$${pageParams.length}`;
     // Stable tie-break on the group key so paging never repeats/skips rows with equal metrics.
     const tieBreak = gb.map((_, i) => `s.d${i}::text`).join(', ');
+    // Money sort: single-currency rows first, by currency code and then the value within it; then
+    // no-money rows; mixed-currency rows last in tie-break order (their sum is not comparable).
+    // All of it in SQL, before LIMIT/OFFSET, so paging stays consistent.
+    const orderSql = moneySort
+      ? `s.money_bucket ASC, s.money_currency ASC NULLS LAST, CASE WHEN s.money_bucket = 0 THEN ${orderCol} END ${orderDir} NULLS LAST`
+      : `${orderCol} ${orderDir} NULLS LAST`;
     const sql = `SELECT s.* FROM (${baseSql}) AS s
-      ORDER BY ${orderCol} ${orderDir} NULLS LAST${tieBreak ? `, ${tieBreak}` : ''} LIMIT ${limP} OFFSET ${offP}`;
+      ORDER BY ${orderSql}${tieBreak ? `, ${tieBreak}` : ''} LIMIT ${limP} OFFSET ${offP}`;
 
     const { rows } = await query<Record<string, unknown>>(sql, pageParams);
 
@@ -185,7 +234,7 @@ export class PostgresReportingProvider implements ReportingProvider {
       const payout = String(row['payout']);
       const revenue = String(row['revenue']);
       const margin = String(row['margin']);
-      const all: Record<Metric, string | number> = {
+      const all: Record<Metric, MetricValue> = {
         clicks,
         unique_clicks: Number(row['unique_clicks']),
         invalid_clicks: Number(row['invalid_clicks']),
@@ -195,12 +244,14 @@ export class PostgresReportingProvider implements ReportingProvider {
         payout, revenue, margin,
         cr: clicks > 0 ? Number((conversions / clicks).toFixed(4)) : 0,
         epc: clicks > 0 ? Number((Number(payout) / clicks).toFixed(4)) : 0,
+        currencies: Array.isArray(row['currencies']) ? (row['currencies'] as unknown[]).map(String) : [],
+        money_by_currency: (row['money_by_currency'] ?? {}) as MoneyByCurrency,
       };
-      const metrics: Record<string, string | number> = {};
+      const metrics: Record<string, MetricValue> = {};
       for (const m of req.metrics) if (wanted.has(m)) metrics[m] = all[m];
       return { dimensions, metrics };
     });
 
-    return { groupBy: gb, metrics: req.metrics, rows: out, total };
+    return { groupBy: gb, metrics: req.metrics, rows: out, total, ...(moneySort ? { sortedWithinCurrency: true as const } : {}) };
   }
 }

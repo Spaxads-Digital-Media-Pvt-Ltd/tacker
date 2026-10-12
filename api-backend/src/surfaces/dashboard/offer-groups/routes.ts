@@ -17,6 +17,8 @@ import { writeAudit } from '../../../lib/audit.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
+import { mbcJsonSql } from '../../../lib/reporting/money-by-currency.js';
+import type { MoneyByCurrency } from '../../../lib/reporting/types.js';
 
 const TABLE = 'offer_groups';
 
@@ -34,11 +36,11 @@ const dto = (r: Row) => ({
   capsEnabled: r.caps_enabled, caps: r.caps, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
+// Caps are JSON numbers (never strings) and must be finite: a body like `{"daily":1e999}` parses
+// to Infinity, which would otherwise pass min(0) and be silently stored as null.
+const capValue = z.number().finite().min(0).nullable().optional();
 const capWindowSchema = z.object({
-  daily: z.number().min(0).nullable().optional(),
-  weekly: z.number().min(0).nullable().optional(),
-  monthly: z.number().min(0).nullable().optional(),
-  global: z.number().min(0).nullable().optional(),
+  daily: capValue, weekly: capValue, monthly: capValue, global: capValue,
 }).optional();
 const capsSchema = z.object({
   clicks: capWindowSchema, conversions: capWindowSchema, payout: capWindowSchema, revenue: capWindowSchema,
@@ -48,7 +50,8 @@ const createSchema = z.object({
   name: z.string().min(1).max(200),
   advertiserId: z.string().uuid().nullable().optional(),
   offerIds: z.array(z.string().uuid()).default([]),
-  currency: z.string().min(1).max(8).default('USD'),
+  // ISO-4217-style code. Omitted on create → the network's default currency (see POST).
+  currency: z.string().regex(/^[A-Z]{3}$/, 'currency must be a 3-letter upper-case code (e.g. USD)').optional(),
   labels: z.string().max(500).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   status: z.enum(['active', 'paused', 'deleted']).default('active'),
@@ -57,20 +60,51 @@ const createSchema = z.object({
 });
 const updateSchema = createSchema.partial();
 
-async function todayAggForOffers(networkId: string, offerIds: string[]): Promise<{ clicks: number; payout: string; revenue: string }> {
-  if (offerIds.length === 0) return { clicks: 0, payout: '0', revenue: '0' };
-  const { rows } = await query<{ clicks: string; payout: string; revenue: string }>(
-    `SELECT
-       COUNT(DISTINCT cl.id)::text AS clicks,
-       COALESCE(SUM(c.payout), 0)::text AS payout,
-       COALESCE(SUM(c.revenue), 0)::text AS revenue
-     FROM clicks cl
-     LEFT JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
-     WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at::date = CURRENT_DATE`,
+/** The network's default currency — what a group created without one is in ('USD' only if unset). */
+async function networkDefaultCurrency(networkId: string): Promise<string> {
+  const { rows } = await query<{ default_currency: string | null }>(
+    `SELECT default_currency FROM networks WHERE id = $1`, [networkId]);
+  return rows[0]?.default_currency || 'USD';
+}
+
+/**
+ * Today's stats for the group's member offers: today's clicks and their conversions. The summed
+ * payout/revenue add up conversions whose currency can differ from each other and from the group's
+ * `currency`, so the same rows are also returned per currency — `currencies` (sorted distinct
+ * non-NULL) and `moneyByCurrency` ({ [currency]: { payout, revenue, margin } }, numeric(14,4) text);
+ * a total with more than one currency is not a meaningful single figure.
+ */
+interface TodayStats {
+  clicks: number; cv: number; payout: string; revenue: string;
+  currencies: string[]; moneyByCurrency: MoneyByCurrency;
+}
+async function todayStatsForOffers(networkId: string, offerIds: string[]): Promise<TodayStats> {
+  if (offerIds.length === 0) return { clicks: 0, cv: 0, payout: '0', revenue: '0', currencies: [], moneyByCurrency: {} };
+  const { rows } = await query<{ clicks: string; cv: string; payout: string; revenue: string; money_by_currency: MoneyByCurrency | null }>(
+    `WITH j AS (
+       SELECT cl.id AS click_row, c.id AS conv_row, c.status, c.payout, c.revenue, c.currency
+         FROM clicks cl
+         LEFT JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
+        WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at::date = CURRENT_DATE
+     ), cm AS (
+       SELECT currency AS cur, COALESCE(SUM(payout), 0) AS p, COALESCE(SUM(revenue), 0) AS r
+         FROM j WHERE conv_row IS NOT NULL AND currency IS NOT NULL GROUP BY currency
+     )
+     SELECT
+       COUNT(DISTINCT j.click_row)::text AS clicks,
+       COUNT(DISTINCT j.conv_row) FILTER (WHERE j.status = 'approved')::text AS cv,
+       COALESCE(SUM(j.payout), 0)::text AS payout,
+       COALESCE(SUM(j.revenue), 0)::text AS revenue,
+       (SELECT ${mbcJsonSql('cm')} FROM cm) AS money_by_currency
+     FROM j`,
     [networkId, offerIds],
   );
   const r = rows[0];
-  return { clicks: Number(r?.clicks ?? 0), payout: r?.payout ?? '0', revenue: r?.revenue ?? '0' };
+  const moneyByCurrency = r?.money_by_currency ?? {};
+  return {
+    clicks: Number(r?.clicks ?? 0), cv: Number(r?.cv ?? 0), payout: r?.payout ?? '0', revenue: r?.revenue ?? '0',
+    currencies: Object.keys(moneyByCurrency).sort(), moneyByCurrency,
+  };
 }
 
 export function offerGroupsRoutes(): Router {
@@ -79,9 +113,10 @@ export function offerGroupsRoutes(): Router {
   r.get('/', asyncHandler(async (req, res) => {
     const rows = await dbForRequest(req).selectMany<Row>(TABLE, { where: {}, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
     warnIfCapped(rows, LIST_CAP, 'offer-groups.list');
-    const withStats = await Promise.all(rows.map(async (row) => ({
-      ...dto(row), today: await todayAggForOffers(req.scope!.networkId, row.offer_ids),
-    })));
+    const withStats = await Promise.all(rows.map(async (row) => {
+      const { clicks, payout, revenue, currencies, moneyByCurrency } = await todayStatsForOffers(req.scope!.networkId, row.offer_ids);
+      return { ...dto(row), today: { clicks, payout, revenue, currencies, moneyByCurrency } };
+    }));
     sendOk(res, withStats);
   }));
 
@@ -96,26 +131,15 @@ export function offerGroupsRoutes(): Router {
     const group = await db.selectOne<Row>(TABLE, { id: req.params.id });
     if (!group) throw notFound('Offer group not found');
     const offerIds = group.offer_ids;
-    if (offerIds.length === 0) return sendOk(res, { revenue: '0', payout: '0', margin: '0', clicks: 0, cv: 0, cvr: 0 });
-    const { rows } = await query<{ clicks: string; cv: string; payout: string; revenue: string }>(
-      `SELECT
-         COUNT(DISTINCT cl.id)::text AS clicks,
-         COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'approved')::text AS cv,
-         COALESCE(SUM(c.payout), 0)::text AS payout,
-         COALESCE(SUM(c.revenue), 0)::text AS revenue
-       FROM clicks cl
-       LEFT JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
-       WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at::date = CURRENT_DATE`,
-      [req.scope!.networkId, offerIds],
-    );
-    const row = rows[0];
-    const clicks = Number(row?.clicks ?? 0);
-    const cv = Number(row?.cv ?? 0);
-    const payout = Number(row?.payout ?? 0);
-    const revenue = Number(row?.revenue ?? 0);
+    if (offerIds.length === 0) return sendOk(res, { revenue: '0', payout: '0', margin: '0', clicks: 0, cv: 0, cvr: 0, currencies: [], moneyByCurrency: {} });
+    const s = await todayStatsForOffers(req.scope!.networkId, offerIds);
+    const { clicks, cv } = s;
+    const payout = Number(s.payout);
+    const revenue = Number(s.revenue);
     sendOk(res, {
       revenue: revenue.toFixed(2), payout: payout.toFixed(2), margin: (revenue - payout).toFixed(2),
       clicks, cv, cvr: clicks > 0 ? cv / clicks : 0,
+      currencies: s.currencies, moneyByCurrency: s.moneyByCurrency,
     });
   }));
 
@@ -151,7 +175,8 @@ export function offerGroupsRoutes(): Router {
     }
     const row = await db.insert<Row>(TABLE, {
       name: b.name, advertiser_id: b.advertiserId ?? null, offer_ids: JSON.stringify(b.offerIds),
-      currency: b.currency, labels: b.labels ?? null, notes: b.notes ?? null, status: b.status,
+      currency: b.currency ?? await networkDefaultCurrency(req.scope!.networkId),
+      labels: b.labels ?? null, notes: b.notes ?? null, status: b.status,
       caps_enabled: b.capsEnabled, caps: JSON.stringify(b.caps),
     });
     await writeAudit(req, { action: 'offer_group.create', entityType: 'offer_group', entityId: row.id, after: row });

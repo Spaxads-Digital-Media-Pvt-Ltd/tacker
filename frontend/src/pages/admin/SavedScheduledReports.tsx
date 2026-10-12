@@ -7,9 +7,10 @@
  * localStorage via components/ReportPageKit.tsx's loadSavedReports/persistSavedReports, keyed per
  * report type. This page reads all of those keys and merges them into the one unified list the
  * reference shows — real names, real report types, real date ranges — with a working Delete.
- * "Open" navigates to that report's page, where its own Load menu (reading the same localStorage
- * key) can load the specific saved config; there's no cross-page deep-link for a specific saved
- * config today, so this doesn't pretend to auto-apply it on arrival.
+ * Flex and Nested (Analytics) saved reports are listed too. "Open" reopens the report WITH the saved
+ * config, as URL params the target page reads on load (lib/savedReportLink.ts) — dates, filters,
+ * exclusions, metric filters, Ignore Fail Traffic, sort, plus Flex dimensions / Nested parent+child.
+ * Hidden columns aren't URL state on those pages, so they're only applied via the page's own Load menu.
  *
  * Scheduled Reports and Requested Reports are honest empty shells (components/EmptyShellTable.tsx,
  * the same pattern as PartnerReferralsReport.tsx/ProductsReport.tsx/RefundsReport.tsx) — this app
@@ -26,19 +27,12 @@ import { MoreVertical, Search } from 'lucide-react';
 import { PageHeader, Tabs, StateBlock } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 import { loadSavedReports, persistSavedReports, type SavedReportConfig } from '../../shared-components/primitives/ReportPageKit';
+import { SAVED_REPORT_SOURCES, savedReportHref } from '../../lib/savedReportLink';
 
 const TABS = ['Saved Reports', 'Scheduled Reports', 'Requested Reports'] as const;
 
-const REPORT_SOURCES: { key: string; label: string; route: string }[] = [
-  { key: 'offer-report', label: 'Offer', route: '/app/reports/offer' },
-  { key: 'partner-report', label: 'Partner', route: '/app/reports/partner' },
-  { key: 'advertiser-report', label: 'Advertiser', route: '/app/reports/advertiser' },
-  { key: 'smartlink-report', label: 'Smart Link', route: '/app/reports/smartlink' },
-  { key: 'daily-report', label: 'Daily', route: '/app/reports/daily' },
-  { key: 'hourly-report', label: 'Hourly', route: '/app/reports/hourly' },
-];
-
-interface SavedRow { source: string; label: string; route: string; name: string; from: string; to: string }
+/** `href` reopens the report with the saved config applied. */
+interface SavedRow { source: string; label: string; href: string; name: string; from: string; to: string }
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -50,9 +44,9 @@ function useSavedRows() {
   const [tick, setTick] = useState(0);
   const rows = useMemo<SavedRow[]>(() => {
     const out: SavedRow[] = [];
-    for (const src of REPORT_SOURCES) {
+    for (const src of SAVED_REPORT_SOURCES) {
       const saved = loadSavedReports<string>(src.key);
-      for (const s of saved) out.push({ source: src.key, label: src.label, route: src.route, name: s.name, from: s.config.from, to: s.config.to });
+      for (const s of saved) out.push({ source: src.key, label: src.label, href: savedReportHref(src, s.config), name: s.name, from: s.config.from, to: s.config.to });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,7 +92,7 @@ function SavedReportsTab() {
               {filtered.map((r) => (
                 <tr key={`${r.source}-${r.name}`} className="hover:bg-accent-subtle/40">
                   <td className="px-4 py-3">
-                    <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => nav(r.route)}>{r.name}</button>
+                    <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => nav(r.href)}>{r.name}</button>
                   </td>
                   <td className="px-4 py-3">{r.label}</td>
                   <td className="px-4 py-3 text-fg-secondary">{formatDate(r.from)} – {formatDate(r.to)}</td>
@@ -109,7 +103,7 @@ function SavedReportsTab() {
                     </button>
                     {menuFor === `${r.source}-${r.name}` && (
                       <div className="absolute right-2 top-full z-30 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setMenuFor(null)}>
-                        <button onClick={() => { setMenuFor(null); nav(r.route); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Open</button>
+                        <button onClick={() => { setMenuFor(null); nav(r.href); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Open</button>
                         <button onClick={() => { setMenuFor(null); remove(r.source, r.name); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Delete</button>
                       </div>
                     )}

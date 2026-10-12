@@ -14,6 +14,12 @@ import { PerformanceChart } from '../shared-components/charts/PerformanceChart';
 import { TrackingLinkGeneratorModal } from '../shared-components/panels/TrackingLinkGeneratorModal';
 import { MOCK_DASHBOARD, mockNameMap, mockTopRows, mockHourlySeries } from './dashboardMock';
 import type { Offer, Publisher, Advertiser } from '../types';
+import { money as moneyIn } from '../lib/reportMath';
+import { balanceText } from '../lib/balanceCurrency';
+import {
+  combineCurrencies, comparePeriods, currenciesOf, mixedTitle, moneyRowComparator, moneyText, parseMoneyByCurrency, resolveCurrency,
+  showSortedWithinNote, SORTED_WITHIN_CURRENCY_NOTE, withCurrenciesMetric, type MoneyField, type MoneyText, type RowCurrency,
+} from '../lib/reportCurrency';
 
 function daysAgo(n: number): string {
   const d = new Date();
@@ -44,10 +50,18 @@ export default function DashboardHome() {
 // ── Admin: Today's Stats ──────────────────────────────────────────────────────
 interface Period { today: number; yesterday: number; month: number; lastMonth: number }
 interface MoneyPeriod { today: string; yesterday: string; month: string; lastMonth: string }
+type PeriodKey = keyof MoneyPeriod;
+/**
+ * `currencies` / `moneyByCurrency` (newer API), per period: the approved conversions' currencies
+ * behind the money sums, and the same money split by currency. A period with several currencies
+ * shows its per-currency amounts (never the summed figure); absent → the network currency.
+ */
 interface Dashboard {
   clicks: Period; conversions: Period; cr: Period;
   revenue: MoneyPeriod; payout: MoneyPeriod; margin: MoneyPeriod;
   series: { clicks: number[]; conversions: number[]; revenue: number[]; payout: number[]; margin: number[]; cr: number[] };
+  currencies?: Partial<Record<PeriodKey, unknown>>;
+  moneyByCurrency?: Partial<Record<PeriodKey, unknown>>;
 }
 
 const nfmt = new Intl.NumberFormat('en-US');
@@ -61,8 +75,31 @@ function delta(today: number, yesterday: number): { pct: number; up: boolean } |
 }
 
 interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
-interface AggResult { rows: AggRow[] }
+interface AggResult { rows: AggRow[]; sortedWithinCurrency?: boolean }
 type RefMap = Map<string, string>;
+
+/**
+ * A money KPI (revenue / payout / margin) across the dashboard's periods, each in its own currency —
+ * a mixed period shows its per-currency amounts. The today-vs-yesterday change is given only when the
+ * two periods are comparable (lib/reportCurrency comparePeriods): never across currencies.
+ */
+function moneyKpi(data: Pick<Dashboard, MoneyField | 'currencies' | 'moneyByCurrency'>, field: MoneyField, fallback: string) {
+  const rc = (k: PeriodKey): RowCurrency => resolveCurrency(data.currencies?.[k], fallback);
+  const text = (k: PeriodKey): MoneyText => moneyText(Number(data[field][k]), rc(k), { breakdown: parseMoneyByCurrency(data.moneyByCurrency?.[k]), field, roomy: true });
+  const today = rc('today');
+  const cmp = comparePeriods(today, rc('yesterday'));
+  const row = (label: string, k: PeriodKey): KpiRow => { const t = text(k); return [label, t.text, t.title]; };
+  return {
+    today,
+    /** Today's figure as text when it can't be one animated amount (mixed currencies). */
+    override: today.kind === 'mixed' ? text('today') : undefined,
+    format: (v: number) => moneyIn(v, today.kind === 'mixed' ? fallback : today.currency),
+    d: cmp.ok ? delta(Number(data[field].today), Number(data[field].yesterday)) : null,
+    changeNote: cmp.ok ? undefined : cmp.reason,
+    rows: [row('Yesterday', 'yesterday'), row('This month', 'month'), row('Last month', 'lastMonth')],
+  };
+}
+type KpiRow = [label: string, value: string, title?: string];
 
 /** Dev-only: swap in sample data when a request errors, so the dashboard is previewable without
  * a live api-backend. No-op in production and a no-op once the real API responds. */
@@ -132,6 +169,9 @@ function CustomizeCards({ visible, onChange }: { visible: Record<SectionId, bool
 function AdminDashboard({ name }: { name: string }) {
   const navigate = useNavigate();
   const { data, loading, error } = withMock(useQuery<Dashboard>('/api/reports/dashboard'), MOCK_DASHBOARD);
+  // Money without a currency of its own (no conversions, older API) is in the network's default.
+  const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
+  const currency = settings?.general?.defaultCurrency ?? 'USD';
   const offers = useQuery<Offer[]>('/api/offers');
   const pubs = useQuery<Publisher[]>('/api/publishers');
   const advs = useQuery<Advertiser[]>('/api/advertisers');
@@ -166,6 +206,12 @@ function AdminDashboard({ name }: { name: string }) {
 
   // Backend returns 4 hourly series; derive margin and cr sparklines from them.
   const seriesMargin = useMemo(() => (data ? data.series.revenue.map((r, i) => r - (data.series.payout[i] ?? 0)) : []), [data]);
+  const kpis = useMemo(() => (data ? {
+    revenue: moneyKpi(data, 'revenue', currency), payout: moneyKpi(data, 'payout', currency), margin: moneyKpi(data, 'margin', currency),
+  } : null), [data, currency]);
+  // Today's hourly money series add up whatever currencies today's conversions are in — not plotted
+  // when those are mixed (clicks/conversions still are).
+  const todayMixed = kpis && kpis.revenue.today.kind === 'mixed' ? kpis.revenue.today.currencies : undefined;
 
   const [visible, setVisible] = useState<Record<SectionId, boolean>>(loadVisible);
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(visible)); }, [visible]);
@@ -188,7 +234,7 @@ function AdminDashboard({ name }: { name: string }) {
       {linkGenOpen && <TrackingLinkGeneratorModal onClose={() => setLinkGenOpen(false)} />}
 
       {loading ? <StateBlock><Spinner /></StateBlock>
-        : error || !data ? <StateBlock>{error ?? 'Failed to load'}</StateBlock>
+        : error || !data || !kpis ? <StateBlock>{error ?? 'Failed to load'}</StateBlock>
         : (
           <>
             {(visible.kpi || visible.performance) && (
@@ -196,21 +242,21 @@ function AdminDashboard({ name }: { name: string }) {
                 {visible.kpi && (
                   <ScrollReveal className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '0ms' }}>
-                      <Kpi label="Revenue" icon={PiCoinsDuotone} iconColor="text-emerald-500" value={Number(data.revenue.today)} formatFn={money} series={data.series.revenue}
-                        d={delta(Number(data.revenue.today), Number(data.revenue.yesterday))}
-                        rows={[['Yesterday', money(data.revenue.yesterday)], ['This month', money(data.revenue.month)], ['Last month', money(data.revenue.lastMonth)]]}
+                      <Kpi label="Revenue" icon={PiCoinsDuotone} iconColor="text-emerald-500" value={Number(data.revenue.today)} formatFn={kpis.revenue.format} series={todayMixed ? null : data.series.revenue}
+                        d={kpis.revenue.d} changeNote={kpis.revenue.changeNote} valueOverride={kpis.revenue.override} seriesMixed={todayMixed}
+                        rows={kpis.revenue.rows}
                         onClick={() => goToReport('revenue')} />
                     </div>
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '110ms' }}>
-                      <Kpi label="Payout" icon={PiCreditCardDuotone} iconColor="text-blue-500" value={Number(data.payout.today)} formatFn={money} series={data.series.payout}
-                        d={delta(Number(data.payout.today), Number(data.payout.yesterday))}
-                        rows={[['Yesterday', money(data.payout.yesterday)], ['This month', money(data.payout.month)], ['Last month', money(data.payout.lastMonth)]]}
+                      <Kpi label="Payout" icon={PiCreditCardDuotone} iconColor="text-blue-500" value={Number(data.payout.today)} formatFn={kpis.payout.format} series={todayMixed ? null : data.series.payout}
+                        d={kpis.payout.d} changeNote={kpis.payout.changeNote} valueOverride={kpis.payout.override} seriesMixed={todayMixed}
+                        rows={kpis.payout.rows}
                         onClick={() => goToReport('payout')} />
                     </div>
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '220ms' }}>
-                      <Kpi label="Margin" icon={PiChartPieSliceDuotone} iconColor="text-purple-500" value={Number(data.margin.today)} formatFn={money} series={seriesMargin}
-                        d={delta(Number(data.margin.today), Number(data.margin.yesterday))}
-                        rows={[['Yesterday', money(data.margin.yesterday)], ['This month', money(data.margin.month)], ['Last month', money(data.margin.lastMonth)]]}
+                      <Kpi label="Margin" icon={PiChartPieSliceDuotone} iconColor="text-purple-500" value={Number(data.margin.today)} formatFn={kpis.margin.format} series={todayMixed ? null : seriesMargin}
+                        d={kpis.margin.d} changeNote={kpis.margin.changeNote} valueOverride={kpis.margin.override} seriesMixed={todayMixed}
+                        rows={kpis.margin.rows}
                         onClick={() => goToReport('margin')} />
                     </div>
                     <div className="animate-slide-in-left h-full" style={{ animationDelay: '330ms' }}>
@@ -234,7 +280,8 @@ function AdminDashboard({ name }: { name: string }) {
                       <div className="lg:col-span-3 h-full animate-fade-in-up" style={{ animationDelay: '750ms' }}>
                         <PerformanceChart
                           revenue={data.series.revenue} clicks={data.series.clicks}
-                          revenueLabel={money(data.revenue.today)} clicksLabel={compact(data.clicks.today)}
+                          revenueLabel={kpis.revenue.override ? 'Mixed' : kpis.revenue.format(Number(data.revenue.today))} clicksLabel={compact(data.clicks.today)}
+                          currency={kpis.revenue.today.kind === 'mixed' ? currency : kpis.revenue.today.currency} revenueMixed={todayMixed}
                         />
                       </div>
                     )}
@@ -260,9 +307,9 @@ function AdminDashboard({ name }: { name: string }) {
                   <p className="mt-1 text-sm text-fg-muted">Overview of your highest grossing offers, partners, and advertisers</p>
                 </div>
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                  {visible.offers && <ScrollReveal animation="animate-slide-in-left" delay={300}><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" nameMap={offerMap} viewAll="/app/reports/offer" /></ScrollReveal>}
-                  {visible.publishers && <ScrollReveal animation="animate-slide-in-left" delay={410}><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" nameMap={pubMap} viewAll="/app/reports/partner" /></ScrollReveal>}
-                  {visible.advertisers && <ScrollReveal animation="animate-slide-in-left" delay={520}><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" nameMap={advMap} viewAll="/app/reports/advertiser" /></ScrollReveal>}
+                  {visible.offers && <ScrollReveal animation="animate-slide-in-left" delay={300}><EntityPanel title="Top offers" dimKey="offer" filterKey="offerId" nameMap={offerMap} viewAll="/app/reports/offer" currency={currency} /></ScrollReveal>}
+                  {visible.publishers && <ScrollReveal animation="animate-slide-in-left" delay={410}><EntityPanel title="Top publishers" dimKey="publisher" filterKey="publisherId" nameMap={pubMap} viewAll="/app/reports/partner" currency={currency} /></ScrollReveal>}
+                  {visible.advertisers && <ScrollReveal animation="animate-slide-in-left" delay={520}><EntityPanel title="Top advertisers" dimKey="advertiser" filterKey="advertiserId" nameMap={advMap} viewAll="/app/reports/advertiser" currency={currency} /></ScrollReveal>}
                 </div>
               </ScrollReveal>
             )}
@@ -272,11 +319,17 @@ function AdminDashboard({ name }: { name: string }) {
   );
 }
 
-function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, formatFn, series, d, rows, className = '', onClick }: {
-  label: string; icon?: React.ElementType; iconColor?: string; value: number; formatFn: (v: number) => string; series: number[];
-  d: { pct: number; up: boolean } | null; rows: [string, string][];
+/**
+ * `valueOverride`: today's figure as text (a per-currency breakdown) instead of one animated amount.
+ * `changeNote`: why there's no change badge (periods in different / mixed currencies) — shown as "—".
+ * `series: null`: not plotted — `seriesMixed`: today mixes these currencies (the hourly series has no per-point currency).
+ */
+function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, formatFn, series, d, rows, className = '', onClick, valueOverride, changeNote, seriesMixed }: {
+  label: string; icon?: React.ElementType; iconColor?: string; value: number; formatFn: (v: number) => string; series: number[] | null;
+  d: { pct: number; up: boolean } | null; rows: KpiRow[] | [string, string][];
   className?: string;
   onClick?: () => void;
+  valueOverride?: MoneyText; changeNote?: string; seriesMixed?: readonly string[];
 }) {
   const trendColor = d ? (d.up ? 'rgb(var(--success))' : 'rgb(var(--danger))') : 'rgb(var(--accent))';
   const baseCls = 'card !p-6 transition-all duration-300 relative overflow-hidden group flex flex-col hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]';
@@ -298,21 +351,27 @@ function Kpi({ label, icon: Icon, iconColor = 'text-accent', value, formatFn, se
           <p className="text-xs font-semibold text-fg-secondary uppercase tracking-wider">{label}</p>
         </div>
         <div className="flex items-center gap-2">
-          {d && (
+          {d ? (
             <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-bold ${d.up ? 'bg-success/15 text-success-text' : 'bg-danger/15 text-danger-text'}`}>
               {d.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />} {Math.abs(d.pct)}%
             </span>
-          )}
+          ) : changeNote ? (
+            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold text-fg-muted" title={changeNote}>—</span>
+          ) : null}
           {onClick && (
             <ExternalLink className="size-3.5 text-fg-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100" aria-hidden="true" />
           )}
         </div>
       </div>
-      <p className="relative z-10 mt-3 text-3xl font-extrabold leading-tight tracking-tight text-fg"><AnimatedNumber value={value} formatFn={formatFn} animate={inView} /></p>
-      <div className="mt-auto pt-6 ml-auto w-1/2"><Sparkline data={series} color={trendColor} /></div>
+      {valueOverride
+        ? <p className="relative z-10 mt-3 break-words text-lg font-extrabold leading-tight tracking-tight text-fg" title={valueOverride.title}>{valueOverride.text}</p>
+        : <p className="relative z-10 mt-3 text-3xl font-extrabold leading-tight tracking-tight text-fg"><AnimatedNumber value={value} formatFn={formatFn} animate={inView} /></p>}
+      <div className="mt-auto pt-6 ml-auto w-1/2">
+        {series ? <Sparkline data={series} color={trendColor} /> : <p className="text-right text-tiny text-fg-muted" title={seriesMixed && mixedTitle(seriesMixed)}>{label} not plotted — mixed currencies ({seriesMixed?.join(', ')})</p>}
+      </div>
       <dl className="mt-3 space-y-1 border-t border-border pt-2 text-tiny">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex justify-between"><dt className="text-fg-muted">{k}</dt><dd className="font-medium tabular-nums text-fg-secondary">{v}</dd></div>
+        {rows.map(([k, v, title]: [string, string, string?]) => (
+          <div key={k} className="flex justify-between gap-2"><dt className="shrink-0 text-fg-muted">{k}</dt><dd className="text-right font-medium tabular-nums text-fg-secondary" title={title}>{v}</dd></div>
         ))}
       </dl>
     </div>
@@ -347,32 +406,43 @@ function topWindowISO(): { from: string; to: string } {
  * the SERVER (orderBy=<selected metric>) over the last TOP_WINDOW_DAYS days — re-sorting the API's
  * default top-50-by-clicks page client-side missed entities ranked lower by clicks.
  */
-function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll }: {
+/**
+ * Revenue is in each entity's own currency ("Mixed" when its conversions mix currencies): ranked by
+ * revenue, the server sorts within each currency (`sortedWithinCurrency`, noted here) — never
+ * comparing EUR with USD — and an hourly revenue series mixing currencies isn't plotted.
+ */
+function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll, currency }: {
   title: string; dimKey: 'offer' | 'publisher' | 'advertiser'; filterKey: string;
-  nameMap: RefMap; viewAll: string;
+  nameMap: RefMap; viewAll: string; currency: string;
 }) {
   const [selectedId, setSelectedId] = useState('');
   const [metric, setMetric] = useState<MetricKey>('revenue');
   const win = useMemo(topWindowISO, []);
   const topQs = new URLSearchParams({
-    groupBy: dimKey, metrics: 'clicks,conversions,revenue', orderBy: metric, orderDir: 'desc', limit: '6', from: win.from, to: win.to,
+    groupBy: dimKey, metrics: withCurrenciesMetric('clicks,conversions,revenue'), orderBy: metric, orderDir: 'desc', limit: '6', from: win.from, to: win.to,
   });
   const q = withMock(useQuery<AggResult>(`/api/reports?${topQs.toString()}`), mockTopRows(dimKey));
-  // Server-ranked; the local sort only orders the mock rows the same way in dev/demo mode.
+  const rcOf = (r: AggRow): RowCurrency => resolveCurrency(currenciesOf(r.metrics), currency);
+  const valueOf = (r: AggRow) => Number(r.metrics[metric] ?? 0);
+  // Server-ranked; the local sort only orders the mock rows the same way in dev/demo mode — by
+  // revenue with the same per-currency partition the server uses (lib/reportCurrency).
   const rows = [...(q.data?.rows ?? [])]
     .filter((r) => r.dimensions[dimKey])
-    .sort((a, b) => Number(b.metrics[metric] ?? 0) - Number(a.metrics[metric] ?? 0))
+    .sort(metric === 'revenue' ? moneyRowComparator(rcOf, valueOf, 'desc') : (a, b) => valueOf(b) - valueOf(a))
     .slice(0, 5);
   const id = selectedId || rows[0]?.dimensions[dimKey] || '';
+  const sortedWithin = metric === 'revenue' && showSortedWithinNote((q.data as AggResult | null)?.sortedWithinCurrency, rows.map(rcOf));
 
   const { from, to } = useMemo(todayRangeISO, []);
   const seriesPath = id
-    ? `/api/reports?groupBy=hour&metrics=clicks,conversions,revenue&${filterKey}=${encodeURIComponent(id)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+    ? `/api/reports?groupBy=hour&metrics=${withCurrenciesMetric('clicks,conversions,revenue')}&${filterKey}=${encodeURIComponent(id)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
     : null;
   const series = withMock(useQuery<AggResult>(seriesPath), mockHourlySeries());
   const points = [...(series.data?.rows ?? [])]
     .sort((a, b) => new Date(a.dimensions.hour ?? 0).getTime() - new Date(b.dimensions.hour ?? 0).getTime())
     .map((r) => Number(r.metrics[metric] ?? 0));
+  const seriesRc = combineCurrencies((series.data?.rows ?? []).map((r) => currenciesOf(r.metrics)), currency);
+  const seriesMixed = metric === 'revenue' && seriesRc.kind === 'mixed' ? seriesRc.currencies : undefined;
 
   return (
     <div className="card !p-0 transition-all duration-300 hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]">
@@ -422,20 +492,23 @@ function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll }: {
                 ? <p className="grid h-16 place-items-center text-small text-fg-muted">Could not load chart data</p>
                 : series.loading
                 ? <div className="grid h-16 place-items-center"><Spinner /></div>
+                : seriesMixed
+                ? <p className="grid h-16 place-items-center text-small text-fg-muted" title={mixedTitle(seriesMixed)}>Revenue not plotted — mixed currencies ({seriesMixed.join(', ')})</p>
                 : <Sparkline data={points.length ? points : [0]} color="rgb(var(--accent))" height={64} />}
             </div>
+            {sortedWithin && <p className="px-4 pb-1 text-tiny text-fg-muted" title="Revenue in different currencies is never compared — each currency's entities are ranked on their own; mixed ones come last.">{SORTED_WITHIN_CURRENCY_NOTE}</p>}
 
             <ul className="divide-y divide-border border-t border-border">
               {rows.map((r, i) => {
                 const rid = r.dimensions[dimKey] ?? '';
                 const label = (rid && nameMap.get(rid)) || (rid ? rid.slice(0, 8) + '…' : '—');
-                const metricValue = Number(r.metrics[metric] ?? 0);
-                const display = metric === 'revenue' ? money(metricValue) : compact(metricValue);
+                const metricValue = valueOf(r);
+                const display: MoneyText = metric === 'revenue' ? moneyText(metricValue, rcOf(r)) : { text: compact(metricValue), muted: false };
                 return (
                   <li key={rid || i} className="flex items-center gap-3 px-4 py-2.5 animate-fade-in-up" style={{ animationDelay: `${i * 80}ms` }}>
                     <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-accent-subtle text-tiny font-semibold text-accent-text">{i + 1}</span>
                     <span className="min-w-0 flex-1 truncate text-small font-medium text-fg">{label}</span>
-                    <span className="shrink-0 text-small font-semibold tabular-nums text-fg">{display}</span>
+                    <span className={`shrink-0 text-small font-semibold tabular-nums ${display.muted ? 'text-fg-muted' : 'text-fg'}`} title={display.title}>{display.text}</span>
                     <span className="shrink-0 text-tiny text-fg-muted">{METRIC_LABEL[metric]}</span>
                   </li>
                 );
@@ -454,6 +527,21 @@ type Summary = Record<string, unknown>;
 interface Tile { label: string; hint: string; val: (s: Summary) => string }
 const int = (v: unknown) => (v == null ? '—' : String(v));
 const pct = (v: unknown) => (v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`);
+/**
+ * A portal summary's money (`currencies` / `moneyByCurrency`, newer API): in its conversions' one
+ * currency, per-currency amounts when they mix (`field`), or "Mixed" for a ratio like EPC. Without
+ * currencies (older API, no conversions) it stays the existing USD display.
+ */
+const portalMoney = (s: Summary, key: string, field?: MoneyField) =>
+  moneyText(Number(s[key] ?? 0), resolveCurrency(s['currencies'], 'USD'), { breakdown: parseMoneyByCurrency(s['moneyByCurrency']), field, roomy: true }).text;
+/**
+ * The publisher's payable balance (lib/balanceCurrency): in its one currency, or per currency
+ * ("€30.25 · $13.00") when it spans several — never summed. An older API (no currency info) keeps
+ * the existing USD display.
+ */
+const portalBalance = (s: Summary) =>
+  balanceText({ balance: s['balance'], balances: s['balances'], currency: s['balanceCurrency'] ?? s['currency'] })?.text
+  ?? money(String(s['balance'] ?? 0));
 const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] }> = {
   super_admin: {
     endpoint: '/platform/summary',
@@ -469,8 +557,8 @@ const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] 
     tiles: [
       { label: 'Clicks (24h)', hint: 'Your traffic', val: (s) => int(s['clicks']) },
       { label: 'Conversions (24h)', hint: 'Attributed to you', val: (s) => int(s['conversions']) },
-      { label: 'EPC', hint: 'Earnings per click', val: (s) => money(String(s['epc'] ?? 0)) },
-      { label: 'Payable balance', hint: 'Approved', val: (s) => money(String(s['balance'] ?? 0)) },
+      { label: 'EPC', hint: 'Earnings per click', val: (s) => portalMoney(s, 'epc') },
+      { label: 'Payable balance', hint: 'Approved', val: portalBalance },
     ],
   },
   advertiser: {
@@ -479,7 +567,7 @@ const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] 
       { label: 'Clicks (24h)', hint: 'Your offers', val: (s) => int(s['clicks']) },
       { label: 'Conversions (24h)', hint: 'Recorded', val: (s) => int(s['conversions']) },
       { label: 'Conversion Rate', hint: 'Last 24h', val: (s) => pct(s['cr']) },
-      { label: 'Spend (24h)', hint: 'Billed', val: (s) => money(String(s['revenue'] ?? 0)) },
+      { label: 'Spend (24h)', hint: 'Billed', val: (s) => portalMoney(s, 'revenue', 'revenue') },
     ],
   },
 };

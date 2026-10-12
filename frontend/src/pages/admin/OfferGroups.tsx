@@ -16,23 +16,46 @@ import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { fmtMoney, type OfferGroup } from '../../data/offerGroups';
+import { NotEnforcedBadge } from '../../shared-components/primitives/NotEnforcedBadge';
 import type { Advertiser, Offer } from '../../types';
+import { capValue } from '../../lib/offerGroupCaps';
+import { money } from '../../lib/reportMath';
+import { MIXED_EXPORT, moneyText, parseMoneyByCurrency, resolveCurrency, type MoneyField, type MoneyText, type RowCurrency } from '../../lib/reportCurrency';
 
 const PAGE_SIZE = 25;
 const STATUSES = ['active', 'paused', 'deleted'] as const;
 
-function capCell(v: number | null | undefined, money: boolean) {
+/** A money cap — the group's own value, so in the group's currency (`currency`); `null` = a count cap. */
+function capCell(raw: number | null | undefined, currency: string | null) {
+  const v = capValue(raw);
   if (v == null) return <span className="text-fg-muted">N/A</span>;
-  return money ? fmtMoney(v) : v.toLocaleString();
+  return currency ? money(v, currency) : v.toLocaleString();
+}
+
+/**
+ * Today's conversion payout/revenue, in the conversions' own currency — not the group's: one
+ * currency → that; several → "Mixed" (per-currency amounts on hover); none → the group's currency
+ * (zero). An older API without `currencies` keeps the previous "$" display.
+ */
+function todayCurrency(r: OfferGroup): RowCurrency | null {
+  return r.today?.currencies ? resolveCurrency(r.today.currencies, r.currency || 'USD') : null;
+}
+function todayMoney(r: OfferGroup, field: Extract<MoneyField, 'payout' | 'revenue'>): MoneyText {
+  const rc = todayCurrency(r);
+  const v = r.today?.[field];
+  return rc ? moneyText(Number(v ?? 0), rc, { breakdown: parseMoneyByCurrency(r.today?.moneyByCurrency), field }) : { text: fmtMoney(v), muted: false };
 }
 
 function TableActionsMenu({ rows, advName }: { rows: OfferGroup[]; advName: (id: string | null) => string }) {
   const [subOpen, setSubOpen] = useState(false);
+  // A group whose conversions mix currencies exports its money blank with currency "MIXED".
+  const exportMoney = (r: OfferGroup, field: 'payout' | 'revenue') => (todayCurrency(r)?.kind === 'mixed' ? '' : todayMoney(r, field).text);
   const exportRows = () => rows.map((r) => ({
     ID: r.ref, Name: r.name, Advertiser: advName(r.advertiserId), Offers: r.offerIds.length,
-    "Today's Clicks": r.today?.clicks ?? 0, "Today's Payout": fmtMoney(r.today?.payout), "Today's Revenue": fmtMoney(r.today?.revenue),
-    'Daily Payout Cap': r.caps.payout?.daily ?? 'N/A', 'Daily Revenue Cap': r.caps.revenue?.daily ?? 'N/A',
-    'Daily Click Cap': r.caps.clicks?.daily ?? 'N/A', 'Daily Conversion Cap': r.caps.conversions?.daily ?? 'N/A',
+    "Today's Clicks": r.today?.clicks ?? 0, "Today's Payout": exportMoney(r, 'payout'), "Today's Revenue": exportMoney(r, 'revenue'),
+    "Today's Currency": ((rc) => (!rc ? '' : rc.kind === 'mixed' ? MIXED_EXPORT : rc.currency))(todayCurrency(r)),
+    'Daily Payout Cap': capValue(r.caps.payout?.daily) ?? 'N/A', 'Daily Revenue Cap': capValue(r.caps.revenue?.daily) ?? 'N/A',
+    'Daily Click Cap': capValue(r.caps.clicks?.daily) ?? 'N/A', 'Daily Conversion Cap': capValue(r.caps.conversions?.daily) ?? 'N/A',
   }));
   return (
     <MenuPopover
@@ -193,10 +216,10 @@ export default function OfferGroups() {
                     <th >Today's Clicks</th>
                     <th >Today's Payout</th>
                     <th >Today's Revenue</th>
-                    <th >Daily Payout Cap</th>
-                    <th >Daily Revenue Cap</th>
-                    <th >Daily Click Cap</th>
-                    <th >Daily Conversion Cap</th>
+                    <th >Daily Payout Cap <NotEnforcedBadge className="ml-1" /></th>
+                    <th >Daily Revenue Cap <NotEnforcedBadge className="ml-1" /></th>
+                    <th >Daily Click Cap <NotEnforcedBadge className="ml-1" /></th>
+                    <th >Daily Conversion Cap <NotEnforcedBadge className="ml-1" /></th>
                     <th className="px-4 py-3 font-semibold" />
                   </tr>
                 </thead>
@@ -208,12 +231,13 @@ export default function OfferGroups() {
                       <td className="px-4 py-3 text-accent-text">{advName(r.advertiserId)}</td>
                       <td className="px-4 py-3 tabular-nums text-fg-secondary">{r.offerIds.length}</td>
                       <td className="text-small tabular-nums">{(r.today?.clicks ?? 0).toLocaleString()}</td>
-                      <td className="text-small tabular-nums">{fmtMoney(r.today?.payout)}</td>
-                      <td className="text-small tabular-nums">{fmtMoney(r.today?.revenue)}</td>
-                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.payout?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.revenue?.daily, true) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.clicks?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
-                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.conversions?.daily, false) : <span className="text-fg-muted">N/A</span>}</td>
+                      {(['payout', 'revenue'] as const).map((f) => { const t = todayMoney(r, f); return (
+                        <td key={f} className={`text-small tabular-nums ${t.muted ? 'text-fg-muted' : ''}`} title={t.title}>{t.text}</td>
+                      ); })}
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.payout?.daily, r.currency || 'USD') : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.revenue?.daily, r.currency || 'USD') : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.clicks?.daily, null) : <span className="text-fg-muted">N/A</span>}</td>
+                      <td className="text-small tabular-nums">{r.capsEnabled ? capCell(r.caps.conversions?.daily, null) : <span className="text-fg-muted">N/A</span>}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end">
                           <RowMenu onEdit={() => nav(`/app/offers-groups/${r.id}/edit`)} />

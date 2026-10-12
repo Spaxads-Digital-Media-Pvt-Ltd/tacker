@@ -26,6 +26,7 @@ import {
   METRIC_KEYS, METRIC_LABELS, OPERATORS, FORMAT_LABELS,
   type FormulaToken, type MetricFormat, tokenLabel,
 } from '../../lib/customMetrics';
+import { formulaError } from '../../lib/customMetricFormula';
 
 interface CustomMetric { id: string; ref: number; name: string; formula: FormulaToken[]; format: MetricFormat; createdAt: string; updatedAt: string }
 
@@ -90,11 +91,13 @@ function MetricModal({ initial, onClose, onSaved }: { initial: CustomMetric | nu
   const [name, setName] = useState(initial?.name ?? '');
   const [format, setFormat] = useState<MetricFormat>(initial?.format ?? 'number');
   const [tokens, setTokens] = useState<FormulaToken[]>(initial?.formula ?? []);
+  // Same grammar the server enforces — a malformed formula can't be saved.
+  const tokensError = formulaError(tokens);
   const save = useMutation((body: Record<string, unknown>) =>
     initial ? api.patch(`/api/custom-metrics/${initial.id}`, body) : api.post('/api/custom-metrics', body));
 
   const submit = async () => {
-    if (!name.trim() || tokens.length === 0) return;
+    if (!name.trim() || tokensError) return;
     if (await save.run({ name: name.trim(), format, formula: tokens })) { onSaved(); onClose(); }
   };
 
@@ -112,10 +115,11 @@ function MetricModal({ initial, onClose, onSaved }: { initial: CustomMetric | nu
           </select>
         </div>
         <FormulaBuilder tokens={tokens} onChange={setTokens} />
+        {tokens.length > 0 && tokensError && <p className="text-small text-danger-text" role="alert">{tokensError}</p>}
         {save.error && <p className="text-small text-danger-text">{save.error}</p>}
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={save.busy || !name.trim() || !tokens.length} onClick={submit}>
+          <button type="button" className="btn-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={save.busy || !name.trim() || tokensError !== null} onClick={submit}>
             {save.busy ? 'Saving…' : 'Save'}
           </button>
         </div>

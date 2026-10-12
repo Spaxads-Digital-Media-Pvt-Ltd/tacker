@@ -12,12 +12,17 @@ import { useNavigate } from 'react-router-dom';
 import { MoreVertical, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useMutation } from '../../lib/useApi';
+import { requestedBalancesMessage, type RequestedBalance } from '../../lib/balanceCurrency';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 
-interface RequestBalancesResult { requested: { publisherId: string; balance: string }[] }
+/**
+ * Newer API: each row also carries `currency` / `balances` (per currency) and `balance` is null when
+ * the partner's balance spans currencies; an older one sends `balance` only (no currency).
+ */
+interface RequestBalancesResult { requested: RequestedBalance[] }
 
 export function TableActionsMenu({
-  selectedIds, allColumns, columnOrder, hiddenColumns, onApplyColumns, onExport, appliedFilters, onBalancesRequested,
+  selectedIds, allColumns, columnOrder, hiddenColumns, onApplyColumns, onExport, appliedFilters, onBalancesRequested, partnerName,
 }: {
   selectedIds: string[];
   allColumns: readonly string[];
@@ -27,6 +32,8 @@ export function TableActionsMenu({
   onExport: (kind: 'partners' | 'emails', format: 'csv' | 'json') => void;
   appliedFilters: Record<string, string | undefined>;
   onBalancesRequested: (message: string) => void;
+  /** Display name for a partner id (the toast lists partners whose balance mixes currencies). */
+  partnerName?: (publisherId: string) => string;
 }) {
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
@@ -72,10 +79,8 @@ export function TableActionsMenu({
   const doRequestBalances = async () => {
     setOpen(false);
     const res = await requestBalances.run(selectedIds);
-    if (res) {
-      const total = res.requested.reduce((sum, r) => sum + Number(r.balance || 0), 0);
-      onBalancesRequested(`Recorded outstanding balance for ${res.requested.length} partner${res.requested.length === 1 ? '' : 's'} (total $${total.toFixed(2)}).`);
-    }
+    // Totals per currency (exact decimals) — never one number across currencies.
+    if (res) onBalancesRequested(requestedBalancesMessage(res.requested, partnerName));
   };
 
   return (

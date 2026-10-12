@@ -44,10 +44,15 @@ function smoothPath(
   return out.join(' ');
 }
 
-// Currency / count formatting for the y-axis ticks and the hover tooltip. Mirrors the dashboard's
-// `money` helper (module-local there, so duplicated rather than exported across a page boundary).
-const fmtMoney = (v: number, digits: number) =>
-  `$${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+// Currency / count formatting for the y-axis ticks and the hover tooltip, in the revenue's currency
+// (ISO 4217; "<CODE> 1,234" for a code Intl doesn't know).
+const fmtMoney = (v: number, digits: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
+  } catch {
+    return `${currency} ${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  }
+};
 const fmtCount = (v: number) => v.toLocaleString('en-US');
 
 /**
@@ -55,11 +60,15 @@ const fmtCount = (v: number) => v.toLocaleString('en-US');
  * axis) over the current day's 24 hourly points. Inline SVG, no chart dependency, same approach as
  * `Sparkline`. No "vs yesterday" overlay: the API only exposes yesterday as a single scalar, not an
  * hourly series (see dashboard plan), so this deliberately only plots today.
+ *
+ * `currency`: the revenue's currency. `revenueMixed`: the currencies today's revenue mixes — the series
+ * would add unlike money, so it isn't drawn (clicks still are) and its values read "Mixed" with this
+ * explanation on hover.
  */
 export function PerformanceChart({
-  revenue, clicks, revenueLabel, clicksLabel,
+  revenue, clicks, revenueLabel, clicksLabel, currency = 'USD', revenueMixed,
 }: {
-  revenue: number[]; clicks: number[]; revenueLabel: string; clicksLabel: string;
+  revenue: number[]; clicks: number[]; revenueLabel: string; clicksLabel: string; currency?: string; revenueMixed?: readonly string[];
 }) {
   const [mode, setMode] = useState<'area' | 'bar'>('area');
   // Hovered hour index (0-23), or null when the pointer is off the plot.
@@ -80,8 +89,9 @@ export function PerformanceChart({
   // Clamp the smoothed curves to the plot's vertical bounds so a hard spike-into-zeros transition
   // can't bow the line below the baseline (or above the top) — see smoothPath's note.
   const yb: readonly [number, number] = [padT, padT + plotH];
-  const revLine = smoothPath(revenue.map((v, i) => [x(i), yRev(v)] as const), 0.16, yb);
-  const revArea = `${revLine} L${x(n - 1).toFixed(1)},${padT + plotH} L${x(0).toFixed(1)},${padT + plotH} Z`;
+  const plotted = revenueMixed ? [] : revenue;
+  const revLine = smoothPath(plotted.map((v, i) => [x(i), yRev(v)] as const), 0.16, yb);
+  const revArea = revLine ? `${revLine} L${x(n - 1).toFixed(1)},${padT + plotH} L${x(0).toFixed(1)},${padT + plotH} Z` : '';
   const clickLine = smoothPath(clicks.map((v, i) => [x(i), yClick(v)] as const), 0.16, yb);
   const barW = Math.max(2, (plotW / n) * 0.55);
 
@@ -90,8 +100,9 @@ export function PerformanceChart({
   const tickDigits = revMax >= 100 ? 0 : 2;
   const yAxis = [0.25, 0.5, 0.75, 1].map((f) => ({
     y: padT + plotH * f,
-    label: fmtMoney(revMax * (1 - f), tickDigits),
+    label: revenueMixed ? '' : fmtMoney(revMax * (1 - f), tickDigits, currency),
   }));
+  const revText = (v: number) => (revenueMixed ? 'Mixed' : fmtMoney(v, 2, currency));
 
   // Pointer → nearest hour. `preserveAspectRatio="none"` stretches the viewBox to exactly fill the
   // element, so fraction-of-width maps linearly onto the plot's x range.
@@ -160,7 +171,7 @@ export function PerformanceChart({
               <path d={revLine} fill="none" stroke="rgb(var(--accent))" strokeWidth="1.5" className="animate-draw-line" style={{ strokeDasharray: 3000, strokeDashoffset: 3000 }} vectorEffect="non-scaling-stroke" />
             </>
           ) : (
-            revenue.map((v, i) => (
+            plotted.map((v, i) => (
               <rect key={i} x={x(i) - barW / 2} y={yRev(v)} width={barW} height={padT + plotH - yRev(v)} rx="1.5" fill="rgb(var(--accent))" fillOpacity="0.55" />
             ))
           )}
@@ -188,10 +199,10 @@ export function PerformanceChart({
 
         {hi != null && (
           <>
-            <span
+            {!revenueMixed && <span
               className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent ring-2 ring-surface"
               style={{ left: `${leftPct}%`, top: `${(yRev(hoverRev) / h) * 100}%` }}
-            />
+            />}
             <span
               className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-fg-muted ring-2 ring-surface"
               style={{ left: `${leftPct}%`, top: `${(yClick(hoverClicks) / h) * 100}%` }}
@@ -203,7 +214,7 @@ export function PerformanceChart({
               <div className="mb-1 text-tiny font-medium tabular-nums text-fg-secondary">{hourLabel}</div>
               <div className="flex items-center gap-1.5 text-tiny text-fg-secondary">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent" />Revenue
-                <strong className="ml-auto font-semibold tabular-nums text-fg">{fmtMoney(hoverRev, 2)}</strong>
+                <strong className="ml-auto font-semibold tabular-nums text-fg">{revText(hoverRev)}</strong>
               </div>
               <div className="mt-0.5 flex items-center gap-1.5 text-tiny text-fg-secondary">
                 <span className="h-1.5 w-1.5 rounded-full bg-fg-muted" />Clicks
@@ -215,9 +226,11 @@ export function PerformanceChart({
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-4 border-t border-border pt-2 text-tiny text-fg-secondary">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-accent" />Revenue:{' '}
-          <strong className="font-semibold tabular-nums text-fg">{hi == null ? revenueLabel : fmtMoney(hoverRev, 2)}</strong>
+        <span className="inline-flex items-center gap-1.5" title={revenueMixed && `Mixed currencies (${revenueMixed.join(', ')}) — not added together; no FX conversion yet`}>
+          <span className="h-2 w-2 rounded-full bg-accent" />
+          {revenueMixed
+            ? <span className="text-fg-muted">Revenue not plotted — mixed currencies ({revenueMixed.join(', ')})</span>
+            : <>Revenue:{' '}<strong className="font-semibold tabular-nums text-fg">{hi == null ? revenueLabel : revText(hoverRev)}</strong></>}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-fg-muted" />Clicks:{' '}

@@ -85,6 +85,9 @@ export function percentOfMoney(amount: string, pct: string | number): string {
   return fromUnits(divRound(toUnits(amount) * pctScaled, 100n * 1_000_000n));
 }
 
+/** A currency code as the ledger accepts it: exactly 3 upper-case letters (e.g. USD). */
+export const CURRENCY_RE = /^[A-Z]{3}$/;
+
 /** Zod schema for a money field: accepts string or number, outputs normalized numeric string. */
 export const moneySchema = z
   .union([z.string(), z.number()])

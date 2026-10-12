@@ -5,6 +5,11 @@
  * the click, incl. geo overrides), write the conversion, and — when approved — enqueue the
  * outbound postback to the publisher.
  *
+ * Dedup policy: a conversion WITH a transaction id is unique per (offer, transaction id) — DB index.
+ * A conversion WITHOUT one is unique per (network, click, event): once any conversion exists for
+ * that click + event name (any status), the same click + event without a transaction id can never
+ * convert again — not only within the 48h Redis window. Distinct events still convert separately.
+ *
  * Ledger dual-entry (spec §8) plugs in at Phase 4 where marked.
  */
 import { randomUUID } from 'node:crypto';
@@ -25,6 +30,7 @@ import { loadIntegrations } from '../../../lib/integrations/settings.js';
 import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 import { timingSafeCompare } from '../../../lib/secure-code-compare.js';
 import { checkConversionAbuse } from '../../../lib/conversion-abuse.js';
+import { logger } from '../../../lib/logger.js';
 
 export type ConversionOutcome =
  | 'approved' | 'pending' | 'rejected' | 'duplicate' | 'click_not_found' | 'security_failed';
@@ -134,14 +140,47 @@ async function resolveGoal(networkId: string, offerId: string, event: string | n
  return rows[0] ?? null;
 }
 
+/** Deletes the idempotency key only while it still holds THIS attempt's token (atomic compare-and-delete). */
+const RELEASE_IF_OWNER = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+
+/**
+ * After a failed attempt (nothing committed), free the idempotency key so a legitimate retry isn't
+ * answered "duplicate" for 48h with nothing stored. Only this attempt's own key is removed (token
+ * match), and a cleanup failure is logged — never thrown over the original error.
+ */
+async function releaseIdemKey(redis: ReturnType<typeof getRedis>, key: string, token: string): Promise<void> {
+ try {
+ await redis.eval(RELEASE_IF_OWNER, 1, key, token);
+ } catch (cleanupErr) {
+ logger.warn({ err: cleanupErr, key }, 'conversion idempotency key cleanup failed');
+ }
+}
+
 export async function recordConversion(input: RecordConversionInput): Promise<RecordConversionResult> {
  const redis = getRedis();
 
- // Fast idempotency pre-check (authoritative guard is the DB unique index below).
+ // Fast idempotency pre-check (authoritative guards are in the DB: the (offer, transaction_id)
+ // unique index, and the per-(network, click, event) check for conversions without a transaction id).
+ // The value is a per-attempt token so only this attempt can release the key after a failure.
  const idemKey = `convidem:${input.clickId}:${input.txnId ?? input.event ?? 'default'}`;
- const acquired = await redis.set(idemKey, '1', 'EX', 172800, 'NX');
+ const idemToken = randomUUID();
+ const acquired = await redis.set(idemKey, idemToken, 'EX', 172800, 'NX');
  if (acquired !== 'OK') return { outcome: 'duplicate' };
 
+ const state = { committed: false };
+ try {
+ return await recordWithIdemKey(input, redis, idemKey, state);
+ } catch (err) {
+ // Nothing was recorded → let a retry through. Once the insert transaction has committed the key
+ // stays (a later error, e.g. enqueueing the partner postback, must not reopen a recorded conversion).
+ if (!state.committed) await releaseIdemKey(redis, idemKey, idemToken);
+ throw err;
+ }
+}
+
+async function recordWithIdemKey(
+ input: RecordConversionInput, redis: ReturnType<typeof getRedis>, idemKey: string, state: { committed: boolean },
+): Promise<RecordConversionResult> {
  // T-2: per-click conversion abuse guard — limit distinct txnId variation per click.
  // Applied before click lookup. Fail open on Redis errors.
  if (input.txnId && input.txnId.trim().length > 0) {
@@ -300,12 +339,29 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  let insertedOk = false;
  try {
  await client.query('BEGIN');
- if (status !== 'rejected') {
+ // No transaction id → at most one conversion per (network, click, event name), permanently (the
+ // DB index only covers non-null transaction ids; the Redis key above expires after 48h). The
+ // transaction-scoped advisory lock serialises concurrent attempts for the same click + event, and
+ // the check runs after it, so the second attempt sees the first's committed row. Taken before the
+ // cap lock, always in that order.
+ let noTxnDuplicate = false;
+ if (input.txnId == null) {
+ await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+ [JSON.stringify(['convnotxn', input.networkId, input.clickId, eventName])]);
+ const prior = await client.query(
+ `SELECT 1 FROM conversions
+ WHERE network_id = $1 AND click_id = $2 AND transaction_id IS NULL AND event_name IS NOT DISTINCT FROM $3
+ LIMIT 1`,
+ [input.networkId, input.clickId, eventName],
+ );
+ noTxnDuplicate = prior.rows.length > 0;
+ }
+ if (!noTxnDuplicate && status !== 'rejected') {
  const capReason = await conversionCapReached(client, input.networkId, click.offer_id,
  { daily: offer?.dailyConversionCap ?? null, total: offer?.totalConversionCap ?? null }, goal);
  if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
  }
- const ins = await client.query<{ conversion_id: string }>(
+ const ins = noTxnDuplicate ? { rows: [] as { conversion_id: string }[] } : await client.query<{ conversion_id: string }>(
  `INSERT INTO conversions (
  conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,
  event_name, status, reason, payout, revenue, currency, transaction_id, source, raw_params,
@@ -336,6 +392,7 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
  }
  }
  await client.query('COMMIT');
+ state.committed = true;
  } catch (err) {
  await client.query('ROLLBACK');
  await releaseClickLock();
