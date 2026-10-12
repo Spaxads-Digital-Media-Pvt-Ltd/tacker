@@ -17,6 +17,7 @@ import { resolveEntityId } from './ref-resolver.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
 import { buildTrustedProxyCheck } from './trusted-proxy.js';
+import { SOURCE_PARAMS, firstNonBlank } from './click-params.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
@@ -186,7 +187,8 @@ export function buildTrackingApp(): FastifyInstance {
  const publisherId = await resolveEntityId('publisher', tenant.networkId, firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
  const smartLinkId = asUuid(firstStr(q['sl'])); // set when a smart link routed this click
  const subs = [1, 2, 3, 4, 5].map((i) => firstStr(q[`sub${i}`]));
- const sourceId = firstStr(q['source_id']) ?? firstStr(q['source']) ?? firstStr(q['src']) ?? null;
+ // Blank / whitespace-only → null, and a blank alias falls through (source_id → source → src).
+ const sourceId = firstNonBlank(q, SOURCE_PARAMS);
 
  // 2. Offer config from Redis (load-through). No sync Postgres read on the hot path.
  const offer = await getOfferConfig(tenant.networkId, offerId);
@@ -280,7 +282,7 @@ export function buildTrackingApp(): FastifyInstance {
  resolvedPayout, resolvedRevenue, currency: offer.currency,
  smartLinkId,
  // Taken verbatim from the click URL (already parsed — no extra work on the hot path); absent → null.
- sourceId, fbclid: firstStr(q['fbclid']) ?? null, gclid: firstStr(q['gclid']) ?? null,
+ sourceId, fbclid: firstNonBlank(q, ['fbclid']), gclid: firstNonBlank(q, ['gclid']),
  ipqs: offer.attribution?.ipqs?.enabled ?? false,
  };
  await enqueueClick(job);
@@ -371,9 +373,11 @@ export function buildTrackingApp(): FastifyInstance {
  const pub = firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']);
  if (pub) params.set('pub_id', pub);
  for (const i of [1, 2, 3, 4, 5]) { const s = firstStr(q[`sub${i}`]); if (s) params.set(`sub${i}`, s); }
- // Source ID too — Traffic Blocking rules can match on it at /click.
- const src = firstStr(q['source_id']) ?? firstStr(q['source']) ?? firstStr(q['src']);
+ // Source ID too — Traffic Blocking rules can match on it at /click — and the ad click ids, so a
+ // smart-link click records them like a direct one (blank values are not forwarded).
+ const src = firstNonBlank(q, SOURCE_PARAMS);
  if (src) params.set('source_id', src);
+ for (const k of ['fbclid', 'gclid']) { const v = firstNonBlank(q, [k]); if (v) params.set(k, v); }
  return reply.code(302).header('location', `/click?${params.toString()}`).header('cache-control', 'no-store').send();
  });
 

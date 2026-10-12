@@ -286,6 +286,26 @@ describe('ClickHouseReportingProvider — SQL structure', () => {
  orderBy: 'conversions', orderDir: 'asc',
  });
  expect((querySpy.mock.calls[1]?.[0] as { query: string }).query).toMatch(/ORDER BY conversions ASC, d0 LIMIT/);
+
+ // Sort-only valid_clicks (net clicks) — same meaning as the Postgres provider.
+ querySpy.mockClear();
+ await w.runReport({
+ networkId: NETWORK_A, groupBy: ['offer'], metrics: ['clicks'],
+ filters: {}, limit: 10, offset: 0,
+ orderBy: 'valid_clicks', orderDir: 'desc',
+ });
+ expect((querySpy.mock.calls[1]?.[0] as { query: string }).query).toMatch(/ORDER BY \(clicks - invalid_clicks\) DESC, d0 LIMIT/);
+ });
+
+ it('advertiser grouping: valid_clicks and epc sorts keep the d0 tie-break (Advertiser Report)', async () => {
+ const { client, querySpy } = mkClient();
+ const w = new ClickHouseReportingProvider(client, async () => [{ id: 'o1', advertiser_id: 'a1' }]);
+ await w.runReport({ networkId: NETWORK_A, groupBy: ['advertiser'], metrics: ['clicks', 'epc'], filters: {}, limit: 25, offset: 0, orderBy: 'valid_clicks', orderDir: 'desc' });
+ expect((querySpy.mock.calls[1]?.[0] as { query: string }).query).toMatch(/ORDER BY \(clicks - invalid_clicks\) DESC, d0 LIMIT/);
+ querySpy.mockClear();
+ await w.runReport({ networkId: NETWORK_A, groupBy: ['advertiser'], metrics: ['clicks', 'epc'], filters: {}, limit: 25, offset: 0, orderBy: 'epc', orderDir: 'desc' });
+ // epc is a money ratio: ordered within one currency at a time, then the group key.
+ expect((querySpy.mock.calls[1]?.[0] as { query: string }).query).toMatch(/ORDER BY money_bucket ASC, money_currency ASC, if\(money_bucket = 0, if\(clicks > 0, payout \/ clicks, 0\), NULL\) DESC NULLS LAST, d0 LIMIT/);
  });
 
  it('excludes fraud-flagged clicks when excludeInvalid=true', async () => {

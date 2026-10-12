@@ -20,6 +20,7 @@ import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import { DbHostResolver } from '../../src/surfaces/tracking/host-resolver-db.js';
 import { getQueue, QUEUE } from '../../src/surfaces/workers/queues.js';
 import { startClickPersistWorker } from '../../src/surfaces/workers/processors/click-persist.js';
+import { enqueueClick } from '../../src/surfaces/tracking/click-job.js';
 import { query } from '../../src/lib/db/pool.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
 import { operatorToken, bearer } from '../helpers/tokens.js';
@@ -29,7 +30,10 @@ const d = process.env.INTEGRATION_DB === '1' ? describe : describe.skip;
 const CHROME_WIN = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36';
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1';
 
-interface ClickJobData { clickId: string; ip: string | null; os: string | null; browser: string | null; device: string | null; userAgent: string | null }
+interface ClickJobData {
+  clickId: string; ip: string | null; os: string | null; browser: string | null; device: string | null; userAgent: string | null;
+  sourceId?: string | null; fbclid?: string | null; gclid?: string | null; smartLinkId?: string | null;
+}
 
 d('click capture: IP / user agent from the real request (live DB + Redis)', () => {
   let track: FastifyInstance;
@@ -113,6 +117,60 @@ d('click capture: IP / user agent from the real request (live DB + Redis)', () =
       expect(await job(await clickWith(`source_id=src-${tag}&fbclid=IwAR-${tag}&gclid=Cj0K-${tag}`))).toMatchObject({ sourceId: `src-${tag}`, fbclid: `IwAR-${tag}`, gclid: `Cj0K-${tag}` });
       expect(await job(await clickWith(`src=alias-${tag}`))).toMatchObject({ sourceId: `alias-${tag}`, fbclid: null, gclid: null });
       expect(await job(await clickWith('sub1=x'))).toMatchObject({ sourceId: null, fbclid: null, gclid: null });
+    });
+    it('blank / whitespace-only values are null (never ""); a blank source_id falls through to source', async () => {
+      const cases: [string, Partial<ClickJobData>][] = [
+        ['source=&fbclid=&gclid=', { sourceId: null, fbclid: null, gclid: null }],
+        ['source_id=%20%20&fbclid=%09&gclid=%20', { sourceId: null, fbclid: null, gclid: null }],
+        ['source_id=&source=push-fallback', { sourceId: 'push-fallback' }],
+        ['source_id=%20&source=&src=native-fallback', { sourceId: 'native-fallback' }],
+        ['source_id=sid-wins&source=src-loses&src=x', { sourceId: 'sid-wins' }],
+        ['fbclid=IwAR-ok&gclid=', { fbclid: 'IwAR-ok', gclid: null }],
+      ];
+      for (const [qs, want] of cases) expect(await job(await clickWith(qs)), qs).toMatchObject(want);
+    });
+    it('/sl forwards source and the ad click ids to /click (blank values are not forwarded)', async () => {
+      const sl = (await query<{ id: string }>(`INSERT INTO smart_links (network_id, name) VALUES ($1, 'capture sl') RETURNING id`, [fx.networkA])).rows[0]!.id;
+      await query(`INSERT INTO smart_link_items (network_id, smart_link_id, offer_id) VALUES ($1, $2, $3)`, [fx.networkA, sl, fx.offerA]);
+      const fwd = async (qs: string) => {
+        const r = await track.inject({ method: 'GET', url: `/sl?id=${sl}&${qs}`, headers: { host }, remoteAddress: '127.0.0.1' });
+        expect(r.statusCode).toBe(302);
+        return new URLSearchParams((r.headers.location as string).split('?')[1]);
+      };
+      const full = await fwd('source=push-sl&fbclid=IwAR-sl&gclid=Cj0K-sl');
+      expect([full.get('source_id'), full.get('fbclid'), full.get('gclid'), full.get('sl')]).toEqual(['push-sl', 'IwAR-sl', 'Cj0K-sl', sl]);
+      const blank = await fwd('source_id=%20&source=&fbclid=&gclid=%20');
+      expect([blank.has('source_id'), blank.has('fbclid'), blank.has('gclid')]).toEqual([false, false, false]);
+      // The forwarded /click records them like a direct click.
+      const r = await track.inject({ method: 'GET', url: `/click?${full.toString()}&pub_id=${fx.pubA1}`, headers: { host }, remoteAddress: '127.0.0.1' });
+      expect(await job(clickIdFrom(r.headers.location as string))).toMatchObject({ sourceId: 'push-sl', fbclid: 'IwAR-sl', gclid: 'Cj0K-sl', smartLinkId: sl });
+    });
+    it('worker stores NULL for "" from an older-build job; the API returns NULL for a stored ""', async () => {
+      const tag = randomUUID().slice(0, 8);
+      const legacyId = randomUUID().replace(/-/g, '');
+      await enqueueClick({
+        clickId: legacyId, networkId: fx.networkA, offerId: fx.offerA, publisherId: fx.pubA1, ts: new Date().toISOString(), ip: '127.0.0.1',
+        country: null, region: null, city: null, isp: null, device: null, os: null, browser: null, referrer: null, userAgent: null,
+        sub1: `legacy-${tag}`, sub2: null, sub3: null, sub4: null, sub5: null, isUnique: true, fraudScore: 0, fraudFlags: [],
+        resolvedPayout: null, resolvedRevenue: null, currency: null, smartLinkId: null, sourceId: '', fbclid: '  ', gclid: '',
+      });
+      // A row as an earlier build persisted it ('' values) — inserted directly, test DB only.
+      const storedBlankId = randomUUID().replace(/-/g, '');
+      await query(`INSERT INTO clicks (click_id, network_id, offer_id, publisher_id, created_at, ip, is_unique, fraud_score, source_id, fbclid, gclid)
+        VALUES ($1, $2, $3, $4, now(), '127.0.0.1', true, 0, '', ' ', '')`, [storedBlankId, fx.networkA, fx.offerA, fx.pubA1]);
+      worker ??= startClickPersistWorker();
+      const deadline = Date.now() + 15000;
+      let row: { source_id: string | null; fbclid: string | null; gclid: string | null } | undefined;
+      while (Date.now() < deadline && !row) {
+        row = (await query<NonNullable<typeof row>>(`SELECT source_id, fbclid, gclid FROM clicks WHERE network_id = $1 AND click_id = $2`, [fx.networkA, legacyId])).rows[0];
+        if (!row) await new Promise((r) => setTimeout(r, 200));
+      }
+      expect(row).toEqual({ source_id: null, fbclid: null, gclid: null });
+      const auth = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkA }));
+      const res = await request(dash).get(`/api/reports/clicks?clickIds=${storedBlankId}`).set(auth);
+      expect(res.body.data[0]).toMatchObject({ source_id: null, fbclid: null, gclid: null });
+      // The stored values themselves are untouched (no rewrite of existing rows).
+      expect((await query(`SELECT source_id, fbclid, gclid FROM clicks WHERE click_id = $1`, [storedBlankId])).rows[0]).toEqual({ source_id: '', fbclid: ' ', gclid: '' });
     });
     it('persisted, returned by /api/reports/clicks, filterable (flat + grouped), and tenant-isolated', async () => {
       const tag = randomUUID().slice(0, 8);

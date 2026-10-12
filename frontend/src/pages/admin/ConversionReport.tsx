@@ -14,14 +14,20 @@
  * IDFA/Google Ad ID/Android ID, DMA, Attribution Method, etc. have no real source in this schema and
  * are omitted rather than faked.
  *
+ * Conversion ID and Click ID are available through Columns Customization (off by default) and are
+ * always in the export. Money is shown in the currency stored on the conversion — one recorded
+ * without a currency is a plain amount, never an assumed USD (lib/conversionReport.ts). Approve /
+ * Reject appear only for the roles the API allows (admin, finance — from GET /api/me).
+ *
  * Pagination is "has more" (overfetch by one row), matching Click Report — the shared API client
- * discards response pagination metadata app-wide.
+ * discards response pagination metadata app-wide. The API orders by created_at, then conversion_id,
+ * so pages (and the paged export) never repeat or skip a conversion when timestamps tie.
  *
  * No "Run Report": every control applies on its own — dates once they form a valid range (debounced,
  * since the native date input reports each typed segment), filters / chips immediately. The applied
  * report is mirrored to the address bar, so the URL itself is the shareable link.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { useMutation, useQuery } from '../../lib/useApi';
@@ -31,7 +37,7 @@ import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, money, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { countryName, countryOptions, regionName, useRegions } from '../../data/geo';
 import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
@@ -43,6 +49,7 @@ import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZon
 import { useReportTimeZone } from '../../lib/useReportTimeZone';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
+import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta } from '../../lib/conversionReport';
 
 /**
  * Approve a pending conversion (writes publisher earning + advertiser billing and fires the partner
@@ -95,24 +102,14 @@ interface ConvRow {
 }
 
 const ALL_COLUMNS = [
+  'Conversion ID', 'Click ID',
   'Status', 'Reason', 'Offer', 'Partner', 'Advertiser', 'Event Name', 'Goal', 'Source',
   'Revenue', 'Payout', 'Currency', 'Transaction ID', 'Click Date', 'Delta',
   'Country', 'Region', 'City', 'ISP', 'Device', 'OS', 'Browser', 'Fraud',
   'Sub1', 'Sub2', 'Sub3', 'Sub4', 'Sub5',
 ] as const;
-
-function formatDelta(seconds: number | null): string {
-  if (seconds == null) return DASH;
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-}
-/** A conversion's money in its own currency (USD when the row has none). */
-function convMoney(v: string | null, currency: string | null): string {
-  if (v == null) return DASH;
-  return money(Number(v), currency || 'USD');
-}
+/** Available via Columns Customization (and always in the export); off by default to keep the table narrow. */
+const DEFAULT_HIDDEN = ['Conversion ID', 'Click ID'];
 
 const STATUS_OPTIONS = [
   { value: 'approved', label: 'Approved' },
@@ -156,11 +153,26 @@ export default function ConversionReport() {
   const [q, setQ] = useState('');
   const pageSize = 25;
   const [showColumns, setShowColumns] = useState(false);
-  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set(DEFAULT_HIDDEN));
   const [tableActionsOpen, setTableActionsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const exp = useReportExport();
+  // Table Actions closes on an outside click / tap or Escape (mouse-leave alone never fires on touch
+  // screens and leaves keyboard users without a way out).
+  const tableActionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!tableActionsOpen) return;
+    const close = () => { setTableActionsOpen(false); setExportOpen(false); };
+    const onDown = (e: PointerEvent) => { if (!tableActionsRef.current?.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [tableActionsOpen]);
+  // Approve / Reject only for the roles the API allows (admin, finance) — the role the backend enforces.
+  const { data: me } = useQuery<{ identity?: { role?: string } }>('/api/me');
+  const canModerate = canModerateConversions(me?.identity?.role);
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
@@ -230,7 +242,7 @@ export default function ConversionReport() {
     const offerName = offerMap.get(r.offer_id) ?? '';
     const pubName = r.publisher_id ? (pubMap.get(r.publisher_id) ?? '') : '';
     const advName = r.advertiser_id ? (advMap.get(r.advertiser_id) ?? '') : '';
-    return [offerName, pubName, advName, r.transaction_id, r.country, r.country ? countryName(r.country) : null, r.city, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
+    return [offerName, pubName, advName, r.transaction_id, r.conversion_id, r.click_id, r.event_name, r.country, r.country ? countryName(r.country) : null, r.city, r.sub1, r.sub2, r.sub3, r.sub4, r.sub5]
       .some((v) => (v ?? '').toLowerCase().includes(needle));
   }), [pageRows, q, offerMap, pubMap, advMap]);
 
@@ -240,12 +252,14 @@ export default function ConversionReport() {
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: ConvRow) => ({
-    date: formatDate(r.created_at), status: r.status, reason: r.reason ?? DASH,
+    date: formatDate(r.created_at), conversionId: r.conversion_id, clickId: r.click_id ?? DASH,
+    status: r.status, reason: r.reason ?? DASH,
     offer: offerMap.get(r.offer_id) ?? r.offer_id, partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
     eventName: r.event_name ?? DASH, goal: r.goal_name ?? DASH, source: r.source,
     // Exact decimal text (spreadsheet-numeric); `currency` is the one the table formats them in.
-    revenue: r.revenue ?? DASH, payout: r.payout ?? DASH, currency: r.currency || 'USD',
+    // No currency on the conversion → "—" (never an assumed USD).
+    revenue: r.revenue ?? DASH, payout: r.payout ?? DASH, currency: conversionCurrency(r.currency),
     transactionId: r.transaction_id ?? DASH,
     clickDate: r.click_created_at ? formatDate(r.click_created_at) : DASH, delta: formatDelta(r.delta_seconds),
     timezone: zone.tz,
@@ -288,8 +302,9 @@ export default function ConversionReport() {
             <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
               aria-label="Search this page" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <div className="relative">
-            <button type="button" title="Table Actions" aria-label="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
+          <div className="relative" ref={tableActionsRef}>
+            <button type="button" title="Table Actions" aria-label="Table Actions" aria-haspopup="menu" aria-expanded={tableActionsOpen}
+              onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
               <MoreVertical size={15} />
             </button>
@@ -332,6 +347,8 @@ export default function ConversionReport() {
                 <thead>
                   <tr>
                     <th title={zone.tz}>Date <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
+                    {shown.has('Conversion ID') && <th >Conversion ID</th>}
+                    {shown.has('Click ID') && <th title="The click this conversion was attributed to">Click ID</th>}
                     {shown.has('Status') && <th >Status</th>}
                     {shown.has('Reason') && <th >Reason</th>}
                     {shown.has('Offer') && <th >Offer</th>}
@@ -340,8 +357,8 @@ export default function ConversionReport() {
                     {shown.has('Event Name') && <th >Event Name</th>}
                     {shown.has('Goal') && <th >Goal</th>}
                     {shown.has('Source') && <th >Source</th>}
-                    {shown.has('Revenue') && <th className="text-right font-semibold">Revenue</th>}
-                    {shown.has('Payout') && <th className="text-right font-semibold">Payout</th>}
+                    {shown.has('Revenue') && <th className="text-right font-semibold" title="Advertiser revenue recorded on the conversion, in its currency">Revenue</th>}
+                    {shown.has('Payout') && <th className="text-right font-semibold" title="Partner payout recorded on the conversion, in its currency">Payout</th>}
                     {shown.has('Currency') && <th >Currency</th>}
                     {shown.has('Transaction ID') && <th >Transaction ID</th>}
                     {shown.has('Click Date') && <th >Click Date</th>}
@@ -359,13 +376,15 @@ export default function ConversionReport() {
                     {shown.has('Sub3') && <th >Sub3</th>}
                     {shown.has('Sub4') && <th >Sub4</th>}
                     {shown.has('Sub5') && <th >Sub5</th>}
-                    <th>Actions</th>
+                    {canModerate && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.conversion_id} className="hover:bg-accent-subtle/40">
                       <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
+                      {shown.has('Conversion ID') && <td className="font-mono text-tiny">{r.conversion_id}</td>}
+                      {shown.has('Click ID') && <td className="font-mono text-tiny">{r.click_id ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3"><Badge value={r.status} /></td>}
                       {shown.has('Reason') && <td className="px-4 py-3">{r.reason ?? DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
@@ -374,9 +393,9 @@ export default function ConversionReport() {
                       {shown.has('Event Name') && <td className="px-4 py-3">{r.event_name ?? DASH}</td>}
                       {shown.has('Goal') && <td className="px-4 py-3">{r.goal_name ?? DASH}</td>}
                       {shown.has('Source') && <td className="px-4 py-3 capitalize">{r.source}</td>}
-                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{convMoney(r.revenue, r.currency)}</td>}
-                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{convMoney(r.payout, r.currency)}</td>}
-                      {shown.has('Currency') && <td className="px-4 py-3">{r.currency ?? DASH}</td>}
+                      {shown.has('Revenue') && (() => { const m = conversionMoney(r.revenue, r.currency); return <td className="px-4 py-3 text-right tabular-nums" title={m.title}>{m.text}</td>; })()}
+                      {shown.has('Payout') && (() => { const m = conversionMoney(r.payout, r.currency); return <td className="px-4 py-3 text-right tabular-nums" title={m.title}>{m.text}</td>; })()}
+                      {shown.has('Currency') && <td className="px-4 py-3">{conversionCurrency(r.currency)}</td>}
                       {shown.has('Transaction ID') && <td className="font-mono text-tiny">{r.transaction_id ?? DASH}</td>}
                       {shown.has('Click Date') && <td >{r.click_created_at ? formatDate(r.click_created_at) : DASH}</td>}
                       {shown.has('Delta') && <td >{formatDelta(r.delta_seconds)}</td>}
@@ -393,7 +412,7 @@ export default function ConversionReport() {
                       {shown.has('Sub3') && <td className="px-4 py-3">{r.sub3 ?? DASH}</td>}
                       {shown.has('Sub4') && <td className="px-4 py-3">{r.sub4 ?? DASH}</td>}
                       {shown.has('Sub5') && <td className="px-4 py-3">{r.sub5 ?? DASH}</td>}
-                      <td className="px-4 py-3"><ConversionActions row={r} onChanged={refetch} /></td>
+                      {canModerate && <td className="px-4 py-3"><ConversionActions row={r} onChanged={refetch} /></td>}
                     </tr>
                   ))}
                 </tbody>
@@ -404,13 +423,13 @@ export default function ConversionReport() {
            reachable on an emptied later page so Previous still works. */}
         {!error && (pageRows.length > 0 || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
-            <span>Page {page}</span>
+            <span aria-live="polite">Page {page}</span>
             <div className="flex items-center gap-1">
-              <button type="button" title="Previous page" disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))}
+              <button type="button" title="Previous page" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronLeft size={14} />
               </button>
-              <button type="button" title="Next page" disabled={!hasNextPage || loading} onClick={() => setPage(page + 1)}
+              <button type="button" title="Next page" aria-label="Next page" disabled={!hasNextPage || loading} onClick={() => setPage(page + 1)}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronRight size={14} />
               </button>

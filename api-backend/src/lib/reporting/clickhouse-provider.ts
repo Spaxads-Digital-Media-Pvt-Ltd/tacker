@@ -40,6 +40,7 @@ import type {
  ReportingProvider,
  MetricValue,
  MoneyByCurrency,
+ SortOnlyKey,
 } from './types.js';
 import { MONEY_SORT_METRICS, moneyFieldsOf, money4 } from './types.js';
 
@@ -128,9 +129,11 @@ const METRIC_CONV: Record<SideMetric, string> = {
 // ORDER BY expressions over the outer select's aliases. cr/epc order by the derived ratio itself
 // (computed the same way as `derivedExpr` below) — not by clicks.
 // `currencies` / `money_by_currency` are never sort keys (request.ts refuses them as orderBy).
-type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'>;
+type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'> | SortOnlyKey;
 const ORDER_COL: Record<OrderMetric, string> = {
  clicks: 'clicks',
+ // Sort-only: net (valid) clicks — what the admin reports' "Clicks" column shows.
+ valid_clicks: '(clicks - invalid_clicks)',
  unique_clicks: 'unique_clicks',
  conversions: 'conversions',
  cr: 'if(clicks > 0, conversions / clicks, 0)',

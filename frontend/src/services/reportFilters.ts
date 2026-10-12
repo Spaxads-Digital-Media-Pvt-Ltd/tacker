@@ -137,14 +137,6 @@ export const CLICK_COLUMNS: FilterDef[] = [
   { key: 'user_agent', label: 'User Agent', kind: 'column' },
   { key: 'referer', label: 'Referer', kind: 'column' },
   { key: 'is_unique', label: 'Is Unique', kind: 'column' },
-  { key: 'g1', label: 'G1', kind: 'column' },
-  { key: 'g2', label: 'G2', kind: 'column' },
-  { key: 'g3', label: 'G3', kind: 'column' },
-  { key: 'g4', label: 'G4', kind: 'column' },
-  { key: 'g5', label: 'G5', kind: 'column' },
-  { key: 'g6', label: 'G6', kind: 'column' },
-  { key: 'g7', label: 'G7', kind: 'column' },
-  { key: 'g8', label: 'G8', kind: 'column' },
   { key: 'note', label: 'Note', kind: 'column' },
   { key: 'referrer_offer_id', label: 'Referrer Offer ID', kind: 'column' },
   { key: 'idfa', label: 'IDFA', kind: 'column' },
@@ -172,7 +164,7 @@ export const CLICK_COLUMNS: FilterDef[] = [
 
 export const DEFAULT_CLICK_COLUMNS = [
   'click_id', 'offer_id', 'offer_title', 'affiliate_company', 'source',
-  'ip', 'country', 'region', 'city', 'device', 'g1', 'created_date',
+  'ip', 'country', 'region', 'city', 'device', 'created_date',
 ] as const;
 
 export const CONVERSION_COLUMNS: FilterDef[] = [
@@ -201,7 +193,6 @@ export const CONVERSION_COLUMNS: FilterDef[] = [
   { key: 'created', label: 'Created', kind: 'column' },
   { key: 'source', label: 'Source', kind: 'column' },
   { key: 'ip', label: 'IP Address', kind: 'column' },
-  { key: 'g1', label: 'G1', kind: 'column' },
 ];
 
 export const DEFAULT_CONVERSION_COLUMNS = [

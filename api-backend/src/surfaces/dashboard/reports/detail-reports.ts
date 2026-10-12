@@ -280,6 +280,11 @@ export function mountDetailReports(r: Router): void {
         LEFT JOIN cmj ON cmj.k = COALESCE(cl.k, cv.k)`;
     const { rows } = await query<{ k: string; clicks: number; conversions: number; payout: string; revenue: string; profit: string; currencies: string[] | null; money_by_currency: MoneyByCurrency | null }>(sql, params);
 
+    // A group with no offer of its own (partner / advertiser / day / country / device, or no
+    // conversions) is in the network's default currency — never an assumed 'USD'.
+    const net = await query<{ default_currency: string | null }>(`SELECT default_currency FROM networks WHERE id = $1`, [nid]);
+    const networkCurrency = net.rows[0]?.default_currency || 'USD';
+
     // Resolve labels + numeric ref for entity groupings.
     let labels: Map<string, { ref: number; label: string; currency?: string }> = new Map();
     if (f.groupBy === 'offer') {
@@ -293,6 +298,8 @@ export function mountDetailReports(r: Router): void {
       labels = new Map(l.rows.map((x) => [x.id, { ref: Number(x.ref), label: x.name }]));
     }
 
+    // Deterministic order (the table and the export both follow it): days chronologically; any other
+    // grouping by clicks, then label, then key — equal-click groups no longer come back shuffled.
     const out = rows.map((row) => {
       const meta = labels.get(row.k);
       const clicks = row.clicks, conversions = row.conversions;
@@ -300,7 +307,7 @@ export function mountDetailReports(r: Router): void {
         key: row.k,
         id: meta ? meta.ref : null,
         label: meta ? meta.label : (row.k === '~none~' ? '(none)' : row.k),
-        currency: meta?.currency ?? 'USD',
+        currency: meta?.currency ?? networkCurrency,
         clicks, conversions,
         payout: row.payout, revenue: row.revenue, profit: row.profit,
         currencies: row.currencies ?? [],
@@ -308,7 +315,9 @@ export function mountDetailReports(r: Router): void {
         cr: clicks > 0 ? Number(((conversions / clicks) * 100).toFixed(2)) : 0,
         epc: clicks > 0 ? Number((Number(row.payout) / clicks).toFixed(4)) : 0,
       };
-    }).sort((a, b) => b.clicks - a.clicks);
+    }).sort((a, b) => (f.groupBy === 'day'
+      ? a.key.localeCompare(b.key)
+      : b.clicks - a.clicks || a.label.localeCompare(b.label) || a.key.localeCompare(b.key)));
 
     // Money stays exact decimal text (never float sums).
     const totals = out.reduce((t, r) => ({
@@ -448,11 +457,17 @@ export function mountDetailReports(r: Router): void {
     const { rows } = await query<{ referrer: string | null }>(
       `SELECT click_id, created_at, offer_id, publisher_id, smart_link_id, host(ip) AS ip, country, region, city, isp,
               device, os, browser, is_unique, fraud_score, fraud_flags, sub1, sub2, sub3, sub4, sub5,
-              referrer, user_agent, currency, source_id, fbclid, gclid,
+              referrer, user_agent, currency,
+              -- Blank = not present: a '' stored by an earlier build reads as NULL (data unchanged).
+              CASE WHEN btrim(source_id) = '' THEN NULL ELSE source_id END AS source_id,
+              CASE WHEN btrim(fbclid) = '' THEN NULL ELSE fbclid END AS fbclid,
+              CASE WHEN btrim(gclid) = '' THEN NULL ELSE gclid END AS gclid,
               resolved_payout::text AS resolved_payout, resolved_revenue::text AS resolved_revenue,
               EXISTS(SELECT 1 FROM conversions cv WHERE cv.click_id = clicks.click_id AND cv.network_id = clicks.network_id) AS converted
          FROM clicks WHERE ${clickWhere}
-        ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        -- click_id breaks created_at ties: offset paging (the table and the paged export) must see one
+        -- fixed order, or clicks sharing a timestamp repeat on one page and vanish from the next.
+        ORDER BY created_at DESC, click_id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
     // The referring page's URL can carry its own tokens — same redaction as postback URLs.
@@ -494,7 +509,8 @@ export function mountDetailReports(r: Router): void {
          LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id
          LEFT JOIN offer_goals og ON og.id = v.goal_id AND og.network_id = v.network_id
         ${clickWhere ? `WHERE ${clickWhere}` : ''}
-        ORDER BY v.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        -- conversion_id breaks created_at ties so offset pages (table + paged export) never repeat or skip a row.
+        ORDER BY v.created_at DESC, v.conversion_id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
     // raw_params holds every inbound postback param — incl. the advertiser's secure_code, which

@@ -51,12 +51,33 @@ import { flexReportPath } from '../../lib/flexReportLink';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
+import { exactMoney, offerDisplay } from '../../lib/offerReport';
 
 const ALL_COLUMNS = [
   'Clicks', 'Uniq. Clicks', 'Dup. Clicks', 'Invalid Clicks', 'Total CV', 'CV', 'Throttle', 'Events',
   'CVR', 'CPC', 'CPA', 'Revenue', 'Payout', 'Profit', 'Margin', 'Fraud',
 ] as const;
-type OrderMetric = 'clicks' | 'unique_clicks' | 'invalid_clicks' | 'conversions' | 'total_conversions' | 'payout' | 'revenue' | 'margin' | 'avg_fraud_score';
+// `valid_clicks` (sort-only, API) = clicks − invalid clicks: the number the "Clicks" column shows.
+// `clicks` (gross) stays accepted for older saved reports / links.
+type OrderMetric = 'valid_clicks' | 'clicks' | 'unique_clicks' | 'invalid_clicks' | 'conversions' | 'total_conversions' | 'payout' | 'revenue' | 'margin' | 'avg_fraud_score';
+
+/** Column header tooltips — what each count / ratio is built from (lib/reportMath deriveRow, reporting/postgres). */
+const HEADER_HINT: Partial<Record<string, string>> = {
+  'Clicks': 'Clicks net of invalid (fraud-flagged) clicks',
+  'Uniq. Clicks': 'First click from a visitor on the offer (gross)',
+  'Dup. Clicks': 'Gross clicks − unique clicks',
+  'Invalid Clicks': 'Clicks with a fraud flag',
+  'Total CV': 'Conversions of every status (approved, pending, rejected)',
+  'CV': 'Approved conversions — the ones payout and revenue are counted from',
+  'CVR': 'CV (approved) ÷ Clicks (net of invalid)',
+  'CPC': 'Payout ÷ Clicks (net of invalid)',
+  'CPA': 'Payout ÷ CV (approved)',
+  'Revenue': 'Revenue of approved conversions, in the row\'s currency',
+  'Payout': 'Payout of approved conversions, in the row\'s currency',
+  'Profit': 'Revenue − Payout (approved conversions)',
+  'Margin': 'Profit ÷ Revenue',
+  'Fraud': 'Average click fraud score (0–100)',
+};
 
 function metricCells(shown: Set<string>, d: DerivedRow, rc: RowCurrency) {
   return (
@@ -103,16 +124,24 @@ function ExpandedPartnerRows({ offerId, colSpanBefore, shown, dimParams, from, t
     const id = r.dimensions['publisher'] ?? null;
     return {
       publisherId: id,
-      publisherName: id ? (publishers?.find((p) => p.id === id)?.name ?? id.slice(0, 8)) : NO_PARTNER,
+      // A partner missing from the list shows its full id (an 8-char prefix is ambiguous).
+      publisherName: id ? (publishers?.find((p) => p.id === id)?.name ?? `Unknown partner (${id})`) : NO_PARTNER,
       derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency),
     };
   }), [data, publishers, currency]);
 
   if (loading) return <tr><td colSpan={colSpanBefore + ALL_COLUMNS.length} className="px-4 py-3 text-center"><Spinner /></td></tr>;
   if (!rows.length) return <tr><td colSpan={colSpanBefore + ALL_COLUMNS.length} className="px-4 py-3 text-small text-fg-muted">No partner activity for this offer in the selected period.</td></tr>;
+  // The drill-down loads one page of partners; say so when the offer has more (never a silent cut-off).
+  const more = (data?.total ?? rows.length) - rows.length;
 
   return (
     <>
+      {more > 0 && (
+        <tr><td colSpan={colSpanBefore + ALL_COLUMNS.length} className="py-1.5 pl-10 pr-4 text-tiny text-fg-muted">
+          Showing the top {rows.length} of {data?.total} partners for this offer — filter by Partner to see the others.
+        </td></tr>
+      )}
       {rows.map((r) => (
         <tr key={r.publisherId ?? '__no-partner__'} className="bg-page/60 text-small text-fg-secondary">
           <td className={`py-2 pl-10 pr-4${r.publisherId ? '' : ' italic'}`}>{r.publisherName}</td>
@@ -273,9 +302,12 @@ export default function OfferReport() {
   const tableActionsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!tableActionsOpen) return;
-    const onDown = (e: MouseEvent) => { if (!tableActionsRef.current?.contains(e.target as Node)) { setTableActionsOpen(false); setExportOpen(false); } };
+    const close = () => { setTableActionsOpen(false); setExportOpen(false); };
+    const onDown = (e: MouseEvent) => { if (!tableActionsRef.current?.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [tableActionsOpen]);
 
   // The reference's page-level kebab also offers Schedule Report / Request Report / Share Offer(s)
@@ -292,9 +324,12 @@ export default function OfferReport() {
   const pageMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!pageMenuOpen) return;
-    const onDown = (e: MouseEvent) => { if (!pageMenuRef.current?.contains(e.target as Node)) { setPageMenuOpen(false); setLoadOpen(false); } };
+    const close = () => { setPageMenuOpen(false); setLoadOpen(false); };
+    const onDown = (e: MouseEvent) => { if (!pageMenuRef.current?.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [pageMenuOpen]);
 
   const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
@@ -409,7 +444,15 @@ export default function OfferReport() {
   const toRows = useCallback((src: AggRow[]) => src.map((r) => {
     const id = r.dimensions['offer'] ?? null;
     const offer = id ? offers?.find((o) => o.id === id) : undefined;
-    return { offerId: id, offerName: id ? (offer?.name ?? id.slice(0, 8)) : NO_OFFER, offerStatus: offer?.status, offerVisibility: offer?.visibility, derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) };
+    // Until the offer list has loaded an id can't be called "unknown" yet — show the full id meanwhile.
+    const d = id && !offers ? { name: id, offerId: id, known: false, title: undefined } : offerDisplay(id, offer, NO_OFFER);
+    return {
+      offerId: id, offerName: d.name, offerRef: d.offerId, offerKnown: d.known, offerTitle: d.title,
+      offerStatus: offer?.status, offerVisibility: offer?.visibility,
+      // The API's exact money text (numeric(14,4)) — exports use it as recorded.
+      metrics: r.metrics,
+      derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency),
+    };
   }), [offers, currency]);
   const loadedRows = useMemo(() => toRows(data?.rows ?? []), [data, toRows]);
   // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
@@ -436,10 +479,12 @@ export default function OfferReport() {
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const exportRow = (r: ReturnType<typeof toRows>[number]) => ({
-    offer: r.offerName, clicks: r.derived.clicks, uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks,
+    offerId: r.offerRef || DASH, offer: r.offerName,
+    clicks: r.derived.clicks, uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks,
     invalidClicks: r.derived.invalidClicks, totalCv: r.derived.totalCv, cv: r.derived.cv, throttle: DASH, events: DASH,
     cvr: pct(r.derived.cvr), cpc: r.derived.cpc.toFixed(2), cpa: r.derived.cpa.toFixed(2),
-    revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2), profit: r.derived.margin.toFixed(2),
+    // Recorded money exactly as the API summed it (numeric text) — not a float re-rounded to 2 places.
+    revenue: exactMoney(r.metrics, 'revenue'), payout: exactMoney(r.metrics, 'payout'), profit: exactMoney(r.metrics, 'margin'),
     margin: pct(r.derived.marginPct), fraud: r.derived.fraudScore.toFixed(0),
   });
   // Export every row matching the applied filters (all pages), not just the visible page — the
@@ -462,9 +507,17 @@ export default function OfferReport() {
   };
 
   const sortIcon = (metric: OrderMetric) => (orderBy === metric ? (orderDir === 'desc' ? '↓' : '↑') : '');
+  // A real button (keyboard / screen reader) inside the header; aria-sort states the applied order.
   const sortableHeader = (label: string, metric: OrderMetric) => (
-    <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort(metric)}>{label} {sortIcon(metric)}</th>
+    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold" title={HEADER_HINT[label]}
+      aria-sort={orderBy === metric ? (orderDir === 'desc' ? 'descending' : 'ascending') : 'none'}>
+      <button type="button" className="inline-flex items-center gap-1 font-semibold uppercase hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        onClick={() => toggleSort(metric)} aria-label={`Sort by ${label}`}>
+        {label} <span aria-hidden>{sortIcon(metric)}</span>
+      </button>
+    </th>
   );
+  const plainHeader = (label: string) => <th className="text-right font-semibold" title={HEADER_HINT[label]}>{label}</th>;
 
   const saveReport = (name: string) => {
     const config: SavedConfig = { from: appliedFrom, to: appliedTo, filters, exclusions, metricFilters, ignoreFailTraffic, orderBy, orderDir, hiddenColumns: [...hiddenColumns] };
@@ -507,7 +560,7 @@ export default function OfferReport() {
           </FiltersButton>
           <div className="flex items-center gap-3">
             <div ref={pageMenuRef} className="relative">
-              <button type="button" title="Page Actions" onClick={() => setPageMenuOpen((o) => !o)}
+              <button type="button" title="Page Actions" aria-label="Page Actions" aria-haspopup="menu" aria-expanded={pageMenuOpen} onClick={() => setPageMenuOpen((o) => !o)}
                 className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
                 <MoreVertical size={15} />
               </button>
@@ -580,7 +633,7 @@ export default function OfferReport() {
               aria-label="Search this page" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <div ref={tableActionsRef} className="relative">
-            <button type="button" title="Table Actions" aria-label="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
+            <button type="button" title="Table Actions" aria-label="Table Actions" aria-haspopup="menu" aria-expanded={tableActionsOpen} onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
               <MoreVertical size={15} />
             </button>
@@ -624,21 +677,22 @@ export default function OfferReport() {
                     <th >
                       Offer<br /><span className="text-[10px] normal-case text-fg-muted">↳ Partner</span>
                     </th>
-                    {shown.has('Clicks') && sortableHeader('Clicks', 'clicks')}
+                    {/* Sorting "Clicks" orders by the net clicks the column shows (valid_clicks), not gross. */}
+                    {shown.has('Clicks') && sortableHeader('Clicks', 'valid_clicks')}
                     {shown.has('Uniq. Clicks') && sortableHeader('Uniq. Clicks', 'unique_clicks')}
-                    {shown.has('Dup. Clicks') && <th className="text-right font-semibold">Dup. Clicks</th>}
+                    {shown.has('Dup. Clicks') && plainHeader('Dup. Clicks')}
                     {shown.has('Invalid Clicks') && sortableHeader('Invalid Clicks', 'invalid_clicks')}
                     {shown.has('Total CV') && sortableHeader('Total CV', 'total_conversions')}
                     {shown.has('CV') && sortableHeader('CV', 'conversions')}
-                    {shown.has('Throttle') && <th className="text-right font-semibold">Throttle</th>}
-                    {shown.has('Events') && <th className="text-right font-semibold">Events</th>}
-                    {shown.has('CVR') && <th className="text-right font-semibold">CVR</th>}
-                    {shown.has('CPC') && <th className="text-right font-semibold">CPC</th>}
-                    {shown.has('CPA') && <th className="text-right font-semibold">CPA</th>}
+                    {shown.has('Throttle') && <th className="text-right font-semibold" title="Not tracked in this app">Throttle</th>}
+                    {shown.has('Events') && <th className="text-right font-semibold" title="Not tracked in this app">Events</th>}
+                    {shown.has('CVR') && plainHeader('CVR')}
+                    {shown.has('CPC') && plainHeader('CPC')}
+                    {shown.has('CPA') && plainHeader('CPA')}
                     {shown.has('Revenue') && sortableHeader('Revenue', 'revenue')}
                     {shown.has('Payout') && sortableHeader('Payout', 'payout')}
                     {shown.has('Profit') && sortableHeader('Profit', 'margin')}
-                    {shown.has('Margin') && <th className="text-right font-semibold">Margin</th>}
+                    {shown.has('Margin') && plainHeader('Margin')}
                     {shown.has('Fraud') && sortableHeader('Fraud', 'avg_fraud_score')}
                     <th className="w-9" />
                   </tr>
@@ -659,10 +713,12 @@ export default function OfferReport() {
                       <Fragment key={id}>
                         <tr>
                           <td >
-                            <button type="button" onClick={() => toggleExpand(id)} className="inline-flex items-center gap-1.5 text-fg hover:text-accent-text">
-                              <ChevronRight size={13} className={`transition-transform ${expanded.has(id) ? 'rotate-90' : ''}`} />
-                              <span className={`h-2 w-2 rounded-full ${r.offerStatus === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />
-                              {r.offerName}
+                            <button type="button" onClick={() => toggleExpand(id)} className="inline-flex items-center gap-1.5 text-left text-fg hover:text-accent-text"
+                              title={r.offerTitle} aria-expanded={expanded.has(id)} aria-label={`${expanded.has(id) ? 'Hide' : 'Show'} partners for ${r.offerName}`}>
+                              <ChevronRight size={13} className={`shrink-0 transition-transform ${expanded.has(id) ? 'rotate-90' : ''}`} />
+                              <span className={`h-2 w-2 shrink-0 rounded-full ${r.offerStatus === 'active' ? 'bg-success' : 'bg-fg-muted'}`} />
+                              {r.offerKnown && <span className="font-mono text-tiny text-fg-muted">({r.offerRef})</span>}
+                              <span className={r.offerKnown ? undefined : 'break-all italic text-fg-secondary'}>{r.offerName}</span>
                             </button>
                           </td>
                           {metricCells(shown, r.derived, r.rc)}

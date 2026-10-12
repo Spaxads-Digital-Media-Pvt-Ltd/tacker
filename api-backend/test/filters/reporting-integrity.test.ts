@@ -152,6 +152,10 @@ describe('/conversions redacts inbound security codes', () => {
     expect(res.body.data[0].raw_params).toEqual({ secure_code: REDACTED, Security_Code: REDACTED, click_id: 'k1' });
     expect(res.body.data[0].conversion_id).toBe('c1');
   });
+  it('orders by created_at then conversion_id, so offset pages never repeat or skip a conversion', async () => {
+    await request(reportsApp()).get('/conversions?limit=25&offset=50');
+    expect(calls()[0]!.sql).toMatch(/ORDER BY v\.created_at DESC, v\.conversion_id DESC LIMIT \$\d+ OFFSET \$\d+/);
+  });
 });
 
 // ── /grouped strict ──
@@ -405,7 +409,9 @@ describe('Click Report filters: clickIds, ip, isUnique on /clicks and /grouped',
     const { sql, params } = clicksSql();
     expect(params).toEqual([NET, 100, 0]);
     expect(sql).not.toMatch(/click_id = ANY|::inet/);
-    expect(sql).toMatch(/referrer, user_agent, currency, source_id, fbclid, gclid,\s+resolved_payout::text AS resolved_payout, resolved_revenue::text AS resolved_revenue/);
+    expect(sql).toMatch(/referrer, user_agent, currency,[\s\S]*resolved_payout::text AS resolved_payout, resolved_revenue::text AS resolved_revenue/);
+    // A blank stored value (an earlier build stored '') is returned as NULL — the data is not rewritten.
+    for (const col of ['source_id', 'fbclid', 'gclid']) expect(sql).toContain(`CASE WHEN btrim(${col}) = '' THEN NULL ELSE ${col} END AS ${col}`);
     expect(sql).not.toMatch(/source_id = \$|fbclid = \$|gclid = \$/);
   });
 
@@ -417,7 +423,8 @@ describe('Click Report filters: clickIds, ip, isUnique on /clicks and /grouped',
       expect(clicksSql().sql, k).toContain(`AND ${col} = $2`);
       expect(clicksSql().params, k).toEqual([NET, 'v-1', 100, 0]);
     }
-    for (const bad of ['gclid=', `sourceId=${'x'.repeat(501)}`]) {
+    // Blank / whitespace-only filters are rejected (a blank value is "not present", never matched).
+    for (const bad of ['gclid=', 'gclid=%20%20', 'fbclid=%09', 'sourceId=%20', `sourceId=${'x'.repeat(501)}`]) {
       expect((await request(reportsApp()).get(`/clicks?${bad}`)).status, bad).toBe(422);
     }
   });
@@ -493,6 +500,38 @@ describe('Click Report filters: clickIds, ip, isUnique on /clicks and /grouped',
     expect(cv).toContain('LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id');
     expect(cv).toContain('k.source_id = $5 AND k.fbclid = $6 AND k.gclid = $7');
     expect(params).toEqual([NET, 's1', 'f1', 'g1', 's1', 'f1', 'g1']);
+  });
+
+  it('/clicks: created_at ties are broken by click_id, so offset pages never repeat or skip a click', async () => {
+    await request(reportsApp()).get('/clicks?limit=10&offset=20');
+    expect(calls().find((x) => /FROM clicks WHERE/.test(x.sql))!.sql).toMatch(/ORDER BY created_at DESC, click_id DESC LIMIT \$\d+ OFFSET \$\d+/);
+  });
+
+  describe('/grouped order and currency', () => {
+    const grouped = (rows: Record<string, unknown>[], defaultCurrency: string | null = 'EUR') => queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH cl AS')) return { rows: rows.map((r) => ({ conversions: 0, payout: '0', revenue: '0', profit: '0', currencies: [], money_by_currency: null, ...r })) };
+      if (/FROM networks WHERE id = \$1/.test(sql)) return { rows: defaultCurrency == null ? [] : [{ default_currency: defaultCurrency }] };
+      return { rows: [] };
+    });
+    const keys = (res: { body: { data: { rows: { key: string }[] } } }) => res.body.data.rows.map((r) => r.key);
+
+    it('Day groups are chronological (not by clicks)', async () => {
+      grouped([{ k: '2026-10-03', clicks: 9 }, { k: '2026-10-01', clicks: 1 }, { k: '2026-10-02', clicks: 5 }]);
+      expect(keys(await request(reportsApp()).get('/grouped?groupBy=day'))).toEqual(['2026-10-01', '2026-10-02', '2026-10-03']);
+    });
+    it('other groupings: clicks desc, then label, then key — stable for equal clicks', async () => {
+      grouped([{ k: 'US', clicks: 3 }, { k: 'DE', clicks: 3 }, { k: 'IN', clicks: 7 }, { k: 'AT', clicks: 3 }]);
+      expect(keys(await request(reportsApp()).get('/grouped?groupBy=country'))).toEqual(['IN', 'AT', 'DE', 'US']);
+    });
+    it('a group without an offer currency falls back to the network default currency, not USD', async () => {
+      grouped([{ k: 'mobile', clicks: 2 }]);
+      const res = await request(reportsApp()).get('/grouped?groupBy=device');
+      expect(res.body.data.rows[0].currency).toBe('EUR');
+      // The lookup is scoped to the caller's network.
+      expect(calls().find((x) => /FROM networks WHERE id = \$1/.test(x.sql))!.params).toEqual([NET]);
+      grouped([{ k: 'mobile', clicks: 2 }], null);
+      expect((await request(reportsApp()).get('/grouped?groupBy=device')).body.data.rows[0].currency).toBe('USD');
+    });
   });
 
   it('/grouped absent → no click join added for these filters', async () => {

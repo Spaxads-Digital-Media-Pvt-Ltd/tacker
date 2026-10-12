@@ -112,4 +112,33 @@ describe('PostgresReportingProvider SQL', () => {
     const { sql } = await run({}, { orderBy: 'cr', orderDir: 'desc' });
     expect(sql).toContain('ORDER BY s.conversions::numeric / NULLIF(s.clicks, 0) DESC NULLS LAST');
   });
+
+  it('orderBy valid_clicks sorts by net clicks (clicks − invalid) — the admin reports\' "Clicks" column — with the group-key tie-break', async () => {
+    const { sql } = await run({}, { orderBy: 'valid_clicks', orderDir: 'desc' });
+    expect(sql).toMatch(/ORDER BY \(s\.clicks - s\.invalid_clicks\) DESC NULLS LAST, s\.d0::text LIMIT/);
+  });
+});
+
+describe('sort-only key valid_clicks', () => {
+  const req = (audience: 'admin' | 'network' | 'publisher' | 'advertiser', orderBy: string) => {
+    const r = parse({ groupBy: 'offer', orderBy });
+    if (!r.success) throw new Error('parse failed');
+    return buildReportRequest(NET, r.data, audience);
+  };
+  it('is accepted for admin / network (they see clicks and invalid clicks) and is not a returned metric', () => {
+    for (const a of ['admin', 'network'] as const) {
+      const r = req(a, 'valid_clicks');
+      expect(r.orderBy).toBe('valid_clicks');
+      expect(r.metrics).not.toContain('valid_clicks');
+    }
+  });
+  it('is dropped for publisher / advertiser audiences (invalid clicks are not theirs to see)', () => {
+    expect(req('publisher', 'valid_clicks').orderBy).toBeUndefined();
+    expect(req('advertiser', 'valid_clicks').orderBy).toBeUndefined();
+  });
+  it('unknown sort keys are still ignored, and existing metric sorts are unchanged', () => {
+    expect(req('admin', 'net_clicks').orderBy).toBeUndefined();
+    expect(req('admin', 'clicks').orderBy).toBe('clicks');
+    expect(req('admin', 'conversions').orderBy).toBe('conversions');
+  });
 });

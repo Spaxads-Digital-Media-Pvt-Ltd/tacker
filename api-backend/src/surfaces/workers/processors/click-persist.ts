@@ -12,6 +12,7 @@ import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 import { QUEUE } from '../queues.js';
 import { ipqsLookup } from '../../../lib/integrations/ipqs.js';
 import type { ClickJob } from '../../tracking/click-job.js';
+import { blankToNull } from '../../tracking/click-params.js';
 
 const log = surfaceLogger('workers');
 
@@ -41,7 +42,8 @@ async function persist(job: ClickJob): Promise<void> {
  job.country, job.region, job.city, job.isp, job.device, job.os, job.browser, job.referrer, job.userAgent,
  job.sub1, job.sub2, job.sub3, job.sub4, job.sub5, job.isUnique, fraudScore, fraudFlags,
  job.resolvedPayout, job.resolvedRevenue, job.currency, job.smartLinkId,
- job.sourceId ?? null, job.fbclid ?? null, job.gclid ?? null,
+ // Blank → NULL again here: a job queued by an older tracking build may carry ''.
+ blankToNull(job.sourceId), blankToNull(job.fbclid), blankToNull(job.gclid),
  ],
  );
 

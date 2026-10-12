@@ -245,7 +245,6 @@ export const CLICK_FIELDS: readonly ClickField[] = [
   { key: 'userAgent', label: 'User Agent', support: 'stored' },
   { key: 'referer', label: 'Referer', support: 'stored', hint: 'Referring page URL (credentials in it are redacted)' },
   { key: 'isUnique', label: 'Is Unique', support: 'stored' },
-  ...(['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8'] as const).map((g) => ({ key: g.toLowerCase(), label: g, support: 'unavailable' as const, hint: 'Not tracked — the click URL carries sub1–sub5 only; no G1–G8 parameters exist' })),
   { key: 'note', label: 'Note', support: 'unavailable', hint: 'Not tracked — clicks have no note and nothing writes one' },
   { key: 'referrerOfferId', label: 'Referrer Offer ID', support: 'unavailable', hint: 'Not tracked — a click forwarded from another offer does not record that offer' },
   { key: 'gaid', label: 'GAID', support: 'unavailable', hint: NO_DEVICE_ID },
@@ -340,6 +339,39 @@ export function writeFieldsToUrl(next: URLSearchParams, fields: Iterable<string>
   const dflt = visibleColumns(DEFAULT_FIELDS);
   if (vis.length !== dflt.length || vis.some((k, i) => k !== dflt[i])) next.set('cols', vis.join(','));
 }
+
+// ── Fields list layout (modal) ────────────────────────────────────────────────────────────────
+/**
+ * The modal's field list split into the selectable fields (shown) and the untracked ones (behind the
+ * collapsed "Show untracked fields" toggle). Display only — catalog order is kept within each part, so
+ * Sub1–Sub5 stay last among the tracked fields; selection / URL / export logic never use this split.
+ */
+export function partitionFields(fields: readonly ClickField[]): { tracked: ClickField[]; untracked: ClickField[] } {
+  return {
+    tracked: fields.filter((f) => f.support !== 'unavailable'),
+    untracked: fields.filter((f) => f.support === 'unavailable'),
+  };
+}
+
+/** Text of the untracked-fields toggle, with the count of untracked fields it reveals. */
+export function untrackedToggleLabel(count: number, open: boolean): string {
+  return `${open ? 'Hide' : 'Show'} untracked fields (${count})`;
+}
+
+// ── Group By mode ──────────────────────────────────────────────────────────────────────────────
+/**
+ * Header for the grouped table's dimension column. Day groups are UTC calendar days (the API buckets
+ * by `date_trunc('day', created_at, 'UTC')`, and the date range is UTC days too) — the label says so,
+ * since the individual-clicks mode re-formats times into the selected display zone.
+ */
+export function groupDimensionHeader(groupBy: string, label: string): { label: string; title?: string } {
+  return groupBy === 'day'
+    ? { label: `${label} (UTC)`, title: 'Each row is one UTC calendar day — the display timezone does not re-bucket groups' }
+    : { label };
+}
+
+/** Grouped money and conversions count APPROVED conversions only; Converted (individual clicks) is any status. */
+export const GROUPED_CONVERSIONS_NOTE = 'Approved conversions of these clicks (pending and rejected are not counted)';
 
 /** One export record: the visible columns, in table order, keyed by their labels. */
 export function exportRecord(columns: readonly string[], valueOf: (key: string) => string | number): Record<string, string | number> {

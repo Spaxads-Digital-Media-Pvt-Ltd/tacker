@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
-  CLICK_FIELDS, DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, MAX_CLICK_IDS, TABLE_ORDER, appliedFilterCount, chipValues,
+  CLICK_FIELDS, DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, GROUPED_CONVERSIONS_NOTE, MAX_CLICK_IDS, groupDimensionHeader, partitionFields, untrackedToggleLabel, TABLE_ORDER, appliedFilterCount, chipValues,
   clickIdsError, draftErrors, draftFromApplied, exportRecord, fieldByKey, fieldsFromUrl, filtersFromDraft,
   filtersFromUrl, ipError, isIpAddress, isSelectable, parseClickIds, searchFields, selectAllState, setAllFields,
   toApiParams, toggleField, visibleColumns, withoutChip, writeFieldsToUrl, writeFiltersToUrl, type ClickFilters,
@@ -130,7 +130,7 @@ describe('URL round-trip (reload / shared link)', () => {
 
 describe('Click Report Fields', () => {
   it('lists every reference field; only real ones are selectable', () => {
-    for (const l of ['Click ID', 'Offer ID', 'Offer Title', 'Partner Company', 'G1', 'G8', 'GAID', 'IDFA', 'Final URL', 'Click URL', 'Created Date']) {
+    for (const l of ['Click ID', 'Offer ID', 'Offer Title', 'Partner Company', 'GAID', 'IDFA', 'Final URL', 'Click URL', 'Created Date']) {
       assert.ok(CLICK_FIELDS.some((f) => f.label === l), l);
     }
     for (const k of ['g1', 'gaid', 'idfa', 'landingPageId', 'proxy', 'finalUrl', 'advertiserCompany']) assert.strictEqual(isSelectable(k), false, k);
@@ -139,6 +139,15 @@ describe('Click Report Fields', () => {
     // Every field still disabled says what is missing — never a generic "not tracked".
     for (const f of CLICK_FIELDS.filter((x) => x.support === 'unavailable')) assert.ok(f.hint && f.hint.length > 30, f.key);
     for (const k of DEFAULT_FIELDS) assert.ok(isSelectable(k), k);
+  });
+  it('tracking parameters are Sub1–Sub5 only — no G1–G8 placeholders (the click URL has no such params)', () => {
+    for (let n = 1; n <= 8; n++) {
+      assert.strictEqual(fieldByKey(`g${n}`), undefined, `g${n}`);
+      assert.ok(!CLICK_FIELDS.some((f) => f.label === `G${n}`), `G${n}`);
+    }
+    for (let n = 1; n <= 5; n++) assert.strictEqual(isSelectable(`sub${n}`), true, `sub${n}`);
+    // An old shared link with cols=g1 just drops the unknown key.
+    assert.deepStrictEqual(fieldsFromUrl(new URLSearchParams({ cols: 'g1,sub1,clickId' })), visibleColumns(['sub1', 'clickId']));
   });
   it('search filters the list case-insensitively', () => {
     assert.deepStrictEqual(searchFields('click id').map((f) => f.label), ['Click ID', 'FB Click ID', 'Google Click ID']);
@@ -198,5 +207,59 @@ describe('chips', () => {
     assert.strictEqual(withoutChip(f, 'visibility', 'unique').visibility, 'all');
     assert.strictEqual(withoutChip(f, 'offer', UUID).offer, '');
     assert.deepStrictEqual(chipValues(EMPTY_CLICK_FILTERS), {});
+  });
+});
+
+describe('Group By mode labels', () => {
+  it('Day groups are labelled as UTC days (the API buckets by UTC day); other dimensions keep their label', () => {
+    assert.deepStrictEqual(groupDimensionHeader('day', 'Day').label, 'Day (UTC)');
+    assert.match(groupDimensionHeader('day', 'Day').title ?? '', /UTC calendar day/);
+    for (const [g, l] of [['offer', 'Offer'], ['publisher', 'Partner'], ['country', 'Country'], ['device', 'Device']] as const) {
+      assert.deepStrictEqual(groupDimensionHeader(g, l), { label: l });
+    }
+  });
+  it('grouped conversions / money are documented as approved-only (Converted is any status)', () => {
+    assert.match(GROUPED_CONVERSIONS_NOTE, /Approved conversions/);
+    assert.match(GROUPED_CONVERSIONS_NOTE, /pending and rejected are not counted/);
+  });
+});
+
+describe('fields list layout — untracked fields behind a collapsed toggle (display only)', () => {
+  const { tracked, untracked } = partitionFields(CLICK_FIELDS);
+  it('splits every field exactly once: tracked = selectable, untracked = disabled', () => {
+    assert.strictEqual(tracked.length + untracked.length, CLICK_FIELDS.length);
+    assert.ok(tracked.every((f) => isSelectable(f.key)));
+    assert.ok(untracked.every((f) => f.support === 'unavailable' && !isSelectable(f.key)));
+    assert.ok(untracked.length > 0);
+  });
+  it('keeps catalog order within each part — Sub1–Sub5 stay last among the tracked fields', () => {
+    assert.deepStrictEqual(tracked.map((f) => f.key), CLICK_FIELDS.filter((f) => f.support !== 'unavailable').map((f) => f.key));
+    assert.deepStrictEqual(tracked.slice(-5).map((f) => f.key), ['sub1', 'sub2', 'sub3', 'sub4', 'sub5']);
+  });
+  it('Source / FB Click ID / Google Click ID are tracked (selectable) and unchecked by default', () => {
+    for (const k of ['source', 'fbClickId', 'googleClickId']) {
+      assert.ok(tracked.some((f) => f.key === k), k);
+      assert.ok(!DEFAULT_FIELDS.includes(k), k);
+    }
+  });
+  it('untracked fields keep their missing-dependency hints', () => {
+    for (const f of untracked) assert.ok(f.hint && f.hint.length > 30, f.key);
+  });
+  it('the toggle label says Show / Hide and how many untracked fields it holds', () => {
+    assert.strictEqual(untrackedToggleLabel(untracked.length, false), `Show untracked fields (${untracked.length})`);
+    assert.strictEqual(untrackedToggleLabel(3, true), 'Hide untracked fields (3)');
+  });
+  it('follows the field search (the count is of the matching untracked fields)', () => {
+    const m = partitionFields(searchFields('id'));
+    assert.ok(m.untracked.some((f) => f.key === 'gaid') && m.tracked.some((f) => f.key === 'clickId'));
+    assert.strictEqual(m.tracked.length + m.untracked.length, searchFields('id').length);
+  });
+  it('selection, Select All and URL columns are unaffected by the split', () => {
+    const ids = searchFields('');
+    assert.deepStrictEqual(setAllFields([], ids, true).sort(), tracked.map((f) => f.key).sort()); // Select All = every tracked field
+    const prefs = ['createdDate', 'source', 'sub5', 'ip'];
+    const sp = new URLSearchParams(); writeFieldsToUrl(sp, prefs);
+    assert.deepStrictEqual(fieldsFromUrl(sp), visibleColumns(prefs));
+    assert.deepStrictEqual(fieldsFromUrl(new URLSearchParams({ cols: 'gaid,clickId' })), ['clickId']); // old links: untracked keys dropped as before
   });
 });

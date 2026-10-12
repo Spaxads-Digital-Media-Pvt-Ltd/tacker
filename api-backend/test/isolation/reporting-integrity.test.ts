@@ -91,6 +91,163 @@ d('reporting integrity (live DB)', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/TOPSECRET|ALSOSECRET/);
   });
 
+  describe('Offer Report (/api/reports?groupBy=offer)', () => {
+    const mkOffer = async (name: string) => (await query<{ id: string }>(
+      `INSERT INTO offers (network_id, advertiser_id, name, status, destination_url) VALUES ($1, $2, $3, 'active', 'https://example.com/{click_id}') RETURNING id`,
+      [fx.networkA, fx.advA, name])).rows[0]!.id;
+    const clicks = async (offerId: string, n: number, flagged: boolean) => {
+      for (let i = 0; i < n; i++) {
+        await query(`INSERT INTO clicks (click_id, network_id, offer_id, created_at, is_unique, fraud_flags) VALUES ($1, $2, $3, '2026-05-05T10:00:00Z', true, $4)`,
+          [uid(), fx.networkA, offerId, flagged ? ['datacenter'] : []]);
+      }
+    };
+    const convAt = (offerId: string, status: string, payout: string, revenue: string) => query(
+      `INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, payout, revenue, currency, status, source, created_at)
+       VALUES ($1, $2, $1, $3, $4, $5, 'USD', $6, 'postback', '2026-05-05T11:00:00Z')`, [uid(), fx.networkA, offerId, payout, revenue, status]);
+    let gross: string; let net: string;
+    beforeAll(async () => {
+      // `gross` has more clicks in total but most are fraud-flagged; `net` has more VALID clicks.
+      gross = await mkOffer('Offer report gross'); net = await mkOffer('Offer report net');
+      await clicks(gross, 2, false); await clicks(gross, 6, true);
+      await clicks(net, 5, false);
+      await convAt(net, 'approved', '1.2345', '3.0000');
+      await convAt(net, 'pending', '9.0000', '9.0000');
+      await convAt(net, 'rejected', '7.0000', '7.0000');
+    });
+    const report = (qs: string) => request(app).get(`/api/reports?groupBy=offer&from=2026-05-05&to=2026-05-05&offerId=${gross},${net}&metrics=clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,currencies&${qs}`).set(auth);
+    const order = (res: { body: { data: { rows: { dimensions: { offer: string } }[] } } }) => res.body.data.rows.map((r) => r.dimensions.offer);
+
+    it('Clicks column sort (valid_clicks) orders by net clicks; gross `clicks` keeps its own order', async () => {
+      expect(order(await report('orderBy=valid_clicks&orderDir=desc'))).toEqual([net, gross]); // 5 valid vs 2
+      expect(order(await report('orderBy=clicks&orderDir=desc'))).toEqual([gross, net]);       // 8 gross vs 5
+    });
+    it('counts and money reconcile with the records: CV = approved only, Total CV = every status, money = approved, exact text', async () => {
+      const rows = (await report('orderBy=valid_clicks')).body.data.rows as { dimensions: { offer: string }; metrics: Record<string, unknown> }[];
+      const n = rows.find((r) => r.dimensions.offer === net)!.metrics;
+      expect(n).toMatchObject({ clicks: 5, invalid_clicks: 0, conversions: 1, total_conversions: 3, payout: '1.2345', revenue: '3.0000', margin: '1.7655', currencies: ['USD'] });
+      const g = rows.find((r) => r.dimensions.offer === gross)!.metrics;
+      expect(g).toMatchObject({ clicks: 8, invalid_clicks: 6, conversions: 0, total_conversions: 0, payout: '0.0000', currencies: [] });
+    });
+    it('another network gets none of these offers\' rows', async () => {
+      const authB = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkB, role: 'admin' }));
+      const res = await request(app).get(`/api/reports?groupBy=offer&from=2026-05-05&to=2026-05-05&offerId=${gross},${net}`).set(authB);
+      expect(res.status).toBe(200);
+      expect(res.body.data.rows).toEqual([]);
+    });
+  });
+
+  describe('Advertiser Report (/api/reports?groupBy=advertiser)', () => {
+    let advGross: string; let advNet: string;
+    const mkAdv = async (name: string) => (await query<{ id: string }>(`INSERT INTO advertisers (network_id, name) VALUES ($1, $2) RETURNING id`, [fx.networkA, name])).rows[0]!.id;
+    const mkOffer = async (advertiserId: string) => (await query<{ id: string }>(
+      `INSERT INTO offers (network_id, advertiser_id, name, status, destination_url) VALUES ($1, $2, 'adv report offer', 'active', 'https://example.com/{click_id}') RETURNING id`,
+      [fx.networkA, advertiserId])).rows[0]!.id;
+    const clicks = async (offerId: string, n: number, flagged: boolean) => {
+      for (let i = 0; i < n; i++) {
+        await query(`INSERT INTO clicks (click_id, network_id, offer_id, created_at, is_unique, fraud_flags) VALUES ($1, $2, $3, '2026-06-06T10:00:00Z', true, $4)`,
+          [uid(), fx.networkA, offerId, flagged ? ['datacenter'] : []]);
+      }
+    };
+    const convAt = (offerId: string, advertiserId: string, status: string, payout: string, revenue: string) => query(
+      `INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, advertiser_id, payout, revenue, currency, status, source, created_at)
+       VALUES ($1, $2, $1, $3, $4, $5, $6, 'USD', $7, 'postback', '2026-06-06T11:00:00Z')`, [uid(), fx.networkA, offerId, advertiserId, payout, revenue, status]);
+    beforeAll(async () => {
+      // advGross: 10 gross / 2 valid clicks, payout 5 → EPC 0.5. advNet: 4 gross / 4 valid, payout 1 → EPC 0.25.
+      advGross = await mkAdv('Adv report gross'); advNet = await mkAdv('Adv report net');
+      const og = await mkOffer(advGross); const on = await mkOffer(advNet);
+      await clicks(og, 2, false); await clicks(og, 8, true);
+      await clicks(on, 4, false);
+      await convAt(og, advGross, 'approved', '5.0000', '8.0000');
+      await convAt(on, advNet, 'approved', '1.0000', '2.5000');
+      await convAt(on, advNet, 'pending', '3.0000', '3.0000');
+    });
+    const report = (qs: string, a = auth) => request(app).get(`/api/reports?groupBy=advertiser&from=2026-06-06&to=2026-06-06&advertiserId=${advGross},${advNet}&metrics=clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,epc,currencies&${qs}`).set(a);
+    const order = (res: { body: { data: { rows: { dimensions: { advertiser: string } }[] } } }) => res.body.data.rows.map((r) => r.dimensions.advertiser);
+
+    it('Clicks column sort (valid_clicks) orders by net clicks; gross `clicks` keeps its own order', async () => {
+      expect(order(await report('orderBy=valid_clicks&orderDir=desc'))).toEqual([advNet, advGross]); // 4 valid vs 2
+      expect(order(await report('orderBy=clicks&orderDir=desc'))).toEqual([advGross, advNet]);       // 10 gross vs 4
+    });
+    it('EPC sort orders by the API epc it displays (payout ÷ gross clicks)', async () => {
+      const res = await report('orderBy=epc&orderDir=desc');
+      expect(order(res)).toEqual([advGross, advNet]); // 0.5 vs 0.25
+      expect(res.body.data.rows.map((r: { metrics: { epc: number } }) => r.metrics.epc)).toEqual([0.5, 0.25]);
+    });
+    it('counts and money reconcile: CV = approved, Total CV = every status, money exact text, per-advertiser', async () => {
+      const rows = (await report('orderBy=valid_clicks')).body.data.rows as { dimensions: { advertiser: string }; metrics: Record<string, unknown> }[];
+      expect(rows.find((r) => r.dimensions.advertiser === advNet)!.metrics).toMatchObject({ clicks: 4, invalid_clicks: 0, conversions: 1, total_conversions: 2, payout: '1.0000', revenue: '2.5000', margin: '1.5000', currencies: ['USD'] });
+      expect(rows.find((r) => r.dimensions.advertiser === advGross)!.metrics).toMatchObject({ clicks: 10, invalid_clicks: 8, conversions: 1, total_conversions: 1, payout: '5.0000', revenue: '8.0000', margin: '3.0000' });
+    });
+    it('another network gets none of these advertisers\' rows', async () => {
+      const authB = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkB, role: 'admin' }));
+      const res = await report('orderBy=valid_clicks', authB);
+      expect(res.status).toBe(200);
+      expect(res.body.data.rows).toEqual([]);
+    });
+  });
+
+  describe('Conversion Report rows', () => {
+    let offerCR: string;
+    beforeAll(async () => {
+      offerCR = (await query<{ id: string }>(
+        `INSERT INTO offers (network_id, advertiser_id, name, status, destination_url) VALUES ($1, $2, 'Conv report', 'active', 'https://example.com/{click_id}') RETURNING id`,
+        [fx.networkA, fx.advA])).rows[0]!.id;
+    });
+    const get = (qs: string, a = auth) => request(app).get(`/api/reports/conversions?offerId=${offerCR}&${qs}`).set(a);
+
+    it('rows carry the stored ids, money (exact decimal text), currency and status of the conversion and its click', async () => {
+      const clickId = uid();
+      await query(`INSERT INTO clicks (click_id, network_id, offer_id, publisher_id, created_at, country, device) VALUES ($1, $2, $3, $4, now() - interval '90 seconds', 'DE', 'mobile')`,
+        [clickId, fx.networkA, offerCR, fx.pubA1]);
+      const convId = uid();
+      await query(
+        `INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id, payout, revenue, currency, status, source, transaction_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 1.2345, 9.5, 'EUR', 'pending', 'postback', 'TXN-CR-1', now())`,
+        [convId, fx.networkA, clickId, offerCR, fx.pubA1, fx.advA]);
+      const row = (await get('limit=500')).body.data.find((r: { conversion_id: string }) => r.conversion_id === convId);
+      expect(row).toMatchObject({
+        conversion_id: convId, click_id: clickId, transaction_id: 'TXN-CR-1', offer_id: offerCR, publisher_id: fx.pubA1, advertiser_id: fx.advA,
+        payout: '1.2345', revenue: '9.5000', currency: 'EUR', status: 'pending', source: 'postback', country: 'DE', device: 'mobile',
+      });
+      expect(row.delta_seconds).toBeGreaterThanOrEqual(89);
+    });
+    it('paging conversions that share one created_at returns each exactly once (stable order)', async () => {
+      const at = '2026-03-04T05:06:07.000Z';
+      const made: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        const id = uid();
+        await query(`INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, payout, revenue, currency, status, source, created_at)
+                     VALUES ($1, $2, $1, $3, 1, 2, 'USD', 'approved', 'postback', $4)`, [id, fx.networkA, offerCR, at]);
+        made.push(id);
+      }
+      const seen: string[] = [];
+      for (let offset = 0; offset < 7; offset += 2) {
+        seen.push(...(await get(`from=2026-03-04&to=2026-03-04&limit=2&offset=${offset}`)).body.data.map((r: { conversion_id: string }) => r.conversion_id));
+      }
+      expect(seen).toEqual([...made].sort().reverse());
+    });
+    it('status filter returns exactly that status; another network\'s conversions never appear', async () => {
+      const mine = await conv({ networkId: fx.networkA, offerId: offerCR, status: 'rejected' });
+      const theirs = await conv({ networkId: fx.networkB, offerId: offerCR, status: 'rejected' });
+      const rejected = (await get('status=rejected&limit=500')).body.data as { conversion_id: string; status: string }[];
+      expect(rejected.every((r) => r.status === 'rejected')).toBe(true);
+      expect(rejected.map((r) => r.conversion_id)).toContain(mine);
+      expect(rejected.map((r) => r.conversion_id)).not.toContain(theirs);
+      const authB = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkB, role: 'admin' }));
+      expect((await get('limit=500', authB)).body.data.map((r: { conversion_id: string }) => r.conversion_id)).not.toContain(mine);
+    });
+    it('read-only admins can read the report but cannot approve or reject (admin / finance only)', async () => {
+      const id = await conv({ networkId: fx.networkA, offerId: offerCR, status: 'pending' });
+      for (const role of ['read_only', 'manager']) {
+        const a = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkA, role }));
+        expect((await get('limit=1', a)).status, role).toBe(200);
+        expect((await request(app).post(`/api/finance/conversions/${id}/approve`).set(a).send({})).status, role).toBe(403);
+        expect((await request(app).post(`/api/finance/conversions/${id}/reject`).set(a).send({})).status, role).toBe(403);
+      }
+      expect((await query<{ status: string }>(`SELECT status FROM conversions WHERE conversion_id = $1`, [id])).rows[0]!.status).toBe('pending');
+    });
+  });
+
   // ── 2-4. Pacing + Caps ──
   describe('pacing / caps', () => {
     beforeAll(async () => {
@@ -316,6 +473,41 @@ d('reporting integrity (live DB)', () => {
         expect(await g(`clickIds=${c.v4}`)).toMatchObject({ clicks: 1, conversions: 1, payout: '2.0000' });
         expect(await g('ip=10.0.0.2')).toMatchObject({ clicks: 1, conversions: 1, payout: '3.0000' });
         expect(await g('isUnique=true')).toMatchObject({ clicks: 2, conversions: 1, payout: '2.0000' });
+      });
+      it('paging clicks that share one created_at returns each click exactly once (stable order)', async () => {
+        const offer = await newOffer('Click paging ties');
+        const at = '2026-03-04T05:06:07.000Z';
+        const made: string[] = [];
+        for (let i = 0; i < 7; i++) {
+          const id = uid();
+          await query(`INSERT INTO clicks (click_id, network_id, offer_id, created_at) VALUES ($1, $2, $3, $4)`, [id, fx.networkA, offer, at]);
+          made.push(id);
+        }
+        const seen: string[] = [];
+        for (let offset = 0; offset < 7; offset += 2) {
+          const res = await request(app).get(`/api/reports/clicks?offerId=${offer}&from=2026-03-04&to=2026-03-04&limit=2&offset=${offset}`).set(auth);
+          seen.push(...res.body.data.map((r: { click_id: string }) => r.click_id));
+        }
+        expect(seen).toEqual([...made].sort().reverse()); // newest first, then click_id desc
+      });
+      it('/grouped Day rows are chronological; groups without an offer use the network default currency', async () => {
+        const offer = await newOffer('Click grouped order');
+        for (const [ago, n] of [['2 days', 1], ['1 day', 5], ['0 days', 3]] as const) {
+          for (let i = 0; i < n; i++) {
+            await query(`INSERT INTO clicks (click_id, network_id, offer_id, created_at) VALUES ($1, $2, $3, date_trunc('day', now()) - $4::interval + interval '1 hour')`, [uid(), fx.networkA, offer, ago]);
+          }
+        }
+        const prev = (await query<{ default_currency: string }>(`SELECT default_currency FROM networks WHERE id = $1`, [fx.networkA])).rows[0]!.default_currency;
+        await query(`UPDATE networks SET default_currency = 'GBP' WHERE id = $1`, [fx.networkA]);
+        try {
+          const res = await request(app).get(`/api/reports/grouped?groupBy=day&offerId=${offer}&from=${new Date(Date.now() - 3 * 86400e3).toISOString().slice(0, 10)}`).set(auth);
+          const rows = res.body.data.rows as { key: string; clicks: number; currency: string }[];
+          expect(rows.map((r) => r.clicks)).toEqual([1, 5, 3]);
+          expect(rows.map((r) => r.key)).toEqual([...rows.map((r) => r.key)].sort());
+          expect(rows.every((r) => r.currency === 'GBP')).toBe(true);
+        } finally {
+          await query(`UPDATE networks SET default_currency = $2 WHERE id = $1`, [fx.networkA, prev]);
+        }
       });
       it('malformed values are 422s', async () => {
         expect((await get('clickIds=nope')).status).toBe(422);

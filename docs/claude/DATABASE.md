@@ -120,9 +120,9 @@ Click records (append-only, written async by workers).
 | `user_agent` | text | Raw UA string |
 | `referrer` | text | HTTP referrer |
 | `sub1` – `sub5` | text | Sub-IDs (tracking parameters) |
-| `source_id` | text | Traffic source from the click URL (`source_id` / `source` / `src`); NULL when absent and on clicks before migration 066 |
-| `fbclid` | text | Meta click id from the click URL (`fbclid`); NULL when absent |
-| `gclid` | text | Google Ads click id from the click URL (`gclid`); NULL when absent |
+| `source_id` | text | Traffic source from the click URL (`source_id` / `source` / `src`, first non-blank); NULL when absent or blank and on clicks before migration 066 |
+| `fbclid` | text | Meta click id from the click URL (`fbclid`); NULL when absent or blank |
+| `gclid` | text | Google Ads click id from the click URL (`gclid`); NULL when absent or blank |
 | `is_unique` | boolean | Dedup flag |
 | `fraud_score` | int | Fraud score |
 | `fraud_flags` | text[] | Fraud flag list |

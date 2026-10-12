@@ -9,7 +9,7 @@
 import { query } from '../db/pool.js';
 import { MONEY_SORT_METRICS, moneyFieldsOf } from './types.js';
 import { mbcJsonSql } from './money-by-currency.js';
-import type { Dimension, Metric, MetricValue, MoneyByCurrency, ReportRequest, ReportResult, ReportRow, ReportingProvider } from './types.js';
+import type { Dimension, Metric, MetricValue, MoneyByCurrency, ReportRequest, ReportResult, ReportRow, ReportingProvider, SortOnlyKey } from './types.js';
 
 const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers?: boolean }> = {
   offer: { click: 'clicks.offer_id', conv: 'c.offer_id' },
@@ -34,9 +34,11 @@ const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers
 
 // ORDER BY expressions over the outer `s` row (cr/epc are ratios, computed the same way as below).
 // `currencies` / `money_by_currency` are never sort keys (request.ts refuses them as orderBy).
-type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'>;
+type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'> | SortOnlyKey;
 const ORDER_COL: Record<OrderMetric, string> = {
   clicks: 's.clicks', unique_clicks: 's.unique_clicks', conversions: 's.conversions',
+  // Sort-only: net (valid) clicks — what the admin reports' "Clicks" column shows.
+  valid_clicks: '(s.clicks - s.invalid_clicks)',
   payout: 's.payout', revenue: 's.revenue', margin: 's.margin',
   cr: 's.conversions::numeric / NULLIF(s.clicks, 0)', epc: 's.payout / NULLIF(s.clicks, 0)',
   invalid_clicks: 's.invalid_clicks', total_conversions: 's.total_conversions', avg_fraud_score: 's.avg_fraud_score',

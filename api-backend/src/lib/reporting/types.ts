@@ -34,7 +34,16 @@ export const MONEY_FIELDS: readonly MoneyField[] = ['payout', 'revenue', 'margin
  * Every other orderable metric (clicks, unique_clicks, conversions, cr, invalid_clicks,
  * total_conversions, avg_fraud_score) is a count/ratio/score and sorts as before.
  */
-export const MONEY_SORT_METRICS: ReadonlySet<Metric> = new Set<Metric>(['payout', 'revenue', 'margin', 'epc']);
+export const MONEY_SORT_METRICS: ReadonlySet<string> = new Set<Metric>(['payout', 'revenue', 'margin', 'epc']);
+
+/**
+ * Sort-only keys — an ORDER BY that isn't a returned metric. `valid_clicks` = clicks − invalid
+ * (fraud-flagged) clicks: the "Clicks" column the admin reports display (lib/reportMath deriveRow),
+ * so sorting that column orders by the number shown rather than by gross clicks.
+ */
+export const SORT_ONLY_KEYS = ['valid_clicks'] as const;
+export type SortOnlyKey = typeof SORT_ONLY_KEYS[number];
+export type OrderKey = Metric | SortOnlyKey;
 
 // Every include filter below accepts one value or several (an IN-list) — the Dimensional Report's
 // "click row to filter" lets a user select multiple values within one dimension at once (spec-matched
@@ -80,7 +89,7 @@ export interface ReportRequest {
   filters: ReportFilters;
   limit: number;
   offset: number;
-  orderBy?: Metric;
+  orderBy?: OrderKey;
   orderDir?: 'asc' | 'desc';
   /**
    * Which money fields `money_by_currency` may carry — set from the audience policy by

@@ -7,8 +7,8 @@
 import { z } from 'zod';
 import { MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../http/pagination.js';
 import { queryBool, queryDate } from '../http/query-params.js';
-import { MONEY_FIELDS } from './types.js';
-import type { Dimension, Metric, MoneyField, ReportRequest, ReportFilters, FilterValue } from './types.js';
+import { MONEY_FIELDS, SORT_ONLY_KEYS } from './types.js';
+import type { Dimension, Metric, MoneyField, OrderKey, ReportRequest, ReportFilters, FilterValue, SortOnlyKey } from './types.js';
 
 export type ReportAudience = 'admin' | 'network' | 'publisher' | 'advertiser';
 
@@ -159,8 +159,12 @@ export function buildReportRequest(
   const metricsReq = csv<Metric>(raw.metrics, allowedMetrics);
   const metrics = metricsReq.length ? metricsReq : allowedMetrics.filter((m) => !OPT_IN_METRICS.has(m));
 
-  const orderBy = raw.orderBy && (allowedMetrics as string[]).includes(raw.orderBy) && !OPT_IN_METRICS.has(raw.orderBy as Metric)
-    ? (raw.orderBy as Metric) : undefined;
+  // A sort-only key is allowed when the audience may see every metric it is built from
+  // (valid_clicks = clicks − invalid_clicks), so it never reveals anything the audience can't see.
+  const sortOnlyAllowed = (k: string): k is SortOnlyKey =>
+    (SORT_ONLY_KEYS as readonly string[]).includes(k) && (['clicks', 'invalid_clicks'] as Metric[]).every((m) => allowedMetrics.includes(m));
+  const orderBy: OrderKey | undefined = raw.orderBy && (allowedMetrics as string[]).includes(raw.orderBy) && !OPT_IN_METRICS.has(raw.orderBy as Metric)
+    ? (raw.orderBy as Metric) : raw.orderBy && sortOnlyAllowed(raw.orderBy) ? raw.orderBy : undefined;
 
   const user: ReportFilters = {
     ...(raw.from ? { from: utcDayStart(raw.from) } : {}),

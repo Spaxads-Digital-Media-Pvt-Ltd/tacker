@@ -16,7 +16,8 @@ import { SearchablePicker, type PickerOption } from '../../../shared-components/
 import { TimeZoneSelect } from '../../../shared-components/primitives/ReportTimeZone';
 import type { ReportTimeZone } from '../../../lib/useReportTimeZone';
 import {
-  VISIBILITY_OPTIONS, draftErrors, draftFromApplied, filtersFromDraft, searchFields, selectAllState, setAllFields, toggleField,
+  VISIBILITY_OPTIONS, draftErrors, draftFromApplied, filtersFromDraft, partitionFields, searchFields, selectAllState, setAllFields, toggleField,
+  untrackedToggleLabel, type ClickField,
   type CapturedFilterKey, type ClickFilterDraft, type ClickFilters, type Visibility,
 } from '../../../lib/clickReportFilters';
 
@@ -67,6 +68,23 @@ export function ClickFiltersModal({
   const matching = useMemo(() => searchFields(fieldQuery), [fieldQuery]);
   const allState = selectAllState(draft.fields, matching);
   const selected = useMemo(() => new Set(draft.fields), [draft.fields]);
+  // Untracked (disabled) fields sit in their own section, collapsed until asked for — display only.
+  const { tracked, untracked } = useMemo(() => partitionFields(matching), [matching]);
+  const [showUntracked, setShowUntracked] = useState(false);
+  const fieldRow = (f: ClickField) => {
+    const off = f.support === 'unavailable';
+    return (
+      <li key={f.key} className="min-w-0">
+        {/* The whole row is the label (box + text toggle the field); untracked rows are dimmed and inert. */}
+        <label className={`-mx-1.5 flex items-center gap-2.5 rounded-[var(--radius)] px-1.5 py-1 text-small ${off ? 'cursor-not-allowed text-fg-muted opacity-60' : 'cursor-pointer text-fg hover:bg-accent-subtle'}`} title={f.hint}>
+          <input type="checkbox" className="chk !h-4 !w-4 shrink-0 cursor-pointer disabled:cursor-not-allowed" disabled={off} checked={!off && selected.has(f.key)}
+            onChange={(e) => setDraft((d) => ({ ...d, fields: toggleField(d.fields, f.key, e.target.checked) }))} />
+          <span className="truncate">{f.label}</span>
+          {off && <span className="shrink-0 text-tiny">(not tracked)</span>}
+        </label>
+      </li>
+    );
+  };
 
   // Focus: into the dialog on open (the fields search when opened for columns), back to the opener on close.
   useEffect(() => {
@@ -233,22 +251,26 @@ export function ClickFiltersModal({
                 </div>
                 {errors.fields && <p className="mt-2 text-tiny text-danger-text" role="alert">{errors.fields}</p>}
                 {matching.length === 0 ? <p className="mt-3 text-small text-fg-muted">No fields match “{fieldQuery}”.</p> : (
-                  <ul className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" aria-labelledby={`${uid}-fields`}>
-                    {matching.map((f) => {
-                      const off = f.support === 'unavailable';
-                      return (
-                        <li key={f.key} className="min-w-0">
-                          {/* The whole row is the label (box + text toggle the field); untracked rows are dimmed and inert. */}
-                          <label className={`-mx-1.5 flex items-center gap-2.5 rounded-[var(--radius)] px-1.5 py-1 text-small ${off ? 'cursor-not-allowed text-fg-muted opacity-60' : 'cursor-pointer text-fg hover:bg-accent-subtle'}`} title={f.hint}>
-                            <input type="checkbox" className="chk !h-4 !w-4 shrink-0 cursor-pointer disabled:cursor-not-allowed" disabled={off} checked={!off && selected.has(f.key)}
-                              onChange={(e) => setDraft((d) => ({ ...d, fields: toggleField(d.fields, f.key, e.target.checked) }))} />
-                            <span className="truncate">{f.label}</span>
-                            {off && <span className="shrink-0 text-tiny">(not tracked)</span>}
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  <>
+                    {tracked.length === 0
+                      ? <p className="mt-3 text-small text-fg-muted">No tracked fields match “{fieldQuery}”.</p>
+                      : <ul className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" aria-labelledby={`${uid}-fields`}>{tracked.map(fieldRow)}</ul>}
+                    {untracked.length > 0 && (
+                      <div className="mt-4 border-t border-dashed border-border pt-3">
+                        <button type="button" onClick={() => setShowUntracked((o) => !o)} aria-expanded={showUntracked} aria-controls={`${uid}-untracked`}
+                          className="inline-flex items-center gap-1.5 rounded-[var(--radius)] text-small font-medium text-fg-secondary hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                          {showUntracked ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+                          {untrackedToggleLabel(untracked.length, showUntracked)}
+                        </button>
+                        {showUntracked && (
+                          <div id={`${uid}-untracked`}>
+                            <p className="mt-1 text-tiny text-fg-muted">Nothing in Tracker captures these yet — hover a field to see what it needs.</p>
+                            <ul className="mt-2 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" aria-label="Untracked fields">{untracked.map(fieldRow)}</ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

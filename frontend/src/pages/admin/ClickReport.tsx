@@ -13,7 +13,7 @@
  *
  * Fields: the reference's field list is shown in full, but only fields with a real source can be
  * picked — `clicks` columns, or the network's own offers / partners / advertisers (Offer ID / Title,
- * Partner ID / Name / Company, Advertiser ID / Name). The rest (G1–G8, GAID, IDFA, landing page,
+ * Partner ID / Name / Company, Advertiser ID / Name). The rest (GAID, IDFA, landing page,
  * proxy, …) aren't tracked anywhere in this schema, so they're listed disabled ("not tracked") and
  * never faked. The selected fields drive the table, the CSV / Excel export and the `cols` URL param.
  *
@@ -27,7 +27,7 @@
  * No "Run Report": dates apply once they form a valid range (debounced), Group By / chips immediately,
  * the modal on Apply. The applied report is mirrored to the address bar.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Search, MoreVertical, ChevronLeft, ChevronRight, Check, X } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
@@ -52,9 +52,9 @@ import { money } from '../../lib/reportMath';
 import { displayBrowser, displayOs } from '../../lib/userAgentDisplay';
 import { Money } from '../../shared-components/primitives/ReportMoney';
 import {
-  DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, VISIBILITY_OPTIONS, appliedFilterCount, chipValues, exportRecord, fieldByKey,
-  fieldsFromUrl, filtersFromUrl, toApiParams, visibleColumns, withoutChip, writeFieldsToUrl, writeFiltersToUrl,
-  type ClickFilters,
+  DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, GROUPED_CONVERSIONS_NOTE, VISIBILITY_OPTIONS, appliedFilterCount, chipValues,
+  exportRecord, fieldByKey, fieldsFromUrl, filtersFromUrl, groupDimensionHeader, toApiParams, visibleColumns, withoutChip,
+  writeFieldsToUrl, writeFiltersToUrl, type ClickFilters,
 } from '../../lib/clickReportFilters';
 import { ClickFiltersModal, type ClickFiltersApply } from './clickReport/ClickFiltersModal';
 
@@ -79,6 +79,8 @@ interface GroupedRow {
   /** Per-currency payout/revenue/margin (newer API) — a mixed group lists them in its "Mixed" tooltip. */
   moneyByCurrency?: unknown;
 }
+/** `/api/reports/grouped` totals across every group (same filters). */
+interface GroupedTotals { clicks: number; conversions: number; payout: string; revenue: string; profit: string; currencies?: string[]; moneyByCurrency?: unknown }
 /** A group's money currency: its conversions' one currency, "mixed", or (none / older API) `currency`. */
 const groupedCurrency = (r: GroupedRow): RowCurrency => resolveCurrency(r.currencies, r.currency || 'USD');
 
@@ -125,6 +127,18 @@ export default function ClickReport() {
   const [exportOpen, setExportOpen] = useState(false);
   const [showApiRequest, setShowApiRequest] = useState(false);
   const exp = useReportExport();
+  // Table Actions closes on an outside click / tap or Escape (mouse-leave alone never fires on touch
+  // screens and leaves keyboard users without a way out) — same as the other report pages.
+  const tableActionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!tableActionsOpen) return;
+    const close = () => { setTableActionsOpen(false); setExportOpen(false); };
+    const onDown = (e: PointerEvent) => { if (!tableActionsRef.current?.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [tableActionsOpen]);
 
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
@@ -207,7 +221,7 @@ export default function ClickReport() {
     if (window.location.search.replace(/^\?/, '') !== urlState) setSearchParams(new URLSearchParams(urlState), { replace: true });
   }, [urlState, setSearchParams]);
   // /grouped returns { rows, totals } — rows keyed by `key`.
-  const groupedQ = useQuery<{ rows: GroupedRow[] }>(groupedPath);
+  const groupedQ = useQuery<{ rows: GroupedRow[]; totals?: GroupedTotals }>(groupedPath);
   const rowQ = useQuery<ClickRow[]>(rowPath);
 
   const [filteredRows, setFilteredRows] = useState<ClickRow[]>([]);
@@ -220,6 +234,8 @@ export default function ClickReport() {
     () => (groupBy && !groupedQ.error ? (groupedQ.data?.rows ?? []) : []),
     [groupBy, groupedQ.data, groupedQ.error],
   );
+  // Totals over ALL groups (from the API, so "Search groups…" narrowing the visible rows doesn't change them).
+  const groupedTotals = groupBy && !groupedQ.error ? groupedQ.data?.totals ?? null : null;
   const isLoading = groupBy ? groupedQ.loading : rowQ.loading;
   const activeFilterCount = appliedFilterCount(filters);
   const displayError = groupBy ? groupedQ.error : rowQ.error;
@@ -346,7 +362,7 @@ export default function ClickReport() {
       void exp.run(format, `click-report-by-${groupBy}`, async () => ({
         // Money in the group's currency — "MIXED" with payout/revenue/profit left empty when it mixes currencies.
         rows: ((await api.get<{ rows: GroupedRow[] }>(`/api/reports/grouped?${qs({ groupBy, ...baseParams })}`))?.rows ?? []).map((r) => withRowCurrency({
-          [groupByLabel(groupBy)]: groupedLabel(r), clicks: r.clicks, conversions: r.conversions,
+          [groupDimensionHeader(groupBy, groupByLabel(groupBy)).label]: groupedLabel(r), clicks: r.clicks, conversions: r.conversions,
           cr: `${r.cr.toFixed(2)}%`, payout: r.payout, revenue: r.revenue, profit: r.profit,
         }, groupedCurrency(r), ['payout', 'revenue', 'profit'])),
       }));
@@ -392,11 +408,14 @@ export default function ClickReport() {
           {!groupBy && <div className="min-w-0 max-w-full"><TimeZoneSelect zone={zone} selectClassName={`${CONTROL} min-w-0 max-w-full text-small sm:max-w-[22rem]`} /></div>}
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
-              aria-label="Search this page" value={q} onChange={(e) => setQ(e.target.value)} />
+            {/* Grouped mode loads every group, so its search covers them all; individual clicks are paged. */}
+            <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder={groupBy ? 'Search groups…' : 'Search this page…'}
+              title={groupBy ? 'Filters the groups by name' : 'Filters only the rows on the current page'}
+              aria-label={groupBy ? 'Search groups' : 'Search this page'} value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <div className="relative">
-            <button type="button" title="Table Actions" aria-label="Table Actions" onClick={() => setTableActionsOpen((o) => !o)}
+          <div className="relative" ref={tableActionsRef}>
+            <button type="button" title="Table Actions" aria-label="Table Actions" aria-haspopup="menu" aria-expanded={tableActionsOpen}
+              onClick={() => setTableActionsOpen((o) => !o)}
               className="grid h-10 w-10 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
               <MoreVertical size={15} />
             </button>
@@ -448,13 +467,13 @@ export default function ClickReport() {
             <table className="premium-table">
               <thead>
                 <tr>
-                  <th >{groupByLabel(groupBy)}</th>
-                  <th className="font-semibold text-right">Clicks</th>
-                  <th className="font-semibold text-right">Conversions</th>
-                  <th className="font-semibold text-right">Conv. Rate</th>
-                  <th className="font-semibold text-right">Payout</th>
-                  <th className="font-semibold text-right">Revenue</th>
-                  <th className="font-semibold text-right">Profit</th>
+                  <th scope="col" title={groupDimensionHeader(groupBy, groupByLabel(groupBy)).title}>{groupDimensionHeader(groupBy, groupByLabel(groupBy)).label}</th>
+                  <th scope="col" className="font-semibold text-right">Clicks</th>
+                  <th scope="col" className="font-semibold text-right" title={GROUPED_CONVERSIONS_NOTE}>Conversions</th>
+                  <th scope="col" className="font-semibold text-right" title={`Conversions ÷ clicks — ${GROUPED_CONVERSIONS_NOTE.toLowerCase()}`}>Conv. Rate</th>
+                  <th scope="col" className="font-semibold text-right" title={GROUPED_CONVERSIONS_NOTE}>Payout</th>
+                  <th scope="col" className="font-semibold text-right" title={GROUPED_CONVERSIONS_NOTE}>Revenue</th>
+                  <th scope="col" className="font-semibold text-right" title={GROUPED_CONVERSIONS_NOTE}>Profit</th>
                 </tr>
               </thead>
               <tbody>
@@ -470,6 +489,27 @@ export default function ClickReport() {
                   </tr>
                 ))}
               </tbody>
+              {groupedTotals && (() => {
+                // Every group (not just the ones "Search groups…" leaves visible); money per currency when mixed.
+                const rc = resolveCurrency(groupedTotals.currencies, allGroupedRows[0]?.currency || 'USD');
+                const breakdown = parseMoneyByCurrency(groupedTotals.moneyByCurrency);
+                const cr = groupedTotals.clicks > 0 ? (groupedTotals.conversions / groupedTotals.clicks) * 100 : 0;
+                return (
+                  <tfoot>
+                    <tr className="border-t-2 border-border font-semibold text-fg">
+                      <th scope="row" className="text-left" title={searchNeedle ? 'Totals of every group, including ones hidden by the search' : undefined}>
+                        Total{searchNeedle ? ' (all groups)' : ''}
+                      </th>
+                      <td className="text-right tabular-nums">{groupedTotals.clicks.toLocaleString()}</td>
+                      <td className="text-right tabular-nums">{groupedTotals.conversions.toLocaleString()}</td>
+                      <td className="text-right tabular-nums">{cr.toFixed(2)}%</td>
+                      <td className="text-right tabular-nums"><Money value={Number(groupedTotals.payout)} rc={rc} breakdown={breakdown} field="payout" /></td>
+                      <td className="text-right tabular-nums"><Money value={Number(groupedTotals.revenue)} rc={rc} breakdown={breakdown} field="revenue" /></td>
+                      <td className="text-right tabular-nums"><Money value={Number(groupedTotals.profit)} rc={rc} breakdown={breakdown} field="margin" /></td>
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
         ) : <StateBlock>No Record Found</StateBlock>)
@@ -494,13 +534,13 @@ export default function ClickReport() {
            reachable on an emptied later page so Previous still works. */}
         {!groupBy && !displayError && (filteredRows.length > 0 || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
-            <span>Page {page}</span>
+            <span aria-live="polite">Page {page}</span>
             <div className="flex items-center gap-1">
-              <button type="button" title="Previous page" disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))}
+              <button type="button" title="Previous page" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronLeft size={14} />
               </button>
-              <button type="button" title="Next page" disabled={!hasNextPage || isLoading} onClick={() => setPage(page + 1)}
+              <button type="button" title="Next page" aria-label="Next page" disabled={!hasNextPage || isLoading} onClick={() => setPage(page + 1)}
                 className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">
                 <ChevronRight size={14} />
               </button>
