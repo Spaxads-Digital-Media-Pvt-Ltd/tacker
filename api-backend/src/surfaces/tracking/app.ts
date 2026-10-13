@@ -17,7 +17,7 @@ import { resolveEntityId } from './ref-resolver.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
 import { buildTrustedProxyCheck } from './trusted-proxy.js';
-import { SOURCE_PARAMS, firstNonBlank } from './click-params.js';
+import { SOURCE_PARAMS, firstNonBlank, isSpeculativeLoad } from './click-params.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
@@ -152,7 +152,8 @@ export function buildTrackingApp(): FastifyInstance {
  if (req.url.split('?')[0] === '/click') {
  redirectLatency.observe(reply.elapsedTime / 1000);
  const code = reply.statusCode;
- const outcome = code === 302 ? 'redirect' : code === 204 ? 'divert' : code === 404 ? 'unknown_host' : code === 400 ? 'bad_request' : 'other';
+ const outcome = isSpeculativeLoad(req.headers) ? 'speculative'
+ : code === 302 ? 'redirect' : code === 204 ? 'divert' : code === 404 ? 'unknown_host' : code === 400 ? 'bad_request' : 'other';
  clicksTotal.inc({ outcome });
  }
  done();
@@ -160,6 +161,14 @@ export function buildTrackingApp(): FastifyInstance {
 
  app.get('/click', async (req, reply) => {
  const started = process.hrtime.bigint();
+
+ // A browser prefetch / prerender of the link (Chrome does this for a URL pasted into the address
+ // bar, before the real navigation on Enter) is not a click: record nothing. A non-success,
+ // uncacheable answer makes the browser discard it, so the real navigation arrives as a normal
+ // request and is counted once. Checked first — no Redis / tenant work for it.
+ if (isSpeculativeLoad(req.headers)) {
+ return reply.code(503).header('cache-control', 'no-store').send();
+ }
 
  // 0. Rate limit (AP-1): fail fast before any infra work. Skipped in dev/test.
  if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
