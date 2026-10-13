@@ -30,7 +30,7 @@
 | GET,POST,PATCH,DELETE | `/api/advertisers/*` | Advertiser CRUD | admin |
 | GET,POST,PATCH,DELETE | `/api/publishers/*` | Publisher CRUD | admin |
 | GET,POST,PATCH,DELETE | `/api/offers/*` | Offer CRUD. `DELETE /api/offers/:id` (admin) **archives** an offer that has history (clicks, conversions, ledger, reporting adjustments) → `{ deleted: false, archived: true, offer }` (stops at /click, keeps records + name); an unused draft is removed → `{ deleted: true }`; `?hard=true` removes any unused offer, 409 when it has history | admin |
-| GET,POST,PATCH,DELETE | `/api/tracking-domains/*` | Tracking domain CRUD | admin |
+| GET,POST,PATCH,DELETE | `/api/tracking-domains/*` | Tracking domain CRUD. Custom hosts start `pending` with `dnsRecord: { type: 'TXT', name: '_tracker-verify.<host>', value: <token> }`; `POST /:id/verify` (admin/manager) checks DNS now → `{ verified, reason, domain }` (miss → `failed`); a background job re-checks `pending` hosts every 10 min; `PATCH /:id { status: active\|disabled }` (active only when verified). Tracking surface: `GET /_tls/ask?domain=` → 200 only for active + verified hosts (edge on-demand TLS hook) | admin |
 | GET,POST,PATCH,DELETE | `/api/finance/*` | Finance | admin |
 | GET | `/api/reports/*` | Reports (12+ types) | admin |
 | GET,POST,PATCH,DELETE | `/api/alerts/*` | Alert management (PATCH: admin/manager) | admin |

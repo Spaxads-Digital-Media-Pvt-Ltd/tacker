@@ -138,6 +138,7 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Partner Configurations', description: 'Sign up, notices & terms', to: '/app/control-center/partners', icon: Lucide.UserCog },
         { label: 'Advertiser Configurations', description: 'Sign up & dashboard setup', to: '/app/control-center/advertisers', icon: Lucide.Briefcase },
         { label: 'Security', description: 'API keys & IP whitelist', to: '/app/control-center/security', icon: Lucide.ShieldCheck },
+        { label: 'Tracking Domains', description: 'Custom tracking hosts & DNS verification', to: '/app/domains', icon: Lucide.Globe },
         { label: 'Usage', description: 'Account usage per month', to: '/app/control-center/usage', icon: Lucide.Activity },
         { label: 'Documents', description: 'Contracts & resources', to: '/app/control-center/documents', icon: Lucide.File },
         { label: 'Segmentation Options', description: 'Categories, labels & channels', to: '/app/control-center/segmentations', icon: Lucide.Tags },

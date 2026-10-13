@@ -160,6 +160,18 @@ export function buildTrackingApp(): FastifyInstance {
  done();
  });
 
+ // Certificate "ask" hook for the edge (F-15): an on-demand-TLS proxy (Caddy `on_demand_tls ask`,
+ // and similar) calls this before issuing a certificate for an incoming hostname. 200 only for a host
+ // that is active + verified — exactly the hosts /click serves — so nobody can make the edge mint
+ // certificates for arbitrary names. See lib/tracking-domains/verify.ts.
+ app.get('/_tls/ask', async (req, reply) => {
+ const domain = firstStr((req.query as Record<string, unknown>)['domain'])?.trim().toLowerCase() ?? '';
+ if (!domain || domain.length > 253) return reply.code(400).send(errorEnvelope('bad_request', 'domain is required', 400));
+ return (await resolveHostToNetwork(domain))
+ ? reply.code(200).send({ ok: true, data: { domain } })
+ : reply.code(404).send(errorEnvelope('not_found', 'unknown_or_unverified_host', 404));
+ });
+
  app.get('/click', async (req, reply) => {
  const started = process.hrtime.bigint();
 

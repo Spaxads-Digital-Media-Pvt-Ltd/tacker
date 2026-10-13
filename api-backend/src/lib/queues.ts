@@ -9,6 +9,7 @@ export const QUEUE = {
  retention: 'retention',
  facebookCapi: 'facebook-capi',
  offerFeedSync: 'offer-feed-sync',
+ domainVerify: 'domain-verify',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

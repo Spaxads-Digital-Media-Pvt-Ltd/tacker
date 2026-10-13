@@ -146,6 +146,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Retention | `retention.ts` | `retention` | Scheduled |
 | Facebook CAPI | `facebook-capi.ts` | `facebook-capi` | Continuous |
 | Offer Feed Sync | `offer-feed-sync.ts` | `offer-feed-sync` | Scheduled |
+| Tracking Domain Re-check | `domain-verify.ts` | `domain-verify` | Every 10 min — DNS TXT verification of pending custom domains |
 
 ### Queue Definitions (`surfaces/workers/queues.ts`)
 Exports `QUEUE` constant mapping queue names to BullMQ queue instances.

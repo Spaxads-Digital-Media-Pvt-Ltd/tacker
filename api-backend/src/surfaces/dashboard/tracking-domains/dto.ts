@@ -1,4 +1,5 @@
 import type { TrackingDomainRow } from '../../../domain/entities.js';
+import { verificationRecord, type DnsRecord } from '../../../lib/tracking-domains/verify.js';
 
 export interface TrackingDomainDTO {
   id: string;
@@ -10,6 +11,8 @@ export interface TrackingDomainDTO {
   verificationToken: string | null;
   sslStatus: TrackingDomainRow['ssl_status'];
   isPrimary: boolean;
+  /** Custom hosts: the DNS TXT record that verifies them (F-15). Null for subdomains. */
+  dnsRecord: DnsRecord | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +28,7 @@ export function toDTO(row: TrackingDomainRow): TrackingDomainDTO {
     verificationToken: row.verification_token,
     sslStatus: row.ssl_status,
     isPrimary: row.is_primary,
+    dnsRecord: row.mode === 'custom' && row.verification_token ? verificationRecord(row.host, row.verification_token) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
