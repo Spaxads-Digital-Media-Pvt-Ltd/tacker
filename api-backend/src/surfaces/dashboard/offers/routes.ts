@@ -16,7 +16,8 @@ import { badRequest, notFound, forbidden, conflict } from '../../../lib/http/err
 import { queryBool } from '../../../lib/http/query-params.js';
 import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
-import { query } from '../../../lib/db/pool.js';
+import { query, pool } from '../../../lib/db/pool.js';
+import type { PoolClient } from 'pg';
 import { containsPattern } from '../../../lib/db/like.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { idempotentCreate } from '../../../lib/http/idempotency.js';
@@ -79,6 +80,64 @@ const toPagedOfferDTO = (row: PagedOfferRow) => ({
 const OFFERS = 'offers';
 
 const deleteOfferQuery = z.object({ hard: queryBool });
+
+/** Run `fn` in one pg transaction (rolled back on any error). */
+async function inTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+ const client = await pool.connect();
+ try {
+ await client.query('BEGIN');
+ const out = await fn(client);
+ await client.query('COMMIT');
+ return out;
+ } catch (err) {
+ await client.query('ROLLBACK');
+ throw err;
+ } finally {
+ client.release();
+ }
+}
+
+/** Copy one offer's child rows (`cols`) onto another offer of the same network. */
+async function copyOfferRows(client: PoolClient, table: string, cols: string, networkId: string, fromOfferId: string, toOfferId: string): Promise<void> {
+ await client.query(
+ `INSERT INTO ${table} (network_id, offer_id, ${cols})
+ SELECT network_id, $2, ${cols} FROM ${table} WHERE network_id = $1 AND offer_id = $3`,
+ [networkId, toOfferId, fromOfferId],
+ );
+}
+
+/**
+ * offer_custom_settings columns a copy carries — the v2 schema (migration 1700000054000; event/value
+ * are gone). Never `ref` (bigserial: each row gets its own display ref) or ids/timestamps. Shared by
+ * Copy Offer and Copy Offer Settings so both copy exactly the same thing (F-11).
+ */
+const CUSTOM_SETTING_COPY_COLS = [
+ 'category', 'name', 'partner_ids', 'description', 'public_description', 'status', 'partner_id', 'apply_all_partners',
+ 'effective_from', 'effective_to', 'targeting', 'apply_custom_payout', 'payout_model', 'payout_value',
+ 'apply_custom_revenue', 'revenue_model', 'revenue_value', 'fire_partner_postback', 'caps', 'conversion_status',
+ 'throttle_rate', 'set_parameter_goal', 'landing_page_url', 'creative_type', 'creative_url', 'creative_thumbnail_url',
+ 'email_from', 'email_subject',
+].join(', ');
+
+/**
+ * Copy an offer's custom settings onto another offer (deleted ones stay behind). goal_id points at the
+ * SOURCE offer's goals, so it's re-pointed to the destination's goal with the same name + event
+ * (Copy Offer copies goals first), else cleared — never left pointing at another offer's goal.
+ */
+async function copyCustomSettings(client: PoolClient, networkId: string, fromOfferId: string, toOfferId: string): Promise<void> {
+ await client.query(
+ `INSERT INTO offer_custom_settings (network_id, offer_id, ${CUSTOM_SETTING_COPY_COLS}, goal_id)
+ SELECT s.network_id, $2, ${CUSTOM_SETTING_COPY_COLS.split(', ').map((c) => `s.${c}`).join(', ')},
+ (SELECT tg.id FROM offer_goals sg
+ JOIN offer_goals tg ON tg.network_id = sg.network_id AND tg.offer_id = $2
+ AND tg.name = sg.name AND tg.event_name IS NOT DISTINCT FROM sg.event_name
+ WHERE sg.id = s.goal_id
+ ORDER BY tg.created_at LIMIT 1)
+ FROM offer_custom_settings s
+ WHERE s.network_id = $1 AND s.offer_id = $3 AND s.status <> 'deleted'`,
+ [networkId, toOfferId, fromOfferId],
+ );
+}
 
 /**
  * What a hard delete of this offer would orphan or cascade away (F-09): its clicks and conversions,
@@ -455,67 +514,51 @@ export function offersAdminRoutes(): Router {
  // --- Duplicate ("Copy Offer") — clones the offer row. Goals/coupons/deals/tags always come
  // along (base config, not user-optional in the reference either); creatives, forwarding rules,
  // partner visibility, and custom settings/geo-rules are gated by the caller's checkboxes. New
- // name gets a " (copy)" suffix, same convention as the reference. ---
+ // name gets a " (copy)" suffix, same convention as the reference. The copy starts as a DRAFT (a
+ // brand-new offer shouldn't go live just because its source was), and the whole copy is ONE
+ // transaction: a failure part-way leaves no half-copied offer behind (F-11). ---
  r.post('/:id/duplicate', requireRole('admin', 'manager'), validateBody(duplicateOptionsSchema), asyncHandler(async (req, res) => {
  const db = dbForRequest(req);
  const src = await db.selectOne<OfferRow>(OFFERS, { id: req.params.id });
  if (!src) throw notFound('Offer not found');
  const opts = req.body as z.infer<typeof duplicateOptionsSchema>;
-
- const copy = await db.insert<OfferRow>(OFFERS, {
- advertiser_id: src.advertiser_id,
- name: `${src.name} (copy)`,
- status: src.status,
- destination_url: src.destination_url,
- payout_model: src.payout_model,
- default_payout: src.default_payout,
- default_revenue: src.default_revenue,
- currency: src.currency,
- daily_conversion_cap: src.daily_conversion_cap,
- total_conversion_cap: src.total_conversion_cap,
- daily_click_cap: src.daily_click_cap,
- attribution_window_s: src.attribution_window_s,
- dedup_window_s: src.dedup_window_s,
- allowed_traffic_types: src.allowed_traffic_types,
- fallback_url: src.fallback_url,
- objective: src.objective,
- visibility: src.visibility,
- category: src.category,
- preview_url: src.preview_url,
- tracking_domain_id: src.tracking_domain_id,
- metadata: JSON.stringify(src.metadata ?? {}),
- });
-
  const networkId = db.scope.networkId;
- const copyTable = async (table: string, cols: string): Promise<void> => {
- await query(
- `INSERT INTO ${table} (network_id, offer_id, ${cols})
- SELECT network_id, $2, ${cols} FROM ${table} WHERE network_id = $1 AND offer_id = $3`,
- [networkId, copy.id, src.id],
+
+ const copy = await inTransaction(async (client) => {
+ const { rows } = await client.query<OfferRow>(
+ `INSERT INTO offers (network_id, advertiser_id, name, status, destination_url, payout_model, default_payout,
+ default_revenue, currency, daily_conversion_cap, total_conversion_cap, daily_click_cap, attribution_window_s,
+ dedup_window_s, allowed_traffic_types, fallback_url, objective, visibility, category, preview_url,
+ tracking_domain_id, metadata)
+ SELECT network_id, advertiser_id, name || ' (copy)', 'draft', destination_url, payout_model, default_payout,
+ default_revenue, currency, daily_conversion_cap, total_conversion_cap, daily_click_cap, attribution_window_s,
+ dedup_window_s, allowed_traffic_types, fallback_url, objective, visibility, category, preview_url,
+ tracking_domain_id, metadata
+ FROM offers WHERE network_id = $1 AND id = $2
+ RETURNING *`,
+ [networkId, src.id],
  );
- };
+ const created = rows[0]!;
+ const copyTable = (table: string, cols: string) => copyOfferRows(client, table, cols, networkId, src.id, created.id);
  // Always copied — base config, not gated by a checkbox in the reference either.
  await copyTable('offer_goals', 'name, event_name, payout_model, payout, revenue, currency, daily_conversion_cap, total_conversion_cap, is_default, status, sort_order');
  await copyTable('offer_coupons', 'code, publisher_id, description, discount, status, starts_at, ends_at');
  await copyTable('offer_deals', 'name, description, deal_type, value, status, starts_at, ends_at');
- await query(
+ await client.query(
  `INSERT INTO taggings (network_id, tag_id, entity_type, entity_id)
  SELECT network_id, tag_id, 'offer', $2 FROM taggings WHERE network_id = $1 AND entity_type = 'offer' AND entity_id = $3`,
- [networkId, copy.id, src.id],
+ [networkId, created.id, src.id],
  );
 
  if (opts.includeCreatives) await copyTable('offer_creatives', 'name, type, url, html, width, height, language, status');
  if (opts.includeCustomSettings) {
  await copyTable(GEO, 'country, region, action, payout_override, revenue_override, destination_override');
- await query(
- `INSERT INTO offer_custom_settings (network_id, offer_id, category, name, partner_ids, description, public_description, event, value, status)
- SELECT network_id, $2, category, name, partner_ids, description, public_description, event, value, status
- FROM offer_custom_settings WHERE network_id = $1 AND offer_id = $3`,
- [networkId, copy.id, src.id],
- );
+ await copyCustomSettings(client, networkId, src.id, created.id);
  }
  if (opts.includePartnerVisibility) await copyTable(ACCESS, 'publisher_id, access, approval_status, payout_override');
  if (opts.includeForwardingRules) await copyTable('offer_forwarding_rules', 'name, partner_ids, offer_urls, destination, countries, status');
+ return created;
+ });
 
  await writeAudit(req, { action: 'offer.duplicate', entityType: 'offer', entityId: copy.id, after: copy });
  sendOk(res, toAdminDTO(copy), undefined, 201);
@@ -524,7 +567,7 @@ export function offersAdminRoutes(): Router {
  // --- "Copy Offer Settings" — same idea as duplicate, but onto an EXISTING offer instead of a
  // new one (appends, doesn't replace the target's existing rows). "Include Offer URLs" has no
  // equivalent concept here (same reason as Copy Offer), so it's accepted but ignored server-side
- // too — the frontend disables that checkbox.
+ // too — the frontend disables that checkbox. One transaction, like duplicate (F-11).
  r.post('/:id/copy-settings-to', requireRole('admin', 'manager'), validateBody(copySettingsSchema), asyncHandler(async (req, res) => {
  const db = dbForRequest(req);
  const src = await db.selectOne<OfferRow>(OFFERS, { id: req.params.id });
@@ -532,23 +575,21 @@ export function offersAdminRoutes(): Router {
  const opts = req.body as z.infer<typeof copySettingsSchema>;
  const target = await db.selectOne<OfferRow>(OFFERS, { id: opts.targetOfferId });
  if (!target) throw badRequest('targetOfferId does not belong to this network');
-
  const networkId = db.scope.networkId;
- const copyTable = async (table: string, cols: string): Promise<void> => {
- await query(
- `INSERT INTO ${table} (network_id, offer_id, ${cols})
- SELECT network_id, $2, ${cols} FROM ${table} WHERE network_id = $1 AND offer_id = $3`,
- [networkId, target.id, src.id],
- );
- };
 
+ const result: { copied: boolean; targetOfferId: string; geoRulesInserted?: number } = {
+ copied: true, targetOfferId: target.id,
+ };
+ await inTransaction(async (client) => {
+ const copyTable = (table: string, cols: string) => copyOfferRows(client, table, cols, networkId, src.id, target.id);
+ if (opts.includeCreatives) await copyTable('offer_creatives', 'name, type, url, html, width, height, language, status');
+ if (opts.includeCustomSettings) {
  // offer_geo_rules has a unique index (offer_id, country, COALESCE(region, '')).
  // Use a NOT EXISTS subquery so that when the target already has a geo rule for the same
  // country/region as the source, the target's existing row is preserved and the source's
  // row is silently skipped. This avoids a 500 on a normal "copy settings" operation while
  // never destroying existing target configuration.
- const copyGeoRules = async (): Promise<number> => {
- const { rowCount } = await query(
+ const { rowCount } = await client.query(
  `INSERT INTO ${GEO} (network_id, offer_id, country, region, action, payout_override, revenue_override, destination_override)
  SELECT src.network_id, $2, src.country, src.region, src.action, src.payout_override, src.revenue_override, src.destination_override
  FROM ${GEO} src
@@ -561,24 +602,11 @@ export function offersAdminRoutes(): Router {
  )`,
  [networkId, target.id, src.id],
  );
- return rowCount;
- };
-
- const result: { copied: boolean; targetOfferId: string; geoRulesInserted?: number } = {
- copied: true, targetOfferId: target.id,
- };
-
- if (opts.includeCreatives) await copyTable('offer_creatives', 'name, type, url, html, width, height, language, status');
- if (opts.includeCustomSettings) {
- result.geoRulesInserted = await copyGeoRules();
- await query(
- `INSERT INTO offer_custom_settings (network_id, offer_id, category, name, partner_ids, description, public_description, status, ref, partner_id, apply_all_partners, effective_from, effective_to, targeting, apply_custom_payout, payout_model, payout_value, apply_custom_revenue, revenue_model, revenue_value, goal_id, fire_partner_postback, caps, conversion_status, throttle_rate, set_parameter_goal, landing_page_url, creative_type, creative_url, creative_thumbnail_url, email_from, email_subject)
- SELECT network_id, $2, category, name, partner_ids, description, public_description, status, ref, partner_id, apply_all_partners, effective_from, effective_to, targeting, apply_custom_payout, payout_model, payout_value, apply_custom_revenue, revenue_model, revenue_value, goal_id, fire_partner_postback, caps, conversion_status, throttle_rate, set_parameter_goal, landing_page_url, creative_type, creative_url, creative_thumbnail_url, email_from, email_subject
- FROM offer_custom_settings WHERE network_id = $1 AND offer_id = $3`,
- [networkId, target.id, src.id],
- );
+ result.geoRulesInserted = rowCount ?? 0;
+ await copyCustomSettings(client, networkId, src.id, target.id);
  }
  if (opts.includeForwardingRules) await copyTable('offer_forwarding_rules', 'name, partner_ids, offer_urls, destination, countries, status');
+ });
  // Copied geo rules feed the target's cached click config.
  await invalidateOfferConfig(networkId, target.id);
 
