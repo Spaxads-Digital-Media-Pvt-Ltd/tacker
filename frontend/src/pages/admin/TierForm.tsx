@@ -164,7 +164,7 @@ export default function TierForm() {
               <div className="flex justify-between text-fg-secondary"><span>Revenue</span><span className="font-medium text-fg">RPA: $1.00</span></div>
               <div className="flex justify-between text-fg-secondary"><span>Payout</span><span className="font-medium text-fg">CPA: {payout ? `$${payout}` : '—'}</span></div>
               <div className="flex justify-between text-fg-secondary"><span>Margin</span><span className="font-medium text-fg">{validMargin ? `${marginNum}%` : '—'}</span></div>
-              <p className="mt-2 text-[11px] text-fg-muted">Illustration only — the tier margin is saved but doesn't change real payouts yet. Use per-partner payout overrides or Tiered Commissions for that.</p>
+              <p className="mt-2 text-[11px] text-fg-muted">Partners in this tier are paid this margin off the revenue on the tier's offers set to Apply Margin. A partner's own payout override or custom setting still comes first.</p>
             </div>
           </div>
 

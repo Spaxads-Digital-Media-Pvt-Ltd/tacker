@@ -19,6 +19,7 @@ import { writeAudit } from '../../../lib/audit.js';
 import { assertSameNetwork, assertAllSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
+import { invalidateSmartLinkConfig } from '../../tracking/smart-link-cache.js';
 
 const LINKS = 'smart_links';
 const ITEMS = 'smart_link_items';
@@ -28,20 +29,27 @@ interface LinkRow {
   force_ssl: boolean; show_to_partners: boolean; tracking_domain_id: string | null;
   redirect_mechanism: string; catch_all_offer_id: string | null;
   kpi_run_frequency_hours: number | null; kpi_lookback_hours: number | null;
-  kpi_metric: string | null; kpi_min_clicks: number | null;
+  kpi_metric: string | null; kpi_min_clicks: number | null; kpi_computed_at?: string | null;
   created_at: string; updated_at: string;
 }
-interface ItemRow { id: string; smart_link_id: string; offer_id: string; weight: number; country: string | null; offer_url: string | null; position: number | null }
+interface ItemRow {
+  id: string; smart_link_id: string; offer_id: string; weight: number; country: string | null; offer_url: string | null; position: number | null;
+  kpi_weight?: number | null; kpi_score?: string | null; kpi_clicks?: number | null;
+}
 
 const linkDTO = (r: LinkRow) => ({
   id: r.id, ref: Number(r.ref), name: r.name, status: r.status, labels: r.labels,
   forceSsl: r.force_ssl, showToPartners: r.show_to_partners, trackingDomainId: r.tracking_domain_id,
   redirectMechanism: r.redirect_mechanism, catchAllOfferId: r.catch_all_offer_id,
   kpiRunFrequencyHours: r.kpi_run_frequency_hours, kpiLookbackHours: r.kpi_lookback_hours,
-  kpiMetric: r.kpi_metric, kpiMinClicks: r.kpi_min_clicks,
+  kpiMetric: r.kpi_metric, kpiMinClicks: r.kpi_min_clicks, kpiComputedAt: r.kpi_computed_at ?? null,
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
-const itemDTO = (r: ItemRow) => ({ id: r.id, offerId: r.offer_id, weight: r.weight, country: r.country, offerUrl: r.offer_url, position: r.position });
+// kpiWeight / kpiScore / kpiClicks: the KPI worker's last result for this item (F-17b; null until scored).
+const itemDTO = (r: ItemRow) => ({
+  id: r.id, offerId: r.offer_id, weight: r.weight, country: r.country, offerUrl: r.offer_url, position: r.position,
+  kpiWeight: r.kpi_weight ?? null, kpiScore: r.kpi_score ?? null, kpiClicks: r.kpi_clicks ?? null,
+});
 
 const itemInputSchema = z.object({
   offerId: z.string().uuid(),
@@ -176,6 +184,12 @@ export function smartLinksRoutes(): Router {
         await db.insert(ITEMS, { smart_link_id: req.params.id, ...itemColumns(mechanism, item) });
       }
     }
+    // New items, mechanism or KPI settings: have the KPI worker score the link afresh (F-17b).
+    if (b.items !== undefined || b.redirectMechanism !== undefined || b.kpiMetric !== undefined
+      || b.kpiLookbackHours !== undefined || b.kpiMinClicks !== undefined || b.kpiRunFrequencyHours !== undefined) {
+      await db.update(LINKS, { kpi_computed_at: null }, { id: req.params.id });
+    }
+    await invalidateSmartLinkConfig(networkId, req.params.id!);
 
     await writeAudit(req, { action: 'smart_link.update', entityType: 'smart_link', entityId: req.params.id, after: row });
     sendOk(res, linkDTO(row));
@@ -184,6 +198,7 @@ export function smartLinksRoutes(): Router {
   r.delete('/:id', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
     const n = await dbForRequest(req).delete(LINKS, { id: req.params.id });
     if (n === 0) throw notFound('Smart link not found');
+    await invalidateSmartLinkConfig(req.scope!.networkId, req.params.id!);
     await writeAudit(req, { action: 'smart_link.delete', entityType: 'smart_link', entityId: req.params.id });
     sendOk(res, { deleted: true });
   }));
@@ -202,13 +217,18 @@ export function smartLinksRoutes(): Router {
     const offer = await db.selectOne('offers', { id: b.offerId });
     if (!offer) throw badRequest('offerId does not belong to this network');
     const row = await db.insert<ItemRow>(ITEMS, { smart_link_id: req.params.id, ...itemColumns(link.redirect_mechanism, b) });
+    await db.update(LINKS, { kpi_computed_at: null }, { id: req.params.id });
+    await invalidateSmartLinkConfig(req.scope!.networkId, req.params.id!);
     await writeAudit(req, { action: 'smart_link.item.create', entityType: 'smart_link_item', entityId: row.id, after: row });
     sendOk(res, itemDTO(row), undefined, 201);
   }));
 
   r.delete('/:id/items/:itemId', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
-    const n = await dbForRequest(req).delete(ITEMS, { id: req.params.itemId, smart_link_id: req.params.id });
+    const db = dbForRequest(req);
+    const n = await db.delete(ITEMS, { id: req.params.itemId, smart_link_id: req.params.id });
     if (n === 0) throw notFound('Item not found');
+    await db.update(LINKS, { kpi_computed_at: null }, { id: req.params.id });
+    await invalidateSmartLinkConfig(req.scope!.networkId, req.params.id!);
     await writeAudit(req, { action: 'smart_link.item.delete', entityType: 'smart_link_item', entityId: req.params.itemId });
     sendOk(res, { deleted: true });
   }));

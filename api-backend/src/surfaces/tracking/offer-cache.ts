@@ -62,6 +62,9 @@ export interface OfferConfig {
   deniedPublishers: string[];
   /** Per-partner payout overrides (offer_publisher_access.payout_override), publisherId → money string. */
   partnerPayouts?: Record<string, string>;
+  /** Partner Tiers (F-17b): publisherId → margin % of the active tier(s) linked to this offer with
+   * "apply margin" — payout = revenue × (1 − margin/100). Undefined on configs cached before it. */
+  tierMargins?: Record<string, string>;
   /** 'public' | 'ask' | 'private'. Non-public offers only run for approvedPublishers. */
   visibility?: string;
   /** Publishers with access='allow' AND approval_status='approved' on this offer. */
@@ -211,6 +214,18 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     [networkId, offerId],
   );
 
+  // Partner Tiers (F-17b): the members of every ACTIVE tier linked to this offer with apply_margin.
+  // DECISION: a partner in several such tiers gets the lowest margin (the best rate it qualifies for).
+  const tierRes = await query<{ publisher_id: string; margin: string }>(
+    `SELECT m.publisher_id::text AS publisher_id, MIN(t.margin_pct)::text AS margin
+       FROM partner_tier_offers tof
+       JOIN partner_tiers t ON t.id = tof.tier_id AND t.network_id = tof.network_id AND t.status = 'active'
+       JOIN partner_tier_members m ON m.tier_id = t.id AND m.network_id = t.network_id
+      WHERE tof.network_id = $1 AND tof.offer_id = $2 AND tof.apply_margin
+      GROUP BY m.publisher_id`,
+    [networkId, offerId],
+  );
+
   return {
     id: r.id, networkId: r.network_id, advertiserId: r.advertiser_id, status: r.status,
     destinationUrl: r.destination_url, fallbackUrl: r.fallback_url, payoutModel: r.payout_model,
@@ -221,6 +236,7 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     geoRules: r.geo_rules ?? [],
     deniedPublishers: r.denied_publishers ?? [],
     partnerPayouts: r.partner_payouts ?? {},
+    tierMargins: Object.fromEntries(tierRes.rows.map((t) => [t.publisher_id, t.margin])),
     visibility: r.visibility ?? 'public',
     approvedPublishers: r.approved_publishers ?? [],
     securityCode: r.security_code ?? null,

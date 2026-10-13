@@ -50,6 +50,7 @@ import { createScheduledActionSchema, updateScheduledActionSchema, type CreateSc
 import {
  scheduledActionParams, validateScheduledAction, scheduledActionDtoExtras, type ScheduledActionParams,
 } from '../../../lib/automation/scheduled-actions.js';
+import { tierAutoApproves } from '../../../lib/partner-tiers.js';
 import {
  toAdminDTO,
  toAdvertiserDTO,
@@ -1095,15 +1096,23 @@ export function offerPortalRoutes(): Router {
 
  // A pending request must not run traffic: it stays blocked ('deny') until an admin approves it
  // (Offer Applications → approve sets access='allow'). The body's `access` is ignored on purpose.
+ // Partner Tiers (F-17b): a member of an active tier linked to this offer with "auto-approve
+ // partners" is approved straight away.
  void b;
+ const auto = await tierAutoApproves(networkId, offerId, ownerId);
+ const access = auto ? 'allow' : 'deny';
+ const approvalStatus = auto ? 'approved' : 'pending';
  const row = await query<{ id: string }>(
  `INSERT INTO offer_publisher_access (network_id, offer_id, publisher_id, access, approval_status)
- VALUES ($1, $2, $3, 'deny', 'pending') RETURNING id`,
- [networkId, offerId, ownerId],
+ VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+ [networkId, offerId, ownerId, access, approvalStatus],
  );
  await invalidateOfferConfig(networkId, offerId);
- await writeAudit(req, { action: 'offer.access.request', entityType: 'offer_publisher_access', entityId: row.rows[0]!.id, after: { offerId } });
- sendOk(res, { access: 'deny', approvalStatus: 'pending' }, undefined, 201);
+ await writeAudit(req, {
+ action: auto ? 'offer.access.auto_approve' : 'offer.access.request',
+ entityType: 'offer_publisher_access', entityId: row.rows[0]!.id, after: { offerId, ...(auto ? { by: 'partner_tier' } : {}) },
+ });
+ sendOk(res, { access, approvalStatus }, undefined, 201);
  }),
  );
 

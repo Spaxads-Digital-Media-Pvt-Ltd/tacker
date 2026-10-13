@@ -1,8 +1,9 @@
 /**
  * Manage Tiers (Partners › Tiers) — groups of Partners that share a payout margin and offer
- * visibility. margin_pct drives a client-side "Revenue & Payout Example" preview (Payout =
- * Revenue * (1 - margin/100)); nothing about that preview is stored. Labels reuse the existing
- * generic tags/taggings system (entity_type 'partner_tier'). Tenant-scoped by network_id (§3A).
+ * visibility. margin_pct prices the members on the tier's linked offers with "apply margin"
+ * (Payout = Revenue * (1 - margin/100), at /click and on conversion — F-17b, lib/partner-tiers.ts),
+ * and "auto-approve partners" approves a member's access request on a linked offer at once. Labels
+ * reuse the existing generic tags/taggings system (entity_type 'partner_tier'). Tenant-scoped (§3A).
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -17,6 +18,7 @@ import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { findOrCreateTag } from '../../../lib/db/tags.js';
 import { requireRole } from '../auth.js';
+import { invalidateOfferConfig, invalidateNetworkOfferConfigs } from '../../tracking/offer-cache.js';
 
 const TABLE = 'partner_tiers';
 
@@ -172,6 +174,11 @@ export function partnerTiersRoutes(): Router {
     if (!row) throw notFound('Tier not found');
     if (b.labels !== undefined) await setLabels(db, row.id, b.labels);
     if (b.partnerIds !== undefined) await setMembers(db, req.scope!.networkId, row.id, b.partnerIds);
+    // Margin, status and members feed the click/conversion payout (F-17b) via each linked offer's
+    // cached config.
+    if (b.marginPct !== undefined || b.status !== undefined || b.partnerIds !== undefined) {
+      await invalidateNetworkOfferConfigs(req.scope!.networkId);
+    }
     await writeAudit(req, { action: 'partner_tier.update', entityType: 'partner_tier', entityId: req.params.id, before, after: row });
     const labels = await labelsFor(req.scope!.networkId, row.id);
     const { rows: countRows } = await query<{ count: string }>(
@@ -248,6 +255,7 @@ export function partnerTiersRoutes(): Router {
     } else {
       await db.insert('partner_tier_offers', { tier_id: req.params.id, offer_id: b.offerId, apply_margin: b.applyMargin, auto_approve_partners: b.autoApprovePartners });
     }
+    await invalidateOfferConfig(req.scope!.networkId, b.offerId);
     await writeAudit(req, { action: 'partner_tier.offer.link', entityType: 'partner_tier', entityId: req.params.id, after: b });
     sendOk(res, { linked: true });
   }));
@@ -256,6 +264,7 @@ export function partnerTiersRoutes(): Router {
     const db = dbForRequest(req);
     const n = await db.delete('partner_tier_offers', { tier_id: req.params.id, offer_id: req.params.offerId });
     if (n === 0) throw notFound('Offer link not found');
+    await invalidateOfferConfig(req.scope!.networkId, req.params.offerId!);
     await writeAudit(req, { action: 'partner_tier.offer.unlink', entityType: 'partner_tier', entityId: req.params.id, before: { offerId: req.params.offerId } });
     sendOk(res, { deleted: true });
   }));

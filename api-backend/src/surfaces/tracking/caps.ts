@@ -29,6 +29,13 @@ export async function isClickCapped(offerId: string, dailyClickCap: number | nul
   return res === -1;
 }
 
+/** Read-only: is today's click cap already full? (/sl skips such offers instead of dead-ending — F-17b.) */
+export async function clickCapReached(offerId: string, dailyClickCap: number | null): Promise<boolean> {
+  if (dailyClickCap == null || dailyClickCap <= 0) return false;
+  const n = Number((await getRedis().get(`cap:click:${offerId}:${dayStamp()}`)) ?? 0);
+  return n >= dailyClickCap;
+}
+
 // Check every key against its limit first; only when ALL are below, increment them all (so a click
 // capped by one window isn't counted against the others). ARGV = limits…, then TTLs… (0 = no TTL).
 const MULTI_CAP_LUA = `

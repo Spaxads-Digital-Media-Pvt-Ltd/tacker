@@ -109,6 +109,8 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `fraud/` | Fraud rules (Redis-cached for /click), fraud scan, alerts |
 | `alerts/` | `deliverAlert` — email + webhook delivery of raised alerts (fraud scan; automation alert rules) |
 | `automation/` | Scheduled-action runner, alert-rule grammar + evaluator, webhook events (emit + delivery) |
+| `smart-links/` | KPI scoring for KPI smart links (kpiWeights + rescoreKpiSmartLinks) |
+| `partner-tiers.ts` | Tier payout (revenue × (1 − margin)) + auto-approve check |
 | `geo/` | MaxMind GeoIP2 lookup |
 | `http/` | Express app scaffolding, envelope, errors, pagination |
 | `integrations/` | Facebook CAPI, offer feed sync, PIN API |
@@ -152,6 +154,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Scheduled Actions | `scheduled-actions.ts` | `scheduled-actions` | Every minute — applies due offer scheduled actions (lib/automation/scheduled-actions.ts) |
 | Alert Rules | `alert-rules.ts` | `alert-rules` | Every 5 min — evaluates Automation alert rules via the reporting provider (lib/automation/alert-rules.ts) |
 | Automation Webhooks | `automation-webhook.ts` | `automation-webhook` | Continuous — event deliveries with retries/backoff through safeRequest (lib/automation/webhooks.ts) |
+| Smart-Link KPI | `smart-link-kpi.ts` | `smart-link-kpi` | Every 10 min — re-scores due KPI smart links (lib/smart-links/kpi.ts) |
 
 ### Queue Definitions (`surfaces/workers/queues.ts`)
 Exports `QUEUE` constant mapping queue names to BullMQ queue instances.

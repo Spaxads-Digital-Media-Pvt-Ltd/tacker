@@ -39,7 +39,7 @@
 | GET,POST,PATCH,DELETE | `/api/tags/*` | Tag management | admin |
 | GET,POST,PATCH,DELETE | `/api/custom-fields/*` | Custom fields | admin |
 | GET,POST,PATCH,DELETE | `/api/settings/*` | Settings. Secrets never come back: `GET /api/settings` returns `smtp.passwordSet` and `integrations.<key>Set` for every credential (keys ending in key/token/secret/password). `PUT /integrations`: a non-empty credential replaces the stored one (encrypted), `''` keeps it, `null` removes it (`pinApiKey: ''` still revokes the Pin API key). `GET /security` (postback secure code): admin/manager | admin |
-| GET,POST,PATCH,DELETE | `/api/smart-links/*` | Smart links | admin |
+| GET,POST,PATCH,DELETE | `/api/smart-links/*` | Smart links. Writes bust the `/sl` Redis config; KPI links are re-scored by a worker (F-17b — kpi_weight per item, see WORKFLOWS "Smart Link Flow"); changing items / mechanism / KPI settings re-scores on the next run | admin |
 | GET,POST,PATCH,DELETE | `/api/offline/*` | Offline conversions (POST `/conversions` = Add Conversion: admin/manager, manual-conversion policy below) | admin |
 | GET,POST,PATCH,DELETE | `/api/import-export/*` | Import/Export | admin |
 | GET,POST,PATCH,DELETE | `/api/catalog/*` | Catalog | admin |
@@ -58,10 +58,10 @@
 | GET,POST,PATCH,DELETE | `/api/conversion-imports/*` | Conversion imports | admin |
 | GET,POST,PATCH,DELETE | `/api/traffic-controls/*` | Traffic controls | admin |
 | GET,POST,PATCH,DELETE | `/api/offer-custom-settings/*` | Offer custom settings — per-partner overrides, ENFORCED at runtime (`lib/offer-settings/custom-settings.ts`). Body = v2 typed fields in camelCase (`category`, **`offerId` required**, `partnerId`/`partnerIds`/`applyAllPartners`, `status` active\|inactive, `effectiveFrom/To`, `targeting{countries,devices,os,browsers}`, `payoutModel/payoutValue`, `revenueModel/revenueValue`, `goalId`, `firePartnerPostback`, `caps{clicks\|conversions\|payout\|revenue:{daily\|weekly\|monthly\|global}}` or flat `capType+capInterval+capValue`, `throttleRate`, `conversionStatus`, `landingPageUrl`, creative fields). Per-category checks → 400; bad enum/missing offerId → 422. Writes bust the offer's cached config | admin |
-| GET,POST,PATCH,DELETE | `/api/smartswitch/*` | SmartSwitch | admin |
+| GET,POST,PATCH,DELETE | `/api/smartswitch/*` | SmartSwitch rule catalog (stored, never evaluated — the UI hides the module unless `VITE_FEATURE_SMARTSWITCH=true`, F-17b) | admin |
 | GET,POST,PATCH,DELETE | `/api/users/*` | Users | admin |
 | GET,POST,PATCH,DELETE | `/api/postbacks/*` | Postbacks | admin |
-| GET,POST,PATCH,DELETE | `/api/partner-tiers/*` | Partner tiers | admin |
+| GET,POST,PATCH,DELETE | `/api/partner-tiers/*` | Partner tiers (F-17b): members of an **active** tier linked to an offer with `applyMargin` are paid `revenue × (1 − marginPct/100)` — at /click (frozen on the click) and on conversion (off the final revenue) — after the partner's own rates (S2S payout, custom setting, per-offer override) and before goal / country / default payout; a partner in several such tiers gets the lowest margin. `autoApprovePartners`: a member's `POST /api/portal/offers/:id/request` on a linked offer is approved at once (`offer.access.auto_approve`). Tier / link edits bust the offer configs | admin |
 | GET,POST,PATCH,DELETE | `/api/business-units/*` | Business units | admin |
 | GET,POST,PATCH,DELETE | `/api/offer-applications/*` | Offer applications | admin |
 | GET,POST,PATCH,DELETE | `/api/questionnaires/*` | Questionnaires | admin |
@@ -210,7 +210,7 @@ No API-key response carries a secret: `/api/v1/network/offers` uses `toNetworkAp
 | GET | `/tracking/health` | Health check | None |
 | GET | `/tracking/metrics` | Prometheus metrics | None |
 | GET | `/click` | Click redirect (302) | None (tenant by host) |
-| GET | `/sl` | Smart link resolver → redirect | None (tenant by host) |
+| GET | `/sl` | Smart link resolver → 302 `/click?offer_id&sl&pub_id&sub1-5&source_id&fbclid&gclid` (also for the catch-all offer); skips offers that would dead-end at /click; 204 when nothing is eligible and there's no catch-all | None (tenant by host) |
 | GET/POST | `/postback` | S2S postback (conversion) | `secure_code` required (tenant by host) |
 | GET | `/pixel` | Pixel conversion (1x1 GIF) | Fired from the offer's own site (Referer/Origin; tenant by host) |
 | GET | `/iframe` | Iframe conversion | Fired from the offer's own site (Referer/Origin; tenant by host) |

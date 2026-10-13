@@ -31,6 +31,7 @@ import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.
 import { evaluateCustomerValueRules, recordCustomerValueFiring } from '../../../lib/customer-value/evaluate.js';
 import { enqueueOutboundPostback } from './enqueue-postback.js';
 import { emitAutomationEvent } from '../../../lib/automation/webhooks.js';
+import { tierPayout } from '../../../lib/partner-tiers.js';
 import { enqueueFacebookCapi } from '../../../lib/integrations/enqueue.js';
 import { loadIntegrations } from '../../../lib/integrations/settings.js';
 import { allowedConversionHosts, conversionOriginAllowed, type RequestOrigin } from './origin.js';
@@ -346,6 +347,13 @@ async function recordWithIdemKey(
  if (clientPayout == null && custom.payout != null) payout = custom.payout;
  if (clientRevenue == null && custom.revenue != null) revenue = custom.revenue;
  }
+ // Partner Tiers (F-17b): a tier member is paid the tier margin off this conversion's final revenue —
+ // unless the payout is already their own (an S2S payout param, their custom setting, their per-offer
+ // override). It beats the goal / country / default payout.
+ const ownRate = clientPayout != null || custom?.payout != null
+ || (click.publisher_id != null && offer?.partnerPayouts?.[click.publisher_id] != null);
+ const tierRate = !ownRate && click.publisher_id ? tierPayout(revenue, offer?.tierMargins?.[click.publisher_id]) : null;
+ if (tierRate != null) payout = tierRate;
  const eventName = input.event ?? revCfg?.baseEventName ?? null;
  const currency = click.currency ?? goal?.currency ?? offer?.currency ?? null;
  const goalId = goal?.id ?? null;

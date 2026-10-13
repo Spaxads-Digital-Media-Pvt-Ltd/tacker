@@ -25,6 +25,7 @@ import { startDomainVerifyWorker, scheduleDomainVerify } from './processors/doma
 import { startScheduledActionsWorker, scheduleScheduledActions } from './processors/scheduled-actions.js';
 import { startAlertRulesWorker, scheduleAlertRules } from './processors/alert-rules.js';
 import { startAutomationWebhookWorker } from './processors/automation-webhook.js';
+import { startSmartLinkKpiWorker, scheduleSmartLinkKpi } from './processors/smart-link-kpi.js';
 
 const log = surfaceLogger('workers');
 
@@ -46,6 +47,7 @@ const workers = [
  startScheduledActionsWorker(),
  startAlertRulesWorker(),
  startAutomationWebhookWorker(),
+ startSmartLinkKpiWorker(),
 ];
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
 void scheduleRetention().catch((err) => log.error({ err }, 'failed to schedule retention'));
@@ -53,6 +55,7 @@ void scheduleOfferFeedScan().catch((err) => log.error({ err }, 'failed to schedu
 void scheduleDomainVerify().catch((err) => log.error({ err }, 'failed to schedule tracking domain re-check'));
 void scheduleScheduledActions().catch((err) => log.error({ err }, 'failed to schedule scheduled actions'));
 void scheduleAlertRules().catch((err) => log.error({ err }, 'failed to schedule alert rules'));
+void scheduleSmartLinkKpi().catch((err) => log.error({ err }, 'failed to schedule smart link KPI scoring'));
 
 // Report only EXHAUSTED-retry failures to Sentry so transient retries don't spam it.
 for (const w of workers) {

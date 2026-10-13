@@ -203,8 +203,8 @@ API keys for the Public REST API.
 
 | Table | Purpose |
 |---|---|
-| `smart_links` | Smart link definitions (weighted rotation, priority, geo) |
-| `smart_link_items` | Items within a smart link (offer_id, weight, position, country) |
+| `smart_links` | Smart link definitions (weight / priority / kpi, catch-all, KPI settings, `kpi_computed_at` — migration 071) |
+| `smart_link_items` | Items within a smart link (offer_id, weight, position, country; KPI worker output `kpi_weight`, `kpi_score`, `kpi_clicks` — migration 071) |
 | `offer_geo_rules` | Per-offer geo targeting rules |
 | `offer_publisher_access` | Per-offer publisher allow/deny |
 | `offer_templates` | Offer templates |

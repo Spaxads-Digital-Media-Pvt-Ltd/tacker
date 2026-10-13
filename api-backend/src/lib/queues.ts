@@ -13,6 +13,7 @@ export const QUEUE = {
  scheduledActions: 'scheduled-actions',
  alertRules: 'alert-rules',
  automationWebhook: 'automation-webhook',
+ smartLinkKpi: 'smart-link-kpi',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

@@ -17,6 +17,7 @@ import { resolveEntityId } from './ref-resolver.js';
 import { isActivePartner } from './partner-status.js';
 import { getNetworkIpBlacklist } from '../../lib/net/ip-lists.js';
 import { getFraudConfigCached } from '../../lib/fraud/rules.js';
+import { tierPayout } from '../../lib/partner-tiers.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
 import { buildTrustedProxyCheck } from './trusted-proxy.js';
@@ -26,7 +27,8 @@ import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
 import { evaluateGeoRules, resolveForcedGeo } from './geo-rules.js';
 import { checkTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT } from '../../lib/tracking-rate-limit.js';
-import { isClickCapped, isCustomClickCapped } from './caps.js';
+import { isClickCapped, isCustomClickCapped, clickCapReached } from './caps.js';
+import { getSmartLinkConfig } from './smart-link-cache.js';
 import { applicableSettings } from '../../lib/offer-settings/custom-settings.js';
 import { markUnique } from './dedup.js';
 import { fraudPreSignals } from './fraud-presignals.js';
@@ -36,7 +38,6 @@ import { storeClickForAttribution } from './click-store.js';
 import { recordConversion, SALE_AMOUNT_PARAMS, type RecordConversionResult } from './conversions/record.js';
 import { clicksTotal, redirectLatency, metricsText, metricsContentType } from '../../lib/metrics.js';
 import { captureError } from '../../lib/observability/sentry.js';
-import { query } from '../../lib/db/pool.js';
 import { isRedirectUrlSafe, getRedirectUrlRejectReason } from '../../lib/url-security.js';
 
 // 1x1 transparent GIF for the pixel endpoint.
@@ -84,11 +85,6 @@ function pickByPriority(items: { offer_id: string; position: number | null }[]):
 
 // A smart link with no eligible offer diverts to its Catch-All Offer (via /click, so the normal
 // caps/macros/attribution pipeline still applies) — or a neutral 204 if none is configured.
-function divertToCatchAll(reply: FastifyReply, catchAllOfferId: string | null): FastifyReply {
- if (catchAllOfferId) return reply.code(302).header('location', `/click?offer_id=${catchAllOfferId}`).header('cache-control', 'no-store').send();
- return reply.code(204).send();
-}
-
 
 // Defense-in-depth (M-1): the tracking surface has no per-request auth, so the Host and
 // X-Forwarded-For headers cannot be trusted unless the immediate socket peer is a known proxy.
@@ -315,10 +311,12 @@ export function buildTrackingApp(): FastifyInstance {
  const clickId = randomUUID().replace(/-/g, '');
 
  // Resolve payout/revenue (frozen onto the click for later attribution). A partner's own payout
- // override on this offer is the most specific rate, then the country override, then the default.
+ // override on this offer is the most specific rate, then their tier's margin off the revenue (Partner
+ // Tiers, F-17b), then the country override, then the default.
  const partnerPayout = publisherId ? offer.partnerPayouts?.[publisherId] ?? null : null;
- const resolvedPayout = partnerPayout ?? geoDecision.payoutOverride ?? offer.defaultPayout;
  const resolvedRevenue = geoDecision.revenueOverride ?? offer.defaultRevenue;
+ const tierRate = publisherId ? tierPayout(resolvedRevenue, offer.tierMargins?.[publisherId]) : null;
+ const resolvedPayout = partnerPayout ?? tierRate ?? geoDecision.payoutOverride ?? offer.defaultPayout;
 
  // 10. Enqueue durable write (async) — the hot path never blocks on Postgres.
  const job: ClickJob = {
@@ -380,9 +378,12 @@ export function buildTrackingApp(): FastifyInstance {
  return reply.code(302).header('location', finalUrl).header('cache-control', 'no-store').send();
  });
 
- // Smart link resolver — pick an offer by weighted rotation (geo-aware) and hand off to /click so
- // all the normal click logic (caps, macros, attribution, smart_link_id) applies. Lower volume than
- // /click, so a small Postgres read here is acceptable (documented departure from the hot-path rule).
+ // Smart link resolver — pick an offer (Weight / Priority / KPI) and hand off to /click so all the
+ // normal click logic (caps, macros, attribution, smart_link_id) applies. F-17b: the link comes from
+ // Redis (no Postgres read per request); a visitor no item is targeted at goes to the catch-all offer
+ // (it used to get any item, ignoring their targeting); an item whose offer would only dead-end at
+ // /click — not active, today's click cap reached, geo-blocked, or this partner blocked / not
+ // approved on a non-public offer — is skipped; KPI links rotate by the worker's computed weights.
  app.get('/sl', async (req, reply) => {
  // Rate limit (AP-1): skip in dev/test.
  if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
@@ -400,34 +401,12 @@ export function buildTrackingApp(): FastifyInstance {
  const q = req.query as Record<string, unknown>;
  const slId = asUuid(firstStr(q['id']) ?? firstStr(q['sl']));
  if (!slId) return reply.code(400).send(errorEnvelope('bad_request', 'missing_smart_link_id', 400));
-
- const linkRes = await query<{ id: string; status: string; redirect_mechanism: string; catch_all_offer_id: string | null }>(
- `SELECT id, status, redirect_mechanism, catch_all_offer_id FROM smart_links WHERE id = $1 AND network_id = $2 LIMIT 1`,
- [slId, tenant.networkId],
- );
- const link = linkRes.rows[0];
- if (!link || link.status !== 'active') return divertToCatchAll(reply, link?.catch_all_offer_id ?? null);
-
- const itemsRes = await query<{ offer_id: string; weight: number; position: number | null; country: string | null }>(
- `SELECT offer_id, weight, position, country FROM smart_link_items WHERE smart_link_id = $1 AND network_id = $2`,
- [slId, tenant.networkId],
- );
- // Geo filter: keep items with no country target or one matching the visitor's country.
- const geo = req.ip ? lookupGeo(req.ip) : null;
- const country = geo?.country ?? null;
- const eligible = itemsRes.rows.filter((i) => !i.country || i.country === country);
- const pool = eligible.length ? eligible : itemsRes.rows;
- // Priority mechanism: lowest Position wins. Weight and KPI (no live performance signal on the
- // hot path) both fall back to weighted-random, matching the reference's own steady-state
- // behavior once a KPI-driven Smart Link has converged on its best-performing offer.
- const chosen = link.redirect_mechanism === 'priority'
- ? pickByPriority(pool)
- : pickWeighted(pool);
- if (!chosen) return divertToCatchAll(reply, link.catch_all_offer_id);
-
- // Forward to /click, preserving pub_id + subs and tagging the smart link.
- const params = new URLSearchParams({ offer_id: chosen, sl: slId });
  const pub = firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']);
+
+ // Forward to /click, preserving pub_id + subs and tagging the smart link — for the picked offer
+ // and for the catch-all alike (the catch-all used to lose the partner and subs).
+ const forward = (offerId: string) => {
+ const params = new URLSearchParams({ offer_id: offerId, sl: slId });
  if (pub) params.set('pub_id', pub);
  for (const i of [1, 2, 3, 4, 5]) { const s = firstStr(q[`sub${i}`]); if (s) params.set(`sub${i}`, s); }
  // Source ID too — Traffic Blocking rules can match on it at /click — and the ad click ids, so a
@@ -436,6 +415,36 @@ export function buildTrackingApp(): FastifyInstance {
  if (src) params.set('source_id', src);
  for (const k of ['fbclid', 'gclid']) { const v = firstNonBlank(q, [k]); if (v) params.set(k, v); }
  return reply.code(302).header('location', `/click?${params.toString()}`).header('cache-control', 'no-store').send();
+ };
+
+ const link = await getSmartLinkConfig(tenant.networkId, slId);
+ const catchAll = () => (link?.catchAllOfferId ? forward(link.catchAllOfferId) : reply.code(204).send());
+ if (!link || link.status !== 'active') return catchAll();
+
+ const geo = req.ip ? lookupGeo(req.ip) : null;
+ const country = geo?.country ?? null;
+ const targeted = link.items.filter((i) => !i.country || i.country === country);
+ if (!targeted.length) return catchAll();
+
+ // The partner as /click will see it: only an active partner of this network counts (F-08).
+ const requestedPub = pub ? await resolveEntityId('publisher', tenant.networkId, pub) : null;
+ const partner = requestedPub && (await isActivePartner(tenant.networkId, requestedPub)) ? requestedPub : null;
+ const offers = await Promise.all(targeted.map((i) => getOfferConfig(tenant.networkId, i.offerId)));
+ const capped = await Promise.all(offers.map((o) => (o ? clickCapReached(o.id, o.dailyClickCap) : true)));
+ const eligible = targeted.filter((_, k) => {
+ const o = offers[k];
+ if (!o || o.status !== 'active' || capped[k]) return false;
+ if (partner && o.deniedPublishers.includes(partner)) return false;
+ if (o.visibility && o.visibility !== 'public' && !(partner && (o.approvedPublishers ?? []).includes(partner))) return false;
+ return evaluateGeoRules(o.geoRules, country, geoAvailable()).allowed;
+ });
+
+ // Priority: lowest Position wins. Weight: the configured weights. KPI: the worker's weights once
+ // computed (lib/smart-links/kpi.ts), an even rotation until then.
+ const chosen = link.mechanism === 'priority'
+ ? pickByPriority(eligible.map((i) => ({ offer_id: i.offerId, position: i.position })))
+ : pickWeighted(eligible.map((i) => ({ offer_id: i.offerId, weight: link.mechanism === 'kpi' ? (i.kpiWeight ?? 0) : i.weight })));
+ return chosen ? forward(chosen) : catchAll();
  });
 
  // ---- Conversion methods (spec §6) — all three normalize into recordConversion() ----

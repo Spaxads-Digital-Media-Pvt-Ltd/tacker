@@ -110,13 +110,21 @@ Same as postback but:
 ```
 End user clicks /sl?id=<smart-link-id>
  → resolveHostToNetwork(host)
- → Look up smart_links row (small PG read — acceptable)
- → Look up smart_link_items (with offer_id, weight, position, country)
- → Geo-filter items, then:
- - 'priority' mechanism: pick lowest position
- - 'weighted' mechanism: weighted-random pick
- → Forward to /click with chosen offer_id + sl parameter
+ → getSmartLinkConfig — link + items from Redis (`slcfg:{net}:{id}`, load-through; busted by the
+   smart-link API and the KPI worker) — no Postgres read per request (F-17b)
+ → link missing/paused → catch-all offer (or 204)
+ → items targeted at the visitor's country (or untargeted); none → catch-all offer (or 204)
+ → drop items whose offer would dead-end at /click: not active, today's click cap reached (read-only
+   Redis GET), partner denied / not approved on a non-public offer, geo rules (fail-open without geo)
+ → 'priority': lowest position · 'weight': weighted-random · 'kpi': weighted by the KPI worker's
+   kpi_weight (even rotation until scored); nothing eligible → catch-all offer (or 204)
+ → Forward to /click with offer_id + sl + pub_id + subs + source_id + fbclid/gclid (catch-all too)
  → Normal /click pipeline takes over
+
+smart-link-kpi queue (every 10 min) → active KPI links due (kpi_run_frequency_hours, default 1h)
+ → per item: the link's clicks in kpi_lookback_hours (default 24h) + their approved conversions
+ → CVR | EPC (payout/click) | Revenue (revenue/click); ≥ kpi_min_clicks (default 50) and score > 0
+ → best item(s) share 80, others 20 (≥1 each) → smart_link_items.kpi_weight → cache busted
 ```
 
 ## API Key Generation Flow
