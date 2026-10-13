@@ -17,6 +17,7 @@
  */
 import { query } from '../db/pool.js';
 import { isSensitiveParamKey } from '../reporting/redact.js';
+import { dateOnlyOrNull } from '../date-only.js';
 
 export const CV_TEXT_OPERATORS = ['exact_match'] as const;
 export const CV_NUMBER_OPERATORS = ['greater_than', 'greater_than_or_equal_to', 'less_than', 'less_than_or_equal_to', 'equal_to'] as const;
@@ -35,7 +36,7 @@ interface RuleRow {
   apply_offers_mode: string; apply_offer_ids: string[];
   apply_advertisers_mode: string; apply_advertiser_ids: string[];
   apply_partners_mode: string; apply_partner_ids: string[];
-  start_date: string | null; end_date: string | null;
+  start_date: string | Date | null; end_date: string | Date | null;
   goal_cycle: string; recurring_duration: string | null;
   continuous_mode: string | null; continuous_days: number | null;
   set_goal_conditions: boolean; conditions: CvCondition[];
@@ -119,9 +120,14 @@ async function firstConversionAt(networkId: string, rule: RuleRow, userId: strin
 }
 
 async function resolveWindow(networkId: string, rule: RuleRow, userId: string, now: Date): Promise<{ start: Date; end: Date | null } | null> {
-  // Rule Duration (Start/End Date) gates the rule regardless of Goal Cycle mode.
-  const effStart = rule.start_date ? new Date(rule.start_date) : null;
-  const effEnd = rule.end_date ? new Date(`${rule.end_date}T23:59:59.999Z`) : null;
+  // Rule Duration (Start/End Date) gates the rule regardless of Goal Cycle mode — whole UTC days.
+  // start_date/end_date are DATE columns (JS Dates at local midnight), so read them with dateOnly():
+  // interpolating the Date itself made "<Date string>T23:59:59.999Z" — an Invalid Date, so a rule's
+  // end date never stopped it (F-19).
+  const startDay = dateOnlyOrNull(rule.start_date);
+  const endDay = dateOnlyOrNull(rule.end_date);
+  const effStart = startDay ? new Date(`${startDay}T00:00:00.000Z`) : null;
+  const effEnd = endDay ? new Date(`${endDay}T23:59:59.999Z`) : null;
   if (effStart && now < effStart) return null;
   if (effEnd && now > effEnd) return null;
 

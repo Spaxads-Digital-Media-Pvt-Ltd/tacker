@@ -17,6 +17,7 @@ import { pool, query } from '../../../lib/db/pool.js';
 import { settleInvoice } from '../../../lib/ledger/ledger.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
+import { dateOnly } from '../../../lib/date-only.js';
 
 const TABLE = 'advertiser_invoices';
 
@@ -29,20 +30,13 @@ interface Row {
 }
 interface JoinedRow extends Row { advertiser_ref: number; advertiser_name: string; balance: string }
 
-/** node-pg parses `date` columns into JS Date objects at LOCAL midnight, not strings — normalize
- * with local getters (never toISOString/UTC, which can shift the day by the server's UTC offset). */
-function toDateStr(v: string | Date): string {
-  if (!(v instanceof Date)) return v;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
-}
 
 const dto = (r: JoinedRow) => ({
   id: r.id, ref: Number(r.ref),
   advertiserId: r.advertiser_id, advertiserRef: r.advertiser_ref, advertiserName: r.advertiser_name,
   status: r.status, visibleToAdvertiser: r.visible_to_advertiser,
   paymentTerms: r.payment_terms, currency: r.currency,
-  periodStart: toDateStr(r.period_start), periodEnd: toDateStr(r.period_end),
+  periodStart: dateOnly(r.period_start), periodEnd: dateOnly(r.period_end),
   billedAmount: r.billed_amount, paidAmount: r.paid_amount,
   balance: r.balance,
   paidAt: r.paid_at, notes: r.notes,
@@ -114,7 +108,7 @@ async function payAdvertiserInvoice(networkId: string, invoiceId: string, create
     const { settled } = await settleInvoice(client, {
       networkId, accountType: 'advertiser', accountId: before.advertiser_id,
       invoiceId, invoiceRef: before.ref, amount: String(before.billed_amount), currency: before.currency,
-      periodStart: toDateStr(before.period_start), periodEnd: toDateStr(before.period_end), createdBy,
+      periodStart: dateOnly(before.period_start), periodEnd: dateOnly(before.period_end), createdBy,
     });
     const after = (await client.query<Row>(
       `UPDATE ${TABLE} SET status = 'paid', paid_amount = $3, paid_at = now()
@@ -140,7 +134,7 @@ async function overlappingInvoice(networkId: string, advertiserId: string, curre
 }
 
 const overlapMessage = (o: { ref: string; period_start: string | Date; period_end: string | Date }, currency: string) =>
-  `Invoice #${o.ref} already covers ${toDateStr(o.period_start)} to ${toDateStr(o.period_end)} for this advertiser in ${currency}. `
+  `Invoice #${o.ref} already covers ${dateOnly(o.period_start)} to ${dateOnly(o.period_end)} for this advertiser in ${currency}. `
   + 'Invoice periods can\'t overlap: choose dates outside it, or delete that invoice first.';
 
 export function advertiserInvoicesRoutes(): Router {
@@ -258,7 +252,7 @@ export function advertiserInvoicesRoutes(): Router {
         WHERE network_id = $1 AND account_type = 'advertiser' AND account_id = $2 AND status = 'approved'
           AND created_at >= $3::date AND created_at < ($4::date + interval '1 day')
         ORDER BY created_at DESC LIMIT 500`,
-      [req.scope!.networkId, invoice.advertiser_id, toDateStr(invoice.period_start), toDateStr(invoice.period_end)],
+      [req.scope!.networkId, invoice.advertiser_id, dateOnly(invoice.period_start), dateOnly(invoice.period_end)],
     );
     sendOk(res, rows.map((e) => ({
       id: e.id, entryType: e.entry_type, direction: e.direction, amount: e.amount, currency: e.currency,

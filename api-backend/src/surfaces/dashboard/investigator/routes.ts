@@ -13,6 +13,7 @@ import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
+import { dateOnly } from '../../../lib/date-only.js';
 import {
   computeInvestigationStats,
   formatInvestigationTarget,
@@ -45,8 +46,8 @@ interface InvestigationRow {
 function toQueryInput(row: InvestigationRow): InvestigationQueryInput {
   return {
     networkId: row.network_id,
-    startDate: normalizeDate(row.start_date),
-    endDate: normalizeDate(row.end_date),
+    startDate: dateOnly(row.start_date),
+    endDate: dateOnly(row.end_date),
     targetType: row.target_type,
     targetValue: row.target_value,
     subField: row.sub_field,
@@ -54,16 +55,11 @@ function toQueryInput(row: InvestigationRow): InvestigationQueryInput {
   };
 }
 
-function normalizeDate(d: string | Date): string {
-  if (d instanceof Date) return d.toISOString().slice(0, 10);
-  return String(d).slice(0, 10);
-}
-
 const toDto = (r: InvestigationRow) => ({
   id: r.id,
   ref: Number(r.ref),
-  startDate: normalizeDate(r.start_date),
-  endDate: normalizeDate(r.end_date),
+  startDate: dateOnly(r.start_date),
+  endDate: dateOnly(r.end_date),
   targetType: r.target_type,
   targetValue: r.target_value,
   subField: r.sub_field,

@@ -3,6 +3,7 @@
  * click ID, or partner within a saved date range. No fabricated rows.
  */
 import { query } from '../db/pool.js';
+import { dateOnly } from '../date-only.js';
 
 export type InvestigationTargetType = 'sub_id' | 'transaction_id' | 'click_id' | 'partner';
 
@@ -45,14 +46,9 @@ export interface InvestigationReportEntry {
   revenue: number | null;
 }
 
-function normalizeDate(d: string | Date): string {
-  if (d instanceof Date) return d.toISOString().slice(0, 10);
-  return String(d).slice(0, 10);
-}
-
 function dateRange(startDate: string, endDate: string): { from: string; to: string } {
-  const start = normalizeDate(startDate);
-  const end = normalizeDate(endDate);
+  const start = dateOnly(startDate);
+  const end = dateOnly(endDate);
   return {
     from: `${start}T00:00:00.000Z`,
     to: `${end}T23:59:59.999Z`,

@@ -17,6 +17,7 @@ import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { CV_TEXT_OPERATORS, CV_NUMBER_OPERATORS } from '../../../lib/customer-value/evaluate.js';
 import { isSensitiveParamKey } from '../../../lib/reporting/redact.js';
+import { dateOnlyOrNull } from '../../../lib/date-only.js';
 
 const DATA_POINTS_TABLE = 'customer_data_points';
 const RULES_TABLE = 'customer_value_rules';
@@ -58,7 +59,7 @@ const ruleDto = (r: RuleRow) => ({
   applyOffersMode: r.apply_offers_mode, applyOfferIds: r.apply_offer_ids,
   applyAdvertisersMode: r.apply_advertisers_mode, applyAdvertiserIds: r.apply_advertiser_ids,
   applyPartnersMode: r.apply_partners_mode, applyPartnerIds: r.apply_partner_ids,
-  startDate: r.start_date, endDate: r.end_date,
+  startDate: dateOnlyOrNull(r.start_date), endDate: dateOnlyOrNull(r.end_date),
   goalCycle: r.goal_cycle, recurringDuration: r.recurring_duration,
   continuousMode: r.continuous_mode, continuousDays: r.continuous_days,
   setGoalConditions: r.set_goal_conditions, conditions: r.conditions,

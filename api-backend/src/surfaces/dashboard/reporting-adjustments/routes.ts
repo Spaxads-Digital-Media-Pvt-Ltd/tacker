@@ -19,6 +19,7 @@ import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
+import { dateOnly } from '../../../lib/date-only.js';
 
 const TABLE = 'reporting_adjustments';
 
@@ -33,14 +34,6 @@ interface Row {
 interface Metrics { revenue: number; payout: number; grossSales: number; totalClicks: number; uniqueClicks: number; conversions: number; impressions: number }
 const zeroMetrics = (): Metrics => ({ revenue: 0, payout: 0, grossSales: 0, totalClicks: 0, uniqueClicks: 0, conversions: 0, impressions: 0 });
 
-/** node-pg parses `date` columns into JS Date objects constructed at LOCAL midnight, not strings
- * — normalize using local getters (never toISOString/UTC, which can shift the day by the server's
- * UTC offset) before doing any string date-math on a DB-read row. */
-function toDateStr(v: string | Date): string {
-  if (!(v instanceof Date)) return v;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
-}
 function dateKey(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
@@ -128,7 +121,7 @@ const SELECT = `
 `;
 
 async function listDTO(networkId: string, row: Row & JoinFields) {
-  const originals = await originalByDay(networkId, row.publisher_id, row.offer_id, toDateStr(row.date_from), toDateStr(row.date_to));
+  const originals = await originalByDay(networkId, row.publisher_id, row.offer_id, dateOnly(row.date_from), dateOnly(row.date_to));
   let original = zeroMetrics(); let adjusted = zeroMetrics();
   for (const [day, orig] of originals) {
     original = sumMetrics(original, orig);
@@ -138,7 +131,7 @@ async function listDTO(networkId: string, row: Row & JoinFields) {
   return {
     id: row.id, publisherId: row.publisher_id, publisherRef: row.publisher_ref, publisherName: row.publisher_name,
     offerId: row.offer_id, offerRef: row.offer_ref, offerName: row.offer_name, advertiserName: row.advertiser_name,
-    dateFrom: toDateStr(row.date_from), dateTo: toDateStr(row.date_to),
+    dateFrom: dateOnly(row.date_from), dateTo: dateOnly(row.date_to),
     original, adjusted,
     lastModifiedByName: row.last_modified_by_name,
     createdAt: row.created_at, updatedAt: row.updated_at,
@@ -266,7 +259,7 @@ export function reportingAdjustmentsRoutes(): Router {
     const { rows } = await query<Row & JoinFields>(`${SELECT} WHERE a.id = $1 AND a.network_id = $2`, [req.params.id, networkId]);
     if (!rows[0]) throw notFound('Adjustment not found');
     const row = rows[0];
-    const originals = await originalByDay(networkId, row.publisher_id, row.offer_id, toDateStr(row.date_from), toDateStr(row.date_to));
+    const originals = await originalByDay(networkId, row.publisher_id, row.offer_id, dateOnly(row.date_from), dateOnly(row.date_to));
     const days = Array.from(originals.entries()).map(([date, original]) => {
       const override = row.days.find((d) => d.date === date);
       const adjusted = applyOverride(original, override);
@@ -275,7 +268,7 @@ export function reportingAdjustmentsRoutes(): Router {
     sendOk(res, {
       id: row.id, publisherId: row.publisher_id, publisherName: row.publisher_name,
       offerId: row.offer_id, offerName: row.offer_name, advertiserName: row.advertiser_name,
-      dateFrom: toDateStr(row.date_from), dateTo: toDateStr(row.date_to), days,
+      dateFrom: dateOnly(row.date_from), dateTo: dateOnly(row.date_to), days,
       createdAt: row.created_at, updatedAt: row.updated_at,
     });
   }));
@@ -286,7 +279,7 @@ export function reportingAdjustmentsRoutes(): Router {
     if (!before) throw notFound('Adjustment not found');
     const b = req.body as z.infer<typeof updateSchema>;
     if (b.dateFrom !== undefined || b.dateTo !== undefined) {
-      assertRange(b.dateFrom ?? toDateStr(before.date_from), b.dateTo ?? toDateStr(before.date_to));
+      assertRange(b.dateFrom ?? dateOnly(before.date_from), b.dateTo ?? dateOnly(before.date_to));
     }
     if (b.publisherId) { const pub = await db.selectOne('publishers', { id: b.publisherId }); if (!pub) throw badRequest('publisherId does not belong to this network'); }
     if (b.offerId) { const offer = await db.selectOne('offers', { id: b.offerId }); if (!offer) throw badRequest('offerId does not belong to this network'); }
