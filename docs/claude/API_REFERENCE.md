@@ -251,6 +251,11 @@ explicit `payout`/`revenue` param → **Offer Custom Settings › Revenue & Payo
 ### Click access rules
 Only an **active** partner of the network is attributed (`surfaces/tracking/partner-status.ts`, Redis load-through, busted by publishers PATCH/DELETE). A `pub_id` that is pending, inactive, unknown or another network's is dropped from the click: the visitor is still redirected, but the click and its conversions carry no partner, so nothing is ever credited to that id (log field `droppedPartner`). A partner that stops being active after the click (or is deleted) gets its conversions held: an approved conversion becomes `pending` with reason `partner_not_active` (no ledger, no partner postback) until an admin approves it. A partner explicitly denied is diverted. Private and Request-access (`ask`) offers only accept clicks from partners with an `allow` + `approved` access row; others are diverted. A partner's payout override is frozen onto their clicks.
 
+### IP lists (Control Center › Security) — enforced (F-16)
+- `PUT /api/control-center/ip-blacklist { ranges: [{from, to?}] }` — IPs, CIDRs or same-family from–to ranges (IPv4/IPv6; malformed → 422). `/click` from a listed client IP is diverted (like a blocking traffic control), from the next click on.
+- `POST/DELETE /api/control-center/api-whitelist` (IP or CIDR; malformed → 422) — when a network has any entry, its **network-audience** API keys only work from listed IPs (others → 403); advertiser/publisher keys are not restricted by it.
+- Both use the real client IP: X-Forwarded-For is trusted only from loopback, Cloudflare ranges and `TRACKING_TRUSTED_PROXIES` (tracking + public-api surfaces). Lists are cached per network in Redis and busted on write; a cache/DB error fails open.
+
 ### Finance (dashboard)
 - `POST /api/finance/conversions/:conversionId/approve` — pending → approved: tiered commission, earning + billing ledger entries, partner postback (honours "Fire Partner Postback"). Admin/finance.
 - `POST /api/finance/conversions/:conversionId/reject` — status + offsetting ledger entries in one transaction (net per account → 0). Admin/finance.

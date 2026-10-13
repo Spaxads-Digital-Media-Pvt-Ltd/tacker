@@ -13,6 +13,7 @@ import { AppError, forbidden, unauthorized } from '../../lib/http/errors.js';
 import { query } from '../../lib/db/pool.js';
 import { hashKey } from '../../lib/apikeys/keys.js';
 import { checkRateLimit } from '../../lib/apikeys/rate-limit.js';
+import { getNetworkApiWhitelist } from '../../lib/net/ip-lists.js';
 import type { ApiAudience, ApiKeyIdentity } from '../../middleware/types.js';
 
 interface KeyRow {
@@ -42,6 +43,17 @@ export function apiKeyAuth(req: Request, res: Response, next: NextFunction): voi
  .then(async ({ rows }) => {
  const row = rows[0];
  if (!row) return next(unauthorized('Invalid or missing API key.'));
+
+ // Control Center › Security › API IP whitelist (F-16): when the network has one, its NETWORK keys
+ // only work from those addresses. (Advertiser/publisher keys are called from the partners' own
+ // servers, which the network's list doesn't describe.) req.ip is the real client — the app
+ // trusts the same proxies as the tracking surface.
+ if (row.audience === 'network') {
+ const allowed = await getNetworkApiWhitelist(row.network_id);
+ if (allowed && !allowed.check(req.ip ?? '')) {
+ return next(forbidden('This API key can only be used from the network\'s whitelisted IP addresses.'));
+ }
+ }
 
  const rate = await checkRateLimit(row.id, row.rate_limit_tier);
  res.setHeader('X-RateLimit-Limit', String(rate.limit));

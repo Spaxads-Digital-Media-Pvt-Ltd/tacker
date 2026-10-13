@@ -16,6 +16,7 @@ import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { getSupabaseAdmin } from '../../../lib/supabase.js';
+import { validIpEntry, invalidateNetworkIpBlacklist, invalidateNetworkApiWhitelist } from '../../../lib/net/ip-lists.js';
 import {
   getControlCenterConfig,
   putControlCenterConfig,
@@ -256,16 +257,22 @@ export function controlCenterRoutes(): Router {
     sendOk(res, rows.map((row) => ({ id: row.id, ipAddress: row.ip_address, createdAt: row.created_at })));
   }));
 
-  r.post('/api-whitelist', requireRole('admin'), validateBody(z.object({ ipAddress: z.string().min(1).max(100) })), asyncHandler(async (req, res) => {
+  // Enforced on the Public API for this network's keys (F-16): writes bust the cached list.
+  r.post('/api-whitelist', requireRole('admin'), validateBody(z.object({
+    ipAddress: z.string().trim().min(1).max(100).refine((v) => validIpEntry(v), 'Must be an IP address or CIDR (e.g. 203.0.113.7 or 203.0.113.0/24)'),
+  })), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as { ipAddress: string };
     const row = await db.insert('network_api_whitelist', { ip_address: b.ipAddress });
+    await invalidateNetworkApiWhitelist(db.scope.networkId);
     sendOk(res, { id: row.id, ipAddress: b.ipAddress, createdAt: row.created_at }, undefined, 201);
   }));
 
   r.delete('/api-whitelist/:id', requireRole('admin'), asyncHandler(async (req, res) => {
-    const n = await dbForRequest(req).delete('network_api_whitelist', { id: req.params.id });
+    const db = dbForRequest(req);
+    const n = await db.delete('network_api_whitelist', { id: req.params.id });
     if (n === 0) throw notFound('Entry not found');
+    await invalidateNetworkApiWhitelist(db.scope.networkId);
     sendOk(res, { deleted: true });
   }));
 
@@ -276,8 +283,11 @@ export function controlCenterRoutes(): Router {
     sendOk(res, rows.map((row) => ({ id: row.id, from: row.ip_from, to: row.ip_to || row.ip_from })));
   }));
 
+  // Enforced at /click (F-16): every entry must be an IP, CIDR or same-family range; the PUT busts
+  // the tracking surface's cached list.
   r.put('/ip-blacklist', requireRole('admin', 'manager'), validateBody(z.object({
-    ranges: z.array(z.object({ from: z.string().min(1), to: z.string().optional() })),
+    ranges: z.array(z.object({ from: z.string().trim().min(1), to: z.string().trim().optional() })
+      .refine((r) => validIpEntry(r.from, r.to), 'Each entry must be an IP address, a CIDR, or a from–to range of the same IP version')),
   })), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as { ranges: { from: string; to?: string }[] };
@@ -290,6 +300,7 @@ export function controlCenterRoutes(): Router {
       });
       out.push({ id: row.id, from: row.ip_from, to: row.ip_to });
     }
+    await invalidateNetworkIpBlacklist(db.scope.networkId);
     sendOk(res, out);
   }));
 

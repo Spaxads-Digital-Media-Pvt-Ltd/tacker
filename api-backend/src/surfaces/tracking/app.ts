@@ -15,6 +15,7 @@ import { lookupGeo, geoAvailable, carrierAvailable } from '../../lib/geo/geoip.j
 import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
 import { isActivePartner } from './partner-status.js';
+import { getNetworkIpBlacklist } from '../../lib/net/ip-lists.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
 import { buildTrustedProxyCheck } from './trusted-proxy.js';
@@ -206,9 +207,10 @@ export function buildTrackingApp(): FastifyInstance {
 
  // 2. Offer config + partner status from Redis (load-through, in parallel). No sync Postgres read
  // on the hot path — Postgres is only the cold-cache fallback.
- const [offer, partnerActive] = await Promise.all([
+ const [offer, partnerActive, ipBlacklist] = await Promise.all([
  getOfferConfig(tenant.networkId, offerId),
  requestedPublisherId ? isActivePartner(tenant.networkId, requestedPublisherId) : false,
+ getNetworkIpBlacklist(tenant.networkId),
  ]);
  // 2a. Only an active partner of this network can earn (F-08). A pending, inactive or unknown
  // pub_id is DROPPED from the click instead of diverting the visitor: the redirect still happens,
@@ -233,6 +235,9 @@ export function buildTrackingApp(): FastifyInstance {
 
  // 3. Enrich geo + device in-process.
  const ip = req.ip || null;
+ // 3a. Network IP blacklist (Control Center › Security, F-16): a listed address is diverted, the same
+ // outcome as a blocking traffic control. req.ip is the real client (trusted-proxy aware, above).
+ if (ip && ipBlacklist?.check(ip)) return divert(reply, offer.fallbackUrl, offer.id);
  const geo = ip ? lookupGeo(ip) : null;
  const ua = parseUA(req.headers['user-agent']);
 
