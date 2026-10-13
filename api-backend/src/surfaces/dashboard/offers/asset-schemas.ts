@@ -77,6 +77,9 @@ export const createScheduledActionSchema = z.object({
   scheduledTime: z.string().datetime().nullable().optional(),
   internalNotes: z.string().max(2000).nullable().optional(),
   status: z.enum(['pending', 'executed', 'cancelled']).default('pending'),
+  // cap_change (F-17a): which cap it sets, and the new value (null removes the cap).
+  capType: z.enum(['daily_click', 'daily_conversion', 'total_conversion']).nullable().optional(),
+  capValue: z.number().int().min(0).max(2_147_483_647).nullable().optional(),
 });
 export const updateScheduledActionSchema = createScheduledActionSchema.partial();
 export type CreateScheduledAction = z.infer<typeof createScheduledActionSchema>;

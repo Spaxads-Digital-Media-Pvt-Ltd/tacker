@@ -170,6 +170,14 @@ Outbound Postback:
  Conversion created → outbound-postback queue → POST to publisher's URL
  (retry with backoff, log to postback_logs)
 
+Automation (F-17a):
+ scheduled-actions queue (every minute) → due offer_scheduled_actions, one per transaction (SKIP LOCKED)
+ → offer status / cap / partner access changed → system audit → offer cache invalidated → webhook event
+ alert-rules queue (every 5 min) → reporting provider over the rule's window → conditions start to hold
+ → raiseAlert (In App) + deliverAlert email to admins/managers → alert.raised webhook event
+ conversion recorded / approved / rejected, alert raised, action run → emitAutomationEvent
+ → automation-webhook queue → safeRequest (retries + backoff) → automation_webhook_deliveries
+
 Fraud Scan (scheduled):
  fraud-scan queue → query clicks + conversions → evaluate rules → create alerts
  → each NEW alert → deliverAlert (lib/alerts/deliver.ts): email via network SMTP + webhook via safeRequest

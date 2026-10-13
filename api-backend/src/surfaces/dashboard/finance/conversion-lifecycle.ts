@@ -10,6 +10,7 @@ import { writeConversionLedger, reverseConversionLedger } from '../../../lib/led
 import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.js';
 import { getOfferConfig } from '../../tracking/offer-cache.js';
 import { enqueueOutboundPostback } from '../../tracking/conversions/enqueue-postback.js';
+import { emitAutomationEvent } from '../../../lib/automation/webhooks.js';
 
 interface ConvRow {
   conversion_id: string; status: string; click_id: string; offer_id: string;
@@ -17,6 +18,12 @@ interface ConvRow {
   payout: string | null; revenue: string | null; currency: string | null;
   event_name: string | null; transaction_id: string | null;
 }
+
+/** The `data` of a conversion event sent to Automation webhooks (F-17a). */
+const hookData = (r: ConvRow, reason: string) => ({
+  conversionId: r.conversion_id, clickId: r.click_id, offerId: r.offer_id, publisherId: r.publisher_id,
+  status: r.status, reason, event: r.event_name, payout: r.payout, revenue: r.revenue, currency: r.currency,
+});
 
 const LOCK_SQL = `SELECT conversion_id, status, click_id, offer_id, publisher_id, advertiser_id, payout, revenue,
                          currency, event_name, transaction_id
@@ -73,27 +80,31 @@ export async function approveConversion(networkId: string, conversionId: string)
       subs: [subs?.sub1 ?? null, subs?.sub2 ?? null, subs?.sub3 ?? null, subs?.sub4 ?? null, subs?.sub5 ?? null],
     });
   }
+  await emitAutomationEvent(networkId, 'conversion.approved', hookData(row, 'manually_approved'));
   return row;
 }
 
 export async function rejectConversion(networkId: string, conversionId: string, reason = 'manual_rejection'): Promise<ConvRow> {
   const client = await pool.connect();
+  let row: ConvRow;
   try {
     await client.query('BEGIN');
-    const row = (await client.query<ConvRow>(LOCK_SQL, [networkId, conversionId])).rows[0];
-    if (!row) throw notFound('Conversion not found');
-    if (row.status === 'rejected') throw badRequest('Conversion already rejected');
+    const found = (await client.query<ConvRow>(LOCK_SQL, [networkId, conversionId])).rows[0];
+    if (!found) throw notFound('Conversion not found');
+    if (found.status === 'rejected') throw badRequest('Conversion already rejected');
+    row = found;
     await client.query(
       `UPDATE conversions SET status = 'rejected', reason = $3 WHERE network_id = $1 AND conversion_id = $2`,
       [networkId, conversionId, reason],
     );
     await reverseConversionLedger(networkId, conversionId, reason, client);
     await client.query('COMMIT');
-    return row;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
   } finally {
     client.release();
   }
+  await emitAutomationEvent(networkId, 'conversion.rejected', hookData({ ...row, status: 'rejected' }, reason));
+  return row;
 }

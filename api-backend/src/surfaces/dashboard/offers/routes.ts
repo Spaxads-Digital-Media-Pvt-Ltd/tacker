@@ -12,7 +12,7 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
-import { badRequest, notFound, forbidden, conflict } from '../../../lib/http/errors.js';
+import { badRequest, notFound, forbidden, conflict, validationFailed } from '../../../lib/http/errors.js';
 import { queryBool } from '../../../lib/http/query-params.js';
 import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
@@ -47,6 +47,9 @@ import {
 } from './schemas.js';
 import { requestAccessSchema } from './schemas.js';
 import { createScheduledActionSchema, updateScheduledActionSchema, type CreateScheduledAction } from './asset-schemas.js';
+import {
+ scheduledActionParams, validateScheduledAction, scheduledActionDtoExtras, type ScheduledActionParams,
+} from '../../../lib/automation/scheduled-actions.js';
 import {
  toAdminDTO,
  toAdvertiserDTO,
@@ -185,11 +188,13 @@ interface ScheduledActionRow {
  id: string; action_type: string; partner_ids: string[]; event: string | null;
  scheduled_time: string | null; internal_notes: string | null; created_by: string | null;
  status: string; created_at: string; updated_at: string;
+ params?: ScheduledActionParams | null; executed_at?: string | null; result?: unknown;
 }
 const toScheduledActionDTO = (r: ScheduledActionRow) => ({
  id: r.id, actionType: r.action_type, partnerIds: r.partner_ids, event: r.event,
  scheduledTime: r.scheduled_time, internalNotes: r.internal_notes, createdBy: r.created_by,
  status: r.status, createdAt: r.created_at, updatedAt: r.updated_at,
+ ...scheduledActionDtoExtras(r),
 });
 
 interface AuditLogRow {
@@ -801,10 +806,17 @@ export function offersAdminRoutes(): Router {
  const db = dbForRequest(req);
  await ensureOffer(db, req.params.id);
  const b = req.body as CreateScheduledAction;
+ // F-17a: the worker runs pending actions, so they must be runnable (cap_change has its cap, partners exist).
+ const params = scheduledActionParams(b);
+ if (b.status === 'pending') {
+ const problem = await validateScheduledAction(db.scope.networkId, { actionType: b.actionType, partnerIds: b.partnerIds, params });
+ if (problem) throw validationFailed(problem);
+ }
  const row = await db.insert<ScheduledActionRow>(SCHEDULED_ACTIONS, {
  offer_id: req.params.id,
  action_type: b.actionType,
  partner_ids: JSON.stringify(b.partnerIds),
+ params: JSON.stringify(params),
  event: b.event ?? null,
  scheduled_time: b.scheduledTime ?? null,
  internal_notes: b.internalNotes ?? null,
@@ -825,6 +837,13 @@ export function offersAdminRoutes(): Router {
  const before = await db.selectOne<ScheduledActionRow>(SCHEDULED_ACTIONS, { id: req.params.actionId, offer_id: req.params.id });
  if (!before) throw notFound('Scheduled action not found');
  const b = req.body as Partial<CreateScheduledAction>;
+ const params = scheduledActionParams(b, before.params ?? {});
+ if ((b.status ?? before.status) === 'pending') {
+ const problem = await validateScheduledAction(db.scope.networkId, {
+ actionType: b.actionType ?? before.action_type, partnerIds: b.partnerIds ?? before.partner_ids, params,
+ });
+ if (problem) throw validationFailed(problem);
+ }
  const patch: Record<string, unknown> = {};
  if (b.actionType !== undefined) patch['action_type'] = b.actionType;
  if (b.partnerIds !== undefined) patch['partner_ids'] = JSON.stringify(b.partnerIds);
@@ -832,6 +851,9 @@ export function offersAdminRoutes(): Router {
  if (b.scheduledTime !== undefined) patch['scheduled_time'] = b.scheduledTime;
  if (b.internalNotes !== undefined) patch['internal_notes'] = b.internalNotes;
  if (b.status !== undefined) patch['status'] = b.status;
+ if (b.capType !== undefined || b.capValue !== undefined) patch['params'] = JSON.stringify(params);
+ // Back to pending = run again: forget the previous run.
+ if (b.status === 'pending' && before.status !== 'pending') { patch['executed_at'] = null; patch['result'] = null; }
  const [row] = await db.update<ScheduledActionRow>(SCHEDULED_ACTIONS, patch, { id: req.params.actionId, offer_id: req.params.id });
  await writeAudit(req, { action: 'offer.scheduled_action.update', entityType: 'offer_scheduled_actions', entityId: req.params.actionId, before, after: row });
  sendOk(res, toScheduledActionDTO(row ?? before));

@@ -1,18 +1,28 @@
 /**
- * Automation — Scheduled Actions, Alert rules, and Webhooks.
- * Scheduled-action execution, alert firing, and webhook delivery are not wired yet — CRUD only.
+ * Automation — Scheduled Actions, Alert rules, and Webhooks. Executed by the workers (F-17a):
+ * scheduled actions run at their time (lib/automation/scheduled-actions.ts), alert rules are evaluated
+ * every few minutes (lib/automation/alert-rules.ts), webhooks receive the events they listen to
+ * (lib/automation/webhooks.ts). Saving validates what the workers need: a runnable action, parseable
+ * conditions, known webhook events and an allowed URL.
  */
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound } from '../../../lib/http/errors.js';
+import { notFound, validationFailed } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
+import { assertOutboundUrl, BlockedDestinationError } from '../../../lib/net/safe-http.js';
+import {
+  parsePartnerIds as partnerIdsOf, scheduledActionParams, validateScheduledAction, scheduledActionDtoExtras,
+  type ScheduledActionParams,
+} from '../../../lib/automation/scheduled-actions.js';
+import { parseConditions } from '../../../lib/automation/alert-rules.js';
+import { parseWebhookEvents, invalidateWebhookSubscriptions, WEBHOOK_EVENTS } from '../../../lib/automation/webhooks.js';
 import {
   createScheduledActionSchema,
   updateScheduledActionSchema,
@@ -36,6 +46,9 @@ interface ScheduledActionRow {
   status: string;
   created_at: string;
   updated_at: string;
+  params?: ScheduledActionParams | null;
+  executed_at?: string | null;
+  result?: unknown;
   offer_name?: string | null;
   offer_ref?: string | null;
 }
@@ -65,6 +78,7 @@ function toDto(r: ScheduledActionRow, displayId?: number) {
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    ...scheduledActionDtoExtras(r),
   };
 }
 
@@ -73,7 +87,7 @@ function actorLabel(req: import('express').Request): string | null {
 }
 
 const listQuery = z.object({
-  status: z.enum(['all', 'pending', 'executed', 'cancelled']).optional(),
+  status: z.enum(['all', 'pending', 'executed', 'cancelled', 'failed']).optional(),
 });
 
 const createNetworkSchema = createScheduledActionSchema.extend({
@@ -84,6 +98,7 @@ interface AlertRuleRow {
   id: string; ref: string; name: string; conditions: string;
   notify_in_app: boolean; notify_email: boolean; status: string;
   created_at: string; updated_at: string;
+  last_evaluated_at?: string | null; last_fired_at?: string | null; last_error?: string | null;
 }
 
 const alertRuleDto = (r: AlertRuleRow) => ({
@@ -96,7 +111,32 @@ const alertRuleDto = (r: AlertRuleRow) => ({
   status: r.status,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+  lastEvaluatedAt: r.last_evaluated_at ?? null,
+  lastFiredAt: r.last_fired_at ?? null,
+  lastError: r.last_error ?? null,
 });
+
+/** Conditions must parse (F-17a) — the worker evaluates exactly this grammar. */
+function checkConditions(conditions: string): void {
+  const parsed = parseConditions(conditions);
+  if ('error' in parsed) throw validationFailed(parsed.error);
+}
+
+/** A webhook's events must be known (or `*`) and its URL one the SSRF guard allows (F-17a). */
+function normalizeEvents(raw: string): string {
+  const { events, unknown } = parseWebhookEvents(raw);
+  if (unknown.length) throw validationFailed(`Unknown webhook event(s): ${unknown.join(', ')}. Use ${WEBHOOK_EVENTS.join(', ')} or * for all.`);
+  if (!events.length) throw validationFailed(`List the events this webhook receives: ${WEBHOOK_EVENTS.join(', ')}, or * for all.`);
+  return events.join(',');
+}
+function checkWebhookUrl(url: string): void {
+  try {
+    assertOutboundUrl(url);
+  } catch (err) {
+    if (err instanceof BlockedDestinationError) throw validationFailed(`This webhook URL is not allowed (${err.reason}).`);
+    throw err;
+  }
+}
 
 const alertListQuery = z.object({
   status: z.enum(['all', 'active', 'inactive', 'deleted']).optional(),
@@ -187,10 +227,16 @@ export function automationRoutes(): Router {
       const b = req.body as z.infer<typeof createNetworkSchema>;
       const offer = await db.selectOne<{ id: string }>('offers', { id: b.offerId });
       if (!offer) throw notFound('Offer not found');
+      const params = scheduledActionParams(b);
+      if (b.status === 'pending') {
+        const problem = await validateScheduledAction(req.scope!.networkId, { actionType: b.actionType, partnerIds: b.partnerIds, params });
+        if (problem) throw validationFailed(problem);
+      }
       const row = await db.insert<ScheduledActionRow>(TABLE, {
         offer_id: b.offerId,
         action_type: b.actionType,
         partner_ids: JSON.stringify(b.partnerIds),
+        params: JSON.stringify(params),
         event: b.event ?? null,
         scheduled_time: b.scheduledTime ?? null,
         internal_notes: b.internalNotes ?? null,
@@ -218,6 +264,13 @@ export function automationRoutes(): Router {
       const before = await db.selectOne<ScheduledActionRow>(TABLE, { id });
       if (!before) throw notFound('Scheduled action not found');
       const b = req.body as Partial<CreateScheduledAction>;
+      const params = scheduledActionParams(b, before.params ?? {});
+      if ((b.status ?? before.status) === 'pending') {
+        const problem = await validateScheduledAction(req.scope!.networkId, {
+          actionType: b.actionType ?? before.action_type, partnerIds: b.partnerIds ?? partnerIdsOf(before.partner_ids), params,
+        });
+        if (problem) throw validationFailed(problem);
+      }
       const patch: Record<string, unknown> = {};
       if (b.actionType !== undefined) patch['action_type'] = b.actionType;
       if (b.partnerIds !== undefined) patch['partner_ids'] = JSON.stringify(b.partnerIds);
@@ -225,6 +278,9 @@ export function automationRoutes(): Router {
       if (b.scheduledTime !== undefined) patch['scheduled_time'] = b.scheduledTime;
       if (b.internalNotes !== undefined) patch['internal_notes'] = b.internalNotes;
       if (b.status !== undefined) patch['status'] = b.status;
+      if (b.capType !== undefined || b.capValue !== undefined) patch['params'] = JSON.stringify(params);
+      // Back to pending = run again: forget the previous run.
+      if (b.status === 'pending' && before.status !== 'pending') { patch['executed_at'] = null; patch['result'] = null; }
       const [updated] = await db.update<ScheduledActionRow>(TABLE, patch, { id });
       await writeAudit(req, {
         action: 'offer.scheduled_action.update',
@@ -273,6 +329,7 @@ export function automationRoutes(): Router {
     asyncHandler(async (req, res) => {
       const db = dbForRequest(req);
       const b = req.body as z.infer<typeof createAlertRuleSchema>;
+      checkConditions(b.conditions);
       const row = await db.insert<AlertRuleRow>(ALERT_RULES_TABLE, {
         name: b.name,
         conditions: b.conditions,
@@ -300,12 +357,15 @@ export function automationRoutes(): Router {
       const before = await db.selectOne<AlertRuleRow>(ALERT_RULES_TABLE, { id });
       if (!before) throw notFound('Alert rule not found');
       const b = req.body as z.infer<typeof updateAlertRuleSchema>;
+      if (b.conditions !== undefined) checkConditions(b.conditions);
       const patch: Record<string, unknown> = {};
       if (b.name !== undefined) patch['name'] = b.name;
       if (b.conditions !== undefined) patch['conditions'] = b.conditions;
       if (b.inApp !== undefined) patch['notify_in_app'] = b.inApp;
       if (b.email !== undefined) patch['notify_email'] = b.email;
       if (b.status !== undefined) patch['status'] = b.status;
+      // New conditions, or switched off/on: start over (nothing counts as already firing).
+      if (b.conditions !== undefined || b.status !== undefined) patch['state'] = JSON.stringify({});
       const [updated] = await db.update<AlertRuleRow>(ALERT_RULES_TABLE, patch, { id });
       await writeAudit(req, {
         action: 'automation_alert_rule.update',
@@ -353,9 +413,11 @@ export function automationRoutes(): Router {
     asyncHandler(async (req, res) => {
       const db = dbForRequest(req);
       const b = req.body as z.infer<typeof createWebhookSchema>;
+      const events = normalizeEvents(b.events);
+      checkWebhookUrl(b.url);
       const row = await db.insert<WebhookRow>(WEBHOOKS_TABLE, {
         name: b.name,
-        events: b.events,
+        events,
         http_method: b.httpMethod,
         url: b.url,
         status: b.status,
@@ -366,6 +428,7 @@ export function automationRoutes(): Router {
         entityId: row.id,
         after: row,
       });
+      await invalidateWebhookSubscriptions(req.scope!.networkId);
       sendOk(res, webhookDto(row), undefined, 201);
     }),
   );
@@ -382,9 +445,9 @@ export function automationRoutes(): Router {
       const b = req.body as z.infer<typeof updateWebhookSchema>;
       const patch: Record<string, unknown> = {};
       if (b.name !== undefined) patch['name'] = b.name;
-      if (b.events !== undefined) patch['events'] = b.events;
+      if (b.events !== undefined) patch['events'] = normalizeEvents(b.events);
       if (b.httpMethod !== undefined) patch['http_method'] = b.httpMethod;
-      if (b.url !== undefined) patch['url'] = b.url;
+      if (b.url !== undefined) { checkWebhookUrl(b.url); patch['url'] = b.url; }
       if (b.status !== undefined) patch['status'] = b.status;
       const [updated] = await db.update<WebhookRow>(WEBHOOKS_TABLE, patch, { id });
       await writeAudit(req, {
@@ -394,6 +457,7 @@ export function automationRoutes(): Router {
         before,
         after: updated,
       });
+      await invalidateWebhookSubscriptions(req.scope!.networkId);
       sendOk(res, webhookDto(updated ?? before));
     }),
   );
@@ -411,7 +475,28 @@ export function automationRoutes(): Router {
       before,
       after: updated,
     });
+    await invalidateWebhookSubscriptions(req.scope!.networkId);
     sendOk(res, { deleted: true });
+  }));
+
+  // Delivery log (F-17a): the latest 100 deliveries of one webhook.
+  r.get('/webhooks/:id/deliveries', asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const id = req.params.id ?? '';
+    if (!(await db.selectOne<WebhookRow>(WEBHOOKS_TABLE, { id }))) throw notFound('Webhook not found');
+    const { rows } = await query<{
+      id: string; event: string; status: string; attempts: number; status_code: number | null; error: string | null;
+      created_at: string; updated_at: string;
+    }>(
+      `SELECT id, event, status, attempts, status_code, error, created_at, updated_at
+         FROM automation_webhook_deliveries WHERE network_id = $1 AND webhook_id = $2
+        ORDER BY created_at DESC LIMIT 100`,
+      [req.scope!.networkId, id],
+    );
+    sendOk(res, rows.map((d) => ({
+      id: d.id, event: d.event, status: d.status, attempts: d.attempts, statusCode: d.status_code,
+      error: d.error, createdAt: d.created_at, updatedAt: d.updated_at,
+    })));
   }));
 
   return r;

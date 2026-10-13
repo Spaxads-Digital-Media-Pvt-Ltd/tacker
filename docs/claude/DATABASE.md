@@ -233,8 +233,10 @@ API keys for the Public REST API.
 | `customer_value_conversion_events` | Customer conversion events |
 | `marketplace_profiles` | Marketplace public profiles |
 | `marketplace_connections` | Marketplace connections |
-| `automation_rules` | Scheduled automation rules |
-| `automation_webhooks` | Outbound webhook config |
+| `offer_scheduled_actions` | Offer scheduled actions; `params` (cap_change), `executed_at`, `result`, status pending\|executed\|cancelled\|failed (migration 070) |
+| `automation_alert_rules` | Automation alert rules; `state` (what is firing), `last_evaluated_at`, `last_fired_at`, `last_error` (migration 070) |
+| `automation_webhooks` | Outbound webhook config (`events` normalised list or `*`) |
+| `automation_webhook_deliveries` | One row per webhook delivery: event, payload, status, attempts, status_code, error (migration 070) |
 | `control_center_config` | Platform-level configuration |
 | `notification_preferences` | Per-user notification settings |
 | `segmentations` | Segmentation options |

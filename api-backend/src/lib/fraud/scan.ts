@@ -8,6 +8,7 @@ import { query } from '../db/pool.js';
 import { getFraudConfig, fraudAlertChannels } from './rules.js';
 import { raiseAlert, type AlertInput } from './alerts.js';
 import { deliverAlert, hasAlertChannels, type DeliverableAlert } from '../alerts/deliver.js';
+import { emitAutomationEvent } from '../automation/webhooks.js';
 
 export interface ScanResult {
   networksScanned: number;
@@ -91,6 +92,13 @@ async function scanNetwork(networkId: string): Promise<number> {
   const channels = fraudAlertChannels(networkId, cfg);
   if (hasAlertChannels(channels)) {
     for (const a of raised) await deliverAlert(networkId, a, channels);
+  }
+  // …and to the network's Automation webhooks listening to alert.raised (F-17a).
+  for (const a of raised) {
+    await emitAutomationEvent(networkId, 'alert.raised', {
+      id: a.id, type: a.type, severity: a.severity, title: a.title, description: a.description ?? null,
+      entityType: a.entityType ?? null, entityId: a.entityId ?? null, metadata: a.metadata ?? {},
+    });
   }
   return raised.length;
 }

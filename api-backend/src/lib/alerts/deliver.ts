@@ -18,7 +18,8 @@ export interface AlertChannels {
 }
 
 export interface DeliverableAlert {
-  id: string;
+  /** The alerts row it belongs to (the outcome is recorded there); none for a notification-only alert. */
+  id?: string | null;
   type: string;
   severity: string;
   title: string;
@@ -46,7 +47,7 @@ function alertEmail(a: DeliverableAlert): { subject: string; html: string } {
       `<p><strong>${escapeHtml(a.title)}</strong> (${escapeHtml(a.severity)})</p>`,
       a.description ? `<p>${escapeHtml(a.description)}</p>` : '',
       a.entityType && a.entityId ? `<p>${escapeHtml(a.entityType)}: <code>${escapeHtml(a.entityId)}</code></p>` : '',
-      `<p>Alert <code>${escapeHtml(a.type)}</code> · id <code>${escapeHtml(a.id)}</code>. Review it under Alerts in your ${escapeHtml(BRAND.name)} dashboard.</p>`,
+      `<p>Alert <code>${escapeHtml(a.type)}</code>${a.id ? ` · id <code>${escapeHtml(a.id)}</code>` : ''}. Review it in your ${escapeHtml(BRAND.name)} dashboard.</p>`,
     ].join(''),
   };
 }
@@ -77,7 +78,7 @@ export async function deliverAlert(networkId: string, alert: DeliverableAlert, c
         body: JSON.stringify({
           event: 'alert.raised',
           alert: {
-            id: alert.id, type: alert.type, severity: alert.severity, title: alert.title,
+            id: alert.id ?? null, type: alert.type, severity: alert.severity, title: alert.title,
             description: alert.description ?? null, entityType: alert.entityType ?? null, entityId: alert.entityId ?? null,
             metadata: alert.metadata ?? {}, raisedAt: delivery.at,
           },
@@ -92,6 +93,7 @@ export async function deliverAlert(networkId: string, alert: DeliverableAlert, c
     }
   }
 
+  if (!alert.id) return delivery;
   try {
     await query(
       `UPDATE alerts SET metadata = metadata || jsonb_build_object('delivery', $3::jsonb) WHERE id = $1 AND network_id = $2`,

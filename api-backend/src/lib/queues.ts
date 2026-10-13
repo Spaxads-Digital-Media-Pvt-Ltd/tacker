@@ -10,6 +10,9 @@ export const QUEUE = {
  facebookCapi: 'facebook-capi',
  offerFeedSync: 'offer-feed-sync',
  domainVerify: 'domain-verify',
+ scheduledActions: 'scheduled-actions',
+ alertRules: 'alert-rules',
+ automationWebhook: 'automation-webhook',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

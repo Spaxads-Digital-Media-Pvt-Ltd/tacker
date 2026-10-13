@@ -57,6 +57,7 @@ Client Browser
 │ - retention: prune old clicks/conversions │
 │ - facebook-capi: CAPI batch │
 │ - offer-feed-sync: outbound offers │
+│ - scheduled-actions / alert-rules / automation-webhook (Automation, F-17a) │
 └─────────────────────────────────────────────────────┘
  │
  ▼

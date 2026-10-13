@@ -1,6 +1,7 @@
 /**
  * Automation — Scheduled Actions, Alerts, and Webhooks wired via EmptyShellTable (same UI, real API).
- * Execution/delivery not wired yet.
+ * The backend workers execute them (actions at their time, alert rules every few minutes, webhooks
+ * on their events) — see api-backend/src/lib/automation.
  */
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';

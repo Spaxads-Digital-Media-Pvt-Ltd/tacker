@@ -30,6 +30,7 @@ import { findMatchingControl } from '../../../lib/postback-controls/evaluate.js'
 import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.js';
 import { evaluateCustomerValueRules, recordCustomerValueFiring } from '../../../lib/customer-value/evaluate.js';
 import { enqueueOutboundPostback } from './enqueue-postback.js';
+import { emitAutomationEvent } from '../../../lib/automation/webhooks.js';
 import { enqueueFacebookCapi } from '../../../lib/integrations/enqueue.js';
 import { loadIntegrations } from '../../../lib/integrations/settings.js';
 import { allowedConversionHosts, conversionOriginAllowed, type RequestOrigin } from './origin.js';
@@ -573,6 +574,15 @@ async function recordWithIdemKey(
  });
  }
  }
+
+ // Automation webhooks (F-17a): one cached Redis read; nothing is queued unless a webhook listens.
+ await emitAutomationEvent(input.networkId,
+ status === 'approved' ? ['conversion.created', 'conversion.approved']
+ : status === 'rejected' ? ['conversion.created', 'conversion.rejected'] : 'conversion.created',
+ {
+ conversionId, clickId: input.clickId, offerId: click.offer_id, publisherId: click.publisher_id,
+ status, reason, event: eventName, payout, revenue, currency,
+ });
 
  return { outcome: status, conversionId };
 }

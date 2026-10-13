@@ -57,7 +57,7 @@ export interface SafeResponse {
 }
 
 export interface SafeRequestOptions {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: string;
   headers?: Record<string, string>;
   /** Socket inactivity timeout. */

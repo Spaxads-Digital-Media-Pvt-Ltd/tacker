@@ -22,6 +22,9 @@ import { startRetentionWorker, scheduleRetention } from './processors/retention.
 import { startFacebookCapiWorker } from './processors/facebook-capi.js';
 import { startOfferFeedSyncWorker, scheduleOfferFeedScan } from './processors/offer-feed-sync.js';
 import { startDomainVerifyWorker, scheduleDomainVerify } from './processors/domain-verify.js';
+import { startScheduledActionsWorker, scheduleScheduledActions } from './processors/scheduled-actions.js';
+import { startAlertRulesWorker, scheduleAlertRules } from './processors/alert-rules.js';
+import { startAutomationWebhookWorker } from './processors/automation-webhook.js';
 
 const log = surfaceLogger('workers');
 
@@ -40,11 +43,16 @@ const workers = [
  startFacebookCapiWorker(),
  startOfferFeedSyncWorker(),
  startDomainVerifyWorker(),
+ startScheduledActionsWorker(),
+ startAlertRulesWorker(),
+ startAutomationWebhookWorker(),
 ];
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
 void scheduleRetention().catch((err) => log.error({ err }, 'failed to schedule retention'));
 void scheduleOfferFeedScan().catch((err) => log.error({ err }, 'failed to schedule offer feed scan'));
 void scheduleDomainVerify().catch((err) => log.error({ err }, 'failed to schedule tracking domain re-check'));
+void scheduleScheduledActions().catch((err) => log.error({ err }, 'failed to schedule scheduled actions'));
+void scheduleAlertRules().catch((err) => log.error({ err }, 'failed to schedule alert rules'));
 
 // Report only EXHAUSTED-retry failures to Sentry so transient retries don't spam it.
 for (const w of workers) {

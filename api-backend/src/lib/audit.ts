@@ -3,6 +3,7 @@
  * and before/after. Derives actor + network from the request identity so callers can't spoof it.
  */
 import type { Request, Response, NextFunction } from 'express';
+import type { PoolClient } from 'pg';
 import { ScopedDb } from './db/scoped-db.js';
 import { query } from './db/pool.js';
 import { logger } from './logger.js';
@@ -82,6 +83,27 @@ export function auditImpersonatedWrites(req: Request, res: Response, next: NextF
     });
   }
   next();
+}
+
+/**
+ * An action the platform took on its own (actor_type 'system' — the audit log shows it as
+ * "Scheduled Action"), e.g. a scheduled action executed by the worker (F-17a). Pass the transaction's
+ * client to write it atomically with the change it records; it throws then (so the change rolls back).
+ */
+export async function writeSystemAudit(
+  networkId: string,
+  entry: AuditEntry,
+  db: Pick<PoolClient, 'query'> = { query: query as PoolClient['query'] },
+): Promise<void> {
+  await db.query(
+    `INSERT INTO audit_log (network_id, actor_type, actor_id, action, entity_type, entity_id, before, after)
+     VALUES ($1, 'system', NULL, $2, $3, $4, $5, $6)`,
+    [
+      networkId, entry.action, entry.entityType ?? null, entry.entityId ?? null,
+      entry.before === undefined ? null : JSON.stringify(entry.before),
+      entry.after === undefined ? null : JSON.stringify(entry.after),
+    ],
+  );
 }
 
 /**

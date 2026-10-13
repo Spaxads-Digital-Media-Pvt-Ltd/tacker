@@ -108,6 +108,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `db/` | Pool, ScopedDb, from-request, table registry |
 | `fraud/` | Fraud rules (Redis-cached for /click), fraud scan, alerts |
 | `alerts/` | `deliverAlert` — email + webhook delivery of raised alerts (fraud scan; automation alert rules) |
+| `automation/` | Scheduled-action runner, alert-rule grammar + evaluator, webhook events (emit + delivery) |
 | `geo/` | MaxMind GeoIP2 lookup |
 | `http/` | Express app scaffolding, envelope, errors, pagination |
 | `integrations/` | Facebook CAPI, offer feed sync, PIN API |
@@ -148,6 +149,9 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Facebook CAPI | `facebook-capi.ts` | `facebook-capi` | Continuous |
 | Offer Feed Sync | `offer-feed-sync.ts` | `offer-feed-sync` | Scheduled |
 | Tracking Domain Re-check | `domain-verify.ts` | `domain-verify` | Every 10 min — DNS TXT verification of pending custom domains |
+| Scheduled Actions | `scheduled-actions.ts` | `scheduled-actions` | Every minute — applies due offer scheduled actions (lib/automation/scheduled-actions.ts) |
+| Alert Rules | `alert-rules.ts` | `alert-rules` | Every 5 min — evaluates Automation alert rules via the reporting provider (lib/automation/alert-rules.ts) |
+| Automation Webhooks | `automation-webhook.ts` | `automation-webhook` | Continuous — event deliveries with retries/backoff through safeRequest (lib/automation/webhooks.ts) |
 
 ### Queue Definitions (`surfaces/workers/queues.ts`)
 Exports `QUEUE` constant mapping queue names to BullMQ queue instances.

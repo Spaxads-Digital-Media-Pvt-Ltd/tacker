@@ -42,7 +42,7 @@ export function ForwardingRulesTab({ base, pubOptions = [] }: { base: string; pu
 export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; pubOptions?: PubOptions }) {
   return (
     <>
-    <p className="mb-3 rounded-card border border-border bg-page px-3 py-2 text-[11px] text-fg-muted">Scheduled actions are saved but not executed automatically yet — change the offer status yourself at the scheduled time.</p>
+    <p className="mb-3 rounded-card border border-border bg-page px-3 py-2 text-[11px] text-fg-muted">Pending actions run automatically at their scheduled time (checked every minute). cap_change needs a cap type and value, which can be set through the API for now.</p>
     <CollectionTab
       basePath={`${base}/scheduled-actions`}
       addLabel="Action"

@@ -88,7 +88,7 @@ Some of the 50+ dashboard route modules have minimal implementations. As phases 
 `frontend/src/pages/dashboardMock.ts` contains mock data. This should be removed once real endpoints are fully populated.
 
 ### 17. Stored-but-not-enforced settings (labelled in the UI)
-Saved and shown, but not acted on by the tracker yet — each page says so: Scheduled Actions (no executor), Link Templates, Coupon Codes (no coupon-based attribution), Reporting Adjustments (not applied to ledger/reports), Partner Tier margin / auto-approve, invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), SmartSwitch rules, group-level shared caps, CPC-level postbacks.
+Saved and shown, but not acted on by the tracker yet — each page says so: Link Templates, Coupon Codes (no coupon-based attribution), Reporting Adjustments (not applied to ledger/reports), Partner Tier margin / auto-approve, invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), SmartSwitch rules, group-level shared caps, CPC-level postbacks.
 
 ### 16. Schema Uses Serial Ref Numbers
 The `ref` column on entities (offers, publishers, advertisers, etc.) is a `serial` (auto-increment integer). This is visible to users as display IDs. Consider if this should remain sequential.
