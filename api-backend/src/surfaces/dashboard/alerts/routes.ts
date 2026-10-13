@@ -56,6 +56,7 @@ export function alertsRoutes(): Router {
 
   r.patch(
     '/:id',
+    requireRole('admin', 'manager'),
     validateBody(patchSchema),
     asyncHandler(async (req, res) => {
       const b = req.body as z.infer<typeof patchSchema>;

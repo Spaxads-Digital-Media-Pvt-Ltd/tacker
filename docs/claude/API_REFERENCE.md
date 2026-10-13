@@ -33,9 +33,9 @@
 | GET,POST,PATCH,DELETE | `/api/tracking-domains/*` | Tracking domain CRUD | admin |
 | GET,POST,PATCH,DELETE | `/api/finance/*` | Finance | admin |
 | GET | `/api/reports/*` | Reports (12+ types) | admin |
-| GET,POST,PATCH,DELETE | `/api/alerts/*` | Alert management | admin |
+| GET,POST,PATCH,DELETE | `/api/alerts/*` | Alert management (PATCH: admin/manager) | admin |
 | GET,POST,PATCH,DELETE | `/api/fraud-rules/*` | Fraud rules | admin |
-| GET,POST,PATCH,DELETE | `/api/ai/*` | AI ops | admin |
+| GET,POST,PATCH,DELETE | `/api/ai/*` | AI ops (`POST /chat` spends the Anthropic budget: admin/manager) | admin |
 | GET,POST,PATCH,DELETE | `/api/tags/*` | Tag management | admin |
 | GET,POST,PATCH,DELETE | `/api/custom-fields/*` | Custom fields | admin |
 | GET,POST,PATCH,DELETE | `/api/settings/*` | Settings | admin |
@@ -52,7 +52,7 @@
 | GET,POST,PATCH,DELETE | `/api/communication-hub/*` | Communication hub | admin |
 | GET,POST,PATCH,DELETE | `/api/customer-value/*` | Customer value rules | admin |
 | GET,POST,PATCH,DELETE | `/api/traffic-health/*` | Traffic health | admin |
-| GET,POST,PATCH,DELETE | `/api/investigator/*` | Investigator | admin |
+| GET,POST,PATCH,DELETE | `/api/investigator/*` | Investigator (create/refresh/delete: admin/manager) | admin |
 | GET,POST,PATCH,DELETE | `/api/automation/*` | Automation | admin |
 | GET | `/api/audit-log/*` | Audit log | admin |
 | GET,POST,PATCH,DELETE | `/api/conversion-imports/*` | Conversion imports | admin |

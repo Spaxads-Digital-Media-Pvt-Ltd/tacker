@@ -12,6 +12,7 @@ import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { requireRole } from '../auth.js';
 import {
   computeInvestigationStats,
   formatInvestigationTarget,
@@ -124,7 +125,7 @@ export function investigatorRoutes(): Router {
     sendOk(res, rows.map(toDto));
   }));
 
-  r.post('/', validateBody(createSchema), asyncHandler(async (req, res) => {
+  r.post('/', requireRole('admin', 'manager'), validateBody(createSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof createSchema>;
     const db = dbForRequest(req);
     const networkId = req.scope!.networkId;
@@ -168,7 +169,7 @@ export function investigatorRoutes(): Router {
     sendOk(res, entries);
   }));
 
-  r.post('/:id/refresh', asyncHandler(async (req, res) => {
+  r.post('/:id/refresh', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
     const id = req.params.id ?? '';
     const existing = await fetchRow(networkId, id);
@@ -185,7 +186,7 @@ export function investigatorRoutes(): Router {
     sendOk(res, toDto(full!));
   }));
 
-  r.delete('/:id', asyncHandler(async (req, res) => {
+  r.delete('/:id', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const id = req.params.id ?? '';
     const existing = await db.selectOne<InvestigationRow>(TABLE, { id });

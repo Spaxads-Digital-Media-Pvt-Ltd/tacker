@@ -11,6 +11,7 @@ import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { runChat, isAiConfigured } from '../../../lib/ai/service.js';
+import { requireRole } from '../auth.js';
 
 const chatSchema = z.object({
   message: z.string().min(1).max(4000),
@@ -43,8 +44,10 @@ export function aiRoutes(): Router {
     }),
   );
 
+  // Each chat spends the network's Anthropic budget — admin/manager only (F-13).
   r.post(
     '/chat',
+    requireRole('admin', 'manager'),
     validateBody(chatSchema),
     asyncHandler(async (req, res) => {
       const b = req.body as z.infer<typeof chatSchema>;
