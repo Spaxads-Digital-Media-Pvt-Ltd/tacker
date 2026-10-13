@@ -63,6 +63,15 @@ interface Dashboard {
   currencies?: Partial<Record<PeriodKey, unknown>>;
   moneyByCurrency?: Partial<Record<PeriodKey, unknown>>;
 }
+/** The API sends the hourly money series as fixed-scale decimal strings (it never does float math
+ * on money); the sparklines plot numbers, so they're converted once, here at the UI edge. */
+type DashboardResponse = Omit<Dashboard, 'series'> & {
+  series: { clicks: number[]; conversions: number[]; revenue: Array<number | string>; payout: Array<number | string> };
+};
+const plotSeries = (d: DashboardResponse) => ({
+  ...d,
+  series: { ...d.series, revenue: d.series.revenue.map(Number), payout: d.series.payout.map(Number) },
+});
 
 const nfmt = new Intl.NumberFormat('en-US');
 const money = (v: string | number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}`;
@@ -168,7 +177,8 @@ function CustomizeCards({ visible, onChange }: { visible: Record<SectionId, bool
 
 function AdminDashboard({ name }: { name: string }) {
   const navigate = useNavigate();
-  const { data, loading, error } = withMock(useQuery<Dashboard>('/api/reports/dashboard'), MOCK_DASHBOARD);
+  const { data: raw, loading, error } = withMock(useQuery<DashboardResponse>('/api/reports/dashboard'), MOCK_DASHBOARD);
+  const data = useMemo(() => (raw ? plotSeries(raw) : null), [raw]);
   // Money without a currency of its own (no conversions, older API) is in the network's default.
   const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
   const currency = settings?.general?.defaultCurrency ?? 'USD';

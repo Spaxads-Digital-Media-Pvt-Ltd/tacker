@@ -737,7 +737,7 @@ describe('`money_by_currency` metric (reporting provider)', () => {
     expect(sql).toMatch(/cm AS \(\s+SELECT c\.offer_id AS d0, c\.currency AS cur,/);
     expect(sql).toContain("AND c.status = 'approved' AND c.currency IS NOT NULL");
     expect(sql).toMatch(/GROUP BY d0, cur/);
-    expect(sql).toContain("jsonb_object_agg(cm.cur, jsonb_build_object('payout', cm.p::numeric(14,4)::text, 'revenue', cm.r::numeric(14,4)::text, 'margin', (cm.r - cm.p)::numeric(14,4)::text)) AS mbc");
+    expect(sql).toContain("jsonb_object_agg(cm.cur, jsonb_build_object('payout', round(cm.p, 4)::text, 'revenue', round(cm.r, 4)::text, 'margin', round(cm.r - cm.p, 4)::text)) AS mbc");
     expect(sql).toContain("LEFT JOIN cmj ON COALESCE(COALESCE(cl.d0, cv.d0)::text, '~NULL~') = COALESCE(cmj.d0::text, '~NULL~')");
     expect(sql).toContain("COALESCE(cmj.mbc, '{}'::jsonb) AS money_by_currency");
     expect(calls()[0]!.params).toEqual([NET]);
@@ -747,12 +747,12 @@ describe('`money_by_currency` metric (reporting provider)', () => {
     const req = build({ metrics: 'money_by_currency' }, 'publisher');
     await pg().runReport(req);
     const sql = pageSql();
-    expect(sql).toContain("jsonb_build_object('payout', cm.p::numeric(14,4)::text)");
+    expect(sql).toContain("jsonb_build_object('payout', round(cm.p, 4)::text)");
     expect(sql).not.toMatch(/'revenue'|'margin'/);
     // Without an explicit moneyFields only the money metrics the request itself lists are carried.
     queryMock.mockClear();
     await pg().runReport({ networkId: NET, groupBy: ['offer'], metrics: ['revenue', 'money_by_currency'], filters: {}, limit: 1, offset: 0 });
-    expect(pageSql()).toContain("jsonb_build_object('revenue', cm.r::numeric(14,4)::text)");
+    expect(pageSql()).toContain("jsonb_build_object('revenue', round(cm.r, 4)::text)");
   });
 
   it('Postgres groupBy=none: one row, CROSS JOIN, {} when there is no money', async () => {
@@ -845,7 +845,7 @@ describe('`moneyByCurrency` on /summary, /dashboard, /grouped, /goals, Pacing, /
     const res = await request(reportsApp()).get('/summary');
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ payout: '1.0000', currencies: ['USD'], moneyByCurrency: { USD: { payout: '1.0000', revenue: '3.0000', margin: '2.0000' } } });
-    expect(calls()[1]!.sql).toContain("jsonb_build_object('payout', cm.p::numeric(14,4)::text, 'revenue', cm.r::numeric(14,4)::text, 'margin', (cm.r - cm.p)::numeric(14,4)::text)");
+    expect(calls()[1]!.sql).toContain("jsonb_build_object('payout', round(cm.p, 4)::text, 'revenue', round(cm.r, 4)::text, 'margin', round(cm.r - cm.p, 4)::text)");
   });
 
   it('/dashboard: per period, only currencies with conversions in that period', async () => {
@@ -955,14 +955,15 @@ describe('`moneyByCurrency` on /summary, /dashboard, /grouped, /goals, Pacing, /
 
 describe('offer-group stats split money by currency', () => {
   const group = { id: A, ref: '1', name: 'G', advertiser_id: null, offer_ids: [A], currency: 'USD', labels: null, notes: null, status: 'active', caps_enabled: false, caps: {}, created_at: 't', updated_at: 't' };
-  const stats = { clicks: '4', cv: '2', payout: '3.0000', revenue: '9.0000', money_by_currency: { EUR: { payout: '1.0000', revenue: '4.0000', margin: '3.0000' }, USD: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } } };
+  const stats = { clicks: '4', cv: '2', payout: '3.0000', revenue: '9.0000', margin: '6.0000', money_by_currency: { EUR: { payout: '1.0000', revenue: '4.0000', margin: '3.0000' }, USD: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } } };
   const mock = () => queryMock.mockImplementation(async (sql: string) => (sql.includes('WITH j AS') ? { rows: [stats] } : { rows: [group] }));
 
   it('/:id/stats keeps its fields and adds currencies + moneyByCurrency', async () => {
     mock();
     const res = await request(groupsApp()).get(`/${A}/stats`);
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ revenue: '9.00', payout: '3.00', margin: '6.00', clicks: 4, cv: 2, cvr: 0.5, currencies: ['EUR', 'USD'], moneyByCurrency: stats.money_by_currency });
+    // Money is 4dp text from SQL (F-22) — formatted at the UI edge, not rounded to 2dp here.
+    expect(res.body.data).toEqual({ revenue: '9.0000', payout: '3.0000', margin: '6.0000', clicks: 4, cv: 2, cvr: 0.5, currencies: ['EUR', 'USD'], moneyByCurrency: stats.money_by_currency });
     const q = calls().find((x) => x.sql.includes('WITH j AS'))!;
     expect(q.sql).toContain('cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[])');
     expect(q.sql).toContain("jsonb_object_agg(cm.cur, jsonb_build_object('payout'");
@@ -979,7 +980,7 @@ describe('offer-group stats split money by currency', () => {
   it('a group with no offers → empty currencies / {}', async () => {
     queryMock.mockResolvedValue({ rows: [{ ...group, offer_ids: [] }] });
     const res = await request(groupsApp()).get(`/${A}/stats`);
-    expect(res.body.data).toMatchObject({ payout: '0', currencies: [], moneyByCurrency: {} });
+    expect(res.body.data).toMatchObject({ payout: '0.0000', margin: '0.0000', currencies: [], moneyByCurrency: {} });
   });
 });
 

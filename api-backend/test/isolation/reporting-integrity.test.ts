@@ -999,7 +999,7 @@ d('reporting integrity (live DB)', () => {
         expect(created.status).toBe(201);
         const s = await request(app).get(`/api/offer-groups/${created.body.data.id}/stats`).set(auth);
         expect(s.status).toBe(200);
-        expect(s.body.data).toMatchObject({ payout: '3.00', revenue: '8.00', clicks: 2, cv: 2, currencies: ['EUR', 'USD'],
+        expect(s.body.data).toMatchObject({ payout: '3.0000', revenue: '8.0000', margin: '5.0000', clicks: 2, cv: 2, currencies: ['EUR', 'USD'],
           moneyByCurrency: { EUR: M('2.0000', '5.0000', '3.0000'), USD: M('1.0000', '3.0000', '2.0000') } });
         const list = await request(app).get('/api/offer-groups').set(auth);
         const mine = list.body.data.find((g: { id: string }) => g.id === created.body.data.id);

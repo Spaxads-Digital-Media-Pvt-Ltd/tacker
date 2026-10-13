@@ -257,8 +257,8 @@ export function mountDetailReports(r: Router): void {
         FROM clicks c ${clicksJoin} WHERE ${cf.where} GROUP BY 1
       ), cv AS (
         SELECT ${dim('v')} AS k, COUNT(*)::int AS conversions,
-               COALESCE(SUM(v.payout),0)::numeric(14,4) AS payout,
-               COALESCE(SUM(v.revenue),0)::numeric(14,4) AS revenue,
+               round(COALESCE(SUM(v.payout),0), 4) AS payout,
+               round(COALESCE(SUM(v.revenue),0), 4) AS revenue,
                -- Currencies of the (approved) conversions summed above; >1 = a mixed-currency sum.
                array_agg(DISTINCT v.currency ORDER BY v.currency) FILTER (WHERE v.currency IS NOT NULL) AS currencies
         FROM conversions v ${convJoin} WHERE ${vWhere} GROUP BY 1
@@ -346,25 +346,33 @@ export function mountDetailReports(r: Router): void {
     ];
     const P = (col: string) => PERIOD.map(([k, cond]) => `
       COALESCE(${col} FILTER (WHERE ${cond}),0) AS ${k}`).join(',');
+    // Money is summed (and the margin subtracted) as numeric in SQL and returned as 4dp text —
+    // never JS float arithmetic on currency (F-22). round(x, 4), not ::numeric(14,4): a SUM can
+    // exceed the 10 integer digits a single amount column has (that cast overflowed → 500).
+    const sumOf = (col: string, cond: string) => `COALESCE(SUM(${col}) FILTER (WHERE ${cond}),0)`;
+    const PM = (pfx: 'p' | 'r' | 'm') => PERIOD.map(([k, cond]) => `
+      round(${pfx === 'p' ? sumOf('payout', cond) : pfx === 'r' ? sumOf('revenue', cond) : `${sumOf('revenue', cond)} - ${sumOf('payout', cond)}`}, 4)::text AS ${pfx}_${k}`).join(',');
     const since = `created_at >= date_trunc('month', now(), 'UTC') - interval '1 month'`;
 
     const [clk, cv, ser, byCur] = await Promise.all([
       query<Record<string, string>>(`SELECT ${P('COUNT(*)')} FROM clicks WHERE network_id = $1 AND ${since}`, [nid]),
       query<Record<string, string>>(
         `SELECT ${P('COUNT(*)')},
-                ${P('SUM(payout)').replace(/AS (\w+)/g, 'AS p_$1')},
-                ${P('SUM(revenue)').replace(/AS (\w+)/g, 'AS r_$1')},
+                ${PM('p')},
+                ${PM('r')},
+                ${PM('m')},
                 -- Per period: currencies of the approved conversions behind the money sums (>1 = mixed).
                 ${P(`array_agg(DISTINCT currency ORDER BY currency)`)
                   .replace(/FILTER \(WHERE /g, 'FILTER (WHERE currency IS NOT NULL AND ')
                   .replace(/,0\) AS (\w+)/g, `,'{}'::text[]) AS c_$1`)}
            FROM conversions WHERE network_id = $1 AND status = 'approved' AND ${since}`, [nid]),
-      query<{ h: number; clicks: number; conversions: number; revenue: string; payout: string }>(
-        `SELECT date_part('hour', h.created_at)::int AS h,
+      query<{ h: number; clicks: number; conversions: number; revenue: string; payout: string; margin: string }>(
+        `SELECT date_part('hour', h.created_at AT TIME ZONE 'UTC')::int AS h, -- UTC hours, like the UTC 'today' window
                 COUNT(*) FILTER (WHERE src = 'click')::int AS clicks,
                 COUNT(*) FILTER (WHERE src = 'conv')::int AS conversions,
-                COALESCE(SUM(revenue),0)::text AS revenue,
-                COALESCE(SUM(payout),0)::text AS payout
+                round(COALESCE(SUM(revenue),0), 4)::text AS revenue,
+                round(COALESCE(SUM(payout),0), 4)::text AS payout,
+                round(COALESCE(SUM(revenue),0) - COALESCE(SUM(payout),0), 4)::text AS margin
            FROM (
              SELECT created_at, 'click' AS src, 0::numeric revenue, 0::numeric payout FROM clicks
               WHERE network_id = $1 AND created_at >= date_trunc('day', now(), 'UTC')
@@ -376,9 +384,9 @@ export function mountDetailReports(r: Router): void {
       query<Record<string, string | number>>(
         `SELECT currency,${PERIOD.map(([k, cond]) => `
                 COUNT(*) FILTER (WHERE ${cond})::int AS n_${k},
-                COALESCE(SUM(payout) FILTER (WHERE ${cond}),0)::numeric(14,4)::text AS p_${k},
-                COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0)::numeric(14,4)::text AS r_${k},
-                (COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0) - COALESCE(SUM(payout) FILTER (WHERE ${cond}),0))::numeric(14,4)::text AS m_${k}`).join(',')}
+                round(COALESCE(SUM(payout) FILTER (WHERE ${cond}),0), 4)::text AS p_${k},
+                round(COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0), 4)::text AS r_${k},
+                round(COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0) - COALESCE(SUM(payout) FILTER (WHERE ${cond}),0), 4)::text AS m_${k}`).join(',')}
            FROM conversions WHERE network_id = $1 AND status = 'approved' AND currency IS NOT NULL AND ${since}
           GROUP BY currency ORDER BY currency`, [nid]),
     ]);
@@ -387,42 +395,47 @@ export function mountDetailReports(r: Router): void {
       .map((r) => [String(r['currency']), { payout: String(r[`p_${k}`]), revenue: String(r[`r_${k}`]), margin: String(r[`m_${k}`]) }]));
 
     const c = clk.rows[0]!; const v = cv.rows[0]!;
+    // Counts are integers; money stays the 4dp text SQL produced.
     const periods = (o: Record<string, string>, pfx = '') => ({
       today: Number(o[`${pfx}today`] ?? 0), yesterday: Number(o[`${pfx}yesterday`] ?? 0),
       month: Number(o[`${pfx}month`] ?? 0), lastMonth: Number(o[`${pfx}last_month`] ?? 0),
     });
+    const moneyPeriods = (pfx: 'p' | 'r' | 'm') => ({
+      today: String(v[`${pfx}_today`]), yesterday: String(v[`${pfx}_yesterday`]),
+      month: String(v[`${pfx}_month`]), lastMonth: String(v[`${pfx}_last_month`]),
+    });
     const clicks = periods(c);
     const conversions = periods(v);
-    const payout = periods(v, 'p_');
-    const revenue = periods(v, 'r_');
-    const money = (n: number) => n.toFixed(4);
     const curr = (o: Record<string, unknown>, k: string): string[] => (Array.isArray(o[`c_${k}`]) ? (o[`c_${k}`] as string[]) : []);
     const mk = (fn: (k: 'today' | 'yesterday' | 'month' | 'lastMonth') => number) =>
       ({ today: fn('today'), yesterday: fn('yesterday'), month: fn('month'), lastMonth: fn('lastMonth') });
-    const margin = mk((k) => revenue[k] - payout[k]);
-    const cr = mk((k) => (clicks[k] > 0 ? Number(((conversions[k] / clicks[k]) * 100).toFixed(2)) : 0));
+    const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 10_000) / 100 : 0); // a rate, not money
+    const cr = mk((k) => pct(conversions[k], clicks[k]));
 
-    const mkSeries = (fn: (row: typeof ser.rows[number]) => number) => {
-      const a = Array<number>(24).fill(0);
+    // Today's 24 hourly slots. SQL returns only the hours that have data, in no particular order, so
+    // every series is bucketed by the row's hour — never by its position in the result.
+    const series = <T>(empty: T, fn: (row: typeof ser.rows[number]) => T): T[] => {
+      const a = Array<T>(24).fill(empty);
       for (const row of ser.rows) a[row.h] = fn(row);
       return a;
     };
-    const clicksSeries = mkSeries((r) => r.clicks);
-    const crSeries = clicksSeries.map((clicks, h) => (clicks > 0 ? Number(((ser.rows[h]?.conversions ?? 0) / clicks) * 100).toFixed(2) : 0));
+    const clicksSeries = series(0, (r) => r.clicks);
+    const conversionsSeries = series(0, (r) => r.conversions);
+    const crSeries = clicksSeries.map((n, h) => pct(conversionsSeries[h]!, n));
     sendOk(res, {
       clicks, conversions,
-      revenue: { today: money(revenue.today), yesterday: money(revenue.yesterday), month: money(revenue.month), lastMonth: money(revenue.lastMonth) },
-      payout: { today: money(payout.today), yesterday: money(payout.yesterday), month: money(payout.month), lastMonth: money(payout.lastMonth) },
-      margin: { today: money(margin.today), yesterday: money(margin.yesterday), month: money(margin.month), lastMonth: money(margin.lastMonth) },
+      revenue: moneyPeriods('r'),
+      payout: moneyPeriods('p'),
+      margin: moneyPeriods('m'),
       currencies: { today: curr(v, 'today'), yesterday: curr(v, 'yesterday'), month: curr(v, 'month'), lastMonth: curr(v, 'last_month') },
       moneyByCurrency: { today: mbcFor('today'), yesterday: mbcFor('yesterday'), month: mbcFor('month'), lastMonth: mbcFor('last_month') },
       cr,
       series: {
         clicks: clicksSeries,
-        conversions: mkSeries((r) => r.conversions),
-        revenue: mkSeries((r) => Number(r.revenue)),
-        payout: mkSeries((r) => Number(r.payout)),
-        margin: mkSeries((r) => Number(r.revenue) - Number(r.payout)),
+        conversions: conversionsSeries,
+        revenue: series('0.0000', (r) => r.revenue),
+        payout: series('0.0000', (r) => r.payout),
+        margin: series('0.0000', (r) => r.margin),
         cr: crSeries,
       },
     });
@@ -572,8 +585,8 @@ export function mountDetailReports(r: Router): void {
                 (c.goal_id IS NULL) AS unmatched,
                 (CASE WHEN c.goal_id IS NULL THEN c.event_name END) AS event_key,
                 COUNT(*)::int AS conversions,
-                COALESCE(SUM(c.payout),0)::numeric(14,4) AS payout,
-                COALESCE(SUM(c.revenue),0)::numeric(14,4) AS revenue,
+                round(COALESCE(SUM(c.payout),0), 4) AS payout,
+                round(COALESCE(SUM(c.revenue),0), 4) AS revenue,
                 (COALESCE(SUM(c.revenue),0) - COALESCE(SUM(c.payout),0))::numeric(14,4) AS margin,
                 -- The row's money is in its offer's currency (network default if the offer is gone).
                 COALESCE((SELECT o.currency FROM offers o WHERE o.id = c.offer_id AND o.network_id = $1),
