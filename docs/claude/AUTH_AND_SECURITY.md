@@ -23,6 +23,11 @@
 - SPA sign-in: Login page › "Sign in as Super Admin" → `authClient.loginPlatform()` → `POST /platform/login` → session `role: 'super_admin'` with the platform token (1 h, `expiresAt` from its `exp`). Account: `npm run bootstrap:admin -- <email> <password>`
 - No refresh cookie: the api client never sends a Super Admin session to `/api/auth/refresh`; a 401 from `/platform/*` clears the session and returns to `/login`, a 401 from a tenant `/api/*` endpoint just fails that call
 
+### 2b. Impersonation session (admin → portal account)
+- `POST /api/{publishers|advertisers}/:id/impersonate` (admin) mints a 30-min HS256 token, issuer `tracker-impersonation`, signed with `IMPERSONATION_JWT_SECRET` (optional; 503 when unset) — never the account's own credentials
+- `dashboardAuth` routes it by issuer to its own verifier → portal identity of that account + `impersonatedBy`; it can't authenticate admin routes or other surfaces
+- Writes are audited to the admin (`audit_log.impersonated_by`); password/email/anonymize/API-key changes are refused; `/api/me` exposes `impersonating` for the SPA banner
+
 ### 3. API Key (Public REST API)
 - Format: `<audience>_<env>_<publicId>_<secret>`
  - e.g., `pub_live_a1b2c3d4_<32-char-base64url>`

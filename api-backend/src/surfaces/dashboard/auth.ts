@@ -11,8 +11,11 @@
  * until then we read role/network from verified custom claims and default safely.
  */
 import type { Request, Response, NextFunction } from 'express';
-import { unauthorized, forbidden } from '../../lib/http/errors.js';
+import { unauthorized, forbidden, serviceUnavailable } from '../../lib/http/errors.js';
 import { verifySupabaseJwt } from '../../lib/auth/verify-jwt.js';
+import {
+ isImpersonationToken, verifyImpersonationToken, signImpersonationToken, impersonationConfigured,
+} from '../../lib/auth/impersonation-token.js';
 import { query } from '../../lib/db/pool.js';
 import type { DashboardKind, AdminRole } from '../../middleware/types.js';
 
@@ -58,7 +61,20 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  const token = bearer(req);
  if (!token) return next(unauthorized('Missing bearer token.'));
 
+ // Admin impersonation session (F-10): its own short-lived token and secret — the account's portal
+ // identity plus the admin behind it (`impersonatedBy`). Everything else is a Supabase-issued token.
+ if (isImpersonationToken(token)) {
  try {
+ const s = await verifyImpersonationToken(token);
+ req.identity = {
+ surface: 'dashboard', kind: s.kind, userId: s.userId, networkId: s.networkId, ownerId: s.ownerId,
+ impersonatedBy: s.impersonatedBy, impersonationExpiresAt: s.expiresAt,
+ };
+ req.scope = { networkId: s.networkId, ownerId: s.ownerId };
+ } catch {
+ return next(unauthorized('Impersonation session is invalid or has expired.'));
+ }
+ } else try {
  const payload = await verifySupabaseJwt(token);
  const meta = (payload['app_metadata'] as Record<string, unknown> | undefined) ?? {};
  const claim = (k: string): string =>
@@ -101,6 +117,45 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  return next(err);
  }
  return next();
+}
+
+/** Is an admin impersonating this request's portal account? (F-10) */
+export function isImpersonating(req: Request): boolean {
+ const id = req.identity;
+ return Boolean(id && id.surface === 'dashboard' && id.kind !== 'admin' && id.impersonatedBy);
+}
+
+/**
+ * Refuse while impersonating (F-10) — for credential changes (password, email, anonymize, API keys):
+ * an impersonation session is time-boxed and must not be able to outlive or take over the account.
+ * `writesOnly` lets reads through (e.g. listing API keys).
+ */
+export function notWhileImpersonating(opts: { writesOnly?: boolean } = {}) {
+ return (req: Request, _res: Response, next: NextFunction): void => {
+ if (opts.writesOnly && (req.method === 'GET' || req.method === 'HEAD')) return next();
+ if (isImpersonating(req)) return next(forbidden('Not available while impersonating.'));
+ return next();
+ };
+}
+
+/**
+ * Start impersonating a partner/advertiser account (F-10): a dedicated short-lived session for that
+ * account's portal, flagged with the admin starting it — never the account's own credentials. Works
+ * whether or not the account has a portal login. Returns the API response and what to audit.
+ */
+export async function startImpersonation(
+ req: Request, kind: 'publisher' | 'advertiser', account: { id: string; auth_user_id: string | null },
+) {
+ if (!impersonationConfigured()) throw serviceUnavailable('Impersonation is not configured on this server (IMPERSONATION_JWT_SECRET).');
+ const id = req.identity;
+ if (!id || id.surface !== 'dashboard' || id.kind !== 'admin') throw forbidden('Admin access required.');
+ const { token, expiresAt, jti } = await signImpersonationToken({
+ kind, networkId: id.networkId, ownerId: account.id, userId: account.auth_user_id ?? account.id, impersonatedBy: id.userId,
+ });
+ return {
+ response: { token, expiresAt, kind, ownerId: account.id, impersonatedBy: id.userId },
+ audit: { impersonatedBy: id.userId, expiresAt: new Date(expiresAt * 1000).toISOString(), sessionId: jti },
+ };
 }
 
 /** Restrict to admin logins (not portal users). */

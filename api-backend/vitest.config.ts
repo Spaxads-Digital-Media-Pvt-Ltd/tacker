@@ -11,6 +11,7 @@ export default defineConfig({
    PLATFORM_ADMIN_JWT_SECRET: process.env.PLATFORM_ADMIN_JWT_SECRET ?? 'plat-test-secret-do-not-use-in-prod',
    // Test-only settings encryption key (32 bytes hex) — never use outside tests.
    SETTINGS_ENC_KEY: process.env.SETTINGS_ENC_KEY ?? '7465737420736574746e6773206b6579202d20646f206e6f74207573652121ff',
+   IMPERSONATION_JWT_SECRET: process.env.IMPERSONATION_JWT_SECRET ?? 'impersonation-test-secret-do-not-use-in-prod',
    DATABASE_URL: process.env.DATABASE_URL ?? 'postgres://test:test@localhost:5432/test',
    REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
    SUPABASE_URL: process.env.SUPABASE_URL ?? 'https://test.supabase.co',

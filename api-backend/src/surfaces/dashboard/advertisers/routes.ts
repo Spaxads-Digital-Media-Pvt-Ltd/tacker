@@ -14,9 +14,8 @@ import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
-import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import type { AdvertiserRow } from '../../../domain/entities.js';
-import { requireRole, requirePortal } from '../auth.js';
+import { requireRole, requirePortal, startImpersonation } from '../auth.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
@@ -324,22 +323,17 @@ export function advertisersAdminRoutes(): Router {
     }),
   );
 
-  // "Impersonate" (row menu) — mints a real Supabase magic-link for the advertiser's OWN linked
-  // portal account (never a forged/self-signed token), mirroring the same publisher pattern. Only
-  // advertisers with a linked portal account (hasPortalAccount) can be impersonated.
+  // "Impersonate" (row menu) — a short-lived impersonation session for this advertiser's portal
+  // (F-10): a dedicated 30-minute token flagged with the admin who started it — never the account's
+  // own credentials (the old Supabase magic link was a reusable login). Writes made with it are
+  // audited to that admin; credential changes are refused. See dashboard/auth.ts startImpersonation.
   r.post('/:id/impersonate', requireRole('admin'), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const adv = await db.selectOne<AdvertiserRow>(TABLE, { id: req.params.id });
     if (!adv) throw notFound('Advertiser not found');
-    if (!adv.auth_user_id || !adv.contact_email) {
-      throw badRequest('This advertiser has no linked portal account to impersonate.');
-    }
-    const { data, error } = await getSupabaseAdmin().auth.admin.generateLink({
-      type: 'magiclink', email: adv.contact_email,
-    });
-    if (error || !data?.properties?.action_link) throw badRequest('Could not generate an impersonation link.');
-    await writeAudit(req, { action: 'advertiser.impersonate', entityType: 'advertiser', entityId: adv.id });
-    sendOk(res, { link: data.properties.action_link });
+    const session = await startImpersonation(req, 'advertiser', adv);
+    await writeAudit(req, { action: 'advertiser.impersonate', entityType: 'advertiser', entityId: adv.id, after: session.audit });
+    sendOk(res, session.response);
   }));
 
   // Portal invite (audit F-04): same as the partner invite — a temporary password emailed to the

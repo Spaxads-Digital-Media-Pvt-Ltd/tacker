@@ -42,6 +42,10 @@ const schema = z.object({
   // chars or base64 (e.g. `openssl rand -hex 32`). Losing it makes stored secrets unreadable.
   SETTINGS_ENC_KEY: z.string().refine((v) => settingsKeyBytes(v) !== null, 'must be 32 bytes: 64 hex chars or base64'),
 
+  // Signs short-lived admin impersonation sessions (lib/auth/impersonation-token.ts, audit F-10).
+  // Optional: without it, "Impersonate" answers 503. Use a long random value (openssl rand -hex 32).
+  IMPERSONATION_JWT_SECRET: z.string().min(32).optional(),
+
   REDIS_URL: z.string().url(),
 
  // --- Login rate limiting (dashboard auth). AP-1 / spec §4. ---

@@ -19,7 +19,8 @@ import { validateBody } from '../../lib/http/validate.js';
 import { badRequest } from '../../lib/http/errors.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { query } from '../../lib/db/pool.js';
-import { dashboardAuth, requireAdmin, requireRole, requirePortal } from './auth.js';
+import { dashboardAuth, requireAdmin, requireRole, requirePortal, notWhileImpersonating } from './auth.js';
+import { auditImpersonatedWrites } from '../../lib/audit.js';
 import { passwordSchema } from '../../lib/auth/password-policy.js';
 import { ownerIdOf } from '../../lib/db/from-request.js';
 import { apiKeyManagementRoutes } from './api-keys/routes.js';
@@ -84,8 +85,26 @@ export function buildDashboardApp(): Express {
 
   const authed = Router();
   authed.use(dashboardAuth);
+  // Writes made while an admin impersonates a portal account are audited to that admin (F-10).
+  authed.use(auditImpersonatedWrites);
 
-  authed.get('/me', (req, res) => sendOk(res, { identity: req.identity, scope: req.scope }));
+  // `impersonation` is set while an admin is impersonating this portal account (F-10) — the SPA
+  // shows a persistent "impersonating" banner from it.
+  authed.get('/me', asyncHandler(async (req, res) => {
+    const id = req.identity;
+    let impersonation: { impersonatedBy: string; adminEmail: string | null; account: string | null; expiresAt: number } | null = null;
+    if (id && id.surface === 'dashboard' && id.kind !== 'admin' && id.impersonatedBy) {
+      const [admin, account] = await Promise.all([
+        query<{ email: string }>('SELECT email FROM users WHERE network_id = $1 AND auth_user_id::text = $2 LIMIT 1', [id.networkId, id.impersonatedBy]),
+        query<{ name: string }>(`SELECT name FROM ${id.kind === 'publisher' ? 'publishers' : 'advertisers'} WHERE network_id = $1 AND id = $2`, [id.networkId, id.ownerId]),
+      ]);
+      impersonation = {
+        impersonatedBy: id.impersonatedBy, adminEmail: admin.rows[0]?.email ?? null,
+        account: account.rows[0]?.name ?? null, expiresAt: id.impersonationExpiresAt ?? 0,
+      };
+    }
+    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation });
+  }));
 
   // My Account (Profile) General tab — this user's own real row + metadata profile fields.
   authed.get('/me/account', asyncHandler(async (req, res) => {
@@ -202,7 +221,7 @@ export function buildDashboardApp(): Express {
   }));
 
   // Change own password (Profile → Change password).
-  authed.patch('/me/password', validateBody(z.object({ password: passwordSchema })), asyncHandler(async (req, res) => {
+  authed.patch('/me/password', notWhileImpersonating(), validateBody(z.object({ password: passwordSchema })), asyncHandler(async (req, res) => {
     const userId = (req.identity as { userId?: string }).userId;
     if (!userId) return sendOk(res, { ok: false });
     await getSupabaseAdmin().auth.admin.updateUserById(userId, { password: (req.body as { password: string }).password });
@@ -210,7 +229,7 @@ export function buildDashboardApp(): Express {
   }));
 
   // Change own login email (auth + users row).
-  authed.patch('/me/email', validateBody(z.object({ email: z.string().email().max(200) })), asyncHandler(async (req, res) => {
+  authed.patch('/me/email', notWhileImpersonating(), validateBody(z.object({ email: z.string().email().max(200) })), asyncHandler(async (req, res) => {
     const userId = (req.identity as { userId?: string }).userId;
     if (!userId) return sendOk(res, { ok: false });
     const email = (req.body as { email: string }).email.trim().toLowerCase();
@@ -250,7 +269,7 @@ export function buildDashboardApp(): Express {
   }));
 
   // GDPR-style anonymize of own personal fields (keeps business history).
-  authed.post('/me/anonymize', asyncHandler(async (req, res) => {
+  authed.post('/me/anonymize', notWhileImpersonating(), asyncHandler(async (req, res) => {
     const userId = (req.identity as { userId?: string }).userId;
     if (!userId || !req.scope?.networkId) return sendOk(res, { ok: false });
     const { rows } = await query<{ id: string }>(
@@ -380,8 +399,9 @@ export function buildDashboardApp(): Express {
   const adminUserId = (req: import('express').Request): string =>
     req.identity && req.identity.surface === 'dashboard' ? req.identity.userId : '';
   authed.use('/keys', requireAdmin, requireRole('admin'), apiKeyManagementRoutes('network', adminUserId));
-  authed.use('/portal/publisher/keys', requirePortal('publisher'), apiKeyManagementRoutes('publisher', ownerIdOf));
-  authed.use('/portal/advertiser/keys', requirePortal('advertiser'), apiKeyManagementRoutes('advertiser', ownerIdOf));
+  // Minting/revoking keys while impersonating would hand out credentials that outlive the session (F-10).
+  authed.use('/portal/publisher/keys', requirePortal('publisher'), notWhileImpersonating({ writesOnly: true }), apiKeyManagementRoutes('publisher', ownerIdOf));
+  authed.use('/portal/advertiser/keys', requirePortal('advertiser'), notWhileImpersonating({ writesOnly: true }), apiKeyManagementRoutes('advertiser', ownerIdOf));
 
   // Owner-scoped portals (guards enforced per-route inside).
   authed.use('/portal/advertiser', advertiserPortalRoutes());

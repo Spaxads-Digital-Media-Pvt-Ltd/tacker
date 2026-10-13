@@ -15,9 +15,8 @@ import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import type { PublisherRow } from '../../../domain/entities.js';
-import { requireRole, requirePortal } from '../auth.js';
+import { requireRole, requirePortal, startImpersonation } from '../auth.js';
 import { balanceSummary, type CurrencyBalance } from '../../../lib/ledger/ledger.js';
-import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
@@ -166,22 +165,17 @@ export function publishersAdminRoutes(): Router {
     sendOk(res, { requested: results });
   }));
 
-  // "Impersonate" (row menu) — mints a real Supabase magic-link for the publisher's OWN linked
-  // portal account (never a forged/self-signed token) so opening it logs in as that publisher for
-  // real. Only publishers with a linked portal account (hasPortalAccount) can be impersonated.
+  // "Impersonate" (row menu) — a short-lived impersonation session for this publisher's portal
+  // (F-10): a dedicated 30-minute token flagged with the admin who started it — never the account's
+  // own credentials (the old Supabase magic link was a reusable login). Writes made with it are
+  // audited to that admin; credential changes are refused. See dashboard/auth.ts startImpersonation.
   r.post('/:id/impersonate', requireRole('admin'), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const pub = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
     if (!pub) throw notFound('Publisher not found');
-    if (!pub.auth_user_id || !pub.contact_email) {
-      throw badRequest('This partner has no linked portal account to impersonate.');
-    }
-    const { data, error } = await getSupabaseAdmin().auth.admin.generateLink({
-      type: 'magiclink', email: pub.contact_email,
-    });
-    if (error || !data?.properties?.action_link) throw badRequest('Could not generate an impersonation link.');
-    await writeAudit(req, { action: 'publisher.impersonate', entityType: 'publisher', entityId: pub.id });
-    sendOk(res, { link: data.properties.action_link });
+    const session = await startImpersonation(req, 'publisher', pub);
+    await writeAudit(req, { action: 'publisher.impersonate', entityType: 'publisher', entityId: pub.id, after: session.audit });
+    sendOk(res, session.response);
   }));
 
   // Portal invite (audit F-04): give this partner a working portal login — a temporary password

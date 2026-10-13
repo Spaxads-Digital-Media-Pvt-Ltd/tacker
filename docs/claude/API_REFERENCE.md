@@ -13,14 +13,14 @@
 ### Identity
 | Method | Endpoint | Purpose | Auth | Returns |
 |---|---|---|---|---|
-| GET | `/api/me` | Current identity + scope | Dashboard JWT | `{ identity, scope }` |
+| GET | `/api/me` | Current identity + scope; `impersonating` + `impersonation: { impersonatedBy, adminEmail, account, expiresAt }` while an admin impersonates this portal account (banner data) | Dashboard JWT | `{ identity, scope, impersonating, impersonation }` |
 | GET | `/api/me/account` | Own user row + metadata | Dashboard JWT | User object |
 | PATCH | `/api/me/theme` | Set accent theme | Dashboard JWT | `{ theme: 'A'-'F' }` |
 | PATCH | `/api/me/profile` | Update profile fields | Dashboard JWT | `{ ok, ...fields }` |
-| PATCH | `/api/me/password` | Change own password | Dashboard JWT | `{ ok }` |
-| PATCH | `/api/me/email` | Change own email | Dashboard JWT | `{ ok, email }` |
+| PATCH | `/api/me/password` | Change own password (403 while impersonating) | Dashboard JWT | `{ ok }` |
+| PATCH | `/api/me/email` | Change own email (403 while impersonating) | Dashboard JWT | `{ ok, email }` |
 | GET | `/api/me/logins` | Own login history | Dashboard JWT | Login events array |
-| POST | `/api/me/anonymize` | GDPR anonymize | Dashboard JWT | `{ ok }` |
+| POST | `/api/me/anonymize` | GDPR anonymize (403 while impersonating) | Dashboard JWT | `{ ok }` |
 | GET | `/api/me/notifications` | Get notification prefs | Dashboard JWT | `{ preferences }` |
 | PUT | `/api/me/notifications` | Set notification prefs | Dashboard JWT | `{ preferences }` |
 
@@ -149,6 +149,9 @@ Decisions (kept on purpose):
 | GET | `/api/advertisers/:id/events` | Advertiser's events = goals (`offer_goals`) on its offers, with `offerId`/`offerName`/`offerRef` ("Associated to") | admin (any role) |
 | POST | `/api/advertisers/:id/events` | Create an event: goal body + `offerId` (must be one of this advertiser's offers); currency defaults to the offer's | admin/manager |
 | PATCH,DELETE | `/api/advertisers/:id/events/:eventId` | Edit/delete an event of this advertiser (the offer can't be changed). Same rules, audit and cache invalidation as `/api/offers/:id/goals` | admin/manager |
+
+### Impersonation (admin → portal account)
+`POST /api/publishers/:id/impersonate`, `POST /api/advertisers/:id/impersonate` (admin) → `{ token, expiresAt, kind, ownerId, impersonatedBy }`: a dedicated **30-minute** token (`lib/auth/impersonation-token.ts`, HS256, `IMPERSONATION_JWT_SECRET`; 503 if unset) — no longer a Supabase magic link, and the account needn't have a portal login. Used as a Bearer it is that account's portal identity plus `impersonatedBy` (`dashboardAuth`). Every successful write is audited with `audit_log.impersonated_by` = the admin (routes without their own audit row get a generic `impersonation.write` row: method, path, status). Refused while impersonating: `/api/me/password`, `/api/me/email`, `/api/me/anonymize`, portal API key create/revoke. The start is audited as `publisher.impersonate` / `advertiser.impersonate` (actor = admin, `after: { impersonatedBy, expiresAt, sessionId }`). Expired/forged → 401.
 
 ### Portal logins (invites + sign-up)
 Partners and advertisers get a portal login in-product (`lib/portal-invite.ts`, `lib/provisioning.ts` `ensurePortalLogin`):

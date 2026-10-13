@@ -226,7 +226,7 @@ API keys for the Public REST API.
 | `conversion_imports` | Bulk conversion imports |
 | `investigations` | Fraud investigations |
 | `login_events` | Login audit trail |
-| `audit_log` | Audit trail |
+| `audit_log` | Audit trail (`impersonated_by` = the admin behind writes made while impersonating a portal account — migration 1700000069000) |
 | `communication_hub` | Communication hub config |
 | `customer_value_rules` | Customer value adjustment rules |
 | `customer_value_data_points` | Custom customer data |

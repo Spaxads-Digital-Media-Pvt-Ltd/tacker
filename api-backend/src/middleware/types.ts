@@ -35,13 +35,21 @@ export interface AdminIdentity extends DashboardBase {
   role: AdminRole;
 }
 
-export interface PublisherPortalIdentity extends DashboardBase {
+/** Set when an admin is impersonating this portal account (audit F-10). */
+interface Impersonation {
+  /** The impersonating admin's user id — every audited write records it. */
+  impersonatedBy?: string;
+  /** Unix seconds when the impersonation session ends. */
+  impersonationExpiresAt?: number;
+}
+
+export interface PublisherPortalIdentity extends DashboardBase, Impersonation {
   kind: 'publisher';
   /** publisher_id — this user may only ever see their own data. */
   ownerId: string;
 }
 
-export interface AdvertiserPortalIdentity extends DashboardBase {
+export interface AdvertiserPortalIdentity extends DashboardBase, Impersonation {
   kind: 'advertiser';
   /** advertiser_id — this user may only ever see their own data. */
   ownerId: string;
