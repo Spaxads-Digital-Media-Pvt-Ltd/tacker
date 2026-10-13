@@ -18,6 +18,7 @@ import type { PoolClient } from 'pg';
 import { getRedis } from '../../../lib/redis.js';
 import { addMoney, normalizeMoney, percentOfMoney } from '../../../lib/money.js';
 import { getOfferConfig } from '../offer-cache.js';
+import { isActivePartner } from '../partner-status.js';
 import { getStoredClick, type StoredClick } from '../click-store.js';
 import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
 import { getFraudConfig } from '../../../lib/fraud/rules.js';
@@ -318,6 +319,13 @@ async function recordWithIdemKey(
  if (ctit?.enabled && status !== 'rejected') {
  if (ageS < ctit.minSeconds) { status = 'rejected'; reason = 'click_to_conversion_too_fast'; }
  else if (ctit.maxSeconds != null && ageS > ctit.maxSeconds) { status = 'rejected'; reason = 'click_to_conversion_too_slow'; }
+ }
+ // Partner no longer active (F-08). /click only attributes active partners, but a partner can be
+ // set pending/inactive (e.g. banned for fraud) or deleted after the click. They never auto-earn:
+ // the conversion waits in pending for an admin — approving it later books the ledger as usual.
+ if (status === 'approved' && click.publisher_id && !(await isActivePartner(input.networkId, click.publisher_id))) {
+ status = 'pending';
+ reason = 'partner_not_active';
  }
  // "Manually Approve Conversions" → anything that would auto-approve waits in pending.
  if (revCfg?.manualApproval && status === 'approved') {

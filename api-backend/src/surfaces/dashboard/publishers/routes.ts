@@ -35,6 +35,7 @@ import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { badRequest } from '../../../lib/http/errors.js';
 import { invitePortalUser, inviteOnCreate, inviteAuditView } from '../../../lib/portal-invite.js';
+import { invalidatePartnerStatus } from '../../tracking/partner-status.js';
 
 const TABLE = 'publishers';
 const POSTBACKS = 'publisher_postbacks';
@@ -287,6 +288,8 @@ export function publishersAdminRoutes(): Router {
       if (b.customFields !== undefined) patch['metadata'] = mergeCustomFields(before.metadata, b.customFields);
 
       const [row] = await db.update<PublisherRow>(TABLE, patch, { id: req.params.id });
+      // Tracking reads partner status from a Redis cache (F-08) — a status change applies on the next click.
+      if (b.status !== undefined && b.status !== before.status) await invalidatePartnerStatus(db.scope.networkId, before.id);
       await writeAudit(req, { action: 'publisher.update', entityType: 'publisher', entityId: req.params.id, before, after: row });
       sendOk(res, toAdminDTO((await loadPublisher(db.scope.networkId, before.id)) ?? row ?? before));
     }),
@@ -300,6 +303,7 @@ export function publishersAdminRoutes(): Router {
       const before = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
       if (!before) throw notFound('Publisher not found');
       await db.delete(TABLE, { id: req.params.id });
+      await invalidatePartnerStatus(db.scope.networkId, before.id);
       await writeAudit(req, { action: 'publisher.delete', entityType: 'publisher', entityId: req.params.id, before });
       sendOk(res, { deleted: true });
     }),

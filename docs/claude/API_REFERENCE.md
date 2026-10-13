@@ -246,7 +246,7 @@ Fired by the visitor's browser, so they carry no secret and are treated as untru
 explicit `payout`/`revenue` param → goal matched by event name → partner payout override / country (geo) override frozen on the click → default goal → offer default. Offer and goal conversion caps (daily = UTC day, total) reject conversions past the cap (`reason=*_conversion_cap_reached`).
 
 ### Click access rules
-A partner explicitly denied is diverted. Private and Request-access (`ask`) offers only accept clicks from partners with an `allow` + `approved` access row; others are diverted. A partner's payout override is frozen onto their clicks.
+Only an **active** partner of the network is attributed (`surfaces/tracking/partner-status.ts`, Redis load-through, busted by publishers PATCH/DELETE). A `pub_id` that is pending, inactive, unknown or another network's is dropped from the click: the visitor is still redirected, but the click and its conversions carry no partner, so nothing is ever credited to that id (log field `droppedPartner`). A partner that stops being active after the click (or is deleted) gets its conversions held: an approved conversion becomes `pending` with reason `partner_not_active` (no ledger, no partner postback) until an admin approves it. A partner explicitly denied is diverted. Private and Request-access (`ask`) offers only accept clicks from partners with an `allow` + `approved` access row; others are diverted. A partner's payout override is frozen onto their clicks.
 
 ### Finance (dashboard)
 - `POST /api/finance/conversions/:conversionId/approve` — pending → approved: tiered commission, earning + billing ledger entries, partner postback (honours "Fire Partner Postback"). Admin/finance.

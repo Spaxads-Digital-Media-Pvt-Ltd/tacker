@@ -14,6 +14,7 @@ import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
 import { lookupGeo, geoAvailable, carrierAvailable } from '../../lib/geo/geoip.js';
 import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
+import { isActivePartner } from './partner-status.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
 import { buildTrustedProxyCheck } from './trusted-proxy.js';
@@ -184,14 +185,24 @@ export function buildTrackingApp(): FastifyInstance {
  if (!offerId) return divert(reply, null);
  // publisher_id is a UUID column downstream (clicks/conversions). Ignore a malformed value rather
  // than 500 the conversion later — a bad pub_id shouldn't break attribution or the redirect.
- const publisherId = await resolveEntityId('publisher', tenant.networkId, firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
+ const requestedPublisherId = await resolveEntityId('publisher', tenant.networkId, firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
  const smartLinkId = asUuid(firstStr(q['sl'])); // set when a smart link routed this click
  const subs = [1, 2, 3, 4, 5].map((i) => firstStr(q[`sub${i}`]));
  // Blank / whitespace-only → null, and a blank alias falls through (source_id → source → src).
  const sourceId = firstNonBlank(q, SOURCE_PARAMS);
 
- // 2. Offer config from Redis (load-through). No sync Postgres read on the hot path.
- const offer = await getOfferConfig(tenant.networkId, offerId);
+ // 2. Offer config + partner status from Redis (load-through, in parallel). No sync Postgres read
+ // on the hot path — Postgres is only the cold-cache fallback.
+ const [offer, partnerActive] = await Promise.all([
+ getOfferConfig(tenant.networkId, offerId),
+ requestedPublisherId ? isActivePartner(tenant.networkId, requestedPublisherId) : false,
+ ]);
+ // 2a. Only an active partner of this network can earn (F-08). A pending, inactive or unknown
+ // pub_id is DROPPED from the click instead of diverting the visitor: the redirect still happens,
+ // but the click — and every conversion on it — belongs to no partner, so no payout or ledger
+ // entry is ever booked to them. Everything below sees no partner (a private offer then diverts,
+ // as for any click without an approved partner).
+ const publisherId = partnerActive ? requestedPublisherId : null;
  if (!offer || offer.status !== 'active') {
  return divert(reply, offer?.fallbackUrl ?? null, offer?.id);
  }
@@ -307,7 +318,10 @@ export function buildTrackingApp(): FastifyInstance {
  );
 
  const micros = Number(process.hrtime.bigint() - started) / 1000;
- req.log.info({ offerId: offer.id, clickId, unique: isUnique, fraud: fraud.score, us: Math.round(micros) }, 'click');
+ req.log.info({
+ offerId: offer.id, clickId, unique: isUnique, fraud: fraud.score, us: Math.round(micros),
+ ...(requestedPublisherId && !publisherId ? { droppedPartner: requestedPublisherId } : {}),
+ }, 'click');
 
  // AP-3 runtime guard: validate final URL after macro substitution before setting Location header.
  const urlViolation = getRedirectUrlRejectReason(finalUrl);
