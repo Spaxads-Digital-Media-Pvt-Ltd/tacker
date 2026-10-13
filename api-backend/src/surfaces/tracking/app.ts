@@ -16,6 +16,7 @@ import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
 import { isActivePartner } from './partner-status.js';
 import { getNetworkIpBlacklist } from '../../lib/net/ip-lists.js';
+import { getFraudConfigCached } from '../../lib/fraud/rules.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
 import { buildTrustedProxyCheck } from './trusted-proxy.js';
@@ -207,10 +208,11 @@ export function buildTrackingApp(): FastifyInstance {
 
  // 2. Offer config + partner status from Redis (load-through, in parallel). No sync Postgres read
  // on the hot path — Postgres is only the cold-cache fallback.
- const [offer, partnerActive, ipBlacklist] = await Promise.all([
+ const [offer, partnerActive, ipBlacklist, fraudCfg] = await Promise.all([
  getOfferConfig(tenant.networkId, offerId),
  requestedPublisherId ? isActivePartner(tenant.networkId, requestedPublisherId) : false,
  getNetworkIpBlacklist(tenant.networkId),
+ getFraudConfigCached(tenant.networkId),
  ]);
  // 2a. Only an active partner of this network can earn (F-08). A pending, inactive or unknown
  // pub_id is DROPPED from the click instead of diverting the visitor: the redirect still happens,
@@ -280,6 +282,22 @@ export function buildTrackingApp(): FastifyInstance {
  sourceId,
  })) return divert(reply, offer.fallbackUrl, offer.id);
 
+ // 4d. Cheap fraud pre-signals (datacenter, velocity, bot user agent, the IP's cached IPQS verdict),
+ // weighted by the network's fraud rules. DECISION (F-23): at or over the network's block score the
+ // click is diverted — not attributed, not counted — instead of only flagged. It's opt-in (no block
+ // score = flag only, as before) and runs ahead of the caps and dedup, so blocked traffic can't use up
+ // a cap. A server-side click (format=json on an offer that allows it) comes from the partner's
+ // server, so its IP and user agent describe that server, not the visitor: it's scored, never blocked.
+ const fraud = await fraudPreSignals({
+ networkId: tenant.networkId, ip, isDatacenter: geo?.isDatacenter ?? false,
+ userAgent: req.headers['user-agent'] ?? null, ipqs: offer.attribution?.ipqs?.enabled ?? false,
+ }, fraudCfg);
+ const serverSideClick = Boolean(offer.attribution?.serverSideClick) && firstStr(q['format']) === 'json';
+ if (fraudCfg.enabled && fraudCfg.blockScore != null && fraud.score >= fraudCfg.blockScore && !serverSideClick) {
+ req.log.info({ offerId: offer.id, fraud: fraud.score, flags: fraud.flags }, 'click_blocked');
+ return divert(reply, offer.fallbackUrl, offer.id);
+ }
+
  // 5. Cap check (atomic).
  if (await isClickCapped(offer.id, offer.dailyClickCap)) return divert(reply, offer.fallbackUrl, offer.id);
 
@@ -295,9 +313,6 @@ export function buildTrackingApp(): FastifyInstance {
 
  // 7. Unguessable click id.
  const clickId = randomUUID().replace(/-/g, '');
-
- // 8/9. Cheap fraud pre-signals (datacenter + velocity).
- const fraud = await fraudPreSignals(ip, geo?.isDatacenter ?? false);
 
  // Resolve payout/revenue (frozen onto the click for later attribution). A partner's own payout
  // override on this offer is the most specific rate, then the country override, then the default.
@@ -359,7 +374,7 @@ export function buildTrackingApp(): FastifyInstance {
  }
  // Server-side click (Attribution › Enable Server-Side Click): a server can create the click and
  // get the click_id back as JSON instead of following a redirect.
- if (offer.attribution?.serverSideClick && firstStr(q['format']) === 'json') {
+ if (serverSideClick) {
  return reply.code(200).header('cache-control', 'no-store').send({ ok: true, data: { click_id: clickId, redirect_url: finalUrl } });
  }
  return reply.code(302).header('location', finalUrl).header('cache-control', 'no-store').send();

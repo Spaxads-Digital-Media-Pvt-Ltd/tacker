@@ -106,7 +106,8 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `auth/` | JWT verification via jose (JWKS ES256 + HS256 fallback) |
 | `customer-value/` | Customer value rule evaluation |
 | `db/` | Pool, ScopedDb, from-request, table registry |
-| `fraud/` | Fraud rules, fraud scan, alerts |
+| `fraud/` | Fraud rules (Redis-cached for /click), fraud scan, alerts |
+| `alerts/` | `deliverAlert` — email + webhook delivery of raised alerts (fraud scan; automation alert rules) |
 | `geo/` | MaxMind GeoIP2 lookup |
 | `http/` | Express app scaffolding, envelope, errors, pagination |
 | `integrations/` | Facebook CAPI, offer feed sync, PIN API |
@@ -125,7 +126,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `offer-cache.ts` | Redis load-through cache for offer config (no sync PG on hot path) |
 | `caps.ts` | Atomic click cap check in Redis |
 | `dedup.ts` | IP-based dedup/idempotency |
-| `fraud-presignals.ts` | Fast pre-signals (datacenter IP, velocity) |
+| `fraud-presignals.ts` | Fast pre-signals (datacenter IP, velocity, bot/headless UA, cached IPQS verdict), weighted by the network's fraud rules; /click diverts at the block score |
 | `geo-rules.ts` | Offer geo targeting rules |
 | `macros.ts` | Macro token build + substitution (click_id, offer_id, etc.) |
 | `click-job.ts` | Job definition + enqueue for click persistence |

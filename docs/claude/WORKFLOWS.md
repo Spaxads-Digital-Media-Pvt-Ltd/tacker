@@ -59,9 +59,11 @@ End user clicks tracking link
  - evaluateGeoRules(offer.geoRules, country, geoKnown)
  - evaluateTrafficControls(offer.trafficControls, fields)
  - isTrafficBlocked(offer.trafficBlockings, publisherId, fields)
+ - fraudPreSignals({ ip, isDatacenter, userAgent, ipqs }, fraudCfg) — datacenter, velocity, bot/headless UA,
+   the IP's cached IPQS verdict; weights from the network's fraud rules (Redis-cached config)
+ - score ≥ fraudCfg.blockScore → divert (not enqueued); opt-in, never for server-side format=json clicks
  - isClickCapped(offerId, dailyClickCap) — Redis atomic
  - markUnique(offerId, ip, dedupWindowS) — Redis atomic
- → fraudPreSignals(ip, geo.isDatacenter) — fast pre-check
  → Resolve payout/revenue (geo overrides)
  → enqueueClick(job) — BullMQ async write to Postgres
  → storeClickForAttribution(networkId, clickId, ...) — Redis attribution cache
@@ -170,6 +172,8 @@ Outbound Postback:
 
 Fraud Scan (scheduled):
  fraud-scan queue → query clicks + conversions → evaluate rules → create alerts
+ → each NEW alert → deliverAlert (lib/alerts/deliver.ts): email via network SMTP + webhook via safeRequest
+   → outcome stored on the alert (metadata.delivery); a still-open alert is not re-sent
 
 Retention:
  retention queue → DELETE clicks > CLICK_RETENTION_DAYS days old

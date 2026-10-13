@@ -91,8 +91,9 @@ End user (browser → click on tracking link)
  → Host header → resolveHostToNetwork(host) → tenant.networkId (Redis-cached DB lookup)
  → GET /click?offer_id=X&pub_id=Y
  → getOfferConfig(networkId, offerId) from Redis (load-through, no PG on hot path)
- → evaluateGeoRules, evaluateTrafficControls, isTrafficBlocked, isClickCapped, markUnique
- → fraudPreSignals(ip)
+ → evaluateGeoRules, evaluateTrafficControls, isTrafficBlocked
+ → fraudPreSignals (datacenter, velocity, bot UA, cached IPQS verdict; network weights) → divert if score ≥ blockScore
+ → isClickCapped, markUnique
  → enqueueClick(job) to BullMQ (async durable write)
  → storeClickForAttribution (Redis attribution cache for conversion path)
  → substituteMacros(destinationUrl, macros) → 302 redirect

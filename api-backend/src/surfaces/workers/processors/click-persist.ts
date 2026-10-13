@@ -10,7 +10,9 @@ import { query } from '../../../lib/db/pool.js';
 import { surfaceLogger } from '../../../lib/logger.js';
 import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 import { QUEUE } from '../queues.js';
-import { ipqsLookup } from '../../../lib/integrations/ipqs.js';
+import { ipqsVerdict } from '../../../lib/integrations/ipqs.js';
+import { getFraudConfigCached } from '../../../lib/fraud/rules.js';
+import { foldIpqsVerdict } from '../../tracking/fraud-presignals.js';
 import type { ClickJob } from '../../tracking/click-job.js';
 import { blankToNull } from '../../tracking/click-params.js';
 
@@ -20,10 +22,12 @@ async function persist(job: ClickJob): Promise<void> {
  let fraudScore = job.fraudScore;
  let fraudFlags = job.fraudFlags;
  if (job.ipqs && job.ip) {
- const ipqs = await ipqsLookup(job.networkId, job.ip);
+ // Cached per network + IP for a day (F-23), so the IP's later clicks are scored with it at /click.
+ const ipqs = await ipqsVerdict(job.networkId, job.ip);
  if (ipqs) {
- fraudScore = Math.max(fraudScore, ipqs.score);
- fraudFlags = Array.from(new Set([...fraudFlags, ...ipqs.flags]));
+ // The same fold /click applies, so a click scored before the verdict was cached gets its weights too.
+ const { weights } = await getFraudConfigCached(job.networkId);
+ ({ score: fraudScore, flags: fraudFlags } = foldIpqsVerdict({ score: fraudScore, flags: fraudFlags }, ipqs, weights));
  }
  }
  await query(

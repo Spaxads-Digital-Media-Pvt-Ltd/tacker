@@ -34,7 +34,7 @@
 | GET,POST,PATCH,DELETE | `/api/finance/*` | Finance | admin |
 | GET | `/api/reports/*` | Reports (12+ types) | admin |
 | GET,POST,PATCH,DELETE | `/api/alerts/*` | Alert management (PATCH: admin/manager) | admin |
-| GET,POST,PATCH,DELETE | `/api/fraud-rules/*` | Fraud rules | admin |
+| GET,PUT | `/api/fraud-rules` | Fraud rules (PUT: admin/manager, partial patch). Thresholds plus (F-23) `blockScore` (1–100, `null` = flag only — at or over it `/click` diverts the click instead of recording it; server-side `format=json` clicks are never blocked), `weights` {datacenter, velocity, botUserAgent, ipqsProxy, ipqsVpn, ipqsTor, ipqsBot} (0–100, partial merge), `alertEmails` (≤20) and `alertWebhookUrl` (http(s), no private address literal → 422; stored encrypted; GET/PUT/audit only ever show the origin, e.g. `https://hooks.example.com/…`, plus `alertWebhookUrlSet` — sending the masked value back keeps the stored URL; `null` clears it). Newly raised fraud-scan alerts are emailed (network SMTP) and POSTed as `{ event: 'alert.raised', alert }` through the SSRF guard; the outcome is recorded on the alert as `metadata.delivery` | admin |
 | GET,POST,PATCH,DELETE | `/api/ai/*` | AI ops (`POST /chat` spends the Anthropic budget: admin/manager) | admin |
 | GET,POST,PATCH,DELETE | `/api/tags/*` | Tag management | admin |
 | GET,POST,PATCH,DELETE | `/api/custom-fields/*` | Custom fields | admin |

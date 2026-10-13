@@ -170,8 +170,8 @@ api-backend/src/
 ### Click Path (Hot Path — NO Postgres on /click)
 1. Resolve tenant from Host header → Redis-cached
 2. Load offer config from Redis (load-through cache)
-3. Check: offer active, publisher not denied, geo rules, traffic controls, traffic blocking, daily cap, unique/dedup
-4. Fraud pre-signals (datacenter IP, velocity)
+3. Check: offer active, publisher not denied, geo rules, traffic controls, traffic blocking
+4. Fraud pre-signals (datacenter IP, velocity, bot UA, cached IPQS) → divert at the network's block score; then daily cap, unique/dedup
 5. Enqueue click to BullMQ (async Postgres write)
 6. Store attribution data in Redis
 7. Build macros, substitute into destination URL, 302 redirect
