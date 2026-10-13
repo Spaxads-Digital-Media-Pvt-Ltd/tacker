@@ -12,7 +12,8 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
-import { badRequest, notFound, forbidden } from '../../../lib/http/errors.js';
+import { badRequest, notFound, forbidden, conflict } from '../../../lib/http/errors.js';
+import { queryBool } from '../../../lib/http/query-params.js';
 import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -76,6 +77,27 @@ const toPagedOfferDTO = (row: PagedOfferRow) => ({
 });
 
 const OFFERS = 'offers';
+
+const deleteOfferQuery = z.object({ hard: queryBool });
+
+/**
+ * What a hard delete of this offer would orphan or cascade away (F-09): its clicks and conversions,
+ * the ledger entries behind those conversions (the ledger references conversions, which are kept
+ * while ledgered), and its reporting adjustments. Empty = the offer never ran.
+ */
+async function offerHistory(networkId: string, offerId: string): Promise<string[]> {
+ const { rows } = await query<{ clicks: boolean; conversions: boolean; ledger: boolean; adjustments: boolean }>(
+ `SELECT EXISTS (SELECT 1 FROM clicks WHERE network_id = $1 AND offer_id = $2) AS clicks,
+ EXISTS (SELECT 1 FROM conversions WHERE network_id = $1 AND offer_id = $2) AS conversions,
+ EXISTS (SELECT 1 FROM ledger_entries l
+ JOIN conversions c ON c.network_id = l.network_id AND c.conversion_id = l.conversion_id
+ WHERE l.network_id = $1 AND c.offer_id = $2) AS ledger,
+ EXISTS (SELECT 1 FROM reporting_adjustments WHERE network_id = $1 AND offer_id = $2) AS adjustments`,
+ [networkId, offerId],
+ );
+ const r = rows[0];
+ return r ? (['clicks', 'conversions', 'ledger', 'adjustments'] as const).filter((k) => r[k]) : [];
+}
 const GEO = 'offer_geo_rules';
 const ACCESS = 'offer_publisher_access';
 const SCHEDULED_ACTIONS = 'offer_scheduled_actions';
@@ -396,17 +418,37 @@ export function offersAdminRoutes(): Router {
  }),
  );
 
+ // Delete (F-09). A hard DELETE cascades the offer's goals, geo rules, partner access, creatives,
+ // coupons, smart-link items, tier links, traffic blocking AND reporting adjustments (financial
+ // records), and orphans its clicks/conversions/ledger (no FK), so reports show raw ids. So an offer
+ // with tracking history is ARCHIVED instead: status 'archived' stops it at /click (only 'active'
+ // runs), hides it from portals, and keeps every record and its name in reports. Only an offer with
+ // no history can really be removed: an unused draft on a plain DELETE, or any unused offer with
+ // ?hard=true — which answers 409 when there is history (same style as the advertiser-delete guard).
  r.delete(
  '/:id',
  requireRole('admin'),
+ validateQuery(deleteOfferQuery),
  asyncHandler(async (req, res) => {
  const db = dbForRequest(req);
  const before = await db.selectOne<OfferRow>(OFFERS, { id: req.params.id });
  if (!before) throw notFound('Offer not found');
- await db.delete(OFFERS, { id: req.params.id });
- await writeAudit(req, { action: 'offer.delete', entityType: 'offer', entityId: req.params.id, before });
- await invalidateOfferConfig(db.scope.networkId, req.params.id!);
- sendOk(res, { deleted: true });
+ const hard = (res.locals.query as z.infer<typeof deleteOfferQuery>).hard === true;
+ const history = await offerHistory(db.scope.networkId, before.id);
+
+ if (history.length === 0 && (hard || before.status === 'draft')) {
+ await db.delete(OFFERS, { id: before.id });
+ await writeAudit(req, { action: 'offer.delete', entityType: 'offer', entityId: before.id, before });
+ await invalidateOfferConfig(db.scope.networkId, before.id);
+ sendOk(res, { deleted: true, archived: false });
+ return;
+ }
+ if (hard) throw conflict(`This offer has tracking history (${history.join(', ')}); archive it instead.`);
+
+ const [row] = await db.update<OfferRow>(OFFERS, { status: 'archived' }, { id: before.id });
+ await writeAudit(req, { action: 'offer.archive', entityType: 'offer', entityId: before.id, before, after: row });
+ await invalidateOfferConfig(db.scope.networkId, before.id);
+ sendOk(res, { deleted: false, archived: true, offer: toAdminDTO(row ?? before) });
  }),
  );
 
