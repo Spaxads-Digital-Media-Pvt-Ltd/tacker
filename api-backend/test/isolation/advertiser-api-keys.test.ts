@@ -78,9 +78,9 @@ d('Advertiser API keys (admin, per advertiser)', () => {
     expect((await request(app).delete(`/api/advertisers/${advA2}/keys/${keyId}`).set(bearer(adminA))).status).toBe(404);
   });
 
-  it('unknown or malformed advertiser id is 404, non-admin role is 403', async () => {
+  it('unknown advertiser id is 404, malformed id is 422, non-admin role is 403', async () => {
     expect((await request(app).get('/api/advertisers/00000000-0000-4000-8000-0000000000ff/keys').set(bearer(adminA))).status).toBe(404);
-    expect((await request(app).get('/api/advertisers/not-a-uuid/keys').set(bearer(adminA))).status).toBe(404);
+    expect((await request(app).get('/api/advertisers/not-a-uuid/keys').set(bearer(adminA))).status).toBe(422);
     const manager = operatorToken({ userId: 'u-mgr', networkId: fx.networkA, role: 'manager' });
     expect((await request(app).get(`/api/advertisers/${fx.advA}/keys`).set(bearer(manager))).status).toBe(403);
   });

@@ -54,7 +54,8 @@ export default function AdvertiserCreate() {
     e.preventDefault();
     const body: Record<string, unknown> = {
       name: form.name, status: form.status, defaultCurrency: form.defaultCurrency,
-      contactEmail: form.contactEmail, billingTerms: form.billingTerms,
+      // Optional fields: omit when blank (an empty string would fail the API's email check).
+      contactEmail: form.contactEmail.trim() || undefined, billingTerms: form.billingTerms.trim() || undefined,
       accountManagerId: form.accountManagerId || null, salesManagerId: form.salesManagerId || null,
       billingFrequency: form.billingFrequency || null, verificationToken: form.verificationToken || null,
     };
@@ -152,7 +153,7 @@ export default function AdvertiserCreate() {
               <Field label="Day *"><select className="input" defaultValue="Monday">{['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((d) => <option key={d}>{d}</option>)}</select></Field>
             </div>
             <Field label="Tax ID / VAT or SSN"><input className="input" /></Field>
-            <Field label="Billing Terms *"><textarea className="input min-h-[80px]" required value={form.billingTerms} onChange={(e) => set('billingTerms', e.target.value)} placeholder="Net-30, prepay…" /></Field>
+            <Field label="Billing Terms"><textarea className="input min-h-[80px]" value={form.billingTerms} onChange={(e) => set('billingTerms', e.target.value)} placeholder="Net-30, prepay…" /></Field>
             <div>
               <label className="label">Automatic Invoice Creation</label>
               <YesNoToggle on={autoInvoice} onChange={setAutoInvoice} />
@@ -187,7 +188,7 @@ export default function AdvertiserCreate() {
               <Field label="First Name"><input className="input" /></Field>
               <Field label="Last Name"><input className="input" /></Field>
             </div>
-            <Field label="Email *"><input type="email" className="input" required value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
+            <Field label="Email"><input type="email" className="input" value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
           </div>
         )}
 

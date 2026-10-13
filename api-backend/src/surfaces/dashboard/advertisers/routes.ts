@@ -9,6 +9,7 @@ import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
 import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
+import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
@@ -33,7 +34,6 @@ import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { apiKeyManagementRoutes } from '../api-keys/routes.js';
 
 const TABLE = 'advertisers';
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Advertiser whose keys an admin is managing — set only after it's verified to be in the caller's network. */
 const keyOwner = new WeakMap<import('express').Request, string>();
@@ -52,6 +52,7 @@ const toHistoryDTO = (r: AuditLogRow) => {
 
 export function advertisersAdminRoutes(): Router {
   const r = Router();
+  rejectMalformedIdParams(r, 'id', 'eventId');
 
   // Paged mode (`?paged=1`) for the Manage Advertisers page: tabs/filters/search/sort/paging in SQL,
   // returns { rows, total, page, pageSize, counts: { tabs, statuses } }. Every other caller (the
@@ -134,7 +135,7 @@ export function advertisersAdminRoutes(): Router {
     requireRole('admin'),
     asyncHandler(async (req, _res, next) => {
       const id = req.params.id ?? '';
-      if (!UUID_RE.test(id) || !(await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id }))) {
+      if (!(await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id }))) {
         throw notFound('Advertiser not found');
       }
       keyOwner.set(req, id);
@@ -154,7 +155,7 @@ export function advertisersAdminRoutes(): Router {
   // validation, audit and offer-cache invalidation are identical to the offer's Goals tab.
   const ensureAdvertiser = async (req: import('express').Request): Promise<string> => {
     const id = req.params.id ?? '';
-    if (!UUID_RE.test(id) || !(await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id }))) {
+    if (!(await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id }))) {
       throw notFound('Advertiser not found');
     }
     return id;
@@ -162,7 +163,6 @@ export function advertisersAdminRoutes(): Router {
   /** The event's offer id, only if the event is a goal on one of THIS advertiser's offers in this network. */
   const eventOfferId = async (req: import('express').Request, advertiserId: string): Promise<string> => {
     const eventId = req.params.eventId ?? '';
-    if (!UUID_RE.test(eventId)) throw notFound('Event not found');
     const { rows } = await query<{ offer_id: string }>(
       `SELECT g.offer_id FROM offer_goals g
          JOIN offers o ON o.id = g.offer_id AND o.network_id = g.network_id

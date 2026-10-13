@@ -59,3 +59,6 @@ export const tooMany = (msg = 'Too many requests', details?: unknown) =>
 
 export const serviceUnavailable = (msg = 'Service temporarily unavailable') =>
  new AppError('service_unavailable', msg);
+
+/** The 422 message for a value that isn't valid input (a malformed id/date) — one wording everywhere. */
+export const MALFORMED_VALUE_MESSAGE = 'One of the values in the request is malformed (e.g. an invalid id or date).';
