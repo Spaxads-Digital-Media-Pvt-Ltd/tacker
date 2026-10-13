@@ -13,6 +13,7 @@ import { Stepper } from '../../shared-components/panels/Stepper';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import type { Offer, Publisher, Advertiser } from '../../types';
+import { toDateInput, ruleAmountField, conditionError, SEPARATELY_BY_LABEL, SEPARATELY_BY_HINT } from '../../lib/customerValueRules';
 
 const STEPS = ['General', 'Timeframe', 'Behavior'];
 
@@ -56,7 +57,7 @@ export default function CustomerValueRuleForm() {
   const { id } = useParams();
   const nav = useNavigate();
   const isEdit = Boolean(id);
-  const { data: existing, loading: loadingExisting } = useQuery<RuleDetail>(isEdit ? `/api/customer-value/rules/${id}` : null);
+  const { data: existing, loading: loadingExisting, error: existingError } = useQuery<RuleDetail>(isEdit ? `/api/customer-value/rules/${id}` : null);
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
@@ -90,7 +91,8 @@ export default function CustomerValueRuleForm() {
     setApplyAdvertisersMode(existing.applyAdvertisersMode); setApplyAdvertiserIds(existing.applyAdvertiserIds);
     setApplyOffersMode(existing.applyOffersMode); setApplyOfferIds(existing.applyOfferIds);
     setApplyPartnersMode(existing.applyPartnersMode); setApplyPartnerIds(existing.applyPartnerIds);
-    setStartDate(existing.startDate ?? ''); setEndDate(existing.endDate ?? '');
+    // The API sends YYYY-MM-DD; the date inputs show exactly that day and an untouched save sends it back.
+    setStartDate(toDateInput(existing.startDate)); setEndDate(toDateInput(existing.endDate));
     setGoalCycle(existing.goalCycle); setRecurringDuration(existing.recurringDuration ?? 'monthly');
     setContinuousMode(existing.continuousMode ?? 'for_rule_duration'); setContinuousDays(String(existing.continuousDays ?? 365));
     setSetGoalConditions(existing.setGoalConditions); setConditions(existing.conditions);
@@ -111,7 +113,18 @@ export default function CustomerValueRuleForm() {
   const updateCondition = (i: number, patch: Partial<Condition>) => setConditions((c) => c.map((cond, idx) => idx === i ? { ...cond, ...patch } : cond));
   const removeCondition = (i: number) => setConditions((c) => c.filter((_, idx) => idx !== i));
 
+  // Exact decimal text, checked before sending: an invalid amount is shown, never sent as null.
+  const payoutField = ruleAmountField(payoutValue);
+  const revenueField = ruleAmountField(revenueValue);
+  const amountsInvalid = payoutField.error != null || revenueField.error != null;
+  const amountsMissing = payoutField.value == null && revenueField.value == null;
+  // Each condition checked against its data point's type (same rule as the API's 422).
+  const conditionErrors = conditions.map((c) =>
+    conditionError(dataPoints?.find((d) => d.id === c.dataPointId)?.dataType, c.operator, c.conditionLogic, c.value));
+  const conditionsInvalid = setGoalConditions && (conditions.length === 0 || conditionErrors.some((e) => e != null));
+
   const save = async () => {
+    if (amountsInvalid || amountsMissing || conditionsInvalid) return;
     const body = {
       name, status, conversionEventGrouping: grouping,
       applyAdvertisersMode, applyAdvertiserIds: applyAdvertisersMode === 'specific' ? applyAdvertiserIds : [],
@@ -123,8 +136,8 @@ export default function CustomerValueRuleForm() {
       continuousDays: goalCycle === 'continuous' && continuousMode === 'from_first_conversion' ? Number(continuousDays) : null,
       setGoalConditions, conditions: setGoalConditions ? conditions : [],
       outcomeFrequency,
-      payoutValue: payoutValue ? Number(payoutValue) : null,
-      revenueValue: revenueValue ? Number(revenueValue) : null,
+      payoutValue: payoutField.value,
+      revenueValue: revenueField.value,
     };
     const res = await run(body);
     if (res) nav('/app/customer-value');
@@ -133,6 +146,19 @@ export default function CustomerValueRuleForm() {
   const next = () => (step < STEPS.length - 1 ? setStep(step + 1) : save());
 
   if (isEdit && loadingExisting) return <StateBlock><Spinner /></StateBlock>;
+  // A rule that can't be loaded (missing, another network's, request failed) shows why — never an
+  // empty form whose Save would then fail.
+  if (isEdit && existingError) {
+    return (
+      <>
+        <PageHeader title="Edit Rule" subtitle="Customer Value › Payout & Revenue Rules" />
+        <StateBlock>
+          <span className="text-danger-text">Couldn't load this rule: {existingError}</span>{' '}
+          <button type="button" className="text-accent-text hover:underline" onClick={() => nav('/app/customer-value')}>Back to rules</button>
+        </StateBlock>
+      </>
+    );
+  }
 
   return (
     <>
@@ -156,7 +182,8 @@ export default function CustomerValueRuleForm() {
               <p className="text-small text-fg-secondary">Choose how the rule applies to your Customer's Conversion Events.</p>
               <div>
                 <label className="label">Conversion Events Grouping *</label>
-                <Segmented options={[{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: 'Separately By' }]} value={grouping} onChange={setGrouping} />
+                <Segmented options={[{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: SEPARATELY_BY_LABEL }]} value={grouping} onChange={setGrouping} />
+                <p className="mt-1 text-tiny text-fg-muted">{SEPARATELY_BY_HINT}</p>
               </div>
 
               <p className="font-semibold text-fg">Apply Rule To</p>
@@ -229,8 +256,10 @@ export default function CustomerValueRuleForm() {
                         <select className="input" value={cond.operator} onChange={(e) => updateCondition(i, { operator: e.target.value })}>
                           {ops.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
-                        <input className="input" placeholder="Value" value={cond.value} onChange={(e) => updateCondition(i, { value: e.target.value })} />
+                        <input className="input" placeholder="Value" inputMode={dp?.dataType === 'number' ? 'decimal' : undefined} value={cond.value}
+                          aria-invalid={conditionErrors[i] != null || undefined} onChange={(e) => updateCondition(i, { value: e.target.value })} />
                         <button type="button" className="grid place-items-center rounded p-2 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={() => removeCondition(i)}><Trash2 size={14} /></button>
+                        {conditionErrors[i] && <p className="text-tiny text-danger-text sm:col-span-5">{conditionErrors[i]}</p>}
                       </div>
                     );
                   })}
@@ -245,10 +274,18 @@ export default function CustomerValueRuleForm() {
               <Field label="Outcome Frequency">
                 <Segmented options={[{ value: 'once_per_customer', label: 'Once per Customer' }, { value: 'every_cycle', label: 'Every Cycle' }]} value={outcomeFrequency} onChange={setOutcomeFrequency} />
               </Field>
-              <p className="text-small text-fg-secondary">Set a Custom Payout and/or a Custom Revenue — at least one is required. Either overrides the conversion's normal value when this rule fires.</p>
+              <p className="text-small text-fg-secondary">Set a Custom Payout and/or a Custom Revenue — at least one is required. Either overrides the conversion's normal value when this rule fires, in that conversion's own currency (no conversion between currencies).</p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Custom Payout ($)"><input className="input" value={payoutValue} onChange={(e) => setPayoutValue(e.target.value)} placeholder="200.00" /></Field>
-                <Field label="Custom Revenue ($)"><input className="input" value={revenueValue} onChange={(e) => setRevenueValue(e.target.value)} placeholder="200.00" /></Field>
+                <Field label="Custom Payout (conversion's currency)">
+                  <input className="input" inputMode="decimal" value={payoutValue} onChange={(e) => setPayoutValue(e.target.value)} placeholder="200.00"
+                    aria-invalid={payoutField.error != null || undefined} />
+                  {payoutField.error && <p className="mt-1 text-tiny text-danger-text">{payoutField.error}</p>}
+                </Field>
+                <Field label="Custom Revenue (conversion's currency)">
+                  <input className="input" inputMode="decimal" value={revenueValue} onChange={(e) => setRevenueValue(e.target.value)} placeholder="200.00"
+                    aria-invalid={revenueField.error != null || undefined} />
+                  {revenueField.error && <p className="mt-1 text-tiny text-danger-text">{revenueField.error}</p>}
+                </Field>
               </div>
             </div>
           )}
@@ -257,7 +294,7 @@ export default function CustomerValueRuleForm() {
             <button className="btn-ghost" onClick={() => nav('/app/customer-value')}>Cancel</button>
             <div className="flex gap-2">
               {step > 0 && <button className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button>}
-              <button className="btn-primary" disabled={busy || !name || (step === STEPS.length - 1 && !payoutValue && !revenueValue)} onClick={next}>
+              <button className="btn-primary" disabled={busy || !name || (step === STEPS.length - 1 && (amountsMissing || amountsInvalid || conditionsInvalid))} onClick={next}>
                 {busy ? 'Saving…' : step === STEPS.length - 1 ? 'Save' : 'Next'}
               </button>
             </div>

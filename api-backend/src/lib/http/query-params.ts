@@ -36,6 +36,10 @@ function realDay(ymd: string): boolean {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
+/** Exactly YYYY-MM-DD on a real calendar day — a `date` column's value (no time, no zone). */
+export const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date (YYYY-MM-DD)')
+  .refine(realDay, { message: 'must be a real calendar date (YYYY-MM-DD)' });
+
 /** YYYY-MM-DD or a full ISO-8601 datetime, on a real calendar day. */
 export const queryDate = z.string().max(40).refine(
   (s) => /^\d{4}-\d{2}-\d{2}([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(s) && !Number.isNaN(Date.parse(s)) && realDay(s.slice(0, 10)),

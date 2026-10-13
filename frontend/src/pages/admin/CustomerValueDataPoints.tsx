@@ -99,9 +99,11 @@ function DataPointForm({ initial, onSaved, onCancel }: { initial?: DataPoint; on
 }
 
 export default function CustomerValueDataPoints() {
-  const { data, loading, refetch } = useQuery<DataPoint[]>('/api/customer-value/data-points');
+  const { data, loading, error, refetch } = useQuery<DataPoint[]>('/api/customer-value/data-points');
   const [editing, setEditing] = useState<DataPoint | null | 'new'>(null);
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/customer-value/data-points/${id}`));
+  // A data point that rules use can't be deleted (409 naming the rules) — that message is shown, not swallowed.
+  const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/customer-value/data-points/${id}`));
+  const [deleteErrorDismissed, setDeleteErrorDismissed] = useState(false);
   const confirm = useConfirm();
 
   const [q, setQ] = useState('');
@@ -167,7 +169,15 @@ export default function CustomerValueDataPoints() {
         </div>
       </div>
 
-      {loading ? <StateBlock><Spinner /></StateBlock> : filtered.length === 0 ? (
+      {deleteError && !deleteErrorDismissed && (
+        <div role="alert" className="mb-3 flex items-start justify-between gap-2 rounded-[var(--radius)] border border-danger bg-danger-bg px-3 py-2 text-small text-danger-text">
+          <span>Couldn't delete the data point: {deleteError}</span>
+          <button type="button" aria-label="Dismiss" className="text-fg-muted hover:text-fg" onClick={() => setDeleteErrorDismissed(true)}>×</button>
+        </div>
+      )}
+      {loading ? <StateBlock><Spinner /></StateBlock>
+        : error ? <StateBlock><span className="text-danger-text">Couldn't load data points: {error}</span></StateBlock>
+        : filtered.length === 0 ? (
         <StateBlock>No Record Found</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
@@ -186,7 +196,7 @@ export default function CustomerValueDataPoints() {
                     <div className="flex justify-end gap-1">
                       <button title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setEditing(d)}><Pencil size={14} /></button>
                       <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text"
-                        onClick={() => confirm({ title: 'Delete data point?', message: `Are you sure you want to delete data point "${d.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await runDelete(d.id)) refetch(); } })}>
+                        onClick={() => confirm({ title: 'Delete data point?', message: `Are you sure you want to delete data point "${d.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { setDeleteErrorDismissed(false); if (await runDelete(d.id)) refetch(); } })}>
                         <Trash2 size={14} />
                       </button>
                     </div>
