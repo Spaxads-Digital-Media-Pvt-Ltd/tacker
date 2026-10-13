@@ -55,6 +55,43 @@ export async function login(email: string, password: string): Promise<Session> {
   return session;
 }
 
+/** Unix seconds from a JWT's `exp` (read-only decode — the backend verifies the signature). */
+function tokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob((token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown };
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Super Admin sign-in (audit F-05). Platform admins aren't Supabase users: the platform-admin
+ * surface checks their own credentials at POST /platform/login and returns its own short-lived
+ * token (1 h, no refresh cookie). Stored like any session, so the api client sends it on /platform/*.
+ */
+export async function loginPlatform(email: string, password: string): Promise<Session> {
+  const res = await fetch('/platform/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.ok === false) throw new ApiError(body.error?.code ?? 'login_failed', body.error?.message ?? 'Login failed', res.status);
+  const { token, admin } = body.data as { token: string; admin: { id: string; email: string } };
+  const session: Session = {
+    token,
+    role: 'super_admin',
+    displayName: admin.email.split('@')[0] ?? admin.email,
+    email: admin.email,
+    networkId: null,
+    ownerId: null,
+    expiresAt: tokenExpiry(token),
+  };
+  saveSession(session);
+  return session;
+}
+
 /**
  * Exchange the httpOnly refresh cookie for a fresh access token. Returns the new token, or null
  * if the session is gone (caller should send the user back to login). Deduped so concurrent 401s

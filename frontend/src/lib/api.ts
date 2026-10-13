@@ -6,7 +6,7 @@
  * transparently refreshes the token once (via the httpOnly refresh cookie) and retries. If the
  * refresh fails the session is cleared and the user is sent to login.
  */
-import { getToken } from '../auth/session';
+import { loadSession, clearSession } from '../auth/session';
 import { refreshToken } from '../auth/authClient';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
@@ -45,8 +45,22 @@ async function doFetch(path: string, init: RequestInit, token: string | null): P
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
-    let res = await doFetch(path, init, getToken());
+    const session = loadSession();
+    let res = await doFetch(path, init, session?.token ?? null);
     if (res.status === 401) {
+      // A Super Admin session holds the platform surface's own short-lived token, which no refresh
+      // cookie backs — never trade it in at /api/auth/refresh (a leftover tenant cookie would swap
+      // in a tenant token). A /platform/* 401 means it expired → sign in again; a 401 from a tenant
+      // endpoint only means that endpoint isn't for Super Admin. Decided by the session the
+      // request was SENT with, so a concurrent request can't fall through to a refresh.
+      const platformPath = path.startsWith('/platform/');
+      if (session?.role === 'super_admin' || platformPath) {
+        if (session?.role === 'super_admin' && platformPath) {
+          clearSession();
+          if (!location.pathname.startsWith('/login')) location.href = '/login';
+        }
+        throw new ApiError('unauthorized', platformPath ? 'Session expired' : 'Not available to Super Admin', 401);
+      }
       const fresh = await refreshToken();
       if (fresh) {
         res = await doFetch(path, init, fresh);

@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, User, HelpCircle, BookOpen, Keyboard, Mail } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
+import { useAuth } from '../../auth/AuthContext';
 
 interface HistoryRow {
   id: string; ref: number; operationTime: string; service: string; changes: string; isNew: boolean;
@@ -152,7 +153,9 @@ function Popover({ anchorRef, panelRef, children }: {
 
 export function NotificationsBell({ expanded }: { expanded: boolean }) {
   const { open, setOpen, ref, panelRef } = usePopover();
-  const { data } = useQuery<HistoryRow[]>('/api/audit-log');
+  // The tenant audit log isn't on the platform surface — a Super Admin session can't read it (F-05).
+  const { session } = useAuth();
+  const { data } = useQuery<HistoryRow[]>(session?.role === 'super_admin' ? null : '/api/audit-log');
   const rows = (data ?? []).slice(0, 8);
   const hasNew = (data ?? []).some((r) => r.isNew);
 

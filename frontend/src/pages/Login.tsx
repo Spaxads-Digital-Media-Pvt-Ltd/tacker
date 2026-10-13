@@ -24,19 +24,21 @@ function FlowGraphic() {
 }
 
 export default function Login() {
-  const { signIn } = useAuth();
+  const { signIn, signInPlatform } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Super Admins sign in against the platform-admin surface (F-05), not the tenant auth exchange.
+  const [asSuperAdmin, setAsSuperAdmin] = useState(false);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await signIn(email, password);
+      await (asSuperAdmin ? signInPlatform : signIn)(email, password);
       const s = loadSession();
       navigate(s ? ROLE_HOME[s.role] : '/', { replace: true });
     } catch (err) {
@@ -82,7 +84,7 @@ export default function Login() {
           <div className="card !p-8">
             <h1 className="text-h1 font-bold tracking-tight text-fg">Sign in</h1>
             <p className="mt-1.5 text-small text-fg-secondary">
-              Your dashboard is chosen automatically from your account.
+              {asSuperAdmin ? 'Super Admin console — platform operators only.' : 'Your dashboard is chosen automatically from your account.'}
             </p>
 
             {error && (
@@ -114,6 +116,11 @@ export default function Login() {
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
+
+            <button type="button" onClick={() => { setAsSuperAdmin((v) => !v); setError(null); }}
+              className="mt-4 w-full text-center text-tiny font-medium text-accent-text hover:underline">
+              {asSuperAdmin ? 'Back to regular sign in' : 'Sign in as Super Admin'}
+            </button>
 
             <p className="mt-5 text-center text-tiny text-fg-muted lg:hidden">
               Authorization is enforced server-side on every request.

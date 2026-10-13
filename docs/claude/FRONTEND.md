@@ -134,6 +134,7 @@ User enters credentials → POST /api/auth/login
 - 401 response → call `/api/auth/refresh` (uses httpOnly cookie)
 - Token rotation: refresh response includes new token, cookie rotated
 - Deduped inflight refresh (one concurrent refresh at a time)
+- Super Admin sessions (platform token from `POST /platform/login`, see `authClient.loginPlatform`) are never refreshed: a `/platform/*` 401 clears the session → `/login`; a tenant `/api/*` 401 just fails that call (the shell's notifications bell doesn't query the tenant audit log for them)
 
 ### Role System
 | Role | Surface | Landing Route |

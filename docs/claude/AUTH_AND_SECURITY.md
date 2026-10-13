@@ -20,6 +20,8 @@
 - Separate secret: `PLATFORM_ADMIN_JWT_SECRET`
 - Completely isolated from tenant auth (non-negotiable #10, #12)
 - Cannot authenticate any other surface
+- SPA sign-in: Login page › "Sign in as Super Admin" → `authClient.loginPlatform()` → `POST /platform/login` → session `role: 'super_admin'` with the platform token (1 h, `expiresAt` from its `exp`). Account: `npm run bootstrap:admin -- <email> <password>`
+- No refresh cookie: the api client never sends a Super Admin session to `/api/auth/refresh`; a 401 from `/platform/*` clears the session and returns to `/login`, a 401 from a tenant `/api/*` endpoint just fails that call
 
 ### 3. API Key (Public REST API)
 - Format: `<audience>_<env>_<publicId>_<secret>`

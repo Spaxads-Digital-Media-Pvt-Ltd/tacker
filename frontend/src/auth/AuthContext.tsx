@@ -5,6 +5,8 @@ import * as authClient from './authClient';
 interface AuthContextValue {
   session: Session | null;
   signIn: (email: string, password: string) => Promise<void>;
+  /** Super Admin sign-in via the platform-admin surface (POST /platform/login). */
+  signInPlatform: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -18,12 +20,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(next);
   }, []);
 
+  const signInPlatform = useCallback(async (email: string, password: string) => {
+    const next = await authClient.loginPlatform(email, password);
+    setSession(next);
+  }, []);
+
   const signOut = useCallback(async () => {
     await authClient.logout();
     setSession(null);
   }, []);
 
-  const value = useMemo(() => ({ session, signIn, signOut }), [session, signIn, signOut]);
+  const value = useMemo(() => ({ session, signIn, signInPlatform, signOut }), [session, signIn, signInPlatform, signOut]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
