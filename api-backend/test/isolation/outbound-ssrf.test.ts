@@ -33,6 +33,14 @@ describe('safeRequest', () => {
   beforeAll(async () => {
     server = http.createServer((req, res) => {
       if (req.url === '/redirect') { res.writeHead(302, { location: 'http://169.254.169.254/' }); res.end(); return; }
+      if (req.url === '/big') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('x'.repeat(10_000)); return; }
+      if (req.url === '/drip') {
+        // Keeps the socket busy (so the inactivity timeout never fires) but never finishes.
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        const t = setInterval(() => res.write('.'), 20);
+        res.on('close', () => clearInterval(t));
+        return;
+      }
       res.writeHead(200, { 'content-type': 'text/plain' }); res.end('hello');
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
@@ -54,6 +62,23 @@ describe('safeRequest', () => {
   it('never follows redirects', async () => {
     const r = await safeRequest(`http://127.0.0.1:${port}/redirect`, { method: 'GET', timeoutMs: 2000, allowPrivate: true });
     expect(r.status).toBe(302);
+  });
+
+  it('cuts a body longer than maxBodyBytes off there and flags it truncated (F-06)', async () => {
+    const big = await safeRequest(`http://127.0.0.1:${port}/big`, { method: 'GET', timeoutMs: 2000, maxBodyBytes: 100, allowPrivate: true });
+    expect(big).toMatchObject({ status: 200, truncated: true });
+    expect(big.body).toBe('x'.repeat(100));
+    const small = await safeRequest(`http://127.0.0.1:${port}/`, { method: 'GET', timeoutMs: 2000, maxBodyBytes: 100, allowPrivate: true });
+    expect(small.truncated).toBeUndefined();
+  });
+
+  it('deadlineMs caps the whole exchange even while data keeps trickling in (F-06)', async () => {
+    const started = Date.now();
+    const err = await safeRequest(`http://127.0.0.1:${port}/drip`, {
+      method: 'GET', timeoutMs: 5000, deadlineMs: 300, maxBodyBytes: 1_000_000, allowPrivate: true,
+    }).catch((e: unknown) => e);
+    expect((err as Error).name).toBe('AbortError');
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 });
 

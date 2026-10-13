@@ -46,12 +46,13 @@
 - **Data flow**: Conversion recorded → queued → batch sent to Facebook CAPI
 
 ## Offer Feed Sync
-- **Purpose**: Outbound offer feed to external systems
-- **Where used**: Background worker (scheduled)
+- **Purpose**: Inbound offer feed — pull an advertiser's JSON offer list and upsert it as offers (matched by `metadata.feedExternalId`)
+- **Where used**: Background worker (scheduled) + Settings › Integrations › Feeds "Sync now" (`POST /api/settings/integrations/offer-feed/sync`)
 - **Files**:
  - `api-backend/src/lib/integrations/offer-feed-sync.ts`
  - `api-backend/src/surfaces/workers/processors/offer-feed-sync.ts`
-- **Data flow**: Scheduled scan → generate XML/CSV feed → POST to endpoint
+- **Data flow**: `offerFeedUrl` (+ optional key sent as `Authorization: Bearer` / `x-api-key`) → GET JSON (`[...]`, `{offers:[...]}` or `{data:[...]}`) → upsert offers for `offerFeedAdvertiserId`. `demo://offer-feed` returns built-in demo offers.
+- **Security**: the URL is tenant-supplied, so it is fetched through `lib/net/safe-http.ts` `safeRequest` (audit F-06): http(s) only, no redirects, no loopback/private/link-local targets outside `NODE_ENV=development` (checked on the connected address), 30 s total deadline, 16 MB body cap. A refused URL fails the sync with `blocked_destination: …` (saved as `offerFeedLastSyncError`).
 
 ## PIN API
 - **Purpose**: Pinterest integration

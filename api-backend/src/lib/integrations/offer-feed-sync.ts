@@ -4,6 +4,7 @@
  */
 import { query } from '../db/pool.js';
 import { invalidateOfferConfig } from '../../surfaces/tracking/offer-cache.js';
+import { safeRequest, BlockedDestinationError, type SafeResponse } from '../net/safe-http.js';
 import { loadIntegrations, saveIntegrations, type IntegrationSettings } from './settings.js';
 
 export interface FeedOffer {
@@ -59,7 +60,16 @@ function parseFeedPayload(json: unknown): FeedOffer[] {
     .filter((o): o is FeedOffer => o != null);
 }
 
-async function fetchFeed(url: string, apiKey: string | undefined): Promise<FeedOffer[]> {
+/** A feed is parsed whole, so its size is capped (tens of thousands of offers fit comfortably). */
+export const FEED_MAX_BYTES = 16 * 1024 * 1024;
+const FEED_TIMEOUT_MS = 30_000;
+
+/**
+ * Fetch + parse the feed. The URL is tenant-supplied, so it goes through the SSRF guard (audit F-06):
+ * http(s) only, no redirects, and no loopback / private / link-local (cloud metadata) targets outside
+ * NODE_ENV=development — checked on the address actually connected to. 30 s for the whole fetch.
+ */
+export async function fetchFeed(url: string, apiKey: string | undefined): Promise<FeedOffer[]> {
   if (url === 'demo://offer-feed') return DEMO_FEED;
 
   const headers: Record<string, string> = { accept: 'application/json' };
@@ -67,9 +77,29 @@ async function fetchFeed(url: string, apiKey: string | undefined): Promise<FeedO
     headers['authorization'] = `Bearer ${apiKey}`;
     headers['x-api-key'] = apiKey;
   }
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`Feed HTTP ${res.status}`);
-  const json = await res.json();
+  let res: SafeResponse;
+  try {
+    res = await safeRequest(url, {
+      method: 'GET', headers, timeoutMs: FEED_TIMEOUT_MS, deadlineMs: FEED_TIMEOUT_MS, maxBodyBytes: FEED_MAX_BYTES,
+    });
+  } catch (err) {
+    if (err instanceof BlockedDestinationError) {
+      throw new Error(`${err.message} — offer feeds can only be fetched from public internet addresses`);
+    }
+    if ((err as Error).name === 'AbortError') throw new Error(`Feed request timed out after ${FEED_TIMEOUT_MS / 1000}s`);
+    throw err;
+  }
+  if (res.status >= 300 && res.status < 400) {
+    throw new Error(`Feed HTTP ${res.status} (redirects are not followed — use the feed's final URL)`);
+  }
+  if (res.status < 200 || res.status >= 300) throw new Error(`Feed HTTP ${res.status}`);
+  if (res.truncated) throw new Error(`Feed is larger than ${FEED_MAX_BYTES / (1024 * 1024)} MB`);
+  let json: unknown;
+  try {
+    json = JSON.parse(res.body.replace(/^\uFEFF/, ''));
+  } catch {
+    throw new Error('Feed is not valid JSON');
+  }
   const offers = parseFeedPayload(json);
   if (offers.length === 0) throw new Error('Feed returned no valid offers');
   return offers;
