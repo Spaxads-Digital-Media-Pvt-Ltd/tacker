@@ -37,7 +37,7 @@ import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { uaDimensionLabel } from '../../../lib/userAgentDisplay';
 import { Spinner, StateBlock } from '../../../shared-components/primitives/ui';
-import { daysAgo, todayStr, toIso, DASH, num } from '../../../shared-components/primitives/ReportPageKit';
+import { daysAgo, todayStr, toIso, DASH, num, useGraphRows, GraphCappedNote } from '../../../shared-components/primitives/ReportPageKit';
 import { combineCurrencies, currenciesOf, mixedTitle, resolveCurrency, showSortedWithinNote, withCurrenciesMetric, type RowCurrency } from '../../../lib/reportCurrency';
 import { CurrencyNotes, Money } from '../../../shared-components/primitives/ReportMoney';
 import { METRIC_KEYS, METRIC_LABELS, type MetricKey } from '../../../lib/customMetrics';
@@ -310,12 +310,13 @@ export function DimensionalReport() {
   const chartGroupBy = chronological ? 'day' : 'hour';
   const chartsParams = new URLSearchParams({
     groupBy: chartGroupBy, metrics: withCurrenciesMetric(charts.join(',')),
-    from: toIso(appliedFrom), to: toIso(appliedTo, true), limit: '200',
+    from: toIso(appliedFrom), to: toIso(appliedTo, true),
   });
   appendOtherDimParams(chartsParams, filters);
-  // No chart selected → nothing to request (the body says so).
-  const chartsQ = useQuery<AggResult>(charts.length ? `/api/reports?${chartsParams.toString()}` : null);
-  const chartRows = [...(chartsQ.data?.rows ?? [])].sort((a, b) => (a.dimensions[chartGroupBy] ?? '').localeCompare(b.dimensions[chartGroupBy] ?? ''));
+  // No chart selected → nothing to request (the body says so). Every day in range, 200 per request
+  // up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request kept only the oldest 200 active days.
+  const chartsQ = useGraphRows(charts.length ? `/api/reports?${chartsParams.toString()}` : null);
+  const chartRows = [...chartsQ.rows].sort((a, b) => (a.dimensions[chartGroupBy] ?? '').localeCompare(b.dimensions[chartGroupBy] ?? ''));
   const chartLabels = chartRows.map((r) => {
     const iso = r.dimensions[chartGroupBy] ?? '';
     if (!iso) return '';
@@ -409,9 +410,12 @@ export function DimensionalReport() {
               {charts.length === 0 ? <p className="text-small text-fg-muted">No charts selected — pick at least one under Charts.</p>
                 : chartsQ.loading ? <Spinner />
                 : chartsQ.error ? <p className="text-small text-danger-text">{chartsQ.error}</p>
-                : CHART_METRICS.filter((c) => charts.includes(c.key)).map((c) => (
-                  <LabeledChart key={c.key} label={chartLabel(c)} labels={chartLabels} values={chartRows.map((r) => num(r.metrics[c.key] ?? 0))} unavailable={chartUnavailable(c)} />
-                ))}
+                : <>
+                  {chartsQ.capped && <GraphCappedNote shown={chartRows.length} unit={chronological ? 'days' : 'hours'} />}
+                  {CHART_METRICS.filter((c) => charts.includes(c.key)).map((c) => (
+                    <LabeledChart key={c.key} label={chartLabel(c)} labels={chartLabels} values={chartRows.map((r) => num(r.metrics[c.key] ?? 0))} unavailable={chartUnavailable(c)} />
+                  ))}
+                </>}
             </div>
           </ReportBody>
         </ReportCard>

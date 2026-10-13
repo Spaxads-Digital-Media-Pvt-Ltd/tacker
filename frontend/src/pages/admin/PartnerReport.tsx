@@ -35,6 +35,7 @@ import {
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
   reportingChips, withoutReportingChip, fetchAllPages, useReportExport, ExportStatus,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
+  useGraphRows, GraphCappedNote,
 } from '../../shared-components/primitives/ReportPageKit';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
@@ -45,6 +46,7 @@ import {
   combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
   moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
 } from '../../lib/reportCurrency';
+import { moneyExportCells } from '../../lib/reportExportCells';
 import { CurrencyNotes, Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { countryLabel } from '../../data/geo';
 import { flexReportPath } from '../../lib/flexReportLink';
@@ -276,10 +278,12 @@ export default function PartnerReport() {
   // …and, when mixed, its per-currency amounts (newer API) for the Payout/Revenue/Profit tiles.
   const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
-  const graphQs = qs({ groupBy: 'day', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
+  const graphQs = qs({ groupBy: 'day', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  // Every day in range, 200 per request up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request
+  // kept only the oldest 200 active days and silently dropped the newer ones.
+  const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
-    const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions['day'] ?? '').localeCompare(b.dimensions['day'] ?? ''));
+    const rows = [...graph.rows].sort((a, b) => (a.dimensions['day'] ?? '').localeCompare(b.dimensions['day'] ?? ''));
     return {
       labels: rows.map((r) => (r.dimensions['day'] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
@@ -287,7 +291,7 @@ export default function PartnerReport() {
       // Revenue across days in different currencies isn't one comparable series — not plotted then.
       rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData, currency]);
+  }, [graph.rows, currency]);
 
   const tableParams = {
     groupBy: 'publisher', metrics: withCurrenciesMetric(METRICS_PARAM),
@@ -302,7 +306,7 @@ export default function PartnerReport() {
   const toRows = useCallback((src: AggRow[]) => src.map((r) => {
     const id = r.dimensions['publisher'] ?? null;
     const publisher = id ? publishers?.find((p) => p.id === id) : undefined;
-    return { publisherId: id, publisherName: id ? (publisher?.name ?? id.slice(0, 8)) : NO_PARTNER, publisherStatus: publisher?.status, derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) };
+    return { publisherId: id, publisherName: id ? (publisher?.name ?? id.slice(0, 8)) : NO_PARTNER, publisherStatus: publisher?.status, derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency), metrics: r.metrics };
   }), [publishers, currency]);
   const loadedRows = useMemo(() => toRows(data?.rows ?? []), [data, toRows]);
   // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
@@ -332,9 +336,9 @@ export default function PartnerReport() {
     partner: r.publisherName, rpm: DASH, cpm: DASH, grossClicks: r.derived.clicksGross, clicks: r.derived.clicks,
     uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks, invalidClicks: r.derived.invalidClicks,
     totalCv: r.derived.totalCv, cv: r.derived.cv, vtCv: DASH, ctr: DASH, throttle: DASH, events: DASH,
-    cvr: pct(r.derived.cvr), cpc: r.derived.cpc.toFixed(2), cpa: r.derived.cpa.toFixed(2), epc: r.derived.epc.toFixed(2),
-    rpc: r.derived.rpc.toFixed(2), rpa: r.derived.rpa.toFixed(2),
-    revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2), profit: r.derived.margin.toFixed(2),
+    cvr: pct(r.derived.cvr),
+    // Stored money and EPC exactly as the API sent them; CPC/CPA/RPC/RPA with the screen's rounding.
+    ...moneyExportCells(r.derived, r.metrics, { epc: true }),
     margin: pct(r.derived.marginPct), clickToEventRate: DASH, invalidClicksPct: pct(r.derived.invalidPct), cc: DASH,
   });
   // Export every row matching the applied filters (all pages), not just the visible page — the
@@ -452,9 +456,9 @@ export default function PartnerReport() {
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          graph.loading ? <div className="pt-4"><Spinner /></div> : graph.error ? <p className="pt-3 text-small text-danger-text">{graph.error}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
-              {graphSeries.labels.length >= 200 && <p className="mb-2 text-tiny text-fg-muted">Graph shows the first {graphSeries.labels.length} days — narrow the date range to see the rest.</p>}
+              {graph.capped && <GraphCappedNote shown={graphSeries.labels.length} unit="days" />}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
                 {isMixed(graphSeries.rc)
                   ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>

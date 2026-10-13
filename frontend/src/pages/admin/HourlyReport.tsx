@@ -33,6 +33,7 @@ import {
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
   reportingChips, withoutReportingChip, fetchAllPages, useReportExport, ExportStatus,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
+  useGraphRows, GraphCappedNote,
 } from '../../shared-components/primitives/ReportPageKit';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
@@ -43,6 +44,7 @@ import {
   combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
   moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
 } from '../../lib/reportCurrency';
+import { moneyExportCells } from '../../lib/reportExportCells';
 import { CurrencyNotes, Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
@@ -129,7 +131,7 @@ const formatHour = formatReportHour;
 function toHourRows(src: AggRow[], currency: string) {
   return src
     .filter((r) => r.dimensions['hour'])
-    .map((r) => ({ hour: r.dimensions['hour']!, derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) }));
+    .map((r) => ({ hour: r.dimensions['hour']!, derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency), metrics: r.metrics }));
 }
 
 export default function HourlyReport() {
@@ -262,18 +264,9 @@ export default function HourlyReport() {
   // Graph pages through every hour in range (200 per request, chronological default order) up to
   // GRAPH_HOUR_CAP — a single limit=200 request showed only the oldest ~8 days of a longer range.
   const graphQs = qs({ groupBy: 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
-  const [graph, setGraph] = useState<{ rows: AggRow[]; capped: boolean; error: string | null } | null>(null);
-  useEffect(() => {
-    if (!graphOpen) return;
-    let alive = true;
-    setGraph(null);
-    fetchAllPages<AggRow>((limit, offset) => `/api/reports?${graphQs}&limit=${limit}&offset=${offset}`, 200, GRAPH_HOUR_CAP)
-      .then((r) => { if (alive) setGraph({ rows: r.rows, capped: r.capped, error: null }); })
-      .catch((e: unknown) => { if (alive) setGraph({ rows: [], capped: false, error: e instanceof Error ? e.message : 'Failed to load graph' }); });
-    return () => { alive = false; };
-  }, [graphOpen, graphQs]);
+  const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null, GRAPH_HOUR_CAP);
   const graphSeries = useMemo(() => {
-    const rows = [...(graph?.rows ?? [])].sort((a, b) => (a.dimensions['hour'] ?? '').localeCompare(b.dimensions['hour'] ?? ''));
+    const rows = [...graph.rows].sort((a, b) => (a.dimensions['hour'] ?? '').localeCompare(b.dimensions['hour'] ?? ''));
     return {
       labels: rows.map((r) => (r.dimensions['hour'] ?? '').slice(0, 13)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
@@ -281,7 +274,7 @@ export default function HourlyReport() {
       // Revenue across days in different currencies isn't one comparable series — not plotted then.
       rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graph, currency]);
+  }, [graph.rows, currency]);
 
   const tableParams = {
     groupBy: 'hour', metrics: withCurrenciesMetric(METRICS_PARAM),
@@ -318,9 +311,9 @@ export default function HourlyReport() {
     hour: formatHour(r.hour), imp: DASH, rpm: DASH, cpm: DASH, grossClicks: r.derived.clicksGross, clicks: r.derived.clicks,
     uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks, invalidClicks: r.derived.invalidClicks,
     totalCv: r.derived.totalCv, cv: r.derived.cv, vtCv: DASH, ctr: DASH, throttle: DASH,
-    cvr: pct(r.derived.cvr), cpc: r.derived.cpc.toFixed(2), cpa: r.derived.cpa.toFixed(2),
-    rpc: r.derived.rpc.toFixed(2), rpa: r.derived.rpa.toFixed(2),
-    revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2), profit: r.derived.margin.toFixed(2),
+    cvr: pct(r.derived.cvr),
+    // Stored money exactly as the API sent them; CPC/CPA/RPC/RPA with the screen's rounding.
+    ...moneyExportCells(r.derived, r.metrics),
     margin: pct(r.derived.marginPct), cc: DASH, fraud: r.derived.fraudScore.toFixed(0),
   });
   // Export every row matching the applied filters (all pages), not just the visible page — the
@@ -437,9 +430,9 @@ export default function HourlyReport() {
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          !graph ? <div className="pt-4"><Spinner /></div> : graph.error ? <p className="pt-3 text-small text-danger-text">{graph.error}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          graph.loading ? <div className="pt-4"><Spinner /></div> : graph.error ? <p className="pt-3 text-small text-danger-text">{graph.error}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
-              {graph.capped && <p className="mb-2 text-tiny text-fg-muted">Graph shows the first {graphSeries.labels.length.toLocaleString()} hours — narrow the date range to see the rest.</p>}
+              {graph.capped && <GraphCappedNote shown={graphSeries.labels.length} unit="hours" />}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
                 {isMixed(graphSeries.rc)
                   ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>

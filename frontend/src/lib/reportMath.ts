@@ -15,6 +15,18 @@ export function money(v: number, currency = 'USD'): string {
   }
 }
 export const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+
+const EXPORT_RATIO = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
+/**
+ * A money ratio the browser calculates (CPC / CPA / RPC / RPA) as an export cell: 2 places rounded
+ * exactly like the on-screen `money()` (Intl), with no symbol or grouping. `toFixed(2)` rounded the
+ * binary float instead — 3.005 exported "3.00" while the table showed $3.01. Stored money and the
+ * API's own EPC are exported as the API's exact values instead (lib/offerReport `exactMoney`,
+ * lib/advertiserReport `apiEpc`), never through this.
+ */
+export function exportRatio(v: number): string {
+  return EXPORT_RATIO.format(Number.isFinite(v) ? v : 0);
+}
 export const num = (v: string | number) => Number(v);
 
 export function toIso(dateStr: string, endOfDay = false): string {
