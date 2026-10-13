@@ -29,7 +29,7 @@ import { fraudPreSignals } from './fraud-presignals.js';
 import { buildMacros, substituteMacros } from './macros.js';
 import { enqueueClick, type ClickJob } from './click-job.js';
 import { storeClickForAttribution } from './click-store.js';
-import { recordConversion, type RecordConversionResult } from './conversions/record.js';
+import { recordConversion, SALE_AMOUNT_PARAMS, type RecordConversionResult } from './conversions/record.js';
 import { clicksTotal, redirectLatency, metricsText, metricsContentType } from '../../lib/metrics.js';
 import { captureError } from '../../lib/observability/sentry.js';
 import { query } from '../../lib/db/pool.js';
@@ -421,8 +421,11 @@ export function buildTrackingApp(): FastifyInstance {
  txnId: pick('txn_id', 'transaction_id', 'tid'),
  event: pick('event', 'event_name', 'goal'),
  statusHint: pick('status'),
- payoutParam: pick('payout', 'amount'),
+ // `payout` is the only payout override (F-02). `amount` is the sale / order value across the
+ // industry, so it joins sale_amount / order_amount as the Percentage-revenue base — never payout.
+ payoutParam: pick('payout'),
  revenueParam: pick('revenue'),
+ saleAmount: pick(...SALE_AMOUNT_PARAMS),
  secureCode: pick('secure_code', 'security_code'),
  source,
  rawParams: { ...q, ...b },

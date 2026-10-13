@@ -33,6 +33,11 @@ import { timingSafeCompare } from '../../../lib/secure-code-compare.js';
 import { checkConversionAbuse } from '../../../lib/conversion-abuse.js';
 import { logger } from '../../../lib/logger.js';
 
+/** Request params that carry the sale / order value — explicit names first, so an older integration
+ * sending `amount=<payout>&sale_amount=<order>` keeps its revenue base. Only ever the base for
+ * Percentage / Mixed revenue, never the partner payout (audit F-02). */
+export const SALE_AMOUNT_PARAMS = ['sale_amount', 'order_amount', 'amount'] as const;
+
 export type ConversionOutcome =
  | 'approved' | 'pending' | 'rejected' | 'duplicate' | 'click_not_found' | 'security_failed';
 
@@ -44,6 +49,9 @@ export interface RecordConversionInput {
  statusHint: string | null;
  payoutParam: string | null;
  revenueParam: string | null;
+ /** Sale / order value (see SALE_AMOUNT_PARAMS): the base for Percentage / Mixed revenue only.
+  * When omitted, it's read from rawParams by the same aliases. */
+ saleAmount?: string | null;
  secureCode: string | null;
  skipSecureCode?: boolean;
  source: 'postback' | 'pixel' | 'iframe';
@@ -276,11 +284,11 @@ async function recordWithIdemKey(
  let revenue = clientRevenue ?? eventGoal?.revenue ?? clickOverride(click.resolved_revenue, offer?.defaultRevenue)
  ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
  // Percentage / Mixed revenue: a share of the sale amount the advertiser reports (only when the
- // postback didn't send an explicit revenue). `amount` is NOT read here — it's the documented
- // payout-override param, so treating it as a sale amount would also set the partner's payout.
+ // postback didn't send an explicit revenue). The sale amount (sale_amount / order_amount /
+ // amount) only ever feeds revenue here — it never sets the partner payout.
  // A browser-fired conversion's sale amount is visitor-controlled, so it never sets revenue.
  if (!browserFired && clientRevenue == null && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
- const sale = safeMoney(paramStr(input.rawParams, ['sale_amount', 'order_amount']));
+ const sale = safeMoney(input.saleAmount ?? paramStr(input.rawParams, [...SALE_AMOUNT_PARAMS]));
  if (sale != null) {
  const share = percentOfMoney(sale, revCfg.revenuePct);
  revenue = revCfg.revenueType === 'mixed' ? addMoney(revenue ?? '0', share) : share;
