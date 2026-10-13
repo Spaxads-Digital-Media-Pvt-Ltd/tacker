@@ -27,6 +27,7 @@ import { evaluateCustomerValueRules, recordCustomerValueFiring } from '../../../
 import { enqueueOutboundPostback } from './enqueue-postback.js';
 import { enqueueFacebookCapi } from '../../../lib/integrations/enqueue.js';
 import { loadIntegrations } from '../../../lib/integrations/settings.js';
+import { allowedConversionHosts, conversionOriginAllowed, type RequestOrigin } from './origin.js';
 import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 import { timingSafeCompare } from '../../../lib/secure-code-compare.js';
 import { checkConversionAbuse } from '../../../lib/conversion-abuse.js';
@@ -47,6 +48,9 @@ export interface RecordConversionInput {
  skipSecureCode?: boolean;
  source: 'postback' | 'pixel' | 'iframe';
  rawParams: Record<string, unknown>;
+ /** Browser-fired sources (pixel / iframe): the page and host headers that bind the conversion to
+  * the offer's own site. Ignored for postbacks. */
+ requestOrigin?: RequestOrigin;
 }
 
 export interface RecordConversionResult {
@@ -197,16 +201,25 @@ async function recordWithIdemKey(
 
  const offer = await getOfferConfig(input.networkId, click.offer_id);
 
- // Postback secure_code (extra S2S security layer). T-1: timing-safe comparison.
+ // Postback secure_code (S2S authentication). T-1: timing-safe comparison. Fails CLOSED: every
+ // network gets a code at creation (migration 1700000067000 backfills and defaults it), so a
+ // postback with no configured code at all — e.g. after Settings > Security "Clear" — is rejected
+ // instead of accepted from anyone who has seen a click_id. API-key callers pass skipSecureCode.
  if (input.source === 'postback' && !input.skipSecureCode) {
  const required = offer?.securityCode || offer?.networkSecurityCode || null;
- if (required) {
- const cmp = timingSafeCompare(input.secureCode, required);
- if (!cmp.ok) {
+ if (!required || !timingSafeCompare(input.secureCode, required).ok) {
  await redis.del(idemKey);
  return { outcome: 'security_failed' };
  }
  }
+
+ // Pixel / iframe are fired by the visitor's browser and carry no secret. Bind them to the offer's
+ // own site (Referer / Origin, see ./origin.ts) so a partner can't fire them from their own pages,
+ // and (below) never let them set the price.
+ const browserFired = input.source === 'pixel' || input.source === 'iframe';
+ if (browserFired && !conversionOriginAllowed(input.requestOrigin, allowedConversionHosts(offer, input.requestOrigin?.host ?? null))) {
+ await redis.del(idemKey);
+ return { outcome: 'security_failed' };
  }
 
  const revCfg = offer?.revenue;
@@ -254,14 +267,19 @@ async function recordWithIdemKey(
  && goal.event_name.toLowerCase() === input.event.toLowerCase() ? goal : null;
  const clickOverride = (frozen: string | null | undefined, dflt: string | null | undefined): string | null =>
  frozen != null && dflt != null && safeMoney(frozen) !== safeMoney(dflt) ? frozen : null;
- let payout = safeMoney(input.payoutParam) ?? eventGoal?.payout ?? clickOverride(click.resolved_payout, offer?.defaultPayout)
+ // Only the authenticated S2S postback (or an API-key caller) may name a payout / revenue; a
+ // browser-fired pixel or iframe is priced from the goal / click / offer defaults alone.
+ const clientPayout = browserFired ? null : safeMoney(input.payoutParam);
+ const clientRevenue = browserFired ? null : safeMoney(input.revenueParam);
+ let payout = clientPayout ?? eventGoal?.payout ?? clickOverride(click.resolved_payout, offer?.defaultPayout)
  ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
- let revenue = safeMoney(input.revenueParam) ?? eventGoal?.revenue ?? clickOverride(click.resolved_revenue, offer?.defaultRevenue)
+ let revenue = clientRevenue ?? eventGoal?.revenue ?? clickOverride(click.resolved_revenue, offer?.defaultRevenue)
  ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
  // Percentage / Mixed revenue: a share of the sale amount the advertiser reports (only when the
  // postback didn't send an explicit revenue). `amount` is NOT read here — it's the documented
  // payout-override param, so treating it as a sale amount would also set the partner's payout.
- if (!safeMoney(input.revenueParam) && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
+ // A browser-fired conversion's sale amount is visitor-controlled, so it never sets revenue.
+ if (!browserFired && clientRevenue == null && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
  const sale = safeMoney(paramStr(input.rawParams, ['sale_amount', 'order_amount']));
  if (sale != null) {
  const share = percentOfMoney(sale, revCfg.revenuePct);
@@ -311,7 +329,9 @@ async function recordWithIdemKey(
  }
 
  let cvAppliedId: string | null = null;
- if (status === 'approved' && (payout != null || revenue != null)) {
+ // Customer Value rules key off the client-supplied user_id (and other raw params), so a
+ // browser-fired conversion could pick its own bonus; it stays at the default price instead.
+ if (!browserFired && status === 'approved' && (payout != null || revenue != null)) {
  const userIdParam = input.rawParams['user_id'];
  const userId = typeof userIdParam === 'string' && userIdParam.length > 0 ? userIdParam : null;
  const cvResult = await evaluateCustomerValueRules({

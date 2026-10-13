@@ -197,9 +197,9 @@ No API-key response carries a secret: `/api/v1/network/offers` uses `toNetworkAp
 | GET | `/tracking/metrics` | Prometheus metrics | None |
 | GET | `/click` | Click redirect (302) | None (tenant by host) |
 | GET | `/sl` | Smart link resolver → redirect | None (tenant by host) |
-| GET/POST | `/postback` | S2S postback (conversion) | None (tenant by host) |
-| GET | `/pixel` | Pixel conversion (1x1 GIF) | None (tenant by host) |
-| GET | `/iframe` | Iframe conversion | None (tenant by host) |
+| GET/POST | `/postback` | S2S postback (conversion) | `secure_code` required (tenant by host) |
+| GET | `/pixel` | Pixel conversion (1x1 GIF) | Fired from the offer's own site (Referer/Origin; tenant by host) |
+| GET | `/iframe` | Iframe conversion | Fired from the offer's own site (Referer/Origin; tenant by host) |
 
 ### Click Parameters
 - `offer_id` (required) — Offer UUID **or** its short numeric ref (e.g. `offer_id=190`); refs resolve via a Redis-cached ref→UUID lookup
@@ -216,13 +216,20 @@ No API-key response carries a secret: `/api/v1/network/offers` uses `toNetworkAp
   - **Without a transaction ID** the conversion is unique per (network, click, event name) — permanently, not only while the 48h Redis key lives: once any conversion (any status) exists for that click + event with no transaction ID, the same click + event without a transaction ID returns `duplicate` with no conversion or ledger entry. The event name is the one stored on the conversion (the `event` param, or the offer's base event name when none is sent), compared exactly (case-sensitive). Distinct events on the same click still convert separately, and a conversion that has a transaction ID neither blocks nor is blocked by one that doesn't. Concurrent attempts are serialised by a transaction-scoped advisory lock on (network, click, event) taken before the check (`record.ts`).
   - A failed database write frees that attempt's Redis idempotency key (compare-and-delete on a per-attempt token, so another request's key is never removed and a committed conversion keeps its key), so a retry can record the conversion exactly once.
 - `event` / `event_name` / `goal` — Event name (selects the goal with that event name)
-- `payout` / `amount` — Payout override
-- `revenue` — Revenue override
+- `payout` / `amount` — Payout override (S2S postback only — ignored on pixel/iframe)
+- `revenue` — Revenue override (S2S postback only — ignored on pixel/iframe)
 - `sale_amount` / `order_amount` — Sale value for Percentage / Mixed revenue offers (`amount` is NOT read as a sale amount)
-- `secure_code` / `security_code` — Required when the offer or network has a code (offer code wins)
+- `secure_code` / `security_code` — **Required.** Every network has a code (generated at creation; Settings › Security shows and regenerates it); an offer's own code overrides it. Missing or wrong → `403` and nothing is recorded. The check fails closed: a network whose code was cleared rejects every postback until a code is regenerated. API-key conversions (`POST /api/v1/advertiser/conversions`) are authenticated by the key instead.
 - `status` — `approved` (also confirmed/sale/success/1), `rejected` (declined/reversed/cancelled), anything else or omitted → `pending` (no ledger, no partner postback until approved)
 
 The advertiser postback URL shown in the dashboard is `…/postback?click_id={click_id}&txn_id={txn_id}&status=approved&secure_code=<real code>`.
+
+`/postback` is also rate-limited per `click_id` (`TRACKING_RL_POSTBACK_PER_CLICK_LIMIT`, alongside the per-IP limit; both off in development/test).
+
+### Pixel / Iframe
+Fired by the visitor's browser, so they carry no secret and are treated as untrusted (`conversions/origin.ts`, `record.ts`):
+- Recorded only when the page that fired them belongs to the offer's own site — the `Origin` header when present, else `Referer` — matched against the offer's landing pages (default destination + geo-rule destination overrides; exact host or same registrable domain, so `checkout.brand.com` matches a `lp.brand.com` landing page) or exactly the tracking domain itself. No Referer/Origin, or a foreign site, records nothing; the GIF / HTML is still served so the page never breaks.
+- Priced from the goal / click / offer defaults only: `payout`, `amount`, `revenue`, `sale_amount` / `order_amount` are ignored, and Customer Value rules (keyed off the client-supplied `user_id`) are not applied. Use the S2S postback for dynamic payouts or percentage revenue.
 
 ### Conversion pricing precedence
 explicit `payout`/`revenue` param → goal matched by event name → partner payout override / country (geo) override frozen on the click → default goal → offer default. Offer and goal conversion caps (daily = UTC day, total) reject conversions past the cap (`reason=*_conversion_cap_reached`).

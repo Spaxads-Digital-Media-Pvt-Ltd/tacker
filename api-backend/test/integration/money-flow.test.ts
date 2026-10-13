@@ -35,8 +35,9 @@ d('money flow: click → postback → conversion → ledger (live DB + Redis)', 
     const loc = r.headers.location as string | undefined;
     return { status: r.statusCode, clickId: loc ? new URL(loc.replace('{click_id}', '')).pathname.split('/').pop()! : null, loc };
   };
+  // S2S postbacks must carry the network's secure_code (F-01): /postback fails closed without it.
   const postback = async (qs: string) => {
-    const r = await track.inject({ method: 'GET', url: `/postback?${qs}`, headers: { host } });
+    const r = await track.inject({ method: 'GET', url: `/postback?secure_code=${fx.secureCodeA}&${qs}`, headers: { host } });
     return { status: r.statusCode, body: r.json() as { status: string; conversion_id: string | null } };
   };
   const ledger = async (conversionId: string) => (await query<{ account_type: string; entry_type: string; direction: string; amount: string }>(

@@ -36,12 +36,14 @@ const BUCKET_COUNT = 5; // 5-minute window
 
 export const CLICK_LIMIT = env.TRACKING_RL_CLICK_LIMIT;
 export const POSTBACK_LIMIT = env.TRACKING_RL_POSTBACK_LIMIT;
+/** Per click_id on /postback — pass the click_id as the identifier with endpoint 'postback_click'. */
+export const POSTBACK_PER_CLICK_LIMIT = env.TRACKING_RL_POSTBACK_PER_CLICK_LIMIT;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-export type TrackingEndpoint = 'click' | 'postback' | 'pixel' | 'iframe' | 'sl';
+export type TrackingEndpoint = 'click' | 'postback' | 'pixel' | 'iframe' | 'sl' | 'postback_click';
 
 function sha256(value: string): string {
  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');

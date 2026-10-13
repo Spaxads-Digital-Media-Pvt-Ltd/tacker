@@ -29,10 +29,11 @@
 - Verified server-side per-request
 - Scoped by audience ceiling (narrow-only, cannot exceed)
 
-### 4. Tracking (None)
-- Click/postback/pixel/iframe: **No auth**
+### 4. Tracking
+- Click: **No auth** (public redirect)
 - Tenant resolved from `Host` header → tracking domain
-- Security via `secure_code` parameter (optional per-offer)
+- S2S postback: `secure_code` **required** (network code, or the offer's own code) — fails closed
+- Pixel / iframe: no secret (browser-fired); bound to the offer's own site via Referer/Origin and priced at defaults
 
 ## Login Flow
 ```
@@ -113,9 +114,11 @@ dashboardAuth
 - API key rate limiting: `lib/apikeys/rate-limit.ts`
 - Token bucket per API key
 
-### Secure Code (Offers)
-- Optional per-offer `security_code` for S2S postback verification
-- Verified in `conversions/record.ts`
+### Secure Code (Postbacks)
+- Every network has a `postback_security_code`: generated at creation (platform-admin), backfilled and defaulted by migration `1700000067000` (SQL `tracker_generate_secure_code()`, the twin of `lib/security-code.ts`)
+- An offer's own `security_code` overrides the network code
+- Verified (timing-safe) in `conversions/record.ts`; **fails closed** — no configured code means the postback is rejected, not accepted
+- Rides on the Redis-cached offer config; Settings › Security regenerate/clear and the offer security-code endpoints invalidate it
 
 ### Host Header Validation
 - Tracking surface: tenant resolved from `Host` header

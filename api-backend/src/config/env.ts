@@ -37,6 +37,10 @@ const schema = z.object({
  // Requests per IP per sliding window (1-min buckets, 5-bucket window).
  TRACKING_RL_CLICK_LIMIT: z.coerce.number().int().positive().default(120),
  TRACKING_RL_POSTBACK_LIMIT: z.coerce.number().int().positive().default(60),
+ // Per click_id on /postback (F-01): a leaked click_id can't be hammered. The tracking limiter
+ // weights each request by the buckets it touches (one request counts 5 in its first minute), so
+ // 100 ≈ 20 postbacks for one click within a minute — far above legitimate multi-event traffic.
+ TRACKING_RL_POSTBACK_PER_CLICK_LIMIT: z.coerce.number().int().positive().default(100),
 
  // --- ClickHouse analytics store (Phase 8) ---
  // Optional so the app boots without ClickHouse configured (Phase 0-7 do not need it).

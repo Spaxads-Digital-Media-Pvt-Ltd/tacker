@@ -13,6 +13,7 @@ import { query } from '../../lib/db/pool.js';
 import { pool } from '../../lib/db/pool.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import { provisionAdmin } from '../../lib/provisioning.js';
+import { generateSecureCode } from '../../lib/security-code.js';
 import { signPlatformAdminToken } from '../../lib/auth/platform-admin-token.js';
 import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import { env } from '../../config/env.js';
@@ -135,9 +136,10 @@ export function platformRoutes(): Router {
  const client = await pool.connect();
  try {
  await client.query('BEGIN');
+ // Every network gets a postback secure_code at birth: /postback fails closed without one.
  const net = (await client.query<{ id: string }>(
- `INSERT INTO networks (name, slug, default_currency) VALUES ($1, $2, $3) RETURNING *`,
- [b.name, b.slug, b.defaultCurrency],
+ `INSERT INTO networks (name, slug, default_currency, postback_security_code) VALUES ($1, $2, $3, $4) RETURNING *`,
+ [b.name, b.slug, b.defaultCurrency, generateSecureCode()],
  )).rows[0]!;
 
  if (b.provisionSubdomain) {

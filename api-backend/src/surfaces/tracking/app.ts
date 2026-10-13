@@ -22,7 +22,7 @@ import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
 import { evaluateGeoRules, resolveForcedGeo } from './geo-rules.js';
-import { checkTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT } from '../../lib/tracking-rate-limit.js';
+import { checkTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT } from '../../lib/tracking-rate-limit.js';
 import { isClickCapped } from './caps.js';
 import { markUnique } from './dedup.js';
 import { fraudPreSignals } from './fraud-presignals.js';
@@ -383,6 +383,17 @@ export function buildTrackingApp(): FastifyInstance {
 
  // ---- Conversion methods (spec §6) — all three normalize into recordConversion() ----
 
+ /** The click id of a conversion request, from any of its aliases (query string first, then body). */
+ function clickIdOf(req: FastifyRequest): string | null {
+ const q = req.query as Record<string, unknown>;
+ const b = (req.body ?? {}) as Record<string, unknown>;
+ for (const k of ['click_id', 'cid', 'clickid']) {
+ const v = firstStr(q[k]) ?? firstStr(b[k]);
+ if (v != null) return v;
+ }
+ return null;
+ }
+
  async function handleConversion(
  req: FastifyRequest,
  source: 'postback' | 'pixel' | 'iframe',
@@ -401,7 +412,7 @@ export function buildTrackingApp(): FastifyInstance {
  return null;
  };
 
- const clickId = pick('click_id', 'cid', 'clickid');
+ const clickId = clickIdOf(req);
  if (!clickId) return { outcome: 'click_not_found', networkResolved: true };
 
  const result = await recordConversion({
@@ -415,6 +426,12 @@ export function buildTrackingApp(): FastifyInstance {
  secureCode: pick('secure_code', 'security_code'),
  source,
  rawParams: { ...q, ...b },
+ // Pixel / iframe are browser-fired: record.ts binds them to the offer's site via these headers.
+ requestOrigin: source === 'postback' ? undefined : {
+ referer: firstStr(req.headers['referer']),
+ origin: firstStr(req.headers['origin']),
+ host,
+ },
  });
  return { ...result, networkResolved: true };
  }
@@ -428,6 +445,14 @@ export function buildTrackingApp(): FastifyInstance {
  const rl = await checkTrackingRateLimit(clientIp, 'postback', POSTBACK_LIMIT);
  if (rl.limited) {
  return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
+ }
+ // Per click_id too (F-01): a leaked click_id can't be hammered from many IPs at once.
+ const cid = clickIdOf(req);
+ if (cid) {
+ const rlc = await checkTrackingRateLimit(cid, 'postback_click', POSTBACK_PER_CLICK_LIMIT);
+ if (rlc.limited) {
+ return reply.code(429).header('retry-after', String(rlc.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
+ }
  }
  }
 

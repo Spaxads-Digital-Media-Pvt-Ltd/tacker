@@ -31,8 +31,9 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
     expect(r.statusCode).toBe(302);
     return new URL((r.headers.location as string).replace('{click_id}', '')).pathname.split('/').pop()!;
   };
+  // S2S postbacks must carry the network's secure_code (F-01): /postback fails closed without it.
   const postback = async (qs: string) =>
-    (await track.inject({ method: 'GET', url: `/postback?${qs}`, headers: { host } })).json() as { status: string; conversion_id: string | null };
+    (await track.inject({ method: 'GET', url: `/postback?secure_code=${fx.secureCodeA}&${qs}`, headers: { host } })).json() as { status: string; conversion_id: string | null };
   const input = (clickId: string, over: Partial<RecordConversionInput> = {}): RecordConversionInput => ({
     networkId: fx.networkA, clickId, txnId: null, event: null, statusHint: 'approved', payoutParam: null,
     revenueParam: null, secureCode: null, skipSecureCode: true, source: 'postback', rawParams: {}, ...over,
