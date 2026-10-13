@@ -8,6 +8,7 @@
  *  - publisher earning  → CREDIT the publisher (we owe them more)
  *  - advertiser billing → DEBIT the advertiser  (they owe us)
  *  - publisher payout   → DEBIT the publisher   (draws their balance down)
+ *  - advertiser receipt → CREDIT the advertiser (they paid us — offsets their billing)
  *  - reversal offsets the original with the opposite direction (net effect zero, history preserved)
  * Balance = SUM(credit) − SUM(debit) over an account (filtered by status) AND currency — amounts in
  * different currencies are never summed together (there is no FX conversion anywhere in the ledger).
@@ -15,11 +16,11 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool, query } from '../db/pool.js';
-import { validationFailed } from '../http/errors.js';
+import { conflict, validationFailed } from '../http/errors.js';
 import { CURRENCY_RE, absMoney, addMoney, moneySign, subMoney } from '../money.js';
 
 export type AccountType = 'publisher' | 'advertiser';
-type EntryType = 'earning' | 'billing' | 'reversal' | 'adjustment' | 'payout';
+type EntryType = 'earning' | 'billing' | 'reversal' | 'adjustment' | 'payout' | 'receipt';
 type Direction = 'credit' | 'debit';
 type Status = 'pending' | 'approved' | 'rejected';
 
@@ -254,6 +255,45 @@ export async function balanceSummary(
   return { ...collapseBalances(balances, dflt), balances };
 }
 
+/**
+ * Serialise every settlement in a network — payout runs AND invoice payments — so each one reads
+ * balances after the previous one committed: two settlements can never both pay the same money.
+ * Transaction-scoped (released at COMMIT / ROLLBACK).
+ */
+export async function lockSettlements(client: PoolClient, networkId: string): Promise<void> {
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('payout-run:' || $1::text, 0))`, [networkId]);
+}
+
+/**
+ * Pay a publisher (spec §8): the `payouts` line AND its ledger 'payout' debit, together in the
+ * caller's transaction. Payout runs and invoice payments both go through here, so the payouts table
+ * and the ledger cannot drift apart (reconcileLedger compares them). Idempotent on
+ * `idempotencyKey` (default `payout:{payoutId}`): a key that was already used means this money was
+ * already paid — 409, nothing written.
+ */
+export async function recordPublisherPayout(
+  client: PoolClient,
+  args: {
+    networkId: string; batchId: string; publisherId: string; amount: string; currency: string;
+    idempotencyKey?: string; metadata?: Record<string, unknown>;
+  },
+): Promise<string> {
+  const payoutId = randomUUID();
+  const written = await insertEntry(client, {
+    networkId: args.networkId, accountType: 'publisher', accountId: args.publisherId,
+    entryType: 'payout', direction: 'debit', amount: args.amount, currency: args.currency,
+    idempotencyKey: args.idempotencyKey ?? `payout:${payoutId}`,
+    metadata: { batch_id: args.batchId, payout_id: payoutId, ...args.metadata },
+  });
+  if (!written) throw conflict('This payment was already recorded in the ledger.');
+  await client.query(
+    `INSERT INTO payouts (id, network_id, batch_id, publisher_id, amount, currency, fx_rate, status)
+     VALUES ($1,$2,$3,$4,$5,$6,1,'paid')`,
+    [payoutId, args.networkId, args.batchId, args.publisherId, args.amount, args.currency],
+  );
+  return payoutId;
+}
+
 export interface PayoutRunResult {
   batchId: string;
   /** The batch's ONE currency — every line and ledger debit of this run is in it. */
@@ -290,8 +330,8 @@ export async function createPayoutRun(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // One payout run per network at a time (released automatically at COMMIT / ROLLBACK).
-    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('payout-run:' || $1::text, 0))`, [networkId]);
+    // One settlement per network at a time — payout runs and invoice payments share this lock.
+    await lockSettlements(client, networkId);
 
     // Positive approved balance per (publisher, currency), optionally restricted to a set — read
     // AFTER the lock, so a run that committed just before us is already reflected (balance zero).
@@ -341,18 +381,7 @@ export async function createPayoutRun(
     const lines: { publisherId: string; amount: string }[] = [];
     for (const b of eligible) {
       if (b.currency !== currency) continue;
-      const payoutId = randomUUID();
-      await client.query(
-        `INSERT INTO payouts (id, network_id, batch_id, publisher_id, amount, currency, fx_rate, status)
-         VALUES ($1,$2,$3,$4,$5,$6,1,'paid')`,
-        [payoutId, networkId, batch.id, b.account_id, b.bal, currency],
-      );
-      await insertEntry(client, {
-        networkId, accountType: 'publisher', accountId: b.account_id,
-        entryType: 'payout', direction: 'debit', amount: b.bal, currency,
-        idempotencyKey: `payout:${payoutId}`,
-        metadata: { batch_id: batch.id, payout_id: payoutId },
-      });
+      await recordPublisherPayout(client, { networkId, batchId: batch.id, publisherId: b.account_id, amount: b.bal, currency });
       lines.push({ publisherId: b.account_id, amount: b.bal });
     }
 
@@ -372,4 +401,131 @@ export async function createPayoutRun(
   } finally {
     client.release();
   }
+}
+
+/** How each account is settled: the direction it is owed in, and the entry that settles it. */
+const SETTLEMENT: Record<AccountType, { owedDirection: Direction; entryType: 'payout' | 'receipt' }> = {
+  // We owe a publisher their earnings (credits); paying them is a 'payout' debit.
+  publisher: { owedDirection: 'credit', entryType: 'payout' },
+  // An advertiser owes us their billing (debits); their payment is a 'receipt' credit.
+  advertiser: { owedDirection: 'debit', entryType: 'receipt' },
+};
+
+export interface SettlementPosition {
+  /** Owed before the period / inside it (publisher: earned, advertiser: billed), net of reversals. */
+  before: string;
+  within: string;
+  /** Everything settled so far, at any date (payouts / receipts). */
+  settled: string;
+  /** Still owed for THIS period, settlements applied oldest-first (FIFO): the period counts as paid
+   * once `settled` has covered everything owed before it. */
+  unpaidInPeriod: string;
+  /** Owed overall right now, every period, net of every settlement. */
+  outstanding: string;
+  /** min(unpaidInPeriod, outstanding) rounded to cents (invoices are in cents) — the most an
+   * invoice for this period may settle. */
+  payable: string;
+}
+
+/**
+ * An account's settlement position in one currency for an invoice period [periodStart, periodEnd]
+ * (date-only, the same day boundaries the invoices' billedAmountFor uses). The ledger is account-
+ * level — a payout isn't tied to particular earnings — so settlements count oldest-first: a payout
+ * run that drew a balance to zero has paid this period too, even if newer earnings arrived since.
+ * `outstanding` also caps it, so later reversals of this period's conversions are respected.
+ */
+export async function settlementPosition(
+  client: PoolClient,
+  args: { networkId: string; accountType: AccountType; accountId: string; currency: string; periodStart: string; periodEnd: string },
+): Promise<SettlementPosition> {
+  const s = SETTLEMENT[args.accountType];
+  const { rows } = await client.query<{
+    before: string; within: string; settled: string; outstanding: string; unpaid_in_period: string; payable: string;
+  }>(
+    `WITH e AS (
+       SELECT entry_type, created_at, CASE direction WHEN $5 THEN amount ELSE -amount END AS owed
+         FROM ledger_entries
+        WHERE network_id = $1 AND account_type = $2 AND account_id = $3 AND currency = $4 AND status = 'approved'
+     ), t AS (
+       SELECT COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at < $7::date), 0) AS before,
+              COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at >= $7::date
+                                           AND created_at < ($8::date + interval '1 day')), 0) AS within,
+              COALESCE(-SUM(owed) FILTER (WHERE entry_type = $6), 0) AS settled,
+              COALESCE(SUM(owed), 0) AS outstanding
+         FROM e
+     ), p AS (
+       SELECT t.*, within - LEAST(GREATEST(settled - before, 0), GREATEST(within, 0)) AS unpaid FROM t
+     )
+     SELECT before::numeric(14,4)::text AS before, within::numeric(14,4)::text AS within,
+            settled::numeric(14,4)::text AS settled, outstanding::numeric(14,4)::text AS outstanding,
+            unpaid::numeric(14,4)::text AS unpaid_in_period,
+            ROUND(LEAST(unpaid, outstanding), 2)::numeric(14,2)::text AS payable
+       FROM p`,
+    [args.networkId, args.accountType, args.accountId, args.currency, s.owedDirection, s.entryType, args.periodStart, args.periodEnd],
+  );
+  const r = rows[0]!;
+  return {
+    before: r.before, within: r.within, settled: r.settled, outstanding: r.outstanding,
+    unpaidInPeriod: r.unpaid_in_period, payable: r.payable,
+  };
+}
+
+/**
+ * Settle an invoice in the ledger (audit F-03), in the CALLER's transaction: the caller locks the
+ * invoice row, re-checks it is unpaid and marks it paid in that same transaction, so a failure rolls
+ * everything back. A partner invoice becomes a real payout — a one-line payout batch, payouts row and
+ * ledger 'payout' debit through recordPublisherPayout, the same path a payout run takes — and an
+ * advertiser invoice writes a 'receipt' credit. Serialised with payout runs (lockSettlements).
+ * Refuses with a 409, writing nothing, when less than the invoice amount is still open for its
+ * period (already paid by a payout run or an earlier invoice, or reversed since it was created).
+ * A zero invoice settles nothing; a negative one is refused. Idempotent per invoice.
+ */
+export async function settleInvoice(
+  client: PoolClient,
+  args: {
+    networkId: string; accountType: AccountType; accountId: string;
+    invoiceId: string; invoiceRef: string | number; amount: string; currency: string;
+    periodStart: string; periodEnd: string; createdBy?: string | null;
+  },
+): Promise<{ settled: string; batchId: string | null }> {
+  const sign = moneySign(args.amount);
+  if (sign < 0) throw conflict(`This invoice's total is negative (${args.amount} ${args.currency}), so there is nothing to pay.`);
+  if (sign === 0) return { settled: args.amount, batchId: null };
+
+  await lockSettlements(client, args.networkId);
+  const pos = await settlementPosition(client, args);
+  if (moneySign(subMoney(pos.payable, args.amount)) < 0) {
+    const alreadySettled = moneySign(subMoney(pos.unpaidInPeriod, pos.within)) < 0;
+    const reason = !alreadySettled
+      ? 'the balance is now lower than the invoice, because conversions in this period were reversed after it was created'
+      : args.accountType === 'publisher'
+        ? 'the rest was already paid, for example by a payout run or an earlier invoice'
+        : 'the rest was already received with an earlier payment';
+    throw conflict(`Only ${pos.payable} ${args.currency} of this invoice's ${args.amount} is still open for its period: ${reason}. Nothing was recorded.`);
+  }
+
+  const metadata = {
+    invoice_id: args.invoiceId, invoice_ref: String(args.invoiceRef),
+    period_start: args.periodStart, period_end: args.periodEnd,
+  };
+  if (args.accountType === 'publisher') {
+    const batch = (await client.query<{ id: string }>(
+      `INSERT INTO payout_batches (network_id, status, currency, fx_rate, total_amount, note, created_by)
+       VALUES ($1, 'paid', $2, 1, $3, $4, $5) RETURNING id`,
+      [args.networkId, args.currency, args.amount, `Partner invoice #${args.invoiceRef}`, args.createdBy ?? null],
+    )).rows[0]!;
+    await recordPublisherPayout(client, {
+      networkId: args.networkId, batchId: batch.id, publisherId: args.accountId,
+      amount: args.amount, currency: args.currency,
+      idempotencyKey: `invoice-settlement:publisher:${args.invoiceId}`, metadata,
+    });
+    return { settled: args.amount, batchId: batch.id };
+  }
+  const written = await insertEntry(client, {
+    networkId: args.networkId, accountType: 'advertiser', accountId: args.accountId,
+    entryType: 'receipt', direction: 'credit', amount: args.amount, currency: args.currency,
+    idempotencyKey: `invoice-settlement:advertiser:${args.invoiceId}`, metadata,
+  });
+  if (!written) throw conflict('This invoice was already settled in the ledger.');
+  return { settled: args.amount, batchId: null };
 }

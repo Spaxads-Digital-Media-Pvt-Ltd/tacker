@@ -11,9 +11,10 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound, badRequest } from '../../../lib/http/errors.js';
+import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
-import { query } from '../../../lib/db/pool.js';
+import { pool, query } from '../../../lib/db/pool.js';
+import { settleInvoice } from '../../../lib/ledger/ledger.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 
@@ -90,12 +91,57 @@ async function billedAmountFor(networkId: string, advertiserId: string, currency
     `SELECT ROUND(COALESCE(SUM(CASE WHEN direction = 'debit' THEN amount ELSE -amount END), 0), 2)::text AS total
        FROM ledger_entries
       WHERE network_id = $1 AND account_type = 'advertiser' AND account_id = $2 AND status = 'approved'
-        AND currency = $5
+        AND entry_type <> 'receipt' AND currency = $5
         AND created_at >= $3::date AND created_at < ($4::date + interval '1 day')`,
     [networkId, advertiserId, periodStart, periodEnd, currency],
   );
   return rows[0]?.total ?? '0.00';
 }
+
+/**
+ * Mark one advertiser invoice paid (audit F-03): in ONE transaction, lock the invoice row, re-check
+ * it is unpaid, record the payment in the ledger (a 'receipt' credit against the advertiser's billing
+ * — see settleInvoice) and mark it paid. Any failure rolls all of it back.
+ */
+async function payAdvertiserInvoice(networkId: string, invoiceId: string, createdBy: string | null): Promise<{ before: Row; after: Row }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const before = (await client.query<Row>(
+      `SELECT * FROM ${TABLE} WHERE id = $1 AND network_id = $2 FOR UPDATE`, [invoiceId, networkId])).rows[0];
+    if (!before) throw notFound('Invoice not found');
+    if (before.status !== 'unpaid') throw badRequest('Only unpaid invoices can be marked paid');
+    const { settled } = await settleInvoice(client, {
+      networkId, accountType: 'advertiser', accountId: before.advertiser_id,
+      invoiceId, invoiceRef: before.ref, amount: String(before.billed_amount), currency: before.currency,
+      periodStart: toDateStr(before.period_start), periodEnd: toDateStr(before.period_end), createdBy,
+    });
+    const after = (await client.query<Row>(
+      `UPDATE ${TABLE} SET status = 'paid', paid_amount = $3, paid_at = now()
+        WHERE id = $1 AND network_id = $2 RETURNING *`, [invoiceId, networkId, settled])).rows[0]!;
+    await client.query('COMMIT');
+    return { before, after };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** A live invoice for this advertiser + currency whose period overlaps [start, end] — double billing. */
+async function overlappingInvoice(networkId: string, advertiserId: string, currency: string, start: string, end: string) {
+  return (await query<{ ref: string; period_start: string | Date; period_end: string | Date }>(
+    `SELECT ref, period_start, period_end FROM ${TABLE}
+      WHERE network_id = $1 AND advertiser_id = $2 AND currency = $3 AND status <> 'deleted'
+        AND daterange(period_start, period_end, '[]') && daterange($4::date, $5::date, '[]')
+      ORDER BY period_start LIMIT 1`,
+    [networkId, advertiserId, currency, start, end])).rows[0] ?? null;
+}
+
+const overlapMessage = (o: { ref: string; period_start: string | Date; period_end: string | Date }, currency: string) =>
+  `Invoice #${o.ref} already covers ${toDateStr(o.period_start)} to ${toDateStr(o.period_end)} for this advertiser in ${currency}. `
+  + 'Invoice periods can\'t overlap: choose dates outside it, or delete that invoice first.';
 
 export function advertiserInvoicesRoutes(): Router {
   const r = Router();
@@ -142,12 +188,22 @@ export function advertiserInvoicesRoutes(): Router {
     const advertiser = await db.selectOne<{ default_currency: string }>('advertisers', { id: b.advertiserId });
     if (!advertiser) throw badRequest('advertiserId does not belong to this network');
     const currency = advertiser.default_currency || 'USD';
+    const overlap = await overlappingInvoice(networkId, b.advertiserId, currency, b.periodStart, b.periodEnd);
+    if (overlap) throw conflict(overlapMessage(overlap, currency));
     const billed = await billedAmountFor(networkId, b.advertiserId, currency, b.periodStart, b.periodEnd);
-    const row = await db.insert<Row>(TABLE, {
-      advertiser_id: b.advertiserId, status: 'unpaid', visible_to_advertiser: b.visibleToAdvertiser,
-      payment_terms: b.paymentTerms ?? null, currency, period_start: b.periodStart, period_end: b.periodEnd,
-      billed_amount: billed, paid_amount: '0', notes: b.notes ?? null,
-    });
+    let row: Row;
+    try {
+      row = await db.insert<Row>(TABLE, {
+        advertiser_id: b.advertiserId, status: 'unpaid', visible_to_advertiser: b.visibleToAdvertiser,
+        payment_terms: b.paymentTerms ?? null, currency, period_start: b.periodStart, period_end: b.periodEnd,
+        billed_amount: billed, paid_amount: '0', notes: b.notes ?? null,
+      });
+    } catch (err) {
+      // A concurrent create won the race: the DB exclusion constraint (no overlapping periods) refused this one.
+      if ((err as { code?: string }).code !== '23P01') throw err;
+      const o = await overlappingInvoice(networkId, b.advertiserId, currency, b.periodStart, b.periodEnd);
+      throw conflict(o ? overlapMessage(o, currency) : 'Another invoice for this advertiser already covers part of this period.');
+    }
     await writeAudit(req, { action: 'advertiser-invoice.create', entityType: TABLE, entityId: row.id, after: row });
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE i.id = $1 AND i.network_id = $2`, [row.id, networkId]);
     sendOk(res, dto(rows[0]!), undefined, 201);
@@ -176,12 +232,9 @@ export function advertiserInvoicesRoutes(): Router {
   }));
 
   r.post('/:id/pay', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
-    const db = dbForRequest(req);
-    const before = await db.selectOne<Row>(TABLE, { id: req.params.id });
-    if (!before) throw notFound('Invoice not found');
-    if (before.status !== 'unpaid') throw badRequest('Only unpaid invoices can be marked paid');
-    const [row] = await db.update<Row>(TABLE, { status: 'paid', paid_amount: before.billed_amount, paid_at: new Date() }, { id: req.params.id });
-    await writeAudit(req, { action: 'advertiser-invoice.update', entityType: TABLE, entityId: req.params.id, before, after: row });
+    const createdBy = req.identity && req.identity.surface === 'dashboard' ? req.identity.userId : null;
+    const { before, after } = await payAdvertiserInvoice(req.scope!.networkId, req.params.id!, createdBy);
+    await writeAudit(req, { action: 'advertiser-invoice.update', entityType: TABLE, entityId: req.params.id, before, after });
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE i.id = $1 AND i.network_id = $2`, [req.params.id, req.scope!.networkId]);
     sendOk(res, dto(rows[0]!));
   }));

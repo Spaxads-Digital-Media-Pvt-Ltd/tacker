@@ -160,11 +160,12 @@ Append-only money ledger.
 |---|---|---|
 | `id` | uuid | PK |
 | `network_id` | uuid | FK to network |
-| `conversion_id` | uuid | FK to conversion |
-| `party_id` | uuid | FK to parties |
-| `entry_type` | text | conversion/payout/adjustment |
-| `direction` | enum | credit/debit |
-| `amount` | text | Amount (stored as string) |
+| `account_type` / `account_id` | text / uuid | `publisher` or `advertiser` + its id |
+| `conversion_id` | text | The conversion an earning/billing/reversal belongs to (null for payouts / receipts / manual entries) |
+| `entry_type` | text | `earning` (publisher credit), `billing` (advertiser debit), `reversal`, `adjustment`, `payout` (publisher debit — payout runs and paid partner invoices), `receipt` (advertiser credit — paid advertiser invoices) |
+| `direction` | text | `credit` / `debit` |
+| `amount` | numeric(14,4) | Always ≥ 0; the sign comes from `direction` (API carries it as a string) |
+| `idempotency_key` | text | Unique — a retried write never double-counts |
 | `currency` | text | Currency |
 | `created_at` | timestamptz | |
 
