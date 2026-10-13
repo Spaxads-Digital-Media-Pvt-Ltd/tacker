@@ -35,6 +35,7 @@ import {
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
   reportingChips, withoutReportingChip, fetchAllPages, useReportExport, ExportStatus,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
+  useGraphRows, GraphCappedNote,
 } from '../../shared-components/primitives/ReportPageKit';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
@@ -45,6 +46,7 @@ import {
   combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
   moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
 } from '../../lib/reportCurrency';
+import { exportRatio } from '../../lib/reportMath';
 import { CurrencyNotes, Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { countryLabel } from '../../data/geo';
 import { flexReportPath } from '../../lib/flexReportLink';
@@ -418,10 +420,12 @@ export default function OfferReport() {
   // …and, when mixed, its per-currency amounts (newer API) for the Payout/Revenue/Profit tiles.
   const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
-  const graphQs = qs({ groupBy: 'day', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
+  const graphQs = qs({ groupBy: 'day', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  // Every day in range, 200 per request up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request
+  // kept only the oldest 200 active days and silently dropped the newer ones.
+  const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
-    const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions['day'] ?? '').localeCompare(b.dimensions['day'] ?? ''));
+    const rows = [...graph.rows].sort((a, b) => (a.dimensions['day'] ?? '').localeCompare(b.dimensions['day'] ?? ''));
     return {
       labels: rows.map((r) => (r.dimensions['day'] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
@@ -429,7 +433,7 @@ export default function OfferReport() {
       // Revenue across days in different currencies isn't one comparable series — not plotted then.
       rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData, currency]);
+  }, [graph.rows, currency]);
 
   const tableParams = {
     groupBy: 'offer', metrics: withCurrenciesMetric(METRICS_PARAM),
@@ -482,8 +486,9 @@ export default function OfferReport() {
     offerId: r.offerRef || DASH, offer: r.offerName,
     clicks: r.derived.clicks, uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks,
     invalidClicks: r.derived.invalidClicks, totalCv: r.derived.totalCv, cv: r.derived.cv, throttle: DASH, events: DASH,
-    cvr: pct(r.derived.cvr), cpc: r.derived.cpc.toFixed(2), cpa: r.derived.cpa.toFixed(2),
-    // Recorded money exactly as the API summed it (numeric text) — not a float re-rounded to 2 places.
+    cvr: pct(r.derived.cvr), cpc: exportRatio(r.derived.cpc), cpa: exportRatio(r.derived.cpa),
+    // Recorded money exactly as the API summed it (numeric text) — not a float re-rounded to 2 places;
+    // CPC/CPA with the screen's rounding (lib/reportMath exportRatio).
     revenue: exactMoney(r.metrics, 'revenue'), payout: exactMoney(r.metrics, 'payout'), profit: exactMoney(r.metrics, 'margin'),
     margin: pct(r.derived.marginPct), fraud: r.derived.fraudScore.toFixed(0),
   });
@@ -610,9 +615,9 @@ export default function OfferReport() {
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          graph.loading ? <div className="pt-4"><Spinner /></div> : graph.error ? <p className="pt-3 text-small text-danger-text">{graph.error}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
-              {graphSeries.labels.length >= 200 && <p className="mb-2 text-tiny text-fg-muted">Graph shows the first {graphSeries.labels.length} days — narrow the date range to see the rest.</p>}
+              {graph.capped && <GraphCappedNote shown={graphSeries.labels.length} unit="days" />}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
                 {isMixed(graphSeries.rc)
                   ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>

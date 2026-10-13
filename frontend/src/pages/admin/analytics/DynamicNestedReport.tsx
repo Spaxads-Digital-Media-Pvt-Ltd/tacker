@@ -34,6 +34,7 @@ import {
   type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
   fetchAllPages, useReportExport, ExportStatus,
+  useGraphRows, GraphCappedNote,
 } from '../../../shared-components/primitives/ReportPageKit';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlMetricFilters, writeUrlMetricFilters,
@@ -49,6 +50,7 @@ import {
   combineCurrencies, combineMoneyByCurrency, currenciesOf, filterWithMoneyRule, hasMoneyFilter, isMixed, mixedTitle, moneyByCurrencyOf,
   moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
 } from '../../../lib/reportCurrency';
+import { moneyExportCells } from '../../../lib/reportExportCells';
 import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
 
 interface SmartLink { id: string; name: string }
@@ -350,11 +352,13 @@ export default function DynamicNestedReport() {
   const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   const chronological = appliedFrom !== appliedTo;
-  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
+  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  // Every day in range, 200 per request up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request
+  // kept only the oldest 200 active days and silently dropped the newer ones.
+  const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
     const dimKey = chronological ? 'day' : 'hour';
-    const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions[dimKey] ?? '').localeCompare(b.dimensions[dimKey] ?? ''));
+    const rows = [...graph.rows].sort((a, b) => (a.dimensions[dimKey] ?? '').localeCompare(b.dimensions[dimKey] ?? ''));
     return {
       labels: rows.map((r) => (r.dimensions[dimKey] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
@@ -362,7 +366,7 @@ export default function DynamicNestedReport() {
       // Revenue across points in different currencies isn't one comparable series — not plotted then.
       rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData, chronological, currency]);
+  }, [graph.rows, chronological, currency]);
 
   const tableQsFor = (limit: number, offset: number) => qs({
     groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM),
@@ -374,7 +378,7 @@ export default function DynamicNestedReport() {
 
   const toParentRows = (src: AggRow[]) => src
     .filter((r) => r.dimensions[parentDim])
-    .map((r) => ({ raw: r.dimensions[parentDim]!, name: resolveName(parentDim, r.dimensions[parentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency) }));
+    .map((r) => ({ raw: r.dimensions[parentDim]!, name: resolveName(parentDim, r.dimensions[parentDim] ?? null, opts, smartLinkMap), derived: deriveRow(r.metrics), rc: resolveCurrency(currenciesOf(r.metrics), currency), metrics: r.metrics }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- toParentRows only closes over the listed values
   const loadedRows = useMemo(() => toParentRows(data?.rows ?? []), [data, parentDim, opts, smartLinkMap, currency]);
   // A Payout/Revenue threshold has no currency: not applied while the loaded rows span several
@@ -428,9 +432,9 @@ export default function DynamicNestedReport() {
     imp: DASH, rpm: DASH, cpm: DASH, grossClicks: r.derived.clicksGross, clicks: r.derived.clicks,
     uniqueClicks: r.derived.uniqueClicks, dupClicks: r.derived.dupClicks, invalidClicks: r.derived.invalidClicks,
     totalCv: r.derived.totalCv, cv: r.derived.cv, vtCv: DASH, ctr: DASH, throttle: DASH,
-    cvr: pct(r.derived.cvr), cpc: r.derived.cpc.toFixed(2), cpa: r.derived.cpa.toFixed(2),
-    rpc: r.derived.rpc.toFixed(2), rpa: r.derived.rpa.toFixed(2),
-    revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2), profit: r.derived.margin.toFixed(2),
+    cvr: pct(r.derived.cvr),
+    // Stored money exactly as the API sent them; CPC/CPA/RPC/RPA with the screen's rounding.
+    ...moneyExportCells(r.derived, r.metrics),
     margin: pct(r.derived.marginPct),
   }, r.rc));
 
@@ -537,8 +541,9 @@ export default function DynamicNestedReport() {
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          graph.loading ? <div className="pt-4"><Spinner /></div> : graph.error ? <p className="pt-3 text-small text-danger-text">{graph.error}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
+              {graph.capped && <GraphCappedNote shown={graphSeries.labels.length} unit={chronological ? 'days' : 'hours'} />}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
                 {isMixed(graphSeries.rc)
                   ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>

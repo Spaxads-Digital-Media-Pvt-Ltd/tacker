@@ -20,6 +20,7 @@ import { chipsFromValues, withoutValue, type ChipCategory, type FilterChip } fro
 import { cleanFilterValues } from '../../lib/reportFilterState';
 import { api } from '../../lib/api';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
+import { GRAPH_DAY_CAP, REPORT_PAGE_SIZE, graphCappedNote, pageThrough, type PageResponse } from '../../lib/reportPaging';
 import { isMoneyMetricKey, MIXED_LABEL, mixedTitle, moneyFilterNote, moneyText, type MoneyByCurrency, type RowCurrency } from '../../lib/reportCurrency';
 
 export interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
@@ -219,19 +220,35 @@ export async function fetchAllPages<T>(
   pageSize: number,
   cap: number = EXPORT_ROW_CAP,
 ): Promise<{ rows: T[]; capped: boolean; total: number | null }> {
-  const rows: T[] = [];
-  let total: number | null = null;
-  for (let offset = 0; offset < cap; offset += pageSize) {
-    const limit = Math.min(pageSize, cap - offset);
-    const res = await api.get<T[] | { rows: T[]; total?: number }>(path(limit, offset));
-    const page = Array.isArray(res) ? res : (res?.rows ?? []);
-    if (!Array.isArray(res) && typeof res?.total === 'number') total = res.total;
-    rows.push(...page);
-    if (page.length < limit) return { rows, capped: false, total };
-    if (total != null && rows.length >= total) return { rows, capped: false, total };
-  }
-  // Collected exactly `cap` rows — capped unless the source is known to hold no more.
-  return { rows, capped: total == null || total > rows.length, total };
+  return pageThrough<T>((limit, offset) => api.get<PageResponse<T>>(path(limit, offset)), pageSize, cap);
+}
+
+export interface GraphRows { rows: AggRow[]; capped: boolean; loading: boolean; error: string | null }
+
+/**
+ * Every Performance Graph's data: pages a day (or hour) series through `/api/reports` 200 rows at
+ * a time up to `cap` (GRAPH_DAY_CAP) — one `limit=200` request kept only the oldest 200 active days.
+ * `path` is the report URL without limit/offset, or null while the graph is closed (no request).
+ * State is keyed by `path`, so a changed range/filter never shows the previous series as current.
+ */
+export function useGraphRows(path: string | null, cap: number = GRAPH_DAY_CAP): GraphRows {
+  const [state, setState] = useState<{ path: string; rows: AggRow[]; capped: boolean; error: string | null } | null>(null);
+  useEffect(() => {
+    if (!path) return;
+    let alive = true;
+    fetchAllPages<AggRow>((limit, offset) => `${path}&limit=${limit}&offset=${offset}`, REPORT_PAGE_SIZE, cap)
+      .then((r) => { if (alive) setState({ path, rows: r.rows, capped: r.capped, error: null }); })
+      .catch((e: unknown) => { if (alive) setState({ path, rows: [], capped: false, error: e instanceof Error ? e.message : 'Failed to load graph' }); });
+    return () => { alive = false; };
+  }, [path, cap]);
+  const current = path != null && state?.path === path ? state : null;
+  return { rows: current?.rows ?? EMPTY_ROWS, capped: current?.capped ?? false, loading: path != null && current == null, error: current?.error ?? null };
+}
+const EMPTY_ROWS: AggRow[] = [];
+
+/** Shown above a capped Performance Graph (`useGraphRows(...).capped`). */
+export function GraphCappedNote({ shown, unit }: { shown: number; unit: 'days' | 'hours' }) {
+  return <p className="mb-2 text-tiny text-fg-muted">{graphCappedNote(shown, unit)}</p>;
 }
 
 export interface ExportState { busy: boolean; note: string | null; error: string | null }

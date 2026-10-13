@@ -186,6 +186,141 @@ d('reporting integrity (live DB)', () => {
     });
   });
 
+  describe('Flex Report (/api/reports?groupBy=offer,publisher)', () => {
+    let flexOffer: string;
+    const clicks = async (publisherId: string | null, n: number, flagged: boolean) => {
+      for (let i = 0; i < n; i++) {
+        await query(`INSERT INTO clicks (click_id, network_id, offer_id, publisher_id, created_at, is_unique, fraud_flags) VALUES ($1, $2, $3, $4, '2026-07-07T10:00:00Z', true, $5)`,
+          [uid(), fx.networkA, flexOffer, publisherId, flagged ? ['datacenter'] : []]);
+      }
+    };
+    const convAt = (publisherId: string, status: string, payout: string, revenue: string) => query(
+      `INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, publisher_id, payout, revenue, currency, status, source, created_at)
+       VALUES ($1, $2, $1, $3, $4, $5, $6, 'USD', $7, 'postback', '2026-07-07T11:00:00Z')`, [uid(), fx.networkA, flexOffer, publisherId, payout, revenue, status]);
+    beforeAll(async () => {
+      flexOffer = (await query<{ id: string }>(
+        `INSERT INTO offers (network_id, advertiser_id, name, status, destination_url) VALUES ($1, $2, 'Flex report offer', 'active', 'https://example.com/{click_id}') RETURNING id`,
+        [fx.networkA, fx.advA])).rows[0]!.id;
+      // Offer × Partner groups: pubA1 has the most clicks but most are fraud-flagged (9 gross, 2 valid);
+      // pubA2 has 4 valid; traffic with no partner has 3 valid.
+      await clicks(fx.pubA1, 2, false); await clicks(fx.pubA1, 7, true);
+      await clicks(fx.pubA2, 4, false);
+      await clicks(null, 3, false);
+      await convAt(fx.pubA2, 'approved', '1.5000', '4.0000');
+      await convAt(fx.pubA2, 'pending', '9.0000', '9.0000');
+      await convAt(fx.pubA1, 'approved', '0.1000', '0.2500');
+    });
+    const report = (qs: string, a = auth, groupBy = 'offer,publisher') => request(app).get(`/api/reports?groupBy=${groupBy}&from=2026-07-07&to=2026-07-07&offerId=${flexOffer}&metrics=clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,currencies&${qs}`).set(a);
+    type Row = { dimensions: { offer: string; publisher: string | null }; metrics: Record<string, unknown> };
+    const pubs = (res: { body: { data: { rows: Row[] } } }) => res.body.data.rows.map((r) => r.dimensions.publisher);
+
+    it('Clicks column sort (valid_clicks) orders the Offer × Partner groups by net clicks, both directions', async () => {
+      expect(pubs(await report('orderBy=valid_clicks&orderDir=desc'))).toEqual([fx.pubA2, null, fx.pubA1]); // 4, 3, 2 valid
+      expect(pubs(await report('orderBy=valid_clicks&orderDir=asc'))).toEqual([fx.pubA1, null, fx.pubA2]);
+      expect(pubs(await report('orderBy=clicks&orderDir=desc'))).toEqual([fx.pubA1, fx.pubA2, null]);        // 9, 4, 3 gross
+    });
+    it('paging keeps the full-result order and the same total on every page', async () => {
+      const full = pubs(await report('orderBy=valid_clicks&orderDir=desc'));
+      const paged: (string | null)[] = [];
+      for (let offset = 0; offset < 3; offset++) {
+        const res = await report(`orderBy=valid_clicks&orderDir=desc&limit=1&offset=${offset}`);
+        expect(res.body.data.total).toBe(3);
+        paged.push(...pubs(res));
+      }
+      expect(paged).toEqual(full);
+    });
+    it('groups add up to the grand total — no double counting — and money is exact text per group', async () => {
+      const rows = (await report('orderBy=valid_clicks')).body.data.rows as Row[];
+      const sum = (k: string) => rows.reduce((s, r) => s + Number(r.metrics[k]), 0);
+      const total = ((await report('', auth, 'none')).body.data.rows as Row[])[0]!.metrics;
+      expect({ clicks: sum('clicks'), invalid_clicks: sum('invalid_clicks'), conversions: sum('conversions'), total_conversions: sum('total_conversions') })
+        .toEqual({ clicks: total['clicks'], invalid_clicks: total['invalid_clicks'], conversions: total['conversions'], total_conversions: total['total_conversions'] });
+      expect(total).toMatchObject({ clicks: 16, invalid_clicks: 7, conversions: 2, total_conversions: 3, payout: '1.6000', revenue: '4.2500', margin: '2.6500' });
+      expect(rows.find((r) => r.dimensions.publisher === fx.pubA2)!.metrics).toMatchObject({ clicks: 4, conversions: 1, total_conversions: 2, payout: '1.5000', revenue: '4.0000', margin: '2.5000', currencies: ['USD'] });
+      expect(rows.find((r) => r.dimensions.publisher === null)!.metrics).toMatchObject({ clicks: 3, conversions: 0, total_conversions: 0, payout: '0.0000', currencies: [] });
+    });
+    it('another network gets none of these rows', async () => {
+      const authB = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkB, role: 'admin' }));
+      const res = await report('orderBy=valid_clicks', authB);
+      expect(res.status).toBe(200);
+      expect(res.body.data.rows).toEqual([]);
+      expect(res.body.data.total).toBe(0);
+    });
+  });
+
+  describe('Performance Graph day series (/api/reports?groupBy=day) — paged past the 200-row cap', () => {
+    // 250 consecutive active days (one click each, a conversion every 50th day) on one offer.
+    const DAYS = 250;
+    const day0 = Date.UTC(2025, 0, 1);
+    const dayStr = (i: number) => new Date(day0 + i * 86400e3).toISOString().slice(0, 10);
+    let graphOffer: string;
+    beforeAll(async () => {
+      graphOffer = (await query<{ id: string }>(
+        `INSERT INTO offers (network_id, advertiser_id, name, status, destination_url) VALUES ($1, $2, 'Graph series offer', 'active', 'https://example.com/{click_id}') RETURNING id`,
+        [fx.networkA, fx.advA])).rows[0]!.id;
+      await query(
+        `INSERT INTO clicks (click_id, network_id, offer_id, created_at)
+         SELECT replace(gen_random_uuid()::text, '-', ''), $1, $2, $3::timestamptz + (i || ' days')::interval + interval '12 hours'
+           FROM generate_series(0, $4 - 1) AS i`, [fx.networkA, graphOffer, `${dayStr(0)}T00:00:00Z`, DAYS]);
+      await query(
+        `INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, payout, revenue, currency, status, source, created_at)
+         SELECT c, $1, c, $2, '1.0000', '2.5000', 'USD', 'approved', 'postback', $3::timestamptz + (i || ' days')::interval + interval '13 hours'
+           FROM (SELECT i, replace(gen_random_uuid()::text, '-', '') AS c FROM generate_series(0, $4 - 1, 50) AS i) s`,
+        [fx.networkA, graphOffer, `${dayStr(0)}T00:00:00Z`, DAYS]);
+    });
+    // Exactly what every Performance Graph sends (groupBy=day, no orderBy), plus limit/offset.
+    const series = (from: string, to: string, page: string, a = auth) => request(app).get(
+      `/api/reports?groupBy=day&metrics=clicks,revenue,currencies&offerId=${graphOffer}&from=${from}T00:00:00.000Z&to=${to}T23:59:59.999Z&${page}`).set(a);
+    type Row = { dimensions: { day: string }; metrics: { clicks: number; revenue: string } };
+    const daysOf = (res: { body: { data: { rows: Row[] } } }) => res.body.data.rows.map((r) => r.dimensions.day.slice(0, 10));
+    const allPages = async (from: string, to: string) => {
+      const out: string[] = []; let total = -1; let requests = 0;
+      for (let offset = 0; ; offset += 200) {
+        const res = await series(from, to, `limit=200&offset=${offset}`);
+        expect(res.status).toBe(200);
+        requests++; total = res.body.data.total; out.push(...daysOf(res));
+        if (res.body.data.rows.length < 200 || out.length >= total) break;
+      }
+      return { days: out, total, requests };
+    };
+
+    it('the API refuses a page over 200 rows — a graph cannot just ask for more', async () => {
+      expect((await series(dayStr(0), dayStr(DAYS - 1), 'limit=201')).status).toBe(422);
+    });
+    it('one 200-row request of a 250-day range keeps the OLDEST 200 days and reports total=250', async () => {
+      const res = await series(dayStr(0), dayStr(DAYS - 1), 'limit=200');
+      expect(res.body.data.total).toBe(DAYS);
+      expect(daysOf(res)).toEqual(Array.from({ length: 200 }, (_, i) => dayStr(i)));
+    });
+    it('paging (limit=200, offset) returns every one of the 250 days once, chronologically, newest last', async () => {
+      const r = await allPages(dayStr(0), dayStr(DAYS - 1));
+      expect(r).toMatchObject({ total: DAYS, requests: 2 });
+      expect(r.days).toEqual(Array.from({ length: DAYS }, (_, i) => dayStr(i)));
+    });
+    it('exactly 200 and 199 active days fit in one request', async () => {
+      expect(await allPages(dayStr(0), dayStr(199))).toMatchObject({ total: 200, requests: 1 });
+      const r199 = await allPages(dayStr(0), dayStr(198));
+      expect(r199).toMatchObject({ total: 199, requests: 1 });
+      expect(r199.days.at(-1)).toBe(dayStr(198));
+    });
+    it('each day point carries that day\'s own totals (UTC day buckets), money as exact text', async () => {
+      const res = await series(dayStr(200), dayStr(201), 'limit=200');
+      expect(res.body.data.rows.map((r: Row) => ({ day: r.dimensions.day.slice(0, 10), clicks: r.metrics.clicks, revenue: r.metrics.revenue })))
+        .toEqual([{ day: dayStr(200), clicks: 1, revenue: '2.5000' }, { day: dayStr(201), clicks: 1, revenue: '0.0000' }]);
+    });
+    it('a single-day range by hour is at most 24 points (Flex / Nested / Dimensional one-day graphs)', async () => {
+      const res = await request(app).get(`/api/reports?groupBy=hour&metrics=clicks&offerId=${graphOffer}&from=${dayStr(5)}T00:00:00.000Z&to=${dayStr(5)}T23:59:59.999Z&limit=200`).set(auth);
+      expect(res.body.data.total).toBeLessThanOrEqual(24);
+      expect(res.body.data.rows).toHaveLength(1);
+    });
+    it('another network pages through nothing', async () => {
+      const authB = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkB, role: 'admin' }));
+      const res = await series(dayStr(0), dayStr(DAYS - 1), 'limit=200&offset=200', authB);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ rows: [], total: 0 });
+    });
+  });
+
   describe('Conversion Report rows', () => {
     let offerCR: string;
     beforeAll(async () => {

@@ -42,6 +42,7 @@ import {
   type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
   type SavedReportConfig, loadSavedReports, persistSavedReports,
   fetchAllPages, useReportExport, ExportStatus,
+  useGraphRows, GraphCappedNote,
 } from '../../../shared-components/primitives/ReportPageKit';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
@@ -58,6 +59,7 @@ import {
   moneyFilterBlockedBy, resolveCurrency, showSortedWithinNote, withBreakdownMetrics, withCurrenciesMetric, withRowCurrency, type RowCurrency,
 } from '../../../lib/reportCurrency';
 import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
+import { FLEX_COLUMN_SORT, flexExportRow, flexOrderBy, type FlexOrderMetric } from '../../../lib/flexReport';
 
 interface SmartLink { id: string; name: string }
 
@@ -83,7 +85,8 @@ type DimKey = (typeof DIM_OPTIONS)[number]['key'];
 const MAX_DIMS = 4;
 
 const METRIC_COLUMNS = ['Clicks', 'Total CV', 'RPA', 'CPA', 'CVR', 'Revenue', 'Payout', 'Profit', 'Margin', 'EPC'] as const;
-type OrderMetric = 'clicks' | 'total_conversions' | 'payout' | 'revenue' | 'margin';
+// Each sortable column's API sort key (lib/flexReport): Clicks → `valid_clicks`, the net count it shows.
+type OrderMetric = FlexOrderMetric;
 
 function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: Map<string, string>): string {
   if (id == null) return DASH;
@@ -123,7 +126,6 @@ function metricCells(shown: Set<string>, d: DerivedRow, rc: RowCurrency) {
 type SavedConfig = SavedReportConfig<OrderMetric> & { dims: DimKey[] };
 
 const DEFAULT_DIMS: DimKey[] = ['offer', 'publisher'];
-const ORDER_METRICS: OrderMetric[] = ['clicks', 'total_conversions', 'payout', 'revenue', 'margin'];
 
 /**
  * Initial report state from the URL — what the page mirrors to the address bar (`from`, `to`, `dims`,
@@ -144,14 +146,13 @@ function readFlexUrl() {
   let from = readUrlDate(sp, 'from', daysAgo(7));
   const to = readUrlDate(sp, 'to', todayStr());
   if (from > to) from = to;
-  const ob = sp.get('orderBy');
   return {
     from, to, filters,
     exclusions: readUrlFilters(sp, 'x'),
     metricFilters: readUrlMetricFilters<MetricFilters>(sp, METRIC_FILTER_FIELDS.map((f) => f.key)),
     ignoreFail: readUrlFlag(sp, IGNORE_FAIL_PARAM),
     dims: urlDims.length ? Array.from(new Set(urlDims)).slice(0, MAX_DIMS) : DEFAULT_DIMS,
-    orderBy: (ORDER_METRICS as string[]).includes(ob ?? '') ? (ob as OrderMetric) : 'clicks',
+    orderBy: flexOrderBy(sp.get('orderBy')),
     orderDir: (sp.get('orderDir') === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc',
   };
 }
@@ -280,11 +281,13 @@ export default function FlexReport() {
   const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   const chronological = appliedFrom !== appliedTo;
-  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams, limit: 200 });
-  const { data: graphData, loading: graphLoading, error: graphError } = useQuery<AggResult>(graphOpen ? `/api/reports?${graphQs}` : null);
+  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  // Every day in range, 200 per request up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request
+  // kept only the oldest 200 active days and silently dropped the newer ones.
+  const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null);
   const graphSeries = useMemo(() => {
     const dimKey = chronological ? 'day' : 'hour';
-    const rows = [...(graphData?.rows ?? [])].sort((a, b) => (a.dimensions[dimKey] ?? '').localeCompare(b.dimensions[dimKey] ?? ''));
+    const rows = [...graph.rows].sort((a, b) => (a.dimensions[dimKey] ?? '').localeCompare(b.dimensions[dimKey] ?? ''));
     return {
       labels: rows.map((r) => (r.dimensions[dimKey] ?? '').slice(0, 10)),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
@@ -292,7 +295,7 @@ export default function FlexReport() {
       // Revenue across points in different currencies isn't one comparable series — not plotted then.
       rc: combineCurrencies(rows.map((r) => currenciesOf(r.metrics)), currency),
     };
-  }, [graphData, chronological, currency]);
+  }, [graph.rows, chronological, currency]);
 
   const tableQsFor = (limit: number, offset: number) => qs({
     groupBy: groupByStr, metrics: withCurrenciesMetric(METRICS_PARAM),
@@ -308,6 +311,7 @@ export default function FlexReport() {
     dims: dims.map((d) => ({ dim: d, raw: r.dimensions[d] ?? null, name: resolveName(d, r.dimensions[d] ?? null, opts, smartLinkMap) })),
     derived: deriveRow(r.metrics),
     rc: resolveCurrency(currenciesOf(r.metrics), currency),
+    metrics: r.metrics,
   });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- toRow only closes over the listed values
   const loadedRows = useMemo(() => (data?.rows ?? []).map(toRow), [data, dims, opts, smartLinkMap, currency]);
@@ -345,15 +349,9 @@ export default function FlexReport() {
   };
 
   const shownMetrics = useMemo(() => new Set(METRIC_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const toExportRow = (r: ReturnType<typeof toRow>) => {
-    const base: Record<string, unknown> = {};
-    r.dims.forEach((d) => { base[DIM_OPTIONS.find((o) => o.key === d.dim)?.label ?? d.dim] = d.name; });
-    return {
-      ...base, clicks: r.derived.clicks, totalCv: r.derived.totalCv, rpa: r.derived.rpa.toFixed(2), cpa: r.derived.cpa.toFixed(2),
-      cvr: pct(r.derived.cvr), revenue: r.derived.revenue.toFixed(2), payout: r.derived.payout.toFixed(2),
-      profit: r.derived.margin.toFixed(2), margin: pct(r.derived.marginPct), epc: r.derived.epc.toFixed(3),
-    };
-  };
+  // Money as the API's exact decimal text and EPC as the API's value (lib/flexReport `flexExportRow`).
+  const toExportRow = (r: ReturnType<typeof toRow>) => flexExportRow(
+    r.dims.map((d) => ({ label: DIM_OPTIONS.find((o) => o.key === d.dim)?.label ?? d.dim, name: d.name })), r.derived, r.metrics);
   // Export every row matching the applied filters (all pages), with the same client-side metric
   // filters as the table — but not the "Search this page" box, which only narrows the visible page.
   // Money stays plain decimals with the row's currency in a trailing `currency` column ("MIXED",
@@ -379,7 +377,7 @@ export default function FlexReport() {
     range.reset({ from: config.from, to: config.to });
     setFilters(config.filters); setDims(config.dims);
     setExclusions(config.exclusions ?? {}); setMetricFilters(config.metricFilters ?? {}); setIgnoreFailTraffic(config.ignoreFailTraffic ?? false);
-    setOrderBy(config.orderBy); setOrderDir(config.orderDir); setHiddenColumns(new Set(config.hiddenColumns));
+    setOrderBy(flexOrderBy(config.orderBy)); setOrderDir(config.orderDir); setHiddenColumns(new Set(config.hiddenColumns));
     setPageMenuOpen(false); setLoadOpen(false);
   };
   const deleteSavedReport = (name: string) => {
@@ -484,8 +482,9 @@ export default function FlexReport() {
           <ChevronRight size={14} className={`transition-transform ${graphOpen ? 'rotate-90' : ''}`} /> Performance Graph
         </button>
         {graphOpen && (
-          graphLoading || (!graphData && !graphError) ? <div className="pt-4"><Spinner /></div> : graphError ? <p className="pt-3 text-small text-danger-text">{graphError}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
+          graph.loading ? <div className="pt-4"><Spinner /></div> : graph.error ? <p className="pt-3 text-small text-danger-text">{graph.error}</p> : graphSeries.labels.length === 0 ? <p className="pt-3 text-small text-fg-muted">No data for this period.</p> : (
             <div className="pt-4">
+              {graph.capped && <GraphCappedNote shown={graphSeries.labels.length} unit={chronological ? 'days' : 'hours'} />}
               <div className="mb-2 flex items-center gap-4 text-tiny text-fg-secondary">
                 {isMixed(graphSeries.rc)
                   ? <span className="text-fg-muted" title={mixedTitle(graphSeries.rc.currencies)}>Revenue not plotted — mixed currencies</span>
@@ -549,7 +548,7 @@ export default function FlexReport() {
                 <thead>
                   <tr>
                     {dims.map((d) => <th key={d} >{DIM_OPTIONS.find((o) => o.key === d)?.label}</th>)}
-                    {shownMetrics.has('Clicks') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('clicks')}>Clicks {orderBy === 'clicks' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
+                    {shownMetrics.has('Clicks') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort(FLEX_COLUMN_SORT.Clicks)}>Clicks {orderBy === FLEX_COLUMN_SORT.Clicks ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
                     {shownMetrics.has('Total CV') && <th className="cursor-pointer whitespace-nowrap px-4 py-3 text-right font-semibold" onClick={() => toggleSort('total_conversions')}>Total CV {orderBy === 'total_conversions' ? (orderDir === 'desc' ? '↓' : '↑') : ''}</th>}
                     {shownMetrics.has('RPA') && <th className="text-right font-semibold">RPA</th>}
                     {shownMetrics.has('CPA') && <th className="text-right font-semibold">CPA</th>}
