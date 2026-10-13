@@ -17,6 +17,7 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend admin key — **never leaves backend** | — |
 | `SUPABASE_JWT_SECRET` | HS256 fallback for test tokens | — |
 | `PLATFORM_ADMIN_JWT_SECRET` | Super admin JWT secret | — |
+| `SETTINGS_ENC_KEY` | Encrypts integration credentials + the SMTP password in `networks.settings` (AES-256-GCM). 32 bytes as 64 hex chars or base64 (`openssl rand -hex 32`). **Required — boot fails without it.** Keep it stable and backed up: stored secrets can't be read without it | — |
 
 ### Optional
 | Variable | Purpose | Default |

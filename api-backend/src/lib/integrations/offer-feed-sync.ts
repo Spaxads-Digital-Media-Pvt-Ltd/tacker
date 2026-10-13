@@ -5,7 +5,7 @@
 import { query } from '../db/pool.js';
 import { invalidateOfferConfig } from '../../surfaces/tracking/offer-cache.js';
 import { safeRequest, BlockedDestinationError, type SafeResponse } from '../net/safe-http.js';
-import { loadIntegrations, saveIntegrations, type IntegrationSettings } from './settings.js';
+import { loadIntegrations, saveIntegrations, secretValue, type IntegrationSettings } from './settings.js';
 
 export interface FeedOffer {
   id: string;
@@ -197,7 +197,7 @@ export async function syncOfferFeed(networkId: string): Promise<SyncResult> {
   if (!adv[0]) return { pulled: 0, created: 0, updated: 0, error: 'advertiser_not_found' };
 
   try {
-    const offers = await fetchFeed(url, cfg.offerFeedKey);
+    const offers = await fetchFeed(url, secretValue(cfg, 'offerFeedKey') ?? undefined); // key stored encrypted (F-07)
     let created = 0;
     let updated = 0;
     for (const offer of offers) {

@@ -57,6 +57,7 @@ jobs:
       REDIS_URL: redis://localhost:6379
       SUPABASE_JWT_SECRET: ci-test-jwt-secret
       PLATFORM_ADMIN_JWT_SECRET: plat-test-secret-do-not-use-in-prod
+      SETTINGS_ENC_KEY: 7465737420736574746e6773206b6579202d20646f206e6f74207573652121ff
       INTEGRATION_DB: '1'
     steps:
       - uses: actions/checkout@v4

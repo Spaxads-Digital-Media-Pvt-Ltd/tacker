@@ -125,6 +125,11 @@ dashboardAuth
 - Verified (timing-safe) in `conversions/record.ts`; **fails closed** — no configured code means the postback is rejected, not accepted
 - Rides on the Redis-cached offer config; Settings › Security regenerate/clear and the offer security-code endpoints invalidate it
 
+### Settings Secrets (integration credentials, SMTP password)
+- Every integration setting whose name ends in key/token/secret/password (IPQS, FB access token, offer-feed key, Pin API key, the catalog API keys, ...) and the SMTP password are **encrypted at rest** (AES-256-GCM, `lib/crypto/secret-box.ts`, `SETTINGS_ENC_KEY`) and **never returned to the browser**: `GET /api/settings` shows `<key>Set` / `passwordSet` booleans to every role
+- Decrypted only where used (`secretValue()` in IPQS, Facebook CAPI, offer-feed sync; the mailer). Legacy plaintext still reads; `npm run settings:secrets -- encrypt` converts it (`decrypt` undoes)
+- The network postback secure code (`GET /api/settings/security`) is shown to admin/manager only
+
 ### Host Header Validation
 - Tracking surface: tenant resolved from `Host` header
 - `resolveHostToNetwork(host)` validates against configured tracking domains
@@ -142,6 +147,7 @@ dashboardAuth
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend only (admin operations) | **Never** in frontend |
 | `SUPABASE_JWT_SECRET` | Backend only (HS256 verification) | **Never** in frontend |
 | `PLATFORM_ADMIN_JWT_SECRET` | Platform admin only | **Never** in frontend |
+| `SETTINGS_ENC_KEY` | Backend only (settings secrets at rest) | **Never** in frontend; losing it makes stored secrets unreadable |
 | `ANTHROPIC_API_KEY` | AI ops layer | **Never** in frontend |
 | `DATABASE_URL` | Backend only | **Never** in frontend |
 | `REDIS_URL` | Backend only | **Never** in frontend |

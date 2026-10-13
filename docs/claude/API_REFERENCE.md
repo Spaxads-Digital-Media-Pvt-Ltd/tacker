@@ -38,7 +38,7 @@
 | GET,POST,PATCH,DELETE | `/api/ai/*` | AI ops (`POST /chat` spends the Anthropic budget: admin/manager) | admin |
 | GET,POST,PATCH,DELETE | `/api/tags/*` | Tag management | admin |
 | GET,POST,PATCH,DELETE | `/api/custom-fields/*` | Custom fields | admin |
-| GET,POST,PATCH,DELETE | `/api/settings/*` | Settings | admin |
+| GET,POST,PATCH,DELETE | `/api/settings/*` | Settings. Secrets never come back: `GET /api/settings` returns `smtp.passwordSet` and `integrations.<key>Set` for every credential (keys ending in key/token/secret/password). `PUT /integrations`: a non-empty credential replaces the stored one (encrypted), `''` keeps it, `null` removes it (`pinApiKey: ''` still revokes the Pin API key). `GET /security` (postback secure code): admin/manager | admin |
 | GET,POST,PATCH,DELETE | `/api/smart-links/*` | Smart links | admin |
 | GET,POST,PATCH,DELETE | `/api/offline/*` | Offline conversions (POST `/conversions` = Add Conversion: admin/manager, manual-conversion policy below) | admin |
 | GET,POST,PATCH,DELETE | `/api/import-export/*` | Import/Export | admin |

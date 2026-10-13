@@ -19,7 +19,8 @@ docker compose up -d redis postgres
 # 3. Backend
 cd api-backend
 cp .env.example .env
-# Edit .env: fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET
+# Edit .env: fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET,
+# and SETTINGS_ENC_KEY (openssl rand -hex 32)
 npm install
 npm run migrate
 npm run dev
@@ -130,6 +131,7 @@ Required:
 - `SUPABASE_SERVICE_ROLE_KEY` — Supabase admin key
 - `SUPABASE_JWT_SECRET` — For HS256 test token verification
 - `PLATFORM_ADMIN_JWT_SECRET` — Super admin JWT secret
+- `SETTINGS_ENC_KEY` — Encryption key for settings secrets (32 bytes hex/base64). After first deploying it, run `npm run settings:secrets -- encrypt` once to encrypt values stored before (`decrypt` undoes it)
 
 Optional:
 - `SENTRY_DSN` — Error tracking

@@ -10,6 +10,17 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+/** SETTINGS_ENC_KEY → the 32-byte key (64 hex chars, or base64/base64url of 32 bytes); null if malformed. */
+export function settingsKeyBytes(raw: string): Buffer | null {
+  const v = raw.trim();
+  if (/^[0-9a-f]{64}$/i.test(v)) return Buffer.from(v, 'hex');
+  if (/^[A-Za-z0-9+/_-]{43}={0,1}$/.test(v)) {
+    const b = Buffer.from(v.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    if (b.length === 32) return b;
+  }
+  return null;
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z
@@ -25,6 +36,11 @@ const schema = z.object({
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
 
   PLATFORM_ADMIN_JWT_SECRET: z.string().min(1),
+
+  // Encrypts integration credentials + the SMTP password stored in networks.settings (AES-256-GCM,
+  // lib/crypto/secret-box.ts). Required — these are real third-party secrets. 32 bytes, as 64 hex
+  // chars or base64 (e.g. `openssl rand -hex 32`). Losing it makes stored secrets unreadable.
+  SETTINGS_ENC_KEY: z.string().refine((v) => settingsKeyBytes(v) !== null, 'must be 32 bytes: 64 hex chars or base64'),
 
   REDIS_URL: z.string().url(),
 

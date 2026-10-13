@@ -138,6 +138,8 @@ function ConfigureModals({
 
   const cur = settings?.integrations ?? {};
   const smtp = settings?.smtp ?? {};
+  // Credentials never come back from GET /api/settings — only `<key>Set` (true when one is stored).
+  const isSet = (key: string) => Boolean(cur[`${key}Set`]);
 
   useEffect(() => {
     if (!active) return;
@@ -207,7 +209,7 @@ function ConfigureModals({
         <form onSubmit={saveApiKey} className="space-y-3">
           {putIntegrations.error && <p className="text-small text-danger-text">{putIntegrations.error}</p>}
           <Field label={active.label ?? 'API Key'}>
-            <input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={cur[active.settingsKey!] ? '•••••••• (leave blank to keep)' : ''} required={!cur[active.settingsKey!]} />
+            <input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={isSet(active.settingsKey!) ? '•••••••• (leave blank to keep)' : ''} required={!isSet(active.settingsKey!)} />
           </Field>
           <p className="text-tiny text-fg-muted">Credentials are stored in network settings and used to mark this integration connected.</p>
           <button type="submit" className="btn-primary" disabled={putIntegrations.busy}>{putIntegrations.busy ? 'Saving…' : 'Save integration'}</button>
@@ -217,7 +219,7 @@ function ConfigureModals({
         <form onSubmit={saveShopify} className="space-y-3">
           {putIntegrations.error && <p className="text-small text-danger-text">{putIntegrations.error}</p>}
           <Field label="Shopify Store URL"><input className="input" value={shopifyUrl} onChange={(e) => setShopifyUrl(e.target.value)} placeholder="https://yourstore.myshopify.com" required /></Field>
-          <Field label="Admin API Key"><input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={cur['shopifyApiKey'] ? '••••••••' : ''} /></Field>
+          <Field label="Admin API Key"><input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={isSet('shopifyApiKey') ? '••••••••' : ''} /></Field>
           <button type="submit" className="btn-primary" disabled={putIntegrations.busy}>{putIntegrations.busy ? 'Saving…' : 'Save integration'}</button>
         </form>
       )}
@@ -233,7 +235,7 @@ function ConfigureModals({
         <form onSubmit={saveFb} className="space-y-3">
           {putIntegrations.error && <p className="text-small text-danger-text">{putIntegrations.error}</p>}
           <Field label="Dataset / Pixel ID"><input className="input" value={fbForm.fbPixelId} onChange={(e) => setFbForm((f) => ({ ...f, fbPixelId: e.target.value }))} placeholder={cur['fbPixelId'] ? String(cur['fbPixelId']) : ''} /></Field>
-          <Field label="Access Token"><input className="input" type="password" value={fbForm.fbAccessToken} onChange={(e) => setFbForm((f) => ({ ...f, fbAccessToken: e.target.value }))} placeholder={cur['fbAccessToken'] ? '••••••••' : ''} /></Field>
+          <Field label="Access Token"><input className="input" type="password" value={fbForm.fbAccessToken} onChange={(e) => setFbForm((f) => ({ ...f, fbAccessToken: e.target.value }))} placeholder={isSet('fbAccessToken') ? '••••••••' : ''} /></Field>
           <button type="submit" className="btn-primary" disabled={putIntegrations.busy}>{putIntegrations.busy ? 'Saving…' : 'Save integration'}</button>
         </form>
       )}

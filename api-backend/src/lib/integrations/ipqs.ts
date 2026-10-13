@@ -3,7 +3,8 @@
  * path) for offers with "Enable IPQualityScore Fraud Detection" on, using the network's API key from
  * Integrations. Fail-open: no key / timeout / API error → null, click persists unchanged.
  */
-import { loadIntegrations } from './settings.js';
+import { loadIntegrations, secretValue } from './settings.js';
+import { logger } from '../logger.js';
 
 const KEY_TTL_MS = 60_000;
 const keyCache = new Map<string, { key: string | null; at: number }>();
@@ -12,7 +13,12 @@ async function apiKeyFor(networkId: string): Promise<string | null> {
   const hit = keyCache.get(networkId);
   if (hit && Date.now() - hit.at < KEY_TTL_MS) return hit.key;
   const cfg = await loadIntegrations(networkId);
-  const key = typeof cfg['ipQualityScoreApiKey'] === 'string' && cfg['ipQualityScoreApiKey'] ? (cfg['ipQualityScoreApiKey'] as string) : null;
+  let key: string | null = null;
+  try {
+    key = secretValue(cfg, 'ipQualityScoreApiKey'); // stored encrypted (F-07)
+  } catch (err) {
+    logger.warn({ err, networkId }, 'IPQS API key could not be decrypted — lookups skipped');
+  }
   keyCache.set(networkId, { key, at: Date.now() });
   return key;
 }

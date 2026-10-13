@@ -5,6 +5,7 @@
  */
 import nodemailer from 'nodemailer';
 import { query } from './db/pool.js';
+import { decryptSecret } from './crypto/secret-box.js';
 
 interface SmtpSettings {
   host?: string;
@@ -43,12 +44,18 @@ export async function sendNetworkEmail(
       configError: 'SMTP is not fully configured yet — set Host, Username, Password and From Email in Settings › SMTP before sending.',
     };
   }
+  let pass: string;
+  try {
+    pass = decryptSecret(smtp.password); // stored encrypted (F-07); legacy plaintext passes through
+  } catch {
+    return { sent: 0, results: [], configError: "The stored SMTP password can't be decrypted — re-enter it in Settings › SMTP." };
+  }
 
   const transport = nodemailer.createTransport({
     host: smtp.host,
     port: smtp.port ?? 587,
     secure: Boolean(smtp.secure),
-    auth: { user: smtp.username, pass: smtp.password },
+    auth: { user: smtp.username, pass },
   });
 
   const from = smtp.fromName ? `"${smtp.fromName}" <${smtp.fromEmail}>` : smtp.fromEmail;

@@ -2,7 +2,7 @@
  * Facebook Conversions API — server-side Purchase/Lead events on approved conversions.
  * https://developers.facebook.com/docs/marketing-api/conversions-api
  */
-import { loadIntegrations } from './settings.js';
+import { loadIntegrations, secretValue } from './settings.js';
 
 export interface FacebookCapiEvent {
   networkId: string;
@@ -25,7 +25,12 @@ function mapEventName(event: string | null): string {
 export async function sendFacebookCapiEvent(input: FacebookCapiEvent): Promise<{ ok: boolean; error?: string }> {
   const cfg = await loadIntegrations(input.networkId);
   const pixelId = cfg.fbPixelId;
-  const accessToken = cfg.fbAccessToken;
+  let accessToken: string | null;
+  try {
+    accessToken = secretValue(cfg, 'fbAccessToken'); // stored encrypted (F-07)
+  } catch {
+    return { ok: false, error: 'access_token_unreadable' };
+  }
   if (!pixelId || !accessToken) return { ok: false, error: 'not_configured' };
 
   const eventTime = Math.floor(Date.now() / 1000);

@@ -143,7 +143,7 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
   const [key, setKey] = useState('');
   const { run, busy, error } = useMutation((values: Record<string, unknown>) => api.put('/api/settings/integrations', { values }));
   const urlSet = Boolean(cur['offerFeedUrl']);
-  const keySet = Boolean(cur['offerFeedKey']);
+  const keySet = Boolean(cur['offerFeedKeySet']); // the key itself is never sent to the browser
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -451,7 +451,7 @@ function FeedsTab() {
               { label: 'Sync Frequency', value: (cur['offerFeedSyncFrequency'] as string) || '—' },
               { label: 'Default Advertiser', value: advertiserName ?? '—' },
               { label: 'Feed URL', value: url ?? '—' },
-              { label: 'Feed API Key', value: cur['offerFeedKey'] ? '••••••••' : '—' },
+              { label: 'Feed API Key', value: cur['offerFeedKeySet'] ? '••••••••' : '—' },
               { label: 'Last Full Sync', value: lastFullSync },
               { label: 'Total Offers', value: totalOffers },
             ]} />

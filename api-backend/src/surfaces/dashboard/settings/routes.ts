@@ -1,9 +1,10 @@
 /**
  * Network settings (spec feature-depth) — general, SMTP/email, and integrations. Stored in the
  * networks.settings jsonb (+ core columns name/default_currency for general). Admin-only; writes
- * require admin. The SMTP password is a secret: it's stored but NEVER returned to the client — GET
- * returns passwordSet:boolean instead, and a write only changes it when a non-empty value is sent
- * (spec §3A: secrets don't leave the server).
+ * require admin. Secrets — the SMTP password and every integration credential — are encrypted at
+ * rest and NEVER returned to the client: GET returns passwordSet / `<key>Set` booleans instead, and a
+ * write only changes a secret when a non-empty value is sent (spec §3A: secrets don't leave the
+ * server; audit F-07).
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -21,6 +22,8 @@ import { enqueueOfferFeedSync } from '../../../lib/integrations/enqueue.js';
 import { getIntegrationStatus } from '../../../lib/integrations/status.js';
 import { getCategoryCatalog, getAllCatalogs, categoryFromTab } from '../../../lib/integrations/catalog.js';
 import { invalidateNetworkOfferConfigs } from '../../tracking/offer-cache.js';
+import { maskIntegrations, mergeIntegrationsPatch } from '../../../lib/integrations/settings.js';
+import { encryptSecret } from '../../../lib/crypto/secret-box.js';
 
 interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
@@ -59,7 +62,7 @@ const integrationsSchema = z.object({
 export function settingsRoutes(): Router {
   const r = Router();
 
-  // Read everything (SMTP password masked).
+  // Read everything (SMTP password and integration credentials masked).
   r.get('/', asyncHandler(async (req, res) => {
     const net = await loadNetwork(req.scope!.networkId);
     const s = net.settings ?? {};
@@ -68,7 +71,7 @@ export function settingsRoutes(): Router {
     sendOk(res, {
       general: { nid: Number(net.ref), name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
       smtp: { ...smtpSafe, passwordSet: Boolean(password) },
-      integrations: (s['integrations'] as object) ?? {},
+      integrations: maskIntegrations((s['integrations'] as Record<string, unknown> | undefined) ?? {}),
     });
   }));
 
@@ -99,7 +102,7 @@ export function settingsRoutes(): Router {
     for (const k of ['host', 'port', 'username', 'fromEmail', 'fromName', 'secure'] as const) {
       if (b[k] !== undefined) smtp[k] = b[k];
     }
-    if (b.password) smtp['password'] = b.password; // only overwrite when a real value is sent
+    if (b.password) smtp['password'] = encryptSecret(b.password); // only overwrite when a real value is sent
     await saveSettings(networkId, { ...net.settings, smtp });
     await writeAudit(req, { action: 'settings.smtp.update', entityType: 'network', entityId: networkId });
     sendOk(res, { ok: true });
@@ -111,7 +114,10 @@ export function settingsRoutes(): Router {
     const b = req.body as z.infer<typeof integrationsSchema>;
     const net = await loadNetwork(networkId);
     const prev = (net.settings?.['integrations'] as Record<string, unknown> | undefined) ?? {};
-    const integrations = { ...prev, ...b.values };
+    // Credentials are encrypted; '' keeps a stored one (the UI never gets them back to re-send).
+    const integrations = mergeIntegrationsPatch(prev, b.values);
+    // ...except pinApiKey: '' has always meant "revoke the Pin API key".
+    if (b.values['pinApiKey'] === '') delete integrations['pinApiKey'];
     const now = new Date().toISOString();
     if (b.values['offerFeedName'] && !prev['offerFeedCreatedAt']) integrations['offerFeedCreatedAt'] = now;
     if (Object.keys(b.values).some((k) => k.startsWith('offerFeed'))) integrations['offerFeedModifiedAt'] = now;
@@ -166,8 +172,9 @@ export function settingsRoutes(): Router {
     sendOk(res, result);
   }));
 
-  // Global postback secure_code — the code the tracking /postback requires by default (offer code overrides).
-  r.get('/security', asyncHandler(async (req, res) => {
+  // Global postback secure_code — the code the tracking /postback requires by default (offer code
+  // overrides). It authenticates S2S conversions, so only the roles that configure integrations see it.
+  r.get('/security', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
     const { rows } = await query<{ postback_security_code: string | null }>(
       'SELECT postback_security_code FROM networks WHERE id = $1', [req.scope!.networkId]);
     sendOk(res, { securityCode: rows[0]?.postback_security_code ?? null });
