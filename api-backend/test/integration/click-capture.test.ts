@@ -106,6 +106,34 @@ d('click capture: IP / user agent from the real request (live DB + Redis)', () =
     });
   });
 
+  describe('browser prefetch / prerender is not a click (paste into Chrome counted 2)', () => {
+    const jobCount = async () => (await getQueue(QUEUE.clickPersist).getJobs(['waiting', 'delayed', 'active', 'completed', 'failed'])).length;
+    const raw = (headers: Record<string, string>) =>
+      track.inject({ method: 'GET', url: `/click?offer_id=${fx.offerA}&pub_id=${fx.pubA1}`, headers: { host, 'user-agent': CHROME_WIN, ...headers }, remoteAddress: '127.0.0.1' });
+
+    it("paste → Enter: Chrome's speculative load records nothing, the real navigation records exactly one click", async () => {
+      const before = await jobCount();
+      const spec = await raw({ 'sec-purpose': 'prefetch;prerender' });
+      expect(spec.statusCode).toBe(503);
+      expect(spec.headers['cache-control']).toBe('no-store');
+      expect(spec.headers.location).toBeUndefined();
+      expect(await jobCount()).toBe(before);
+
+      const nav = await raw({ 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' });
+      expect(nav.statusCode).toBe(302);
+      expect(await jobCount()).toBe(before + 1);
+      expect(await job(clickIdFrom(nav.headers.location as string))).toMatchObject({ browser: 'Chrome 155.0.0.0' });
+    });
+    it('a prefetch-only visit (never navigated) records no click — for every prefetch header form', async () => {
+      const before = await jobCount();
+      const forms: Record<string, string>[] = [{ 'sec-purpose': 'prefetch' }, { purpose: 'prefetch' }, { 'x-purpose': 'preview' }, { 'x-moz': 'prefetch' }];
+      for (const h of forms) {
+        expect((await raw(h)).statusCode, JSON.stringify(h)).toBe(503);
+      }
+      expect(await jobCount()).toBe(before);
+    });
+  });
+
   describe('source / fbclid / gclid from the click URL', () => {
     const clickWith = async (qs: string) => {
       const r = await track.inject({ method: 'GET', url: `/click?offer_id=${fx.offerA}&pub_id=${fx.pubA1}&${qs}`, headers: { host, 'user-agent': CHROME_WIN }, remoteAddress: '127.0.0.1' });

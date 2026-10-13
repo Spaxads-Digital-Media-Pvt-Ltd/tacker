@@ -210,6 +210,8 @@ No API-key response carries a secret: `/api/v1/network/offers` uses `toNetworkAp
 - `geo` / `test_geo` — Force country (dev/testing)
 - `sl` — Smart link ID (when routed via smart link)
 
+Speculative loads are not clicks: a `/click` request carrying `Sec-Purpose: prefetch…` (Chrome prefetch / prerender, e.g. from the address bar), `Purpose: prefetch`, `X-Purpose: preview` or `X-Moz: prefetch` gets `503` with `Cache-Control: no-store` and records nothing (no click, no Redis key, no queue job; metric outcome `speculative`). The browser then makes the real navigation, which is counted once (`isSpeculativeLoad` in `surfaces/tracking/click-params.ts`).
+
 ### Postback Parameters
 - `click_id` (required) — The click to attribute to
 - `txn_id` / `transaction_id` / `tid` — External transaction ID. Idempotency key: a repeat for the same offer is `duplicate` (Redis guard + DB unique `(offer_id, transaction_id)`), never a second conversion or ledger entry

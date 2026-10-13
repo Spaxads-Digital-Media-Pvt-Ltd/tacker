@@ -4,7 +4,31 @@
  * values are kept exactly as sent and the existing precedence (source_id → source → src) holds.
  */
 import { describe, it, expect } from 'vitest';
-import { SOURCE_PARAMS, blankToNull, firstNonBlank } from '../../src/surfaces/tracking/click-params.js';
+import { SOURCE_PARAMS, blankToNull, firstNonBlank, isSpeculativeLoad } from '../../src/surfaces/tracking/click-params.js';
+
+describe('isSpeculativeLoad — a browser prefetch / prerender is not a click', () => {
+  it("Chrome's address-bar / Speculation Rules loads (Sec-Purpose), any case, any token order", () => {
+    for (const v of ['prefetch', 'prefetch;prerender', 'Prefetch; Prerender', 'prefetch;anonymous-client-ip']) {
+      expect(isSpeculativeLoad({ 'sec-purpose': v }), v).toBe(true);
+    }
+  });
+  it('older forms: Purpose: prefetch, X-Purpose: preview (Safari), X-Moz: prefetch (Firefox)', () => {
+    expect(isSpeculativeLoad({ purpose: 'prefetch' })).toBe(true);
+    expect(isSpeculativeLoad({ 'x-purpose': 'preview' })).toBe(true);
+    expect(isSpeculativeLoad({ 'x-moz': 'prefetch' })).toBe(true);
+    expect(isSpeculativeLoad({ 'sec-purpose': ['prefetch'] })).toBe(true);
+  });
+  it('an ordinary navigation is a click', () => {
+    expect(isSpeculativeLoad({})).toBe(false);
+    expect(isSpeculativeLoad({ 'user-agent': 'Mozilla/5.0', accept: 'text/html' })).toBe(false);
+    expect(isSpeculativeLoad({ 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' })).toBe(false);
+  });
+  it('unrelated values do not count as speculative', () => {
+    expect(isSpeculativeLoad({ 'sec-purpose': 'prefetchx' })).toBe(false);
+    expect(isSpeculativeLoad({ purpose: 'preview' })).toBe(false);
+    expect(isSpeculativeLoad({ 'x-purpose': 'prefetch-something' })).toBe(false);
+  });
+});
 
 describe('blankToNull', () => {
   it('missing / blank / whitespace-only → null', () => {
