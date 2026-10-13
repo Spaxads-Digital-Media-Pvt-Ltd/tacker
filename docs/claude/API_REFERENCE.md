@@ -8,6 +8,7 @@
 | POST | `/api/auth/login` | Login with email+password | None | `{ email, password }` |
 | POST | `/api/auth/refresh` | Refresh access token via cookie | None (uses cookie) | — |
 | POST | `/api/auth/logout` | Clear refresh cookie | None | — |
+| POST | `/api/signup/partner` | Partner self-serve sign-up (see Portal logins below) | None (per-IP limit in production) | `{ network: <slug>, name, email, contactName?, website?, trafficSource?, country? }` |
 
 ### Identity
 | Method | Endpoint | Purpose | Auth | Returns |
@@ -148,6 +149,16 @@ Decisions (kept on purpose):
 | GET | `/api/advertisers/:id/events` | Advertiser's events = goals (`offer_goals`) on its offers, with `offerId`/`offerName`/`offerRef` ("Associated to") | admin (any role) |
 | POST | `/api/advertisers/:id/events` | Create an event: goal body + `offerId` (must be one of this advertiser's offers); currency defaults to the offer's | admin/manager |
 | PATCH,DELETE | `/api/advertisers/:id/events/:eventId` | Edit/delete an event of this advertiser (the offer can't be changed). Same rules, audit and cache invalidation as `/api/offers/:id/goals` | admin/manager |
+
+### Portal logins (invites + sign-up)
+Partners and advertisers get a portal login in-product (`lib/portal-invite.ts`, `lib/provisioning.ts` `ensurePortalLogin`):
+- `POST /api/publishers/:id/invite`, `POST /api/advertisers/:id/invite` (admin/manager) — creates the Supabase login (claims `kind`, `network_id`, `owner_id`) with a **temporary password**, links it (`auth_user_id`) and emails it to the contact email via the network SMTP. Returns `{ outcome: created|reissued|linked, authUserId, email, emailed, emailError?, credentials? }`.
+  - Idempotent by email: a second invite before they sign in re-issues the same login with a fresh password (`reissued`; follows a changed contact email); an existing, already-used login for the email is linked and its claims re-stamped (`linked`, password untouched, no email).
+  - Errors: no contact email → 400 `details.reason=email_required`; this account's login is already active → 409 `already_active`; the email's login belongs to another account/network/staff → 409 `email_in_use` (never taken over; a login left by a deleted account of the same network is reused); Supabase not configured → 503.
+  - When the email can't be sent (SMTP unset or failing) the login still exists; outside production `credentials: { loginUrl, email, temporaryPassword }` is returned for dev. Never in production — fix SMTP and invite again.
+- Create (`POST /api/publishers`, `POST /api/advertisers`) invites automatically when a `contactEmail` is given, unless the body has `invite: false` or the account is created `inactive`. Best effort: the create never fails because of the invite; the response adds `invited` plus `invite` (as above) or `inviteError`.
+- `POST /api/signup/partner` (unauthenticated): network by slug; creates a partner `pending` (shows in Partners › Pending) — or `active` when Control Center › Partners › Sign Up › Auto Approve Partners is on — and provisions its login the same way (the temporary password goes to the email, so only the inbox owner can sign in). 201 `{ status, emailed, message, credentials? (non-production, when not emailed) }`. One sign-up per email: a partner of this network or a login elsewhere → 409 `already_registered` (no partner left behind). Unknown/suspended network → 404; Supabase not configured → 503.
+- Audit: `publisher.invite` / `advertiser.invite` (never the password); sign-ups write `publisher.signup` with actor `system`.
 
 ### Portal Routes (owner-scoped)
 | Method | Endpoint | Purpose | Auth |

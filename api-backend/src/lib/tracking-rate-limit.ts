@@ -9,7 +9,7 @@
  *
  * Key structure: tr:<scope>:<sha256(ip)>:<bucket_idx>
  * - tr: prefix separates tracking RL keys from login (lr:*) keys
- * - scope: endpoint dimension (click, postback, pixel, iframe, sl)
+ * - scope: endpoint dimension (click, postback, pixel, iframe, sl, postback_click, signup)
  * - sha256(ip): prevents raw IP exposure and special-char injection
  * - bucket_idx: floor(now_ms / 60000)
  *
@@ -43,7 +43,8 @@ export const POSTBACK_PER_CLICK_LIMIT = env.TRACKING_RL_POSTBACK_PER_CLICK_LIMIT
 // Helpers
 // ---------------------------------------------------------------------------
 
-export type TrackingEndpoint = 'click' | 'postback' | 'pixel' | 'iframe' | 'sl' | 'postback_click';
+/** 'signup' = the dashboard's unauthenticated partner sign-up (F-04), which reuses this limiter. */
+export type TrackingEndpoint = 'click' | 'postback' | 'pixel' | 'iframe' | 'sl' | 'postback_click' | 'signup';
 
 function sha256(value: string): string {
  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');

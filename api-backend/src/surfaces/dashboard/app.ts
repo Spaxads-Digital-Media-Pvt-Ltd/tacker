@@ -6,6 +6,7 @@
  *   /api/me                     — any authenticated dashboard user
  *   /api/<entity>               — admin-only, RBAC-gated CRUD (network-scoped)
  *   /api/portal/<kind>/...      — publisher/advertiser portal, owner-scoped self-reads
+ *   /api/auth, /api/signup      — unauthenticated: login/refresh/logout, partner sign-up
  */
 import { Router, type Express } from 'express';
 import { z } from 'zod';
@@ -70,13 +71,16 @@ import { postbackControlsRoutes } from './postback-controls/routes.js';
 import { advertiserInvoicesRoutes } from './advertiser-invoices/routes.js';
 import { tieredCommissionsRoutes } from './tiered-commissions/routes.js';
 import { controlCenterRoutes } from './control-center/routes.js';
+import { signupRoutes } from './signup/routes.js';
 
 export function buildDashboardApp(): Express {
   const app = createBaseApp('dashboard');
   app.use(cookieParser());
 
-  // Unauthenticated auth exchange (login/refresh/logout). Everything else requires an identity.
+  // Unauthenticated auth exchange (login/refresh/logout) and partner self-serve sign-up (F-04).
+  // Everything else requires an identity.
   app.use('/api/auth', authRoutes());
+  app.use('/api/signup', signupRoutes());
 
   const authed = Router();
   authed.use(dashboardAuth);

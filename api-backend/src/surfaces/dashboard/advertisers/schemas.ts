@@ -13,9 +13,11 @@ export const createAdvertiserSchema = z.object({
   verificationToken: z.string().max(200).nullable().optional(),
   // Values for network-defined custom fields → merged into metadata.custom.
   customFields: z.record(z.string(), z.unknown()).optional(),
+  // Create only: send a portal invite when there's a contact email (default) — false skips it (F-04).
+  invite: z.boolean().optional(),
 });
 
-export const updateAdvertiserSchema = createAdvertiserSchema.partial();
+export const updateAdvertiserSchema = createAdvertiserSchema.omit({ invite: true }).partial();
 
 export type CreateAdvertiser = z.infer<typeof createAdvertiserSchema>;
 export type UpdateAdvertiser = z.infer<typeof updateAdvertiserSchema>;

@@ -23,9 +23,11 @@ export const createPublisherSchema = z.object({
   notes: z.string().max(4000).nullable().optional(),
   // Values for network-defined custom fields → merged into metadata.custom.
   customFields: z.record(z.string(), z.unknown()).optional(),
+  // Create only: send a portal invite when there's a contact email (default) — false skips it (F-04).
+  invite: z.boolean().optional(),
 });
 
-export const updatePublisherSchema = createPublisherSchema.partial();
+export const updatePublisherSchema = createPublisherSchema.omit({ invite: true }).partial();
 
 export type CreatePublisher = z.infer<typeof createPublisherSchema>;
 export type UpdatePublisher = z.infer<typeof updatePublisherSchema>;

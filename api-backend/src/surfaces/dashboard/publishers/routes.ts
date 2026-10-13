@@ -34,6 +34,7 @@ import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { badRequest } from '../../../lib/http/errors.js';
+import { invitePortalUser, inviteOnCreate, inviteAuditView } from '../../../lib/portal-invite.js';
 
 const TABLE = 'publishers';
 const POSTBACKS = 'publisher_postbacks';
@@ -182,6 +183,21 @@ export function publishersAdminRoutes(): Router {
     sendOk(res, { link: data.properties.action_link });
   }));
 
+  // Portal invite (audit F-04): give this partner a working portal login — a temporary password
+  // emailed to their contact email — and link it (auth_user_id). Idempotent by email; inviting again
+  // before they sign in re-issues the password. See lib/portal-invite.ts.
+  r.post('/:id/invite', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const pub = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
+    if (!pub) throw notFound('Publisher not found');
+    const invite = await invitePortalUser({
+      networkId: db.scope.networkId, kind: 'publisher', ownerId: pub.id,
+      email: pub.contact_email, linkedAuthUserId: pub.auth_user_id,
+    });
+    await writeAudit(req, { action: 'publisher.invite', entityType: 'publisher', entityId: pub.id, after: inviteAuditView(invite) });
+    sendOk(res, invite);
+  }));
+
   r.get(
     '/:id',
     asyncHandler(async (req, res) => {
@@ -226,7 +242,11 @@ export function publishersAdminRoutes(): Router {
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
       });
       await writeAudit(req, { action: 'publisher.create', entityType: 'publisher', entityId: row.id, after: row });
-      sendOk(res, toAdminDTO((await loadPublisher(nid, row.id)) ?? row), undefined, 201);
+      const invited = await inviteOnCreate({ networkId: nid, kind: 'publisher', row, requested: b.invite });
+      if (invited.invite) {
+        await writeAudit(req, { action: 'publisher.invite', entityType: 'publisher', entityId: row.id, after: inviteAuditView(invited.invite) });
+      }
+      sendOk(res, { ...toAdminDTO((await loadPublisher(nid, row.id)) ?? row), ...invited }, undefined, 201);
     }),
   );
 

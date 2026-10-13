@@ -32,6 +32,7 @@ import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { apiKeyManagementRoutes } from '../api-keys/routes.js';
+import { invitePortalUser, inviteOnCreate, inviteAuditView } from '../../../lib/portal-invite.js';
 
 const TABLE = 'advertisers';
 
@@ -261,7 +262,12 @@ export function advertisersAdminRoutes(): Router {
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
       });
       await writeAudit(req, { action: 'advertiser.create', entityType: 'advertiser', entityId: row.id, after: row });
-      sendOk(res, toAdminDTO(row), undefined, 201);
+      const invited = await inviteOnCreate({ networkId: req.scope!.networkId, kind: 'advertiser', row, requested: b.invite });
+      if (invited.invite) {
+        await writeAudit(req, { action: 'advertiser.invite', entityType: 'advertiser', entityId: row.id, after: inviteAuditView(invited.invite) });
+      }
+      const saved = invited.invite ? await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id: row.id }) : null;
+      sendOk(res, { ...toAdminDTO(saved ?? row), ...invited }, undefined, 201);
     }),
   );
 
@@ -334,6 +340,20 @@ export function advertisersAdminRoutes(): Router {
     if (error || !data?.properties?.action_link) throw badRequest('Could not generate an impersonation link.');
     await writeAudit(req, { action: 'advertiser.impersonate', entityType: 'advertiser', entityId: adv.id });
     sendOk(res, { link: data.properties.action_link });
+  }));
+
+  // Portal invite (audit F-04): same as the partner invite — a temporary password emailed to the
+  // advertiser's contact email, linked via auth_user_id, idempotent by email. See lib/portal-invite.ts.
+  r.post('/:id/invite', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const adv = await db.selectOne<AdvertiserRow>(TABLE, { id: req.params.id });
+    if (!adv) throw notFound('Advertiser not found');
+    const invite = await invitePortalUser({
+      networkId: db.scope.networkId, kind: 'advertiser', ownerId: adv.id,
+      email: adv.contact_email, linkedAuthUserId: adv.auth_user_id,
+    });
+    await writeAudit(req, { action: 'advertiser.invite', entityType: 'advertiser', entityId: adv.id, after: inviteAuditView(invite) });
+    sendOk(res, invite);
   }));
 
   r.get('/:id/history', asyncHandler(async (req, res) => {

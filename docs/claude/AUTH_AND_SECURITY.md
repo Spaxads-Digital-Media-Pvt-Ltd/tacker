@@ -55,7 +55,12 @@ SPA → Updates localStorage, retries original request
 ```
 
 ## Registration Flow
-Not implemented in Phase 0. Provisioning is script-based:
+Portal logins (partners/advertisers) are provisioned in-product — see API_REFERENCE.md "Portal logins":
+- Admin/manager **invite** (`POST /api/{publishers|advertisers}/:id/invite`, also automatic on create when a contact email is given): a Supabase user with the portal claims and a temporary password, emailed via the network SMTP. Idempotent by email; never takes over a login whose claims belong to another account, another network or network staff.
+- Partner **self-serve sign-up** (`POST /api/signup/partner`, unauthenticated, per-IP limited in production): creates a `pending` partner + login. The applicant never chooses the password — it's emailed — so signing up with someone else's address gets the attacker nothing.
+- The SPA has no magic-link callback, so invites use temporary passwords (changed via `PATCH /api/me/password`). Outside production, when the email can't be sent, the response returns the credentials for dev.
+
+Network staff and demo data are still script-based:
 - `provision:demo-admin` — Creates demo network admin
 - `provision:demo-portals` — Creates demo publisher/advertiser portals
 
