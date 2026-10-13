@@ -7,7 +7,6 @@ import type { Offer, Publisher } from '../../types';
 type Row = { id: string; [k: string]: unknown };
 const col = (header: string, cell: (r: Row) => ReactNode): Column<Row> => ({ header, cell });
 const fmt = (iso: unknown) => (iso ? new Date(String(iso)).toLocaleString() : '—');
-const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
 
 const TABS = ['Revenue & Payout', 'Caps', 'Throttle Rates', 'Landing Pages', 'Creatives'] as const;
 type Tab = (typeof TABS)[number];
@@ -24,107 +23,98 @@ const ADD_LABEL: Record<Tab, string> = {
   'Landing Pages': 'Landing Page', Creatives: 'Creative',
 };
 
-/** These rows are a reference catalog — nothing here is applied at the click / ledger path yet
- * (see api-backend offer-custom-settings/routes.ts). Each tab points at the mechanism that IS live. */
+/** These rows are applied per partner at runtime (F-12) — see api-backend
+ * lib/offer-settings/custom-settings.ts. Each tab says what its rows do. */
 const NOT_ENFORCED_NOTE: Record<Tab, string> = {
-  'Revenue & Payout': 'Reference list. Enforced payout/revenue overrides are per-country — set them on the offer (Offer → Custom Settings → Custom Payout Revenue Settings); those are applied at /click and frozen onto the click for the ledger.',
-  Caps: 'Reference list — not applied at the click path. The enforced caps are each offer’s own Daily Click / Conversion Cap (Offer → Tracking & Controls).',
-  'Throttle Rates': 'Reference list — traffic throttling is not applied at the click path yet.',
-  'Landing Pages': 'Reference list — the click path serves the offer’s Destination URL (or a per-country Destination override). Custom landing pages here are not served yet.',
+  'Revenue & Payout': 'Applied per partner: their conversions on the offer (or on the chosen goal) earn this payout / bill this revenue instead of the default, goal, partner or per-country rate. CPA = a fixed amount; CPS = a % of the reported sale amount.',
+  Caps: 'Applied per partner, on top of each offer’s own caps: click caps at /click; conversion, payout and revenue caps as conversions come in.',
+  'Throttle Rates': 'Applied per partner: this share of the partner’s conversions gets the chosen status (rejected unless set to pending).',
+  'Landing Pages': 'Applied per partner at /click: their visitors land here instead of the offer’s Destination URL (or a per-country Destination override).',
   Creatives: 'Reference list. Partner-facing creative assets live in Offers → Creatives.',
 };
-
-/** Offers › Custom Settings — network-wide counterpart to each Offer's own per-country geo-rules.
- * Groups by Partner/Event instead of country. `value`/`event` are the schema's shared generic
- * columns, re-labeled per category below (cap amount, throttle %, landing-page URL, creative name). */
+const PAYOUT_MODELS = ['CPA', 'CPA_PPP', 'CPS', 'CPS_PPP', 'CPA_CPS', 'CPA_CPS_PPP', 'CPC', 'CPM', 'PRV', 'PRV_PPP'];
+const CAP_TYPES = [{ value: 'clicks', label: 'Clicks' }, { value: 'conversions', label: 'Conversions' }, { value: 'payout', label: 'Payout' }, { value: 'revenue', label: 'Revenue' }];
+const CAP_INTERVALS = [{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' }, { value: 'global', label: 'Global (all time)' }];
+const CREATIVE_TYPES = ['image', 'html', 'link', 'text', 'email', 'video', 'archive', 'thumbnail'];
+/** Offers › Custom Settings — network-wide list of each offer's per-partner overrides (the v2
+ * typed columns: payout/revenue, caps, throttle rate, landing page, creative). */
 export default function OfferCustomSettingsGlobal() {
   const [tab, setTab] = useState<Tab>('Revenue & Payout');
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const offerName = (id: unknown) => (offers ?? []).find((o) => o.id === id)?.name ?? '—';
-
   const offerOptions = (offers ?? []).map((o) => ({ value: o.id, label: o.name }));
   const partnerOptions = (publishers ?? []).map((p) => ({ value: p.id, label: p.name }));
+  const partners = (r: Row) => (Array.isArray(r.partnerIds) && r.partnerIds.length ? r.partnerIds.length
+    : r.partnerId ? 1 : 'All');
   const baseFields: FieldDef[] = [
-    { key: 'name', label: 'Name', required: true },
-    { key: 'offerId', label: 'Offer', type: 'select', options: offerOptions },
-    { key: 'partnerIds', label: 'Partners', type: 'multiselect', options: partnerOptions, placeholder: 'Type to search partners…' },
+    { key: 'name', label: 'Name' },
+    { key: 'offerId', label: 'Offer', type: 'select', options: offerOptions, required: true },
+    { key: 'partnerIds', label: 'Partners (empty = all)', type: 'multiselect', options: partnerOptions, placeholder: 'Type to search partners…' },
   ];
-
+  const idCol = col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>);
+  const nameCol = col('Name', (r) => <span className="font-medium text-fg">{r.name ? String(r.name) : '—'}</span>);
+  const offerCol = col('Offer', (r) => offerName(r.offerId));
+  const partnersCol = col('Partners', (r) => <span className="tabular-nums">{partners(r)}</span>);
   const columnsByTab: Record<Tab, Column<Row>[]> = {
     'Revenue & Payout': [
-      col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
-      col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
-      col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
+      idCol, nameCol, offerCol, partnersCol,
+      col('Payout', (r) => (r.applyCustomPayout && r.payoutValue != null ? `${String(r.payoutValue)} (${String(r.payoutModel ?? 'CPA')})` : '—')),
+      col('Revenue', (r) => (r.applyCustomRevenue && r.revenueValue != null ? `${String(r.revenueValue)} (${String(r.revenueModel ?? 'CPA')})` : '—')),
       col('Description', (r) => (r.description ? String(r.description) : '—')),
-      col('Public Description', (r) => (r.publicDescription ? String(r.publicDescription) : '—')),
-      col('Event', (r) => (r.event ? String(r.event) : '—')),
     ],
     Caps: [
-      col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
-      col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
-      col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
-      col('Cap Type', (r) => (r.event ? String(r.event) : '—')),
-      col('Cap Value', (r) => <span className="tabular-nums">{r.value ? Number(r.value).toLocaleString() : '—'}</span>),
+      idCol, nameCol, offerCol, partnersCol,
+      col('Cap Type', (r) => (r.capType ? `${String(r.capType)} / ${String(r.capInterval)}` : 'Multiple')),
+      col('Cap Value', (r) => <span className="tabular-nums">{r.capValue != null ? Number(r.capValue).toLocaleString() : '—'}</span>),
     ],
     'Throttle Rates': [
-      col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
-      col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
-      col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
-      col('Throttle Rate', (r) => <span className="tabular-nums">{r.value ? `${r.value}%` : '—'}</span>),
-      col('Redirect', (r) => (r.description ? String(r.description) : '—')),
+      idCol, nameCol, offerCol, partnersCol,
+      col('Throttle Rate', (r) => <span className="tabular-nums">{r.throttleRate != null ? `${String(r.throttleRate)}%` : '—'}</span>),
+      col('Status Set', (r) => (r.conversionStatus ? String(r.conversionStatus) : 'rejected')),
     ],
     'Landing Pages': [
-      col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
-      col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
-      col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
-      col('URL', (r) => (r.value ? String(r.value) : '—')),
-      col('Weight', (r) => <span className="tabular-nums">{r.event ? String(r.event) : '—'}</span>),
+      idCol, nameCol, offerCol, partnersCol,
+      col('URL', (r) => (r.landingPageUrl ? String(r.landingPageUrl) : '—')),
     ],
     Creatives: [
-      col('ID', (r) => <span className="font-mono text-tiny text-fg-secondary">{String(r.id).slice(0, 8)}</span>),
-      col('Name', (r) => <span className="font-medium text-fg">{String(r.name)}</span>),
-      col('Offer', (r) => offerName(r.offerId)),
-      col('Partners', (r) => <span className="tabular-nums">{count(r.partnerIds)}</span>),
-      col('Creative', (r) => (r.value ? String(r.value) : '—')),
-      col('Weight', (r) => <span className="tabular-nums">{r.event ? String(r.event) : '—'}</span>),
+      idCol, nameCol, offerCol, partnersCol,
+      col('Type', (r) => (r.creativeType ? String(r.creativeType) : '—')),
+      col('Creative', (r) => (r.creativeUrl ? String(r.creativeUrl) : '—')),
     ],
   };
-
   const extraFieldsByTab: Record<Tab, FieldDef[]> = {
     'Revenue & Payout': [
+      { key: 'payoutModel', label: 'Payout Model', type: 'select', options: PAYOUT_MODELS, default: 'CPA' },
+      { key: 'payoutValue', label: 'Payout', type: 'money' },
+      { key: 'revenueModel', label: 'Revenue Model', type: 'select', options: PAYOUT_MODELS, default: 'CPA' },
+      { key: 'revenueValue', label: 'Revenue', type: 'money' },
       { key: 'description', label: 'Description' },
       { key: 'publicDescription', label: 'Public Description' },
-      { key: 'event', label: 'Event' },
     ],
     Caps: [
-      { key: 'event', label: 'Cap Type', type: 'select', options: ['Daily Click Cap', 'Daily Conversion Cap', 'Total Conversion Cap'] },
-      { key: 'value', label: 'Cap Value', type: 'number' },
+      { key: 'capType', label: 'Cap Type', type: 'select', options: CAP_TYPES, default: 'clicks' },
+      { key: 'capInterval', label: 'Cap Window', type: 'select', options: CAP_INTERVALS, default: 'daily' },
+      { key: 'capValue', label: 'Cap Value', type: 'number', required: true },
     ],
     'Throttle Rates': [
-      { key: 'value', label: 'Throttle Rate (%)', type: 'number' },
-      { key: 'description', label: 'Redirect URL', type: 'url' },
+      { key: 'throttleRate', label: 'Throttle Rate (%)', type: 'number', required: true },
+      { key: 'conversionStatus', label: 'Throttled Conversion Status', type: 'select', options: ['rejected', 'pending'], default: 'rejected' },
     ],
     'Landing Pages': [
-      { key: 'value', label: 'URL', type: 'url' },
-      { key: 'event', label: 'Weight', type: 'number' },
+      { key: 'landingPageUrl', label: 'URL', type: 'url', required: true },
     ],
     Creatives: [
-      { key: 'value', label: 'Creative' },
-      { key: 'event', label: 'Weight', type: 'number' },
+      { key: 'creativeType', label: 'Type', type: 'select', options: CREATIVE_TYPES, default: 'image' },
+      { key: 'creativeUrl', label: 'Creative URL', type: 'url' },
     ],
   };
-
   const columns = [...columnsByTab[tab], col('Status', (r) => <Badge value={String(r.status)} />), col('Created', (r) => fmt(r.createdAt))];
   const fields: FieldDef[] = [
     { key: 'category', label: 'Category', type: 'hidden', default: CATEGORY[tab] },
     ...baseFields,
     ...extraFieldsByTab[tab],
-    { key: 'status', label: 'Status', type: 'select', options: ['active', 'paused'], default: 'active' },
+    { key: 'status', label: 'Status', type: 'select', options: ['active', 'inactive'], default: 'active' },
   ];
 
   return (
@@ -142,7 +132,7 @@ export default function OfferCustomSettingsGlobal() {
           addLabel={ADD_LABEL[tab]}
           emptyText="No custom settings yet."
           editable
-          searchKeys={['name', 'description', 'publicDescription', 'value', 'event']}
+          searchKeys={['name', 'description', 'publicDescription', 'landingPageUrl', 'creativeUrl']}
           searchPlaceholder="Search by name…"
           fields={fields}
           columns={columns}

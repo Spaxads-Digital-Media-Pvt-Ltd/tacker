@@ -24,7 +24,8 @@ import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
 import { evaluateGeoRules, resolveForcedGeo } from './geo-rules.js';
 import { checkTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT } from '../../lib/tracking-rate-limit.js';
-import { isClickCapped } from './caps.js';
+import { isClickCapped, isCustomClickCapped } from './caps.js';
+import { applicableSettings } from '../../lib/offer-settings/custom-settings.js';
 import { markUnique } from './dedup.js';
 import { fraudPreSignals } from './fraud-presignals.js';
 import { buildMacros, substituteMacros } from './macros.js';
@@ -265,6 +266,13 @@ export function buildTrackingApp(): FastifyInstance {
  // 5. Cap check (atomic).
  if (await isClickCapped(offer.id, offer.dailyClickCap)) return divert(reply, offer.fallbackUrl, offer.id);
 
+ // 5b. Offer Custom Settings for this partner (F-12): their click caps, and (step 11) landing page.
+ const clickAttrs = { country, device: ua.device, os: ua.os, browser: ua.browser };
+ const customFor = (category: 'caps' | 'landing_pages') =>
+ (publisherId && offer.customSettings?.length ? applicableSettings(offer.customSettings, category, publisherId, clickAttrs, new Date()) : []);
+ const customCaps = customFor('caps');
+ if (customCaps.length && await isCustomClickCapped(customCaps, publisherId!)) return divert(reply, offer.fallbackUrl, offer.id);
+
  // 6. Unique / dedup.
  const isUnique = ip ? await markUnique(offer.id, ip, offer.dedupWindowS) : true;
 
@@ -306,12 +314,15 @@ export function buildTrackingApp(): FastifyInstance {
  offer_id: offer.id, publisher_id: publisherId, created_at: job.ts,
  resolved_payout: resolvedPayout, resolved_revenue: resolvedRevenue, currency: offer.currency,
  sub1: job.sub1, sub2: job.sub2, sub3: job.sub3, sub4: job.sub4, sub5: job.sub5,
+ ...clickAttrs,
  },
  offer.attributionWindowS,
  );
 
  // 11. Build destination with macros and 302 out — the fastest exit.
- const dest = geoDecision.destinationOverride ?? offer.destinationUrl;
+ // A partner's custom landing page (Offer Custom Settings, F-12) beats a per-country destination.
+ const customLanding = customFor('landing_pages').find((c) => c.landingPageUrl)?.landingPageUrl;
+ const dest = customLanding ?? geoDecision.destinationOverride ?? offer.destinationUrl;
  const finalUrl = substituteMacros(
  dest,
  buildMacros({ clickId, offerId: offer.id, publisherId, country: country ?? undefined, device: ua.device, subs }),

@@ -10,6 +10,7 @@ import {
   readTargeting, readAttribution, readRevenue,
   type OfferTargeting, type AttributionSettings, type RevenueSettings,
 } from '../../lib/offer-settings/index.js';
+import type { CustomSettingConfig, CustomCategory, CapsMatrix, CustomTargeting } from '../../lib/offer-settings/custom-settings.js';
 
 export interface GeoRuleConfig {
   country: string;
@@ -77,6 +78,9 @@ export interface OfferConfig {
    * dashboard "Fire Partner Postback" toggle). Unset/non-boolean metadata defaults to true so
    * existing offers keep firing postbacks as they always have (backward compatible). */
   firePartnerPostback: boolean;
+  /** Active per-partner Offer Custom Settings (F-12; lib/offer-settings/custom-settings.ts) — undefined
+   * only on a config cached before they were loaded (≤ cache TTL). */
+  customSettings?: CustomSettingConfig[];
   /** Targeting rules (Edit Offer › Targeting) enforced at /click. */
   targeting: OfferTargeting;
   attribution: AttributionSettings;
@@ -187,6 +191,26 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     [networkId, offerId],
   );
 
+  // Offer Custom Settings (F-12): active, not yet expired (a future start is checked when applied).
+  // Creatives are partner-facing assets, not click/conversion behaviour, so they aren't loaded.
+  const csRes = await query<{
+    id: string; category: CustomCategory; partner_id: string | null; partner_ids: string[] | null; apply_all_partners: boolean;
+    effective_from: string | null; effective_to: string | null; targeting: CustomTargeting | null;
+    apply_custom_payout: boolean; payout_model: string | null; payout_value: string | null;
+    apply_custom_revenue: boolean; revenue_model: string | null; revenue_value: string | null;
+    goal_id: string | null; fire_partner_postback: boolean; caps: CapsMatrix | null;
+    throttle_rate: string | null; conversion_status: 'rejected' | 'pending' | null; landing_page_url: string | null;
+  }>(
+    `SELECT id, category, partner_id, partner_ids, apply_all_partners, effective_from, effective_to, targeting,
+            apply_custom_payout, payout_model, payout_value::text, apply_custom_revenue, revenue_model, revenue_value::text,
+            goal_id, fire_partner_postback, caps, throttle_rate::text, conversion_status, landing_page_url
+       FROM offer_custom_settings
+      WHERE network_id = $1 AND offer_id = $2 AND status = 'active' AND category <> 'creatives'
+        AND (effective_to IS NULL OR effective_to > now())
+      ORDER BY created_at, id`,
+    [networkId, offerId],
+  );
+
   return {
     id: r.id, networkId: r.network_id, advertiserId: r.advertiser_id, status: r.status,
     destinationUrl: r.destination_url, fallbackUrl: r.fallback_url, payoutModel: r.payout_model,
@@ -212,5 +236,17 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     targeting: readTargeting(r.metadata),
     attribution: readAttribution(r.metadata),
     revenue: readRevenue(r.metadata),
+    customSettings: csRes.rows.map((c): CustomSettingConfig => {
+      const partnerIds = [...new Set([...(c.partner_id ? [c.partner_id] : []), ...(c.partner_ids ?? [])])];
+      return {
+        id: c.id, category: c.category,
+        allPartners: c.apply_all_partners || partnerIds.length === 0, partnerIds,
+        effectiveFrom: c.effective_from, effectiveTo: c.effective_to, targeting: c.targeting ?? {},
+        payoutModel: c.payout_model, payout: c.apply_custom_payout ? c.payout_value : null,
+        revenueModel: c.revenue_model, revenue: c.apply_custom_revenue ? c.revenue_value : null,
+        goalId: c.goal_id, firePartnerPostback: c.fire_partner_postback, caps: c.caps ?? {},
+        throttleRate: c.throttle_rate, conversionStatus: c.conversion_status, landingPageUrl: c.landing_page_url,
+      };
+    }),
   };
 }

@@ -16,9 +16,13 @@ import { randomUUID } from 'node:crypto';
 import { pool, query } from '../../../lib/db/pool.js';
 import type { PoolClient } from 'pg';
 import { getRedis } from '../../../lib/redis.js';
-import { addMoney, normalizeMoney, percentOfMoney } from '../../../lib/money.js';
+import { addMoney, subMoney, moneySign, normalizeMoney, percentOfMoney } from '../../../lib/money.js';
 import { getOfferConfig } from '../offer-cache.js';
 import { isActivePartner } from '../partner-status.js';
+import {
+ applicableSettings, customPricing, capLimits, capWindowStart,
+ type ClickAttrs, type CustomSettingConfig,
+} from '../../../lib/offer-settings/custom-settings.js';
 import { getStoredClick, type StoredClick } from '../click-store.js';
 import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
 import { getFraudConfig } from '../../../lib/fraud/rules.js';
@@ -74,7 +78,7 @@ async function findClick(networkId: string, clickId: string): Promise<ClickRow |
  if (cached) return cached;
  const { rows } = await query<ClickRow>(
  `SELECT offer_id, publisher_id, created_at, resolved_payout, resolved_revenue, currency,
- sub1, sub2, sub3, sub4, sub5
+ sub1, sub2, sub3, sub4, sub5, country, device, os, browser
  FROM clicks WHERE click_id = $1 AND network_id = $2 LIMIT 1`,
  [clickId, networkId],
  );
@@ -118,6 +122,38 @@ interface GoalPricing {
  * can't overshoot. The lock is only taken when a cap is actually configured. Returns the reject
  * reason, or null when under every cap.
  */
+/**
+ * Offer Custom Settings › Caps for this partner on this offer (F-12): conversions / payout / revenue
+ * per day / week / month (UTC) or all time, over the partner's non-rejected conversions on the offer.
+ * Runs inside the insert transaction, serialized per offer + partner (same pattern as the offer caps).
+ * Returns the reject reason, or null.
+ */
+async function customCapReached(
+ client: PoolClient, networkId: string, offerId: string, publisherId: string,
+ settings: CustomSettingConfig[], payout: string | null, revenue: string | null,
+): Promise<string | null> {
+ const checks = settings.flatMap((s) => (['conversions', 'payout', 'revenue'] as const)
+ .flatMap((kind) => capLimits(s.caps, kind).map(([interval, limit]) => ({ kind, interval, limit }))));
+ if (!checks.length) return null;
+ await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['customcap', networkId, offerId, publisherId])]);
+ const over = (sum: string, add: string | null, limit: number) =>
+ add != null && moneySign(subMoney(addMoney(sum, add), normalizeMoney(limit))) > 0;
+ for (const c of checks) {
+ const { rows } = await client.query<{ n: string; payout: string; revenue: string }>(
+ `SELECT COUNT(*)::text AS n, COALESCE(SUM(payout), 0)::text AS payout, COALESCE(SUM(revenue), 0)::text AS revenue
+ FROM conversions
+ WHERE network_id = $1 AND offer_id = $2 AND publisher_id = $3 AND status <> 'rejected'
+ AND ($4::timestamptz IS NULL OR created_at >= $4)`,
+ [networkId, offerId, publisherId, capWindowStart(c.interval)],
+ );
+ const r = rows[0]!;
+ if (c.kind === 'conversions' && Number(r.n) >= c.limit) return 'custom_conversion_cap_reached';
+ if (c.kind === 'payout' && over(r.payout, payout, c.limit)) return 'custom_payout_cap_reached';
+ if (c.kind === 'revenue' && over(r.revenue, revenue, c.limit)) return 'custom_revenue_cap_reached';
+ }
+ return null;
+}
+
 async function conversionCapReached(
  client: PoolClient, networkId: string, offerId: string,
  offerCaps: { daily: number | null; total: number | null }, goal: GoalPricing | null,
@@ -284,16 +320,30 @@ async function recordWithIdemKey(
  ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
  let revenue = clientRevenue ?? eventGoal?.revenue ?? clickOverride(click.resolved_revenue, offer?.defaultRevenue)
  ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
- // Percentage / Mixed revenue: a share of the sale amount the advertiser reports (only when the
- // postback didn't send an explicit revenue). The sale amount (sale_amount / order_amount /
- // amount) only ever feeds revenue here — it never sets the partner payout.
- // A browser-fired conversion's sale amount is visitor-controlled, so it never sets revenue.
- if (!browserFired && clientRevenue == null && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
- const sale = safeMoney(input.saleAmount ?? paramStr(input.rawParams, [...SALE_AMOUNT_PARAMS]));
- if (sale != null) {
- const share = percentOfMoney(sale, revCfg.revenuePct);
+ // The sale amount the advertiser reports (sale_amount / order_amount / amount). A browser-fired
+ // conversion's sale amount is visitor-controlled, so it never prices anything.
+ const saleAmount = browserFired ? null : safeMoney(input.saleAmount ?? paramStr(input.rawParams, [...SALE_AMOUNT_PARAMS]));
+ // Percentage / Mixed revenue: a share of the sale amount (only when the postback didn't send an
+ // explicit revenue). The sale amount only ever feeds revenue here — it never sets the partner payout.
+ if (clientRevenue == null && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
+ if (saleAmount != null) {
+ const share = percentOfMoney(saleAmount, revCfg.revenuePct);
  revenue = revCfg.revenueType === 'mixed' ? addMoney(revenue ?? '0', share) : share;
  }
+ }
+ // Offer Custom Settings › Revenue & Payout (F-12): this partner's own rate on this offer — or on
+ // the goal that fired — beats the goal / partner / country / default rate (an explicit S2S payout
+ // or revenue still wins). Matched against the click: its time, country, device, OS and browser.
+ const clickAttrs: ClickAttrs = {
+ country: click.country ?? null, device: click.device ?? null, os: click.os ?? null, browser: click.browser ?? null,
+ };
+ const custom = click.publisher_id ? customPricing(offer?.customSettings, {
+ publisherId: click.publisher_id, attrs: clickAttrs, clickAt: new Date(click.created_at),
+ eventGoalId: eventGoal?.id ?? null, defaultGoalId: goal?.is_default ? goal.id : null, saleAmount,
+ }) : null;
+ if (custom) {
+ if (clientPayout == null && custom.payout != null) payout = custom.payout;
+ if (clientRevenue == null && custom.revenue != null) revenue = custom.revenue;
  }
  const eventName = input.event ?? revCfg?.baseEventName ?? null;
  const currency = click.currency ?? goal?.currency ?? offer?.currency ?? null;
@@ -331,6 +381,16 @@ async function recordWithIdemKey(
  if (revCfg?.manualApproval && status === 'approved') {
  status = 'pending';
  reason = 'manual_approval_required';
+ }
+ // Offer Custom Settings › Throttle Rates (F-12): this share of the partner's conversions gets the
+ // setting's status (rejected unless it says pending). Layers with the offer's own throttle below.
+ if (status !== 'rejected' && click.publisher_id) {
+ const t = applicableSettings(offer?.customSettings, 'throttle_rates', click.publisher_id, clickAttrs, new Date())
+ .find((c) => c.throttleRate != null && Number(c.throttleRate) > 0);
+ if (t && Math.random() * 100 < Number(t.throttleRate)) {
+ status = t.conversionStatus ?? 'rejected';
+ reason = 'custom_throttle';
+ }
  }
 
  if (status === 'approved' && (payout != null || revenue != null)) {
@@ -395,6 +455,11 @@ async function recordWithIdemKey(
  if (!noTxnDuplicate && status !== 'rejected') {
  const capReason = await conversionCapReached(client, input.networkId, click.offer_id,
  { daily: offer?.dailyConversionCap ?? null, total: offer?.totalConversionCap ?? null }, goal);
+ if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
+ }
+ if (!noTxnDuplicate && status !== 'rejected' && click.publisher_id) {
+ const capReason = await customCapReached(client, input.networkId, click.offer_id, click.publisher_id,
+ applicableSettings(offer?.customSettings, 'caps', click.publisher_id, clickAttrs, new Date()), payout, revenue);
  if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
  }
  const ins = noTxnDuplicate ? { rows: [] as { conversion_id: string }[] } : await client.query<{ conversion_id: string }>(
@@ -482,7 +547,7 @@ async function recordWithIdemKey(
  // defaults to true (backward compatible with offers created before this setting existed) — only
  // an explicit false suppresses the outbound enqueue. Ledger/conversion creation above, and other
  // integrations below, are unaffected either way.
- if (!throttled && (offer?.firePartnerPostback ?? true)) {
+ if (!throttled && (offer?.firePartnerPostback ?? true) && (custom?.firePartnerPostback ?? true)) {
  await enqueueOutboundPostback({
  networkId: input.networkId,
  conversionId,

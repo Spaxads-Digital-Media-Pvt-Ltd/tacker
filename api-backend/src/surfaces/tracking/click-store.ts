@@ -16,6 +16,9 @@ export interface StoredClick {
   resolved_revenue: string | null;
   currency: string | null;
   sub1: string | null; sub2: string | null; sub3: string | null; sub4: string | null; sub5: string | null;
+  /** Click attributes Offer Custom Settings targeting is evaluated against at conversion time (F-12).
+   * Optional: absent on clicks stored before they were recorded. */
+  country?: string | null; device?: string | null; os?: string | null; browser?: string | null;
 }
 
 const MAX_TTL = 7 * 24 * 60 * 60; // cap: 7 days in Redis; DB covers longer windows

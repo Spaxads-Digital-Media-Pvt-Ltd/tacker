@@ -4,6 +4,7 @@
  * A null cap means unlimited (skip). Conversion caps reuse the same primitive in Phase 3.
  */
 import { getRedis } from '../../lib/redis.js';
+import { capBucket, capLimits, type CustomSettingConfig } from '../../lib/offer-settings/custom-settings.js';
 
 // Increment only if strictly below the limit. Returns the new count, or -1 if capped.
 const CAP_LUA = `
@@ -26,4 +27,39 @@ export async function isClickCapped(offerId: string, dailyClickCap: number | nul
   const key = `cap:click:${offerId}:${dayStamp()}`;
   const res = (await getRedis().eval(CAP_LUA, 1, key, String(dailyClickCap), String(DAY_TTL))) as number;
   return res === -1;
+}
+
+// Check every key against its limit first; only when ALL are below, increment them all (so a click
+// capped by one window isn't counted against the others). ARGV = limits…, then TTLs… (0 = no TTL).
+const MULTI_CAP_LUA = `
+for i = 1, #KEYS do
+  if tonumber(redis.call('GET', KEYS[i]) or '0') >= tonumber(ARGV[i]) then return -1 end
+end
+for i = 1, #KEYS do
+  local n = redis.call('INCR', KEYS[i])
+  local ttl = tonumber(ARGV[#KEYS + i])
+  if n == 1 and ttl > 0 then redis.call('EXPIRE', KEYS[i], ttl) end
+end
+return 1
+`;
+
+/**
+ * Per-partner click caps from Offer Custom Settings › Caps (F-12) — daily / weekly / monthly / global
+ * windows, counted per setting + partner. `settings` are the caps settings that apply to this click.
+ * @returns true if any window is full (divert the click).
+ */
+export async function isCustomClickCapped(settings: CustomSettingConfig[], publisherId: string): Promise<boolean> {
+  const keys: string[] = [];
+  const limits: string[] = [];
+  const ttls: string[] = [];
+  for (const s of settings) {
+    for (const [interval, limit] of capLimits(s.caps, 'clicks')) {
+      const { bucket, ttl } = capBucket(interval);
+      keys.push(`cap:cs:${s.id}:${publisherId}:${bucket}`);
+      limits.push(String(limit));
+      ttls.push(String(ttl));
+    }
+  }
+  if (!keys.length) return false;
+  return (await getRedis().eval(MULTI_CAP_LUA, keys.length, ...keys, ...limits, ...ttls)) === -1;
 }
