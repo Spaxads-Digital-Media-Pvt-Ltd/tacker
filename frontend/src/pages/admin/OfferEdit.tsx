@@ -373,7 +373,9 @@ export default function OfferEdit() {
             <p className="text-small text-fg-secondary">Give this URL to the advertiser. They should fire it from their server when a user converts. The click_id is passed automatically via the redirect.</p>
             <div className="space-y-4">
               <Field label="S2S Postback URL" hint="The advertiser replaces {click_id} and {txn_id} with their own values. The secure code is already filled in.">
-                <CopyBox value={advertiserPostbackUrl(trackHost, offer.securityCode ?? networkSecurity?.securityCode)} placeholder="No active tracking domain — add one first." />
+                {offer.securityCodeHidden
+                  ? <p className="rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg-secondary">Only admins and managers can see this offer's postback URL, because it contains the security code.</p>
+                  : <CopyBox value={advertiserPostbackUrl(trackHost, offer.securityCode ?? networkSecurity?.securityCode)} placeholder="No active tracking domain — add one first." />}
               </Field>
               <div>
                 <p className="label mb-2 block">Postback Parameters</p>
@@ -391,13 +393,17 @@ export default function OfferEdit() {
             <div className="space-y-4 border-t border-border pt-4">
               <h3 className="text-h3 font-medium text-fg">Per-Offer Security Code</h3>
               <p className="text-small text-fg-secondary">Overrides the network-wide code when set. The advertiser must include the per-offer security code in their postback. Leave empty to use the network default.</p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <input className="input font-mono text-tiny" readOnly value={offer.securityCode ?? ''} placeholder="No per-offer code set — using network default" />
+              {offer.securityCodeHidden ? (
+                <p className="text-small text-fg-secondary">{offer.securityCodeSet ? 'This offer has its own security code — hidden for your role.' : 'This offer uses the network default code.'}</p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <input className="input font-mono text-tiny" readOnly value={offer.securityCode ?? ''} placeholder="No per-offer code set — using network default" />
+                  </div>
+                  <button type="button" className="btn-ghost !py-2" disabled={regenCode.busy} onClick={regenerateCode}>{regenCode.busy ? 'Generating…' : (offer.securityCode ? 'Regenerate' : 'Generate')}</button>
+                  {offer.securityCode && <button type="button" className="btn-ghost !py-2 text-danger-text" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
                 </div>
-                <button type="button" className="btn-ghost !py-2" disabled={regenCode.busy} onClick={regenerateCode}>{regenCode.busy ? 'Generating…' : (offer.securityCode ? 'Regenerate' : 'Generate')}</button>
-                {offer.securityCode && <button type="button" className="btn-ghost !py-2 text-danger-text" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
-              </div>
+              )}
             </div>
 
             <div className="space-y-4 border-t border-border pt-4">

@@ -41,6 +41,9 @@
 - Scoped by audience ceiling (narrow-only, cannot exceed)
 - Advertiser / publisher keys stop with their account: owner deleted → 401, owner `inactive` → 403 (checked per request with the network's status)
 
+### Secrets by role
+- Postback security codes — the network's (`GET /api/settings/security`, F-07) and each offer's (`securityCode` on offer responses, O5) — are visible to admin / manager only; finance and read-only see that a code exists, never its value (the SPA says it's hidden instead of showing a postback URL without it)
+
 ### 4. Tracking
 - Click: **No auth** (public redirect)
 - Tenant resolved from `Host` header → tracking domain

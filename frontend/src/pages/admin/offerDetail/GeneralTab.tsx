@@ -101,14 +101,20 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
           <div className="mt-4 rounded-[var(--radius)] border border-border p-4">
             <p className="mb-2 text-small font-semibold text-fg">Conversion Tracking Method: Server To Server Postback</p>
             <p className="mb-3 text-tiny text-fg-secondary">The advertiser fires this postback on conversion, replacing {'{click_id}'} and {'{txn_id}'} with their own values.</p>
-            <CopyBox value={postbackUrl} />
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <p className="text-small font-medium text-fg">Security code (secure_code)</p>
-              <div className="flex gap-2">
-                <button className="btn-ghost !px-3 !py-1 text-tiny" disabled={regenCode.busy} onClick={regenerateCode}>{regenCode.busy ? '…' : offerCode ? 'Regenerate' : 'Generate'}</button>
-                {offerCode && <button className="btn-ghost !px-3 !py-1 text-tiny text-danger-text hover:bg-danger-bg" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
-              </div>
-            </div>
+            {offer.securityCodeHidden ? (
+              <p className="rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg-secondary">Only admins and managers can see this offer's postback URL, because it contains the security code.</p>
+            ) : (
+              <>
+                <CopyBox value={postbackUrl} />
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <p className="text-small font-medium text-fg">Security code (secure_code)</p>
+                  <div className="flex gap-2">
+                    <button className="btn-ghost !px-3 !py-1 text-tiny" disabled={regenCode.busy} onClick={regenerateCode}>{regenCode.busy ? '…' : offerCode ? 'Regenerate' : 'Generate'}</button>
+                    {offerCode && <button className="btn-ghost !px-3 !py-1 text-tiny text-danger-text hover:bg-danger-bg" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </Card>
 

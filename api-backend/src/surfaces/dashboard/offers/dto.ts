@@ -106,6 +106,20 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
 }
 
 /**
+ * The offer's postback security code is a secret — whoever holds it can post conversions — so only
+ * roles that manage integrations (admin, manager) see it (O5). Others get `securityCode: null` with
+ * `securityCodeSet` (is there a per-offer code?) and `securityCodeHidden: true`, so the UI can say it's
+ * hidden instead of offering to generate one.
+ */
+export const OFFER_SECRET_ROLES: readonly string[] = ['admin', 'manager'];
+
+export function withOfferSecrets<T extends { securityCode: string | null }>(dto: T, visible: boolean): T & { securityCodeSet: boolean; securityCodeHidden: boolean } {
+  return visible
+    ? { ...dto, securityCodeSet: dto.securityCode != null, securityCodeHidden: false }
+    : { ...dto, securityCode: null, securityCodeSet: dto.securityCode != null, securityCodeHidden: true };
+}
+
+/**
  * Network API-key consumers (Public API /api/v1/network/offers). Same fields as the admin dashboard
  * DTO MINUS secrets: `securityCode` is the offer's postback secure code — whoever holds it can post
  * conversions to /postback — so it is only ever shown in the session-authenticated dashboard (Offer

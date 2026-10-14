@@ -82,6 +82,10 @@ export interface Offer {
   description?: string | null;
   notes?: string[];
   securityCode?: string | null;
+  /** A per-offer security code exists (shown to every role). */
+  securityCodeSet?: boolean;
+  /** The caller's role can't see security codes (finance / read-only, O5): `securityCode` is null. */
+  securityCodeHidden?: boolean;
   trackingDomainId?: string | null;
   linkingType?: 'redirect' | 'redirect_direct' | null;
   deepLinkEnabled?: boolean | null;

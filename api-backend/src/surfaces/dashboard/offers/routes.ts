@@ -4,7 +4,7 @@
  * advertiser_id / offer_id / publisher_id is verified to belong to the caller's network before
  * use (FKs don't enforce tenant boundaries).
  */
-import express, { Router } from 'express';
+import express, { Router, type Request } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { uploadPublicObject } from '../../../lib/storage/supabase-storage.js';
@@ -56,6 +56,8 @@ import { sendTransactional, networkName } from '../../../lib/email/transactional
 import { offerDetailsEmail } from '../../../lib/email/templates.js';
 import {
  toAdminDTO,
+ withOfferSecrets,
+ OFFER_SECRET_ROLES,
  toAdvertiserDTO,
  toPublisherDetailDTO,
  toPublisherDTO,
@@ -85,6 +87,14 @@ const toPagedOfferDTO = (row: PagedOfferRow) => ({
 });
 
 const OFFERS = 'offers';
+
+/** May this caller see offers' postback security codes? (O5: roles that manage integrations.) */
+const seesOfferSecrets = (req: Request): boolean => {
+ const id = req.identity;
+ return !!id && id.surface === 'dashboard' && id.kind === 'admin' && OFFER_SECRET_ROLES.includes(id.role);
+};
+/** The admin DTO for this caller — the security code masked for finance / read-only (O5). */
+const offerDtoFor = (req: Request) => (row: OfferRow) => withOfferSecrets(toAdminDTO(row), seesOfferSecrets(req));
 
 const deleteOfferQuery = z.object({ hard: queryBool });
 
@@ -236,7 +246,7 @@ export function offersAdminRoutes(): Router {
  asyncHandler(async (req, res) => {
  const q = res.locals.query as OfferListQuery;
  const built = buildOfferListQuery(req.scope!.networkId, q);
- sendOk(res, await runPagedList(built, q, toPagedOfferDTO));
+ sendOk(res, await runPagedList(built, q, (row: PagedOfferRow) => withOfferSecrets(toPagedOfferDTO(row), seesOfferSecrets(req))));
  }),
  );
 
@@ -251,7 +261,7 @@ export function offersAdminRoutes(): Router {
  db.selectMany<OfferRow>(OFFERS, { limit, offset, orderBy: 'created_at', maxLimit: ENTITY_LIST_CAP }),
  db.count(OFFERS),
  ]);
- sendOk(res, rows.map(toAdminDTO), { limit, offset, total });
+ sendOk(res, rows.map(offerDtoFor(req)), { limit, offset, total });
  }),
  );
 
@@ -370,7 +380,7 @@ export function offersAdminRoutes(): Router {
  asyncHandler(async (req, res) => {
  const row = await dbForRequest(req).selectOne<OfferRow>(OFFERS, { id: req.params.id });
  if (!row) throw notFound('Offer not found');
- sendOk(res, toAdminDTO(row));
+ sendOk(res, offerDtoFor(req)(row));
  }),
  );
 
@@ -424,7 +434,7 @@ export function offersAdminRoutes(): Router {
  return created;
  }, (id) => db.selectOne<OfferRow>(OFFERS, { id }));
  if (replayed) res.setHeader('Idempotent-Replayed', 'true');
- sendOk(res, toAdminDTO(row), undefined, 201);
+ sendOk(res, offerDtoFor(req)(row), undefined, 201);
  }),
  );
 
@@ -467,13 +477,13 @@ export function offersAdminRoutes(): Router {
  // Metadata-backed fields (notes, description, targeting, settings…) merge over existing keys.
  const metadata = mergeOfferMetadata(before.metadata, b as Record<string, unknown>);
  if (metadata) patch['metadata'] = metadata;
- if (Object.keys(patch).length === 0) { sendOk(res, toAdminDTO(before)); return; }
+ if (Object.keys(patch).length === 0) { sendOk(res, offerDtoFor(req)(before)); return; }
  const [row] = await db.update<OfferRow>(OFFERS, patch, { id: req.params.id });
  await writeAudit(req, { action: 'offer.update', entityType: 'offer', entityId: req.params.id, before, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!);
  // Live again / paused → Partner Offer Now Available / Unavailable to its partners (O11).
  if (b.status !== undefined) offerStatusChanged(db.scope.networkId, before.id, before.status, b.status);
- sendOk(res, toAdminDTO(row ?? before));
+ sendOk(res, offerDtoFor(req)(row ?? before));
  }),
  );
 
@@ -499,7 +509,7 @@ export function offersAdminRoutes(): Router {
  }
  const [row] = await db.update<OfferRow>(OFFERS, { metadata: { ...(before.metadata ?? {}), thumbnail_url: url } }, { id: before.id });
  await writeAudit(req, { action: 'offer.update', entityType: 'offer', entityId: before.id, before, after: row });
- sendOk(res, toAdminDTO(row ?? before));
+ sendOk(res, offerDtoFor(req)(row ?? before));
  }),
  );
 
@@ -534,7 +544,7 @@ export function offersAdminRoutes(): Router {
  await writeAudit(req, { action: 'offer.archive', entityType: 'offer', entityId: before.id, before, after: row });
  await invalidateOfferConfig(db.scope.networkId, before.id);
  offerStatusChanged(db.scope.networkId, before.id, before.status, 'archived');
- sendOk(res, { deleted: false, archived: true, offer: toAdminDTO(row ?? before) });
+ sendOk(res, { deleted: false, archived: true, offer: offerDtoFor(req)(row ?? before) });
  }),
  );
 
@@ -588,7 +598,7 @@ export function offersAdminRoutes(): Router {
  });
 
  await writeAudit(req, { action: 'offer.duplicate', entityType: 'offer', entityId: copy.id, after: copy });
- sendOk(res, toAdminDTO(copy), undefined, 201);
+ sendOk(res, offerDtoFor(req)(copy), undefined, 201);
  }));
 
  // --- "Copy Offer Settings" — same idea as duplicate, but onto an EXISTING offer instead of a
