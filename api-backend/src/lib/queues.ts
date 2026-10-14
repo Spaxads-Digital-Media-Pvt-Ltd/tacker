@@ -17,6 +17,7 @@ export const QUEUE = {
  reportingRollup: 'reporting-rollup',
  scheduledReports: 'scheduled-reports',
  usageMeter: 'usage-meter',
+ email: 'email',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

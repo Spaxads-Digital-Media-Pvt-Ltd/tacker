@@ -30,6 +30,7 @@ import type {
 } from '../../../domain/entities.js';
 import { requireRole } from '../auth.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
+import { offerStatusChanged, offerAccessChanged } from '../../../lib/email/notifications.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
 import { mergeOfferMetadata } from '../../../lib/offer-settings/index.js';
 import {
@@ -470,6 +471,8 @@ export function offersAdminRoutes(): Router {
  const [row] = await db.update<OfferRow>(OFFERS, patch, { id: req.params.id });
  await writeAudit(req, { action: 'offer.update', entityType: 'offer', entityId: req.params.id, before, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!);
+ // Live again / paused → Partner Offer Now Available / Unavailable to its partners (O11).
+ if (b.status !== undefined) offerStatusChanged(db.scope.networkId, before.id, before.status, b.status);
  sendOk(res, toAdminDTO(row ?? before));
  }),
  );
@@ -530,6 +533,7 @@ export function offersAdminRoutes(): Router {
  const [row] = await db.update<OfferRow>(OFFERS, { status: 'archived' }, { id: before.id });
  await writeAudit(req, { action: 'offer.archive', entityType: 'offer', entityId: before.id, before, after: row });
  await invalidateOfferConfig(db.scope.networkId, before.id);
+ offerStatusChanged(db.scope.networkId, before.id, before.status, 'archived');
  sendOk(res, { deleted: false, archived: true, offer: toAdminDTO(row ?? before) });
  }),
  );
@@ -750,6 +754,7 @@ export function offersAdminRoutes(): Router {
  const pub = await db.selectOne<PublisherRow>('publishers', { id: b.publisherId });
  if (!pub) throw badRequest('publisherId does not belong to this network');
 
+ const previous = await db.selectOne<OfferPublisherAccessRow>(ACCESS, { offer_id: req.params.id, publisher_id: b.publisherId });
  // Upsert: granting access to a partner who already has a row (e.g. their own pending request)
  // updates that row instead of failing on the (offer_id, publisher_id) unique key.
  const { rows: upserted } = await query<OfferPublisherAccessRow>(
@@ -766,6 +771,8 @@ export function offersAdminRoutes(): Router {
  if (!row) throw notFound('Access entry not found');
  await writeAudit(req, { action: 'offer.access.create', entityType: 'offer_publisher_access', entityId: row.id, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!); // block/allow takes effect on next click
+ // Given access → Partner Offer Now Available; blocked → Now Unavailable (O11).
+ offerAccessChanged(db.scope.networkId, req.params.id!, [b.publisherId], previous ?? null, row);
  sendOk(res, toAccessDTO(row), undefined, 201);
  }),
  );
@@ -781,10 +788,12 @@ export function offersAdminRoutes(): Router {
  if (b.access !== undefined) patch['access'] = b.access;
  if (b.approvalStatus !== undefined) patch['approval_status'] = b.approvalStatus;
  if (b.payoutOverride !== undefined) patch['payout_override'] = b.payoutOverride;
+ const previous = await db.selectOne<OfferPublisherAccessRow>(ACCESS, { id: req.params.accessId, offer_id: req.params.id });
  const [row] = await db.update<OfferPublisherAccessRow>(ACCESS, patch, { id: req.params.accessId, offer_id: req.params.id });
  if (!row) throw notFound('Access entry not found');
  await writeAudit(req, { action: 'offer.access.update', entityType: 'offer_publisher_access', entityId: row.id, after: row });
  await invalidateOfferConfig(db.scope.networkId, req.params.id!); // deny list + partner payout are cached for /click
+ offerAccessChanged(db.scope.networkId, req.params.id!, [row.publisher_id], previous ?? null, row);
  sendOk(res, toAccessDTO(row));
  }),
  );

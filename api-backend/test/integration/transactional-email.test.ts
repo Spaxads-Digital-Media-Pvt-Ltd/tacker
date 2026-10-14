@@ -22,6 +22,9 @@ vi.mock('nodemailer', () => ({
   },
 }));
 
+// Emails go through the queue (O11): delivered in-process here.
+vi.mock('../../src/lib/queues.js', async (importOriginal) => (await import('../helpers/inline-email-queue.js')).inlineEmailQueue(importOriginal));
+
 import { buildDashboardApp } from '../../src/surfaces/dashboard/app.js';
 import { query } from '../../src/lib/db/pool.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
@@ -54,13 +57,15 @@ d('transactional email + Communication Hub toggles (live DB, mock SMTP)', () => 
   });
   beforeEach(() => { smtp.sent.length = 0; });
 
-  it('the Communication Hub list says which system emails are actually sent', async () => {
+  it('the Communication Hub list shows only system emails that are actually sent (O11)', async () => {
     const res = await request(dash).get('/api/communication-hub/system-emails').set(admin);
     const byKey = Object.fromEntries((res.body.data as { key: string; enabled: boolean; wired: boolean }[]).map((e) => [e.key, e]));
     for (const key of ['partner_portal_invite', 'advertiser_portal_invite', 'partner_balance_request', 'offer_details_shared', 'partner_invoice_generated', 'advertiser_invoice_generated']) {
       expect(byKey[key]).toMatchObject({ enabled: true, wired: true });
     }
-    expect(byKey['new_conversion_recorded']).toMatchObject({ enabled: true, wired: false });
+    // Unwired ones are hidden rather than shown as toggles that do nothing.
+    expect(byKey['new_conversion_recorded']).toBeUndefined();
+    expect(byKey['advertiser_postback_received']).toBeUndefined();
   });
 
   it('Offer Details Shared: emailed to the partner; with the toggle off it is not, and the response says why', async () => {
@@ -69,7 +74,7 @@ d('transactional email + Communication Hub toggles (live DB, mock SMTP)', () => 
 
     const on = await share();
     expect(on.status).toBe(200);
-    expect(on.body.data.email).toEqual({ sent: true, recipients: [partnerEmail] });
+    expect(on.body.data.email).toEqual({ sent: true, queued: true, recipients: [partnerEmail] });
     const [mail] = mailTo(partnerEmail);
     expect(mail!['subject']).toBe(`${netName}: offer details — ${offerName}`);
     expect(mail!['html']).toContain(`<strong>${offerName}</strong>`);
@@ -91,7 +96,7 @@ d('transactional email + Communication Hub toggles (live DB, mock SMTP)', () => 
     const visible = await create({ periodStart: '2026-01-01', periodEnd: '2026-01-31', paymentTerms: 'Net 30', publicNotes: 'Thanks <b>team</b>' });
     expect(visible.status).toBe(201);
     const inv = visible.body.data;
-    expect(inv.email).toEqual({ sent: true, recipients: [partnerEmail] });
+    expect(inv.email).toEqual({ sent: true, queued: true, recipients: [partnerEmail] });
     const [mail] = mailTo(partnerEmail);
     expect(mail!['subject']).toBe(`${netName}: invoice${inv.ref != null ? ` #${inv.ref}` : ''} for 2026-01-01 – 2026-01-31`);
     expect(mail!['html']).toContain(`Amount: ${inv.billedAmount} ${inv.currency}`);
@@ -120,7 +125,7 @@ d('transactional email + Communication Hub toggles (live DB, mock SMTP)', () => 
     const res = await request(dash).post('/api/advertiser-invoices').set(admin)
       .send({ advertiserId: fx.advA, periodStart: '2026-01-01', periodEnd: '2026-01-31', notes: 'internal: our margin is 40%' });
     expect(res.status).toBe(201);
-    expect(res.body.data.email).toEqual({ sent: true, recipients: [advertiserEmail] });
+    expect(res.body.data.email).toEqual({ sent: true, queued: true, recipients: [advertiserEmail] });
     const [mail] = mailTo(advertiserEmail);
     expect(mail!['html']).toContain(`Amount: ${res.body.data.billedAmount} ${res.body.data.currency}`);
     expect(mail!['html']).not.toContain('margin is 40%');

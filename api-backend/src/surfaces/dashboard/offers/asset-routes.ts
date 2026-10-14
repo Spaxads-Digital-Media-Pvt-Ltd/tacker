@@ -18,6 +18,7 @@ import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { requireRole } from '../auth.js';
 import type { PublisherRow } from '../../../domain/entities.js';
 import { isInlineData } from '../../../lib/creatives/files.js';
+import { notifyNewCreative, creativeIsPartnerVisible } from '../../../lib/email/notifications.js';
 import {
   createGoalSchema, updateGoalSchema,
   createCreativeSchema, updateCreativeSchema,
@@ -59,6 +60,8 @@ export interface AssetSpec {
   auditKind: string;                  // e.g. 'goal'
   invalidateCache?: boolean;          // goals affect payout resolution → bust the offer cache
   beforeWrite?: (db: Db, offerId: string, body: Record<string, unknown>) => Promise<void>;
+  /** After a create is saved (e.g. tell partners about a new creative). Must not throw. */
+  afterCreate?: (networkId: string, offerId: string, row: Row) => void;
   /** Allow-listed exact-match list filters: query param → snake_case column + its allowed values
    * (e.g. ?level=event). An empty param is ignored; any other value outside `values` is a 400. */
   listFilters?: Record<string, { column: string; values: readonly [string, ...string[]] }>;
@@ -86,6 +89,7 @@ export async function createAsset(req: Request, spec: AssetSpec, offerId: string
   const row = await withUniqueMessage(spec, () => db.insert<Row>(spec.table, { offer_id: offerId, ...toColumns(body, spec.colMap, spec.jsonCols) }));
   await writeAudit(req, { action: `offer.${spec.auditKind}.create`, entityType: spec.table, entityId: row.id, after: row });
   if (spec.invalidateCache) await invalidateOfferConfig(db.scope.networkId, offerId);
+  spec.afterCreate?.(db.scope.networkId, offerId, row);
   return row;
 }
 
@@ -210,6 +214,10 @@ export function mountOfferAssets(r: Router): void {
       status: 'status', visibleToPartners: 'visible_to_partners', emailFrom: 'email_from', emailSubject: 'email_subject',
     },
     dto: creativeDTO, auditKind: 'creative',
+    // New Offer Creative Available → the partners running the offer (O11).
+    afterCreate: (networkId, offerId, row) => {
+      if (creativeIsPartnerVisible({ status: row['status'], visible_to_partners: row['visible_to_partners'] })) void notifyNewCreative(networkId, offerId, String(row['name'] ?? 'New creative'));
+    },
   });
 
   mountAsset(r, {

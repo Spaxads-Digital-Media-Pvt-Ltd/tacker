@@ -26,6 +26,7 @@ import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { createCreativeSchema } from '../offers/asset-schemas.js';
 import { CREATIVE_MAX_BYTES, CREATIVE_TYPES_TEXT, CREATIVE_UPLOAD_TYPES, isInlineData, listUrlColumns, uploadCreativeFile } from '../../../lib/creatives/files.js';
+import { notifyNewCreative, creativeIsPartnerVisible } from '../../../lib/email/notifications.js';
 
 const TABLE = 'offer_creatives';
 
@@ -140,6 +141,8 @@ export function creativesRoutes(): Router {
       if (!offer) throw badRequest('offerIds contains an offer outside this network');
       const row = await db.insert<Row>(TABLE, { offer_id: offerId, ...columns(b) });
       await writeAudit(req, { action: 'offer.creative.create', entityType: TABLE, entityId: row.id, after: row });
+      // New Offer Creative Available → the partners running the offer (O11).
+      if (creativeIsPartnerVisible(row)) void notifyNewCreative(db.scope.networkId, offerId, row.name || 'New creative');
       created.push(row);
     }
     sendOk(res, created.map(dto), undefined, 201);

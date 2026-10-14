@@ -235,6 +235,7 @@ API keys for the Public REST API.
 | `stats_dirty_buckets` | (network, bucket) to re-roll — written by the `clicks_stats_dirty` / `conversions_stats_dirty` triggers (`stats_mark_dirty()`) for rows landing/changing in buckets > 2h old |
 | `usage_records` | Daily usage per network × metric (`clicks`, `conversions`, `events` — conversions with an event name — written hourly by the usage-meter worker; `api_calls`, `storage` reserved), unique (network, metric, period_date) — migration 074 added `events` (F-26) |
 | `saved_reports` | Report pages' saved configs per owner (`network_id`, `owner_user_id`, `page`, `name` unique together; `config` jsonb) + optional schedule: `schedule` (5-field cron, network zone), `range_preset`, `recipients` text[], `next_run_at` (due index), `last_run_at` / `last_run_status` (sent\|skipped\|failed) / `last_run_detail` (migration 073, F-24) |
+| `email_outbox` | Every queued email, one row per recipient (O11, migration 075): `event`, `recipient`, `subject`, `html` (enc:v1 while `sensitive` — invites / reset links — and wiped once sent), `attachments`, `status` queued\|sent\|failed, `attempts`, `last_error`, `sent_at`. Kept 90 days (retention) |
 | `communication_hub` | Communication hub config |
 | `customer_value_rules` | Customer value adjustment rules |
 | `customer_value_data_points` | Custom customer data |

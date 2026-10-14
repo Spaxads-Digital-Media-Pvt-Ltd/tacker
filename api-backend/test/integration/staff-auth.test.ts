@@ -29,12 +29,15 @@ const fake = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/lib/mailer.js', () => ({
+  smtpConfigError: async () => (fake.smtp ? null : 'SMTP is not fully configured yet — set Host, Username, Password and From Email in Settings › SMTP before sending.'),
   sendNetworkEmail: async (networkId: string, to: string[], subject: string, html: string) => {
     if (!fake.smtp) return { sent: 0, results: [], configError: 'SMTP is not fully configured yet — set Host, Username, Password and From Email in Settings › SMTP before sending.' };
     fake.mails.push({ networkId, to, subject, html });
     return { sent: to.length, results: to.map((recipient) => ({ recipient, ok: true })) };
   },
 }));
+// Emails go through the queue (O11): delivered in-process here.
+vi.mock('../../src/lib/queues.js', async (importOriginal) => (await import('../helpers/inline-email-queue.js')).inlineEmailQueue(importOriginal));
 
 vi.mock('../../src/lib/supabase.js', () => {
   const secret = process.env.SUPABASE_JWT_SECRET ?? 'test-jwt-secret-do-not-use-in-prod';

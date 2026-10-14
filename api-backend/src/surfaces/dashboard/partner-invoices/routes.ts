@@ -19,6 +19,7 @@ import { AppError, notFound, badRequest, conflict } from '../../../lib/http/erro
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { pool, query } from '../../../lib/db/pool.js';
 import { settleInvoice } from '../../../lib/ledger/ledger.js';
+import { notifyPayoutSent } from '../../../lib/email/notifications.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { dateOnly } from '../../../lib/date-only.js';
@@ -135,6 +136,11 @@ async function payPartnerInvoice(networkId: string, invoiceId: string, createdBy
   }
 }
 
+/** Payout Batch Completed → the partner, for a paid invoice (O11). Fire-and-forget. */
+function paidEmail(networkId: string, inv: Row): void {
+  void notifyPayoutSent(networkId, [{ publisherId: inv.publisher_id, amount: String(inv.payments_amount ?? inv.billed_amount) }], inv.currency, `Invoice #${inv.ref}`);
+}
+
 /** A live invoice for this partner + currency whose period overlaps [start, end] — double billing. */
 async function overlappingInvoice(networkId: string, publisherId: string, currency: string, start: string, end: string) {
   return (await query<{ ref: string; period_start: string | Date; period_end: string | Date }>(
@@ -242,6 +248,7 @@ export function partnerInvoicesRoutes(): Router {
       try {
         const { before, after } = await payPartnerInvoice(networkId, id, actorOf(req));
         await writeAudit(req, { action: 'invoice.update', entityType: TABLE, entityId: id, before, after });
+        paidEmail(networkId, after);
         updated++;
       } catch (err) {
         if (!(err instanceof AppError)) throw err;
@@ -277,6 +284,7 @@ export function partnerInvoicesRoutes(): Router {
   r.post('/:id/approve-pay', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
     const { before, after } = await payPartnerInvoice(req.scope!.networkId, req.params.id!, actorOf(req));
     await writeAudit(req, { action: 'invoice.update', entityType: TABLE, entityId: req.params.id, before, after });
+    paidEmail(req.scope!.networkId, after);
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE i.id = $1 AND i.network_id = $2`, [req.params.id, req.scope!.networkId]);
     sendOk(res, dto(rows[0]!));
   }));

@@ -29,6 +29,7 @@ import { startSmartLinkKpiWorker, scheduleSmartLinkKpi } from './processors/smar
 import { startReportingRollupWorker, scheduleReportingRollup } from './processors/reporting-rollup.js';
 import { startScheduledReportsWorker, scheduleScheduledReports } from './processors/scheduled-reports.js';
 import { startUsageMeterWorker, scheduleUsageMeter } from './processors/usage-meter.js';
+import { startEmailWorker } from './processors/email.js';
 
 const log = surfaceLogger('workers');
 
@@ -54,6 +55,7 @@ const workers = [
  startReportingRollupWorker(),
  startScheduledReportsWorker(),
  startUsageMeterWorker(),
+ startEmailWorker(),
 ];
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
 void scheduleRetention().catch((err) => log.error({ err }, 'failed to schedule retention'));

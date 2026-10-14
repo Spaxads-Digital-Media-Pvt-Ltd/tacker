@@ -91,7 +91,7 @@ async function scanNetwork(networkId: string): Promise<number> {
   // that is still open isn't raised again (deduped above), so it isn't re-sent every scan either.
   const channels = fraudAlertChannels(networkId, cfg);
   if (hasAlertChannels(channels)) {
-    for (const a of raised) await deliverAlert(networkId, a, channels);
+    for (const a of raised) await deliverAlert(networkId, a, channels, 'fraud_rule_triggered');
   }
   // …and to the network's Automation webhooks listening to alert.raised (F-17a).
   for (const a of raised) {

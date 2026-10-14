@@ -31,6 +31,7 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   offer_publisher_access: { tenantColumn: 'network_id' },
   tracking_domains: { tenantColumn: 'network_id' },
   audit_log: { tenantColumn: 'network_id' },
+  email_outbox: { tenantColumn: 'network_id' },
 
   // Phase 1A per-network platform data (admins may read their own; platform admins access any
   // network's rows via raw queries in the platform surface, spec §3C). platform_admins and

@@ -83,6 +83,8 @@ vi.mock('../../src/lib/mailer.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/lib/mailer.js')>();
   return {
     ...actual,
+    // 'ok' / 'fail' = SMTP is set up (the send itself then works / fails).
+    smtpConfigError: async (networkId: string) => (mail.mode === 'actual' ? actual.smtpConfigError(networkId) : null),
     sendNetworkEmail: async (networkId: string, to: string[], subject: string, html: string) => {
       if (mail.mode === 'actual') return actual.sendNetworkEmail(networkId, to, subject, html);
       mail.sent.push({ networkId, to, subject, html });
@@ -92,6 +94,9 @@ vi.mock('../../src/lib/mailer.js', async (importOriginal) => {
     },
   };
 });
+
+// Emails go through the queue (O11): delivered in-process here.
+vi.mock('../../src/lib/queues.js', async (importOriginal) => (await import('../helpers/inline-email-queue.js')).inlineEmailQueue(importOriginal));
 
 const d = process.env.INTEGRATION_DB === '1' ? describe : describe.skip;
 
@@ -312,12 +317,18 @@ d('portal logins are provisioned in-product (live DB, fake Supabase)', () => {
         expect(sent.html).toContain('Acme &lt;b&gt;&amp;&lt;/b&gt; Co');
         expect(sent.html).not.toContain('<b>&</b>');
 
-        // A failed send: still provisioned, the reason is returned, and (outside production) the credentials.
+        // The mail server refusing: the invite is accepted for delivery (O11 — the queue retries it),
+        // and the email log records the failure; the body (a temporary password) stays encrypted.
         mail.mode = 'fail';
-        const failed = await createPartner({ contactEmail: newEmail() });
+        const failedEmail = newEmail();
+        const failed = await createPartner({ contactEmail: failedEmail });
         expect(failed.status).toBe(201);
-        expect(failed.body.data.invite).toMatchObject({ emailed: false, emailError: 'connect ECONNREFUSED' });
-        expect(failed.body.data.invite.credentials.temporaryPassword).toBeTruthy();
+        expect(failed.body.data.invite).toMatchObject({ emailed: true });
+        const logged = (await query<{ status: string; last_error: string; sensitive: boolean; html: string }>(
+          'SELECT status, last_error, sensitive, html FROM email_outbox WHERE network_id = $1 AND recipient = $2', [fx.networkA, failedEmail.toLowerCase()])).rows[0]!;
+        expect(logged).toMatchObject({ status: 'failed', last_error: 'connect ECONNREFUSED', sensitive: true });
+        expect(logged.html.startsWith('enc:v1:')).toBe(true);
+        expect(logged.html).not.toContain(sb.byEmail(failedEmail)!.password);
       } finally {
         await query('UPDATE networks SET name = $2 WHERE id = $1', [fx.networkA, rows[0]!.name]);
       }

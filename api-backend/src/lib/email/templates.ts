@@ -87,3 +87,67 @@ export function passwordResetEmail(p: { networkName: string; resetUrl: string; e
     ].join('\n'),
   };
 }
+
+// ---- Partner notifications (O11) — one email per partner, through the email queue. ----
+
+const greet = (name: string) => `<p>Hello ${e(name)},</p>`;
+const portalLine = (loginUrl: string) => `<p>Sign in to your partner portal: <a href="${e(loginUrl)}">${e(loginUrl)}</a></p>`;
+
+/** Partner Sign-Up Approved / Rejected. */
+export function signupDecisionEmail(p: { networkName: string; partnerName: string; approved: boolean; loginUrl: string }): { subject: string; html: string } {
+  return p.approved
+    ? {
+      subject: `Your ${p.networkName} partner account is approved`,
+      html: [greet(p.partnerName), `<p>Good news — ${e(p.networkName)} approved your partner application. You can now run offers.</p>`, portalLine(p.loginUrl)].join('\n'),
+    }
+    : {
+      subject: `Your ${p.networkName} partner application`,
+      html: [greet(p.partnerName), `<p>Thanks for applying to ${e(p.networkName)}. We're not able to approve your partner application at this time.</p>`].join('\n'),
+    };
+}
+
+/** Offer Application Approved / Denied. */
+export function offerApplicationEmail(p: { networkName: string; partnerName: string; offerName: string; approved: boolean; loginUrl: string }): { subject: string; html: string } {
+  return p.approved
+    ? {
+      subject: `${p.networkName}: you're approved to run ${p.offerName}`,
+      html: [greet(p.partnerName), `<p>Your request to run <strong>${e(p.offerName)}</strong> was approved. Your tracking link is in the portal under Offers.</p>`, portalLine(p.loginUrl)].join('\n'),
+    }
+    : {
+      subject: `${p.networkName}: your request for ${p.offerName}`,
+      html: [greet(p.partnerName), `<p>Your request to run <strong>${e(p.offerName)}</strong> wasn't approved this time.</p>`].join('\n'),
+    };
+}
+
+/** Partner Offer Now Available / Now Unavailable. */
+export function offerAvailabilityEmail(p: { networkName: string; partnerName: string; offerName: string; available: boolean; loginUrl: string }): { subject: string; html: string } {
+  return p.available
+    ? {
+      subject: `${p.networkName}: ${p.offerName} is available to you`,
+      html: [greet(p.partnerName), `<p><strong>${e(p.offerName)}</strong> is now available for you to run.</p>`, portalLine(p.loginUrl)].join('\n'),
+    }
+    : {
+      subject: `${p.networkName}: ${p.offerName} is no longer available`,
+      html: [greet(p.partnerName), `<p><strong>${e(p.offerName)}</strong> is no longer available — please stop sending traffic to it. Clicks on its tracking links won't be credited.</p>`, portalLine(p.loginUrl)].join('\n'),
+    };
+}
+
+/** New Offer Creative Available. */
+export function newCreativeEmail(p: { networkName: string; partnerName: string; offerName: string; creativeName: string; loginUrl: string }): { subject: string; html: string } {
+  return {
+    subject: `${p.networkName}: new creative for ${p.offerName}`,
+    html: [greet(p.partnerName), `<p>A new creative, <strong>${e(p.creativeName)}</strong>, is available for <strong>${e(p.offerName)}</strong>.</p>`, portalLine(p.loginUrl)].join('\n'),
+  };
+}
+
+/** Payout Batch Completed — the partner's own line. */
+export function payoutSentEmail(p: { networkName: string; partnerName: string; amount: string; currency: string; reference: string | null; loginUrl: string }): { subject: string; html: string } {
+  return {
+    subject: `${p.networkName}: payment of ${p.amount} ${p.currency} sent`,
+    html: [
+      greet(p.partnerName),
+      `<p>${e(p.networkName)} has paid you <strong>${money(p.amount, p.currency)}</strong>${p.reference ? ` (${e(p.reference)})` : ''}.</p>`,
+      `<p>Your statement in the portal shows the payment.</p>`, portalLine(p.loginUrl),
+    ].join('\n'),
+  };
+}

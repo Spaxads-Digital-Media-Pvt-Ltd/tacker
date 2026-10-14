@@ -40,6 +40,7 @@ import { balanceRequestEmail } from '../../../lib/email/templates.js';
 import { invalidatePartnerStatus } from '../../tracking/partner-status.js';
 import { forgetPortalAccount, portalAccessAllowed } from '../../../lib/auth/portal-state.js';
 import { applyPortalStatusChange, removeLogin, type LoginSync } from '../../../lib/auth/login-sync.js';
+import { notifySignupDecision } from '../../../lib/email/notifications.js';
 
 const TABLE = 'publishers';
 const POSTBACKS = 'publisher_postbacks';
@@ -300,6 +301,10 @@ export function publishersAdminRoutes(): Router {
         await invalidatePartnerStatus(db.scope.networkId, before.id);
         // Portal + API access follow at once; an inactive partner's login is blocked (O6).
         loginSync = await applyPortalStatusChange(db.scope.networkId, 'publisher', before, before.status, b.status);
+        // A pending sign-up decided: Partner Sign-Up Approved / Rejected email (O11).
+        if (before.status === 'pending' && b.status !== 'pending') {
+          void notifySignupDecision(db.scope.networkId, { id: before.id, name: row?.name ?? before.name, email: row?.contact_email ?? before.contact_email }, b.status === 'active');
+        }
       }
       await writeAudit(req, { action: 'publisher.update', entityType: 'publisher', entityId: req.params.id, before, after: row });
       sendOk(res, { ...toAdminDTO((await loadPublisher(db.scope.networkId, before.id)) ?? row ?? before), ...(loginSync ? { loginSync } : {}) });

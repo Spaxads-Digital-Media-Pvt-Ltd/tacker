@@ -15,6 +15,7 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 
 vi.mock('../../src/lib/mailer.js', () => ({
+  smtpConfigError: async () => null,
   sendNetworkEmail: vi.fn(async (_networkId: string, recipients: string[]) => ({
     sent: recipients.length, results: recipients.map((recipient) => ({ recipient, ok: true })),
   })),

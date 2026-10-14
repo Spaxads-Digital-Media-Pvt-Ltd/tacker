@@ -79,7 +79,7 @@ async function emailInvite(req: Request, member: { name: string; email: string }
     networkName: await networkName(networkId), name: member.name, inviterName: await inviterName(req),
     loginUrl, email: member.email, password: temporaryPassword,
   });
-  const sent = await sendTransactional(networkId, 'staff_invite', [member.email], mail);
+  const sent = await sendTransactional(networkId, 'staff_invite', [member.email], mail, { sensitive: true });
   if (sent.sent) return { emailed: true };
   return {
     emailed: false,

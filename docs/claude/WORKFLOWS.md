@@ -221,13 +221,21 @@ Scheduled reports (F-24):
  due rows claimed FOR UPDATE SKIP LOCKED and next_run_at advanced first (a failed run waits for its
  next slot) → the saved page config → the same report request the page makes, for the rolling range
  (whole local days) → reporting provider (table + totals) → entity labels → summary HTML + CSV
- attachment (formula-safe cells) → sendTransactional('scheduled_report') → last_run_status
+ attachment (formula-safe cells) → sendTransactionalNow('scheduled_report', sent directly) → last_run_status
  sent | skipped (SMTP not configured / refused — the reason is kept) | failed
 
-Transactional email (F-24):
- invite / share offer details / request balances / invoice create → sendTransactional(event)
- → the network's Communication Hub toggle for the event (default on) → no recipient? → network SMTP
- → { sent, skipped?, reason? } on the response; the action itself never fails because of email
+Transactional email (F-24) through the email queue (O11):
+ invite / reset / share offer details / request balances / invoice create / partner notification
+ → sendTransactional(event) → the network's Communication Hub toggle (default on; staff invites and
+ password resets always send) → an address? → SMTP set up? (no → { skipped: smtp_not_configured })
+ → email_outbox row per recipient (body encrypted when it carries a credential) → `email` queue job
+ → email worker → network SMTP → sent (credential bodies wiped) | retried with backoff (6 attempts,
+ ~15 min) → failed (Communication Hub › Email Log; retry there unless it carried a credential).
+ The action itself never fails because of email; `sent: true` on its response = accepted for delivery.
+ Partner notifications (lib/email/notifications.ts) fire after the action commits, without waiting:
+ sign-up decided, offer application decided, offer live again / paused / archived (edit, archive or a
+ scheduled action) → the partners running it, one partner's access opened / blocked, an active
+ creative added, a payout run or a paid partner invoice → each partner's own amount.
 
 Fraud Scan (scheduled):
  fraud-scan queue → query clicks + conversions → evaluate rules → create alerts

@@ -32,6 +32,17 @@ export interface SendResult {
 
 export interface MailAttachment { filename: string; content: string; contentType?: string }
 
+const NOT_CONFIGURED = 'SMTP is not fully configured yet — set Host, Username, Password and From Email in Settings › SMTP before sending.';
+const UNREADABLE = "The stored SMTP password can't be decrypted — re-enter it in Settings › SMTP.";
+
+/** Why this network can't send email right now (SMTP not set up / password unreadable), or null. */
+export async function smtpConfigError(networkId: string): Promise<string | null> {
+  const smtp = await loadSmtp(networkId);
+  if (!smtp.host || !smtp.username || !smtp.password || !smtp.fromEmail) return NOT_CONFIGURED;
+  try { decryptSecret(smtp.password); } catch { return UNREADABLE; }
+  return null;
+}
+
 /** Sends `subject`/`html` to every address in `recipients` via the network's own SMTP config. */
 export async function sendNetworkEmail(
   networkId: string,
@@ -42,16 +53,13 @@ export async function sendNetworkEmail(
 ): Promise<{ sent: number; results: SendResult[]; configError?: string }> {
   const smtp = await loadSmtp(networkId);
   if (!smtp.host || !smtp.username || !smtp.password || !smtp.fromEmail) {
-    return {
-      sent: 0, results: [],
-      configError: 'SMTP is not fully configured yet — set Host, Username, Password and From Email in Settings › SMTP before sending.',
-    };
+    return { sent: 0, results: [], configError: NOT_CONFIGURED };
   }
   let pass: string;
   try {
     pass = decryptSecret(smtp.password); // stored encrypted (F-07); legacy plaintext passes through
   } catch {
-    return { sent: 0, results: [], configError: "The stored SMTP password can't be decrypted — re-enter it in Settings › SMTP." };
+    return { sent: 0, results: [], configError: UNREADABLE };
   }
 
   const transport = nodemailer.createTransport({

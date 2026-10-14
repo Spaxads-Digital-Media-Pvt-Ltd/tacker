@@ -97,7 +97,8 @@ export async function invitePortalUser(args: {
  kind: args.kind, networkName: rows[0]?.name ?? 'your network', loginUrl,
  email: login.email, password: login.temporaryPassword, signup: args.signup,
  });
- const sent = await sendTransactional(args.networkId, args.kind === 'publisher' ? 'partner_portal_invite' : 'advertiser_portal_invite', [login.email], mail);
+ // Carries a temporary password: stored encrypted on the email queue, wiped once sent (O11).
+ const sent = await sendTransactional(args.networkId, args.kind === 'publisher' ? 'partner_portal_invite' : 'advertiser_portal_invite', [login.email], mail, { sensitive: true });
  if (sent.sent) return { ...base, emailed: true };
  return {
  ...base,

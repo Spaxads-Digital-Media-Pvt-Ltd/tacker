@@ -202,7 +202,7 @@ async function evaluateRule(rule: RuleRow, now: Date): Promise<number> {
         },
       };
       const id = rule.notify_in_app ? await raiseAlert(rule.network_id, alert) : null;
-      if (emails.length) await deliverAlert(rule.network_id, { ...alert, id, severity: 'medium' }, { emails, webhookUrl: null });
+      if (emails.length) await deliverAlert(rule.network_id, { ...alert, id, severity: 'medium' }, { emails, webhookUrl: null }, 'alert_threshold_triggered');
       if (id) {
         await emitAutomationEvent(rule.network_id, 'alert.raised', {
           id, type: alert.type, severity: alert.severity, title: alert.title, description: alert.description,

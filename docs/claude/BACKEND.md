@@ -163,6 +163,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Reporting Rollups | `reporting-rollup.ts` | `reporting-rollup` | Every minute — freeze / dirty re-roll / backfill of the 15-min rollups (lib/reporting/rollups.ts) |
 | Usage Meter | `usage-meter.ts` | `usage-meter` | Hourly — meters each active network's clicks / conversions / events (today + yesterday, UTC) and raises plan-limit alerts (lib/usage/meter.ts) |
 | Scheduled Reports | `scheduled-reports.ts` | `scheduled-reports` | Every minute — emails due scheduled saved reports as CSV (lib/reporting/saved-reports.ts) |
+| Email | `email.ts` | `email` | On demand — sends each queued email (one `email_outbox` row) through the network's SMTP; 6 attempts, exponential backoff from 30 s; SMTP problems are final (lib/email/outbox.ts, O11) |
 
 ### Queue Definitions (`surfaces/workers/queues.ts`)
 Exports `QUEUE` constant mapping queue names to BullMQ queue instances.

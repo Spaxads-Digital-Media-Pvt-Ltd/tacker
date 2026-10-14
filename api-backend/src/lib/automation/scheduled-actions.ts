@@ -15,6 +15,7 @@ import { pool, query } from '../db/pool.js';
 import { writeSystemAudit } from '../audit.js';
 import { invalidateOfferConfig } from '../../surfaces/tracking/offer-cache.js';
 import { emitAutomationEvent } from './webhooks.js';
+import { offerStatusChanged, notifyOfferAvailability } from '../email/notifications.js';
 import { logger } from '../logger.js';
 
 export const CAP_COLUMNS = {
@@ -209,7 +210,16 @@ async function runOne(now: Date): Promise<Ran | null> {
   } finally {
     client.release();
   }
-  if (ran.status === 'executed') await invalidateOfferConfig(ran.networkId, ran.offerId);
+  if (ran.status === 'executed') {
+    await invalidateOfferConfig(ran.networkId, ran.offerId);
+    // After the commit: the partners hear about it (O11) — the offer's status, or their own access.
+    const r = ran.result;
+    if (r['changed'] === true && typeof r['from'] === 'string' && typeof r['to'] === 'string' && !('capType' in r)) {
+      offerStatusChanged(ran.networkId, ran.offerId, r['from'], r['to']);
+    } else if (r['scope'] === 'partners' && Array.isArray(r['partners'])) {
+      void notifyOfferAvailability(ran.networkId, ran.offerId, r['access'] === 'allow', { publisherIds: r['partners'] as string[] });
+    }
+  }
   await emitAutomationEvent(ran.networkId, 'scheduled_action.executed', {
     id: ran.id, offerId: ran.offerId, actionType: ran.actionType, status: ran.status, result: ran.result,
   });

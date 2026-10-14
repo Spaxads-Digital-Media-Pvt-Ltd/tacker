@@ -10,7 +10,7 @@ import { getReportingProvider } from './index.js';
 import { attachLabels } from './labels.js';
 import { isValidTimeZone, isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore } from './time-zone.js';
 import { nextCronTime } from '../scheduling/cron.js';
-import { sendTransactional, escapeHtml, networkName, type TransactionalResult } from '../email/transactional.js';
+import { sendTransactionalNow, escapeHtml, networkName, type TransactionalResult } from '../email/transactional.js';
 import { logger } from '../logger.js';
 import type { Dimension, Metric, ReportFilters, ReportRequest, ReportResult } from './types.js';
 
@@ -159,7 +159,7 @@ export async function sendSavedReport(r: SavedReportRow, now: Date = new Date())
     `<p>${table.rows.length} row${table.rows.length === 1 ? '' : 's'} attached as CSV${truncated ? ` (the first ${table.rows.length} of ${table.total})` : ''}.</p>`,
   ].join('\n');
   const slug = r.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'report';
-  const result = await sendTransactional(r.network_id, 'scheduled_report', r.recipients, {
+  const result = await sendTransactionalNow(r.network_id, 'scheduled_report', r.recipients, {
     subject: `${net}: ${r.name} — ${range}`, html,
     attachments: [{ filename: `${slug}-${range.slice(0, 10)}.csv`, content: reportCsv(table), contentType: 'text/csv' }],
   });

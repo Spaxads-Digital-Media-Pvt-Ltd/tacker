@@ -34,12 +34,17 @@ const log = surfaceLogger('workers');
 const BATCH = 5_000;
 const MAX_BATCHES = 1_000; // safety valve: at most 5M rows/table/run on the ctid fallback
 
+/** How long the email log (email_outbox, O11) keeps its records. */
+export const EMAIL_LOG_RETENTION_DAYS = 90;
+
 export interface RetentionResult {
  clicksDeleted: number;
  postbackLogsDeleted: number;
  conversionsDeleted: number;
  /** Names of partitions dropped (e.g. ["clicks_2024_01", "conversions_2024_01"]). */
  partitionsDropped: string[];
+ /** Email log rows older than EMAIL_LOG_RETENTION_DAYS (O11). */
+ emailLogDeleted?: number;
 }
 
 /** YYYYMM → integer month-key. Postgres partition naming uses `_YYYY_MM` (zero-padded). */
@@ -222,6 +227,11 @@ export async function runRetention(now: Date = new Date()): Promise<RetentionRes
  result.conversionsDeleted += await pruneNetwork('conversions', n.id, cutoff(n.conversionDays, now), NOT_LEDGERED);
  }
  }
+
+ // 4. The email log (O11): records older than EMAIL_LOG_RETENTION_DAYS go (queued rows too — a
+ // queued email that old was never going to send).
+ result.emailLogDeleted = (await query(
+ `DELETE FROM email_outbox WHERE created_at < $1`, [cutoff(EMAIL_LOG_RETENTION_DAYS, now)])).rowCount ?? 0;
 
  log.info(
  { ...result, networks: networks.length },

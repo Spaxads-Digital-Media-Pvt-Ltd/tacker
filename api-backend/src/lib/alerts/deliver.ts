@@ -7,6 +7,8 @@
  */
 import { query } from '../db/pool.js';
 import { sendNetworkEmail } from '../mailer.js';
+import { systemEmailEnabled } from '../email/transactional.js';
+import type { SystemEmailKey } from '../email/system-emails.js';
 import { safeRequest } from '../net/safe-http.js';
 import { BRAND } from '../../config/branding.js';
 import { logger } from '../logger.js';
@@ -31,7 +33,8 @@ export interface DeliverableAlert {
 
 export interface AlertDelivery {
   at: string;
-  email?: { sent: number; failed: number; error?: string };
+  /** `skipped`: the email is turned off in Communication Hub › Automated System Emails (O11). */
+  email?: { sent: number; failed: number; error?: string; skipped?: 'disabled' };
   webhook?: { ok: boolean; status?: number; error?: string };
 }
 
@@ -54,10 +57,19 @@ function alertEmail(a: DeliverableAlert): { subject: string; html: string } {
 
 const message = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
 
-export async function deliverAlert(networkId: string, alert: DeliverableAlert, channels: AlertChannels): Promise<AlertDelivery> {
+/**
+ * `emailToggle` is the Communication Hub system email that governs this alert's email (fraud alerts:
+ * fraud_rule_triggered; automation alert rules: alert_threshold_triggered) — off = no email, recorded
+ * as skipped. The webhook isn't affected.
+ */
+export async function deliverAlert(
+  networkId: string, alert: DeliverableAlert, channels: AlertChannels, emailToggle?: SystemEmailKey,
+): Promise<AlertDelivery> {
   const delivery: AlertDelivery = { at: new Date().toISOString() };
 
-  if (channels.emails.length) {
+  if (channels.emails.length && emailToggle && !(await systemEmailEnabled(networkId, emailToggle))) {
+    delivery.email = { sent: 0, failed: 0, skipped: 'disabled' };
+  } else if (channels.emails.length) {
     try {
       const { subject, html } = alertEmail(alert);
       const r = await sendNetworkEmail(networkId, channels.emails, subject, html);

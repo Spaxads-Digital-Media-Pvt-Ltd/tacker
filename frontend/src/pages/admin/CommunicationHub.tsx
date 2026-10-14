@@ -15,7 +15,7 @@ import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 
-const TOP_TABS = ['Overview', 'Emails', 'Banners', 'Audiences', 'Templates', 'Settings'] as const;
+const TOP_TABS = ['Overview', 'Emails', 'Banners', 'Audiences', 'Templates', 'Settings', 'Email Log'] as const;
 // Email scheduling isn't offered (messages are sent immediately or kept as drafts), so there is no
 // always-empty "Scheduled" tab.
 const EMAIL_SUBTABS = ['Sent', 'Drafts'] as const;
@@ -59,7 +59,7 @@ function StatusPill({ status }: { status: string }) {
   const styles: Record<string, string> = {
     sent: 'bg-success-bg text-success-text', published: 'bg-success-bg text-success-text',
     draft: 'bg-page text-fg-secondary', scheduled: 'bg-warning-bg text-warning-text',
-    expired: 'bg-danger-bg text-danger-text',
+    expired: 'bg-danger-bg text-danger-text', queued: 'bg-warning-bg text-warning-text', failed: 'bg-danger-bg text-danger-text',
   };
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-tiny font-medium capitalize ${styles[status] ?? 'bg-page text-fg-secondary'}`}>{status}</span>;
 }
@@ -785,9 +785,10 @@ function SettingsTab() {
   return (
     <div className="space-y-4">
       <p className="text-tiny text-fg-secondary">
-        These reflect real events this app can already fire on (Partner sign-up, Offer Applications, Offer Creatives, Invoices,
-        Postbacks, Alerts). The toggle is saved for real; wiring an actual send into every one of these action handlers is a
-        larger follow-up, so toggling doesn't send anything yet.
+        Each of these emails really goes out when its event happens — through your SMTP settings, via the email queue (see
+        Email Log for every send). Turn one off and it stops at once. Partner notifications go to the partners running the
+        offer (given access, or sending it traffic in the last 30 days). Alert emails go to the addresses set on the fraud
+        rules and automation alerts.
       </p>
       {(['partner', 'advertiser', 'misc'] as const).map((cat) => (
         <div key={cat} className="card !p-0">
@@ -801,6 +802,63 @@ function SettingsTab() {
   );
 }
 
+// ---------------- Email Log (O11) ----------------
+interface EmailLogRow {
+  id: string; event: string; label: string; recipient: string; subject: string; status: 'queued' | 'sent' | 'failed';
+  attempts: number; lastError: string | null; retryable: boolean; createdAt: string; sentAt: string | null;
+}
+const LOG_FILTERS = ['All', 'Failed', 'Queued', 'Sent'] as const;
+
+function EmailLogTab() {
+  const [filter, setFilter] = useState<(typeof LOG_FILTERS)[number]>('All');
+  const { data, loading, error, refetch } = useQuery<{ rows: EmailLogRow[]; last7Days: Record<string, number> }>(
+    `/api/communication-hub/email-log?status=${filter.toLowerCase()}`);
+  const retry = useMutation((id: string) => api.post(`/api/communication-hub/email-log/${id}/retry`));
+  const week = data?.last7Days ?? {};
+  return (
+    <div>
+      <p className="mb-3 text-tiny text-fg-secondary">
+        Every email — invites, password resets, invoices, partner notifications and your messages — is queued and sent through your
+        SMTP settings. A failing mail server is retried for about 15 minutes before an email is marked failed. Email bodies are
+        never shown here. Last 7 days: {week['sent'] ?? 0} sent · {week['queued'] ?? 0} queued · {week['failed'] ?? 0} failed.
+      </p>
+      <Toolbar>
+        <SubTabs tabs={LOG_FILTERS} active={filter} onChange={setFilter} />
+        <button type="button" className="btn-ghost" onClick={refetch}>Refresh</button>
+      </Toolbar>
+      {retry.error && <p className="mb-2 text-small text-danger-text">{retry.error}</p>}
+      {loading && !data ? <StateBlock><Spinner /></StateBlock>
+        : error ? <StateBlock>{error}</StateBlock>
+        : !data?.rows.length ? <StateBlock>No emails{filter === 'All' ? ' yet' : ` ${filter.toLowerCase()}`}.</StateBlock> : (
+          <div className="overflow-x-auto rounded-card border border-border">
+            <table className="premium-table">
+              <thead><tr><th>Queued</th><th>Email</th><th>To</th><th>Subject</th><th>Status</th><th>Attempts</th><th>Last error</th><th /></tr></thead>
+              <tbody>
+                {data.rows.map((e) => (
+                  <tr key={e.id} className="bg-surface text-fg">
+                    <td className="whitespace-nowrap text-fg-secondary">{fmt(e.createdAt)}</td>
+                    <td className="whitespace-nowrap">{e.label}</td>
+                    <td className="font-mono text-tiny">{e.recipient}</td>
+                    <td className="max-w-[280px] truncate" title={e.subject}>{e.subject}</td>
+                    <td><StatusPill status={e.status} />{e.sentAt && <span className="ml-2 text-tiny text-fg-muted">{fmt(e.sentAt)}</span>}</td>
+                    <td>{e.attempts}</td>
+                    <td className="max-w-[320px] text-tiny text-danger-text">{e.lastError ?? ''}</td>
+                    <td className="text-right">
+                      {e.retryable && (
+                        <button type="button" className="text-tiny font-medium text-accent-text hover:underline" disabled={retry.busy}
+                          onClick={async () => { if (await retry.run(e.id)) refetch(); }}>Retry</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </div>
+  );
+}
+
 const TITLES: Record<string, string> = {
   Overview: 'Communication Hub',
   Emails: 'Manage Email Messages',
@@ -808,6 +866,7 @@ const TITLES: Record<string, string> = {
   Audiences: 'Manage Audiences',
   Templates: 'Manage Templates',
   Settings: 'Manage Automated System Emails',
+  'Email Log': 'Email Log',
 };
 
 export default function CommunicationHub() {
@@ -822,6 +881,7 @@ export default function CommunicationHub() {
       {tab === 'Audiences' && <AudiencesTab />}
       {tab === 'Templates' && <TemplatesTab />}
       {tab === 'Settings' && <SettingsTab />}
+      {tab === 'Email Log' && <EmailLogTab />}
     </>
   );
 }

@@ -66,7 +66,7 @@ export async function sendPasswordReset(email: string): Promise<ResetRequestResu
     resetUrl: appUrl(`/reset-password?token=${encodeURIComponent(data.properties.hashed_token)}`),
     expiresInMinutes: RESET_LINK_MINUTES,
   });
-  return { account: true, email: await sendTransactional(networkId, 'password_reset', [data.user.email ?? email], mail) };
+  return { account: true, email: await sendTransactional(networkId, 'password_reset', [data.user.email ?? email], mail, { sensitive: true }) };
 }
 
 const invalidLink = () => new AppError('bad_request', 'This reset link is invalid or has expired — request a new one.', { reason: 'reset_link_invalid' });

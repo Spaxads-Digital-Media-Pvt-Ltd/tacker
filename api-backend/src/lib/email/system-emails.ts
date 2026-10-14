@@ -1,8 +1,9 @@
 /**
  * Automated System Emails (Communication Hub › Settings) — the events the platform can email about,
  * each with an on/off toggle stored per network (settings.communicationHub.systemEmails; default on).
- * `SENT_SYSTEM_EMAILS` are the ones the transactional layer actually sends (audit F-24,
- * lib/email/transactional.ts); toggling the others is stored but has no send behind it yet.
+ * `SENT_SYSTEM_EMAILS` are the ones that actually send (F-24 transactional layer; the partner
+ * notifications in lib/email/notifications.ts and the alert emails, O11). The rest have no send
+ * behind them, so the API leaves them out of the list (O11: hidden until they're wired).
  */
 export const SYSTEM_EMAIL_CATALOG = [
   { key: 'partner_signup_approved', label: 'Partner Sign-Up Approved', category: 'partner' },
@@ -31,4 +32,11 @@ export type SystemEmailKey = (typeof SYSTEM_EMAIL_CATALOG)[number]['key'];
 export const SENT_SYSTEM_EMAILS: ReadonlySet<SystemEmailKey> = new Set<SystemEmailKey>([
   'partner_portal_invite', 'advertiser_portal_invite', 'partner_balance_request', 'offer_details_shared',
   'partner_invoice_generated', 'advertiser_invoice_generated',
+  // O11: partner notifications (lib/email/notifications.ts) and the alert emails (lib/alerts/deliver.ts).
+  'partner_signup_approved', 'partner_signup_rejected', 'offer_application_approved', 'offer_application_denied',
+  'new_offer_creative_available', 'partner_offer_now_available', 'partner_offer_now_unavailable',
+  'payout_batch_completed', 'alert_threshold_triggered', 'fraud_rule_triggered',
 ]);
+
+/** The toggles shown: only emails that actually send (unwired ones stay hidden until they are). */
+export const VISIBLE_SYSTEM_EMAILS = SYSTEM_EMAIL_CATALOG.filter((e) => SENT_SYSTEM_EMAILS.has(e.key));

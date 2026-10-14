@@ -17,6 +17,7 @@ import { writeAudit } from '../../../lib/audit.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { requireRole } from '../auth.js';
+import { notifyOfferApplication } from '../../../lib/email/notifications.js';
 
 const TABLE = 'offer_publisher_access';
 
@@ -81,7 +82,7 @@ export function offerApplicationsRoutes(): Router {
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(decisionSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
-    const before = await db.selectOne<{ id: string; offer_id: string }>(TABLE, { id: req.params.id });
+    const before = await db.selectOne<{ id: string; offer_id: string; publisher_id: string; approval_status: string }>(TABLE, { id: req.params.id });
     if (!before) throw notFound('Application not found');
     const b = req.body as z.infer<typeof decisionSchema>;
     const access = b.status === 'approved' ? 'allow' : 'deny';
@@ -93,6 +94,8 @@ export function offerApplicationsRoutes(): Router {
       action: b.status === 'approved' ? 'offer_application.approve' : 'offer_application.reject',
       entityType: 'offer_application', entityId: req.params.id, before, after: row,
     });
+    // Offer Application Approved / Denied email to the partner (O11) — only when the decision changed.
+    if (before.approval_status !== b.status) void notifyOfferApplication(db.scope.networkId, before.publisher_id, before.offer_id, b.status === 'approved');
     const { rows } = await query<ListRow>(`${SELECT} WHERE a.id = $1 AND a.network_id = $2`, [req.params.id, req.scope!.networkId]);
     sendOk(res, rows[0] ? dto(rows[0]) : null);
   }));

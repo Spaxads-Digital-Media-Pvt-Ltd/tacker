@@ -17,6 +17,7 @@ import {
 import { CURRENCY_RE } from '../../../lib/money.js';
 import { approveConversion, rejectConversion } from './conversion-lifecycle.js';
 import { requireRole } from '../auth.js';
+import { notifyPayoutSent } from '../../../lib/email/notifications.js';
 
 interface LedgerRow {
   id: string; account_type: string; account_id: string; conversion_id: string | null;
@@ -112,6 +113,8 @@ export function financeRoutes(): Router {
         ...(userId ? { createdBy: userId } : {}),
       });
       await writeAudit(req, { action: 'payout.batch.create', entityType: 'payout_batch', entityId: result.batchId, after: result });
+      // Payout Batch Completed → each paid partner, with their own amount (O11).
+      void notifyPayoutSent(networkId, result.lines, result.currency, b.note ?? null);
       sendOk(res, result, undefined, 201);
     }),
   );
