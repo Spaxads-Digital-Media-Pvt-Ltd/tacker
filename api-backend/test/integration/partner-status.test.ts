@@ -18,6 +18,7 @@ import { buildDashboardApp } from '../../src/surfaces/dashboard/app.js';
 import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import { DbHostResolver } from '../../src/surfaces/tracking/host-resolver-db.js';
 import { query } from '../../src/lib/db/pool.js';
+import { getQueue, QUEUE } from '../../src/surfaces/workers/queues.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
 import { operatorToken, bearer } from '../helpers/tokens.js';
 
@@ -54,6 +55,15 @@ d('only active partners earn (live DB + Redis)', () => {
   const credits = async (pubId: string) => Number((await query<{ n: string }>(
     `SELECT COUNT(*) AS n FROM ledger_entries WHERE network_id = $1 AND account_type = 'publisher' AND account_id = $2`,
     [fx.networkA, pubId])).rows[0]!.n);
+  /** A click from a partner that isn't active (D1): an invalid click, the visitor is diverted (no fallback → 204). */
+  const rejectedClick = async (pubId: string, offerId = fx.offerA) => {
+    const r = await track.inject({ method: 'GET', url: `/click?offer_id=${offerId}&pub_id=${pubId}`, headers: { host } });
+    expect(r.statusCode).toBe(204); // never sent to the advertiser
+  };
+  /** The invalid clicks recorded for this network with that reason (the click-persist queue). */
+  const rejected = async (reason: string) => (await getQueue(QUEUE.clickPersist).getJobs(['waiting', 'delayed', 'active', 'completed', 'failed']))
+    .map((j) => j?.data as { networkId: string; publisherId: string | null; fraudFlags: string[]; resolvedPayout: string; isUnique: boolean } | undefined)
+    .filter((d): d is NonNullable<typeof d> => !!d && d.networkId === fx.networkA && d.fraudFlags.includes(reason));
   const setStatus = async (pubId: string, status: string) =>
     expect((await request(dash).patch(`/api/publishers/${pubId}`).set(admin).send({ status })).status).toBe(200);
 
@@ -76,34 +86,32 @@ d('only active partners earn (live DB + Redis)', () => {
     expect(await credits(pub.id)).toBe(1);
   });
 
-  it('pending partner → still redirected, but the click and conversion carry no partner and no earning', async () => {
+  it('pending partner → an INVALID click (D1): recorded on them with the reason, never sent to the advertiser, no earning', async () => {
     const pub = await partner('pending');
-    const conv = await postback(await click(pub.id));
-    expect(conv.publisher_id).toBeNull();
-    expect(conv.status).toBe('approved'); // the advertiser side is unchanged
+    await rejectedClick(pub.id);
+    const recorded = (await rejected('partner_pending')).filter((j) => j.publisherId === pub.id);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({ resolvedPayout: '0.0000', isUnique: false });
     expect(await credits(pub.id)).toBe(0);
   });
 
-  it('inactive partner, and a pending partner linked by numeric ref → same: no earning', async () => {
+  it('inactive partner, and a pending partner linked by numeric ref → the same', async () => {
     const inactive = await partner('inactive');
-    expect((await postback(await click(inactive.id))).publisher_id).toBeNull();
-    expect(await credits(inactive.id)).toBe(0);
-
+    await rejectedClick(inactive.id);
+    expect((await rejected('partner_inactive')).some((j) => j.publisherId === inactive.id)).toBe(true);
     const pending = await partner('pending');
-    expect((await postback(await click(pending.ref))).publisher_id).toBeNull();
-    expect(await credits(pending.id)).toBe(0);
+    await rejectedClick(pending.ref);
+    expect((await rejected('partner_pending')).some((j) => j.publisherId === pending.id)).toBe(true);
+    expect(await credits(inactive.id) + await credits(pending.id)).toBe(0);
   });
 
-  it('a random UUID pub_id (no such partner) → no ledger credit to that id', async () => {
-    const ghost = randomUUID();
-    const conv = await postback(await click(ghost));
-    expect(conv.publisher_id).toBeNull();
-    expect(await credits(ghost)).toBe(0);
-  });
-
-  it("another network's partner → not attributed here", async () => {
-    const conv = await postback(await click(fx.pubB1));
-    expect(conv.publisher_id).toBeNull();
+  it("a made-up pub_id, or another network's partner → an invalid click with no partner on it", async () => {
+    const before = (await rejected('unknown_partner')).length;
+    await rejectedClick(randomUUID());
+    await rejectedClick(fx.pubB1);
+    const after = await rejected('unknown_partner');
+    expect(after.length - before).toBe(2);
+    expect(after.every((j) => j.publisherId === null)).toBe(true);
   });
 
   it('a status change applies on the very next click (the dashboard busts the cache)', async () => {
@@ -111,7 +119,7 @@ d('only active partners earn (live DB + Redis)', () => {
     expect((await postback(await click(pub.id))).publisher_id).toBe(pub.id); // cached as active
 
     await setStatus(pub.id, 'inactive');
-    expect((await postback(await click(pub.id))).publisher_id).toBeNull();
+    await rejectedClick(pub.id); // D1: rejected from the very next click
 
     await setStatus(pub.id, 'active');
     expect((await postback(await click(pub.id))).publisher_id).toBe(pub.id);
@@ -142,7 +150,7 @@ d('only active partners earn (live DB + Redis)', () => {
     expect(await credits(pub.id)).toBe(0);
   });
 
-  it('private offer: a pending partner diverts like any partner without access, even if approved on the offer', async () => {
+  it('private offer: a pending partner is rejected even if approved on the offer; once active they run it', async () => {
     const pub = await partner('pending');
     const { rows } = await query<{ id: string }>(
       `INSERT INTO offers (network_id, advertiser_id, name, status, visibility, destination_url, default_payout, default_revenue)

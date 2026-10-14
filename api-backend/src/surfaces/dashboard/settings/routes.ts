@@ -26,6 +26,7 @@ import { maskIntegrations, mergeIntegrationsPatch } from '../../../lib/integrati
 import { encryptSecret } from '../../../lib/crypto/secret-box.js';
 import { retentionWindows } from '../../../lib/retention/retention.js';
 import { env } from '../../../config/env.js';
+import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 
 interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
@@ -45,6 +46,8 @@ const generalSchema = z.object({
   defaultCurrency: z.string().length(3).optional(),
   timezone: z.string().max(60).optional(),
   supportEmail: z.string().email().optional(),
+  // Where rejected clicks go when their offer has no fallback of its own (D1); null clears it.
+  fallbackUrl: redirectUrlWithMax(2000).nullable().optional(),
 });
 
 const smtpSchema = z.object({
@@ -130,7 +133,10 @@ export function settingsRoutes(): Router {
     const general = { ...(net.settings?.['general'] as object ?? {}) } as Record<string, unknown>;
     if (b.timezone !== undefined) general['timezone'] = b.timezone;
     if (b.supportEmail !== undefined) general['supportEmail'] = b.supportEmail;
+    if (b.fallbackUrl !== undefined) { if (b.fallbackUrl === null) delete general['fallbackUrl']; else general['fallbackUrl'] = b.fallbackUrl; }
     await saveSettings(networkId, { ...net.settings, general });
+    // Every offer's cached click config carries the network fallback — apply it on the next click.
+    if (b.fallbackUrl !== undefined) await invalidateNetworkOfferConfigs(networkId);
     await writeAudit(req, { action: 'settings.general.update', entityType: 'network', entityId: networkId });
     sendOk(res, { ok: true });
   }));

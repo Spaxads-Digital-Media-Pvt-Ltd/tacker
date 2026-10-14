@@ -7,6 +7,7 @@
  * deferred to a queue. The only goal after decisions are made is the fastest possible 302.
  */
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { env } from '../../config/env.js';
 import { buildHealthReport, buildLivenessReport, buildReadinessReport, errorEnvelope } from '../../lib/http/index.js';
@@ -14,7 +15,7 @@ import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
 import { lookupGeo, geoAvailable, carrierAvailable } from '../../lib/geo/geoip.js';
 import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
-import { isActivePartner } from './partner-status.js';
+import { getPartnerStatus } from './partner-status.js';
 import { getNetworkIpBlacklist } from '../../lib/net/ip-lists.js';
 import { getFraudConfigCached } from '../../lib/fraud/rules.js';
 import { tierPayout } from '../../lib/partner-tiers.js';
@@ -49,6 +50,12 @@ function firstStr(v: unknown): string | null {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Return the value only if it's a valid UUID (else null) — guards uuid columns downstream. */
+/** A plain IPv4 / IPv6 address, else null (a visitor IP passed on a server-to-server click, D2). */
+function asIp(v: string | null): string | null {
+ const s = v?.trim() ?? '';
+ return s && s.length <= 45 && isIP(s) ? s : null;
+}
+
 function asUuid(v: string | null): string | null {
  return v && UUID_RE.test(v) ? v : null;
 }
@@ -204,21 +211,52 @@ export function buildTrackingApp(): FastifyInstance {
 
  // 2. Offer config + partner status from Redis (load-through, in parallel). No sync Postgres read
  // on the hot path — Postgres is only the cold-cache fallback.
- const [offer, partnerActive, ipBlacklist, fraudCfg] = await Promise.all([
+ const [offer, partnerStatus, ipBlacklist, fraudCfg] = await Promise.all([
  getOfferConfig(tenant.networkId, offerId),
- requestedPublisherId ? isActivePartner(tenant.networkId, requestedPublisherId) : false,
+ requestedPublisherId ? getPartnerStatus(tenant.networkId, requestedPublisherId) : null,
  getNetworkIpBlacklist(tenant.networkId),
  getFraudConfigCached(tenant.networkId),
  ]);
- // 2a. Only an active partner of this network can earn (F-08). A pending, inactive or unknown
- // pub_id is DROPPED from the click instead of diverting the visitor: the redirect still happens,
- // but the click — and every conversion on it — belongs to no partner, so no payout or ledger
- // entry is ever booked to them. Everything below sees no partner (a private offer then diverts,
- // as for any click without an approved partner).
- const publisherId = partnerActive ? requestedPublisherId : null;
  if (!offer || offer.status !== 'active') {
  return divert(reply, offer?.fallbackUrl ?? null, offer?.id);
  }
+
+ // 2a. Who the visitor is (D2). A server-to-server click (format=json on an offer that allows it)
+ // comes from the partner's server, so the connection's IP and user agent describe that server. When
+ // it passes the VISITOR's (`ip` / `user_ip`, `user_agent` / `ua`), those are what geo, the IP lists,
+ // dedup, fraud checks and the stored click use — and a fraud block then applies like to any click;
+ // without the visitor's IP it is scored on the server but never blocked.
+ const serverSideClick = Boolean(offer.attribution?.serverSideClick) && firstStr(q['format']) === 'json';
+ const visitorIp = serverSideClick ? asIp(firstStr(q['ip']) ?? firstStr(q['user_ip']) ?? firstStr(q['visitor_ip'])) : null;
+ const visitorUa = serverSideClick ? ((firstStr(q['user_agent']) ?? firstStr(q['ua']))?.trim().slice(0, 512) || null) : null;
+ const ip = visitorIp ?? (req.ip || null);
+ const userAgent = visitorUa ?? (req.headers['user-agent'] as string | undefined) ?? null;
+ const geo = ip ? lookupGeo(ip) : null;
+ const ua = parseUA(userAgent ?? undefined);
+
+ // 2b. Only an active partner of this network can run traffic (F-08, D1). A pending, inactive or
+ // unknown pub_id makes an INVALID click: it is recorded with the reason (reports show the rejected
+ // traffic — on the partner when it's one of this network's), and the visitor goes to the fallback —
+ // the offer's, else the network's, else a neutral 204 — never to the advertiser. Nobody is credited:
+ // the click carries no payout and is never stored for attribution.
+ if (requestedPublisherId && partnerStatus !== 'active') {
+ const reason = partnerStatus === null ? 'unknown_partner' : `partner_${partnerStatus}`;
+ await enqueueClick({
+ clickId: randomUUID().replace(/-/g, ''), networkId: tenant.networkId, offerId: offer.id,
+ publisherId: partnerStatus === null ? null : requestedPublisherId,
+ ts: new Date().toISOString(), ip,
+ country: geo?.country ?? null, region: geo?.region ?? null, city: geo?.city ?? null, isp: geo?.isp ?? null,
+ device: ua.device, os: ua.os, browser: ua.browser,
+ referrer: firstStr(req.headers['referer']) ?? null, userAgent,
+ sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
+ isUnique: false, fraudScore: 0, fraudFlags: [reason],
+ resolvedPayout: '0.0000', resolvedRevenue: '0.0000', currency: offer.currency, smartLinkId,
+ sourceId, fbclid: firstNonBlank(q, ['fbclid']), gclid: firstNonBlank(q, ['gclid']),
+ });
+ req.log.info({ offerId: offer.id, pubId: requestedPublisherId, reason }, 'click_rejected');
+ return divert(reply, offer.fallbackUrl, offer.id);
+ }
+ const publisherId = requestedPublisherId;
 
  // 2b. Affiliate blocking — a publisher explicitly denied on this offer never gets traffic.
  if (publisherId && offer.deniedPublishers.includes(publisherId)) {
@@ -231,13 +269,9 @@ export function buildTrackingApp(): FastifyInstance {
  return divert(reply, offer.fallbackUrl, offer.id);
  }
 
- // 3. Enrich geo + device in-process.
- const ip = req.ip || null;
- // 3a. Network IP blacklist (Control Center › Security, F-16): a listed address is diverted, the same
+ // 3. Network IP blacklist (Control Center › Security, F-16): a listed address is diverted, the same
  // outcome as a blocking traffic control. req.ip is the real client (trusted-proxy aware, above).
  if (ip && ipBlacklist?.check(ip)) return divert(reply, offer.fallbackUrl, offer.id);
- const geo = ip ? lookupGeo(ip) : null;
- const ua = parseUA(req.headers['user-agent']);
 
  // 4. Geo targeting. A `geo=XX` query param forces the country (dev/testing when no MaxMind db,
  // or to simulate a country) — geo is then treated as known so allow-list rules actually apply.
@@ -266,7 +300,7 @@ export function buildTrackingApp(): FastifyInstance {
  const tcFields = {
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
  referrer: firstStr(req.headers['referer']) ?? null, ip, country,
- device: ua.device, os: ua.os, browser: ua.browser, userAgent: (req.headers['user-agent'] as string) ?? null,
+ device: ua.device, os: ua.os, browser: ua.browser, userAgent,
  };
  const tcMatch = evaluateTrafficControls(offer.trafficControls, tcFields, publisherId);
  if (tcMatch?.action === 'block') return divert(reply, offer.fallbackUrl, offer.id);
@@ -286,10 +320,9 @@ export function buildTrackingApp(): FastifyInstance {
  // server, so its IP and user agent describe that server, not the visitor: it's scored, never blocked.
  const fraud = await fraudPreSignals({
  networkId: tenant.networkId, ip, isDatacenter: geo?.isDatacenter ?? false,
- userAgent: req.headers['user-agent'] ?? null, ipqs: offer.attribution?.ipqs?.enabled ?? false,
+ userAgent, ipqs: offer.attribution?.ipqs?.enabled ?? false,
  }, fraudCfg);
- const serverSideClick = Boolean(offer.attribution?.serverSideClick) && firstStr(q['format']) === 'json';
- if (fraudCfg.enabled && fraudCfg.blockScore != null && fraud.score >= fraudCfg.blockScore && !serverSideClick) {
+ if (fraudCfg.enabled && fraudCfg.blockScore != null && fraud.score >= fraudCfg.blockScore && !(serverSideClick && !visitorIp)) {
  req.log.info({ offerId: offer.id, fraud: fraud.score, flags: fraud.flags }, 'click_blocked');
  return divert(reply, offer.fallbackUrl, offer.id);
  }
@@ -324,7 +357,7 @@ export function buildTrackingApp(): FastifyInstance {
  ts: new Date().toISOString(), ip,
  country, region: geo?.region ?? null, city: geo?.city ?? null, isp: geo?.isp ?? null,
  device: ua.device, os: ua.os, browser: ua.browser,
- referrer: firstStr(req.headers['referer']) ?? null, userAgent: req.headers['user-agent'] ?? null,
+ referrer: firstStr(req.headers['referer']) ?? null, userAgent,
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
  isUnique, fraudScore: fraud.score,
  fraudFlags: tcMatch?.action === 'fail_traffic' ? [...fraud.flags, 'traffic_control'] : fraud.flags,
@@ -361,7 +394,6 @@ export function buildTrackingApp(): FastifyInstance {
  const micros = Number(process.hrtime.bigint() - started) / 1000;
  req.log.info({
  offerId: offer.id, clickId, unique: isUnique, fraud: fraud.score, us: Math.round(micros),
- ...(requestedPublisherId && !publisherId ? { droppedPartner: requestedPublisherId } : {}),
  }, 'click');
 
  // AP-3 runtime guard: validate final URL after macro substitution before setting Location header.
@@ -428,7 +460,7 @@ export function buildTrackingApp(): FastifyInstance {
 
  // The partner as /click will see it: only an active partner of this network counts (F-08).
  const requestedPub = pub ? await resolveEntityId('publisher', tenant.networkId, pub) : null;
- const partner = requestedPub && (await isActivePartner(tenant.networkId, requestedPub)) ? requestedPub : null;
+ const partner = requestedPub && (await getPartnerStatus(tenant.networkId, requestedPub)) === 'active' ? requestedPub : null;
  const offers = await Promise.all(targeted.map((i) => getOfferConfig(tenant.networkId, i.offerId)));
  const capped = await Promise.all(offers.map((o) => (o ? clickCapReached(o.id, o.dailyClickCap) : true)));
  const eligible = targeted.filter((_, k) => {

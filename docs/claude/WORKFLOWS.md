@@ -51,6 +51,8 @@ Dashboard request with Bearer token
 ```
 End user clicks tracking link
  → GET <tracking-domain>/click?offer_id=X&pub_id=Y&sub1=...
+ → a pending / inactive / unknown pub_id → invalid click (flag partner_* / unknown_partner, no payout, no attribution) → fallback: offer's, else network's (Settings › General), else 204 (D1)
+ → server-side format=json click with ip= / user_agent= → the visitor's address + browser drive geo, IP lists, dedup, fraud (D2)
  → resolveHostToNetwork(Host) — DB-backed, Redis-cached
  → getOfferConfig(networkId, offerId) — Redis load-through
  → (Sync decisions, no Postgres reads)
@@ -61,7 +63,7 @@ End user clicks tracking link
  - isTrafficBlocked(offer.trafficBlockings, publisherId, fields)
  - fraudPreSignals({ ip, isDatacenter, userAgent, ipqs }, fraudCfg) — datacenter, velocity, bot/headless UA,
    the IP's cached IPQS verdict; weights from the network's fraud rules (Redis-cached config)
- - score ≥ fraudCfg.blockScore → divert (not enqueued); opt-in, never for server-side format=json clicks
+ - score ≥ fraudCfg.blockScore → divert (not enqueued); opt-in; a server-side format=json click only when it passes the visitor's ip (D2)
  - isClickCapped(offerId, dailyClickCap) — Redis atomic
  - markUnique(offerId, ip, dedupWindowS) — Redis atomic
  → Resolve payout/revenue (geo overrides)

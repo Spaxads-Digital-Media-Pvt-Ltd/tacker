@@ -150,7 +150,7 @@ function UploadBox({ label, value, error, onFile, onClear }: {
   );
 }
 
-interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string } }
+interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string; fallbackUrl?: string } }
 interface PlatformBranding { logoUrl?: string | null; faviconUrl?: string | null }
 
 /** "Edit General" — Network Displayed Name, Support Email, Currency, and Timezone persist via
@@ -163,6 +163,7 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
   const [supportEmail, setSupportEmail] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [timezone, setTimezone] = useState('UTC');
+  const [fallbackUrl, setFallbackUrl] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -176,6 +177,7 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setSupportEmail(settings.general.supportEmail ?? '');
     setCurrency(settings.general.defaultCurrency ?? 'USD');
     setTimezone(settings.general.timezone ?? 'UTC');
+    setFallbackUrl(settings.general.fallbackUrl ?? '');
   }, [settings]);
 
   useEffect(() => {
@@ -203,11 +205,15 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
       if (supportEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail.trim())) {
         throw new Error('Support Email must be a valid address.');
       }
+      if (fallbackUrl.trim() && !/^https?:\/\/\S+$/i.test(fallbackUrl.trim())) {
+        throw new Error('Fallback URL must be a full http(s) address.');
+      }
       await api.put('/api/settings/general', {
         name: name.trim(),
         supportEmail: supportEmail.trim() || undefined,
         defaultCurrency: currency,
         timezone,
+        fallbackUrl: fallbackUrl.trim() || null,
       });
       await api.put('/api/control-center/config/platform', {
         branding: { logoUrl: logoUrl || null, faviconUrl: faviconUrl || null },
@@ -236,6 +242,10 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
       </Field>
       <Field label="Language *"><select className="input" defaultValue="English"><option>English</option></select></Field>
       <Field label="Timezone"><input className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="e.g. UTC, America/Los_Angeles" /></Field>
+      <Field label="Fallback URL for rejected clicks">
+        <input className="input" value={fallbackUrl} onChange={(e) => setFallbackUrl(e.target.value)} placeholder="https://yourdomain.com/offer-unavailable" />
+        <p className="mt-1 text-tiny text-fg-secondary">Where a click goes when it can't run — the partner isn't active, or a geo / cap / fraud / traffic rule stops it — and its offer has no fallback URL of its own. Empty = a blank page.</p>
+      </Field>
       <Checkbox label="Show Partner Sign Up link (Login page)" defaultChecked />
       <Checkbox label="Show Advertiser Sign Up link (Login page)" defaultChecked />
       <Checkbox label="Show Everflow Support Link in Partner and Advertiser UIs" />
@@ -522,6 +532,7 @@ function GeneralSub() {
             <InfoRow label="Language" value="English" />
             <ColorSwatchRow label="Secondary Color" color={null} />
             <InfoRow label="Timezone" value={settings?.general.timezone} />
+            <InfoRow label="Fallback URL (rejected clicks)" value={settings?.general.fallbackUrl} help="Used when the offer has no fallback URL of its own." />
             <InfoRow label="HTML Custom Footer (Left menu)" />
             <InfoRow label="Currency" value={settings?.general.defaultCurrency} />
             <InfoRow label="Show Name" />

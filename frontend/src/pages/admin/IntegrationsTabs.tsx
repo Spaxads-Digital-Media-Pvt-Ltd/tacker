@@ -310,7 +310,7 @@ function ConfigureModals({
               <input className="input" type="number" min="1" max="100" placeholder="Empty = flag only, never block"
                 value={fraudExtras.blockScore} onChange={(e) => setFraudExtras((x) => ({ ...x, blockScore: e.target.value }))} />
             </Field>
-            <p className="text-tiny text-fg-muted">Every click gets a score from the signals below. At or above this score the click is sent to the offer’s fallback URL and not counted; below it the click is tracked and flagged. Server-to-server clicks are never blocked.</p>
+            <p className="text-tiny text-fg-muted">Every click gets a score from the signals below. At or above this score the click is sent to the fallback URL (the offer’s, else the network’s) and not counted; below it the click is tracked and flagged. A server-to-server click is blocked only when it passes the visitor’s IP (<code>ip=</code>) — otherwise its IP is the partner’s server, so it’s scored but never blocked.</p>
           </div>
 
           <div className="space-y-3 border-t border-border pt-3">

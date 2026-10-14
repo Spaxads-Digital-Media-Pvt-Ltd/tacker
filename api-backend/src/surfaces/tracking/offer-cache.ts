@@ -143,12 +143,14 @@ interface Row {
   visibility: string | null;
   security_code: string | null;
   network_security_code: string | null;
+  network_fallback_url: string | null;
   metadata: Record<string, unknown> | null;
 }
 
 async function loadFromDb(networkId: string, offerId: string): Promise<OfferConfig | null> {
   const { rows } = await query<Row>(
     `SELECT o.*, n.postback_security_code AS network_security_code,
+            (SELECT nn.settings->'general'->>'fallbackUrl' FROM networks nn WHERE nn.id = o.network_id) AS network_fallback_url,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'country', g.country, 'region', g.region, 'action', g.action,
               'payoutOverride', g.payout_override, 'revenueOverride', g.revenue_override,
@@ -228,7 +230,9 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
 
   return {
     id: r.id, networkId: r.network_id, advertiserId: r.advertiser_id, status: r.status,
-    destinationUrl: r.destination_url, fallbackUrl: r.fallback_url, payoutModel: r.payout_model,
+    destinationUrl: r.destination_url,
+    // The offer's own fallback, else the network's (Settings › General — D1): where rejected clicks go.
+    fallbackUrl: r.fallback_url ?? r.network_fallback_url ?? null, payoutModel: r.payout_model,
     defaultPayout: r.default_payout, defaultRevenue: r.default_revenue, currency: r.currency,
     dailyConversionCap: r.daily_conversion_cap, totalConversionCap: r.total_conversion_cap,
     dailyClickCap: r.daily_click_cap, attributionWindowS: r.attribution_window_s,
