@@ -64,7 +64,7 @@ Client Browser
  ▼
 ┌─────────────────────────────────────────────────────┐
 │ Shared Data Layer │
-│ Postgres 16 (via node-pg-migrate, 62 migrations) │
+│ Postgres 16 (via node-pg-migrate, 76 migrations) │
 │ Redis 7 (ioredis — cache, dedup, caps, BullMQ) │
 │ Supabase (Auth + Admin API — backend only) │
 │ MaxMind GeoIP2 (optional) │

@@ -27,10 +27,10 @@
 | `api-backend/src/surfaces/tracking/macros.ts` | High | Macro token build + substitution |
 | `frontend/src/lib/api.ts` | High | HTTP client (Bearer + envelope + auto-refresh) |
 | `frontend/src/lib/authClient.ts` | High | Login/logout/refresh — backend auth bridge |
-| `frontend/src/components/AppShell.tsx` | High | Main layout shell (sidebar, header, flyouts) |
-| `frontend/src/components/nav.ts` | High | Per-role navigation definition |
+| `frontend/src/shared-components/shell/AppShell.tsx` | High | Main layout shell (sidebar, header, flyouts) |
+| `frontend/src/shared-components/primitives/nav.ts` | High | Per-role navigation definition |
 | `frontend/src/auth/ProtectedRoute.tsx` | High | Role-gated route wrapper |
-| `frontend/src/index.css` | High | Design tokens (Sora + Space Mono, teal/slate palette) |
+| `frontend/src/index.css` | High | Design tokens (Inter + Space Mono, teal/slate palette) |
 | `api-backend/migrations/` | High | All 62 SQL migrations (schema source of truth) |
 | `api-backend/src/domain/entities.ts` | High | TypeScript interfaces for DB row shapes |
 
@@ -41,8 +41,8 @@
 | `api-backend/src/lib/apikeys/keys.ts` | Medium | API key generation + hashing |
 | `frontend/src/lib/reportFilters.ts` | Medium | Report filter catalog (Trackog-compatible) |
 | `frontend/src/lib/useApi.ts` | Medium | useQuery / useMutation hooks |
-| `frontend/src/components/ReportPageKit.tsx` | Medium | Shared report page scaffold |
-| `frontend/src/components/ui.tsx` | Medium | UI primitive components (shadcn-style) |
+| `frontend/src/shared-components/primitives/ReportPageKit.tsx` | Medium | Shared report page scaffold |
+| `frontend/src/shared-components/primitives/ui.tsx` | Medium | UI primitive components (shadcn-style) |
 | `api-backend/src/lib/ledger/` | Medium | Append-only money ledger |
 | `api-backend/src/lib/fraud/` | Medium | Fraud rules + scan logic |
 | `api-backend/src/lib/integrations/facebook-capi.ts` | Medium | Facebook CAPI integration |

@@ -50,7 +50,7 @@ frontend/src/
 ├── main.tsx — Entry (BrowserRouter > ThemeProvider > AuthProvider > App)
 ├── App.tsx — Routes (4 role groups, all lazy-loaded)
 ├── auth/ — AuthContext, ProtectedRoute, roles, session (localStorage)
-├── components/ — Shared UI (AppShell, NavFlyout, ui.tsx, etc.)
+├── shared-components/ — Shared UI: shell/ (AppShell, NavFlyout), primitives/ (ui.tsx, nav.ts, ReportPageKit…), panels/, charts/
 ├── pages/
 │ ├── admin/ — 80+ page files (advertisers, publishers, offers, reports, etc.)
 │ ├── portal/ — Publisher/Advertiser portal pages
@@ -58,7 +58,7 @@ frontend/src/
 ├── lib/ — api.ts (HTTP client), authClient.ts, useApi.ts, reportFilters.ts
 ├── theme/ — Light/dark theme (CSS-only)
 ├── config/branding.ts — Brand name
-└── index.css — Design tokens (Sora/Space Mono fonts, teal/slate palette)
+└── index.css — Design tokens (Inter/Space Mono fonts, teal/slate palette)
 ```
 
 **No external state management**. `useState` + `useContext` + `localStorage`.
@@ -92,7 +92,7 @@ api-backend/src/
 
 # Database
 
-**62 migrations** in `api-backend/migrations/`. Key tables:
+**76 migrations** in `api-backend/migrations/`. Key tables:
 - `networks` — tenant (one per advertiser)
 - `users` — dashboard auth users (linked to Supabase Auth)
 - `parties` — unified advertisers + publishers
@@ -208,7 +208,7 @@ api-backend/src/
 | `api-backend/src/lib/redis.ts` | Redis connection |
 | `frontend/src/App.tsx` | All routes |
 | `frontend/src/lib/api.ts` | HTTP client |
-| `frontend/src/components/AppShell.tsx` | Layout shell |
+| `frontend/src/shared-components/shell/AppShell.tsx` | Layout shell |
 | `api-backend/src/config/env.ts` | Env loading |
 | `migrations/` | 62 SQL migrations |
 
@@ -253,7 +253,7 @@ api-backend/src/
 - No ORM — all raw SQL via `pg`
 - Hot path: `/click` must NEVER touch Postgres synchronously
 - Tracking surface has NO auth (tenant by Host header)
-- 62 migrations are raw SQL (node-pg-migrate)
+- 76 migrations are raw SQL (node-pg-migrate)
 - Frontend has NO test framework
 - Phase 0 scaffold active; many route modules minimal
 

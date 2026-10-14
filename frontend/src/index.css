@@ -1,5 +1,5 @@
-/* Sora (UI) + Space Mono (IDs/tokens/codes) — loaded via index.html (Section 0).
- * Sora: geometric sans with a premium SaaS feel for headings, nav, and body copy.
+/* Inter (UI) + Space Mono (IDs/tokens/codes) — loaded via index.html (Section 0).
+ * Inter: the UI sans for headings, nav, and body copy.
  * Space Mono: monospace for tracking IDs, postbacks, codes, and metric-heavy table cells. */
 @tailwind base;
 @tailwind components;

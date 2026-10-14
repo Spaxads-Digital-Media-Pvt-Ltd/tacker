@@ -40,7 +40,7 @@ Two-repository system (independently deployable):
 
 ## Database
 - **Postgres 16** (local docker; Supabase Postgres pooler in staging/prod via `DATABASE_URL`)
-- 62 migrations in `api-backend/migrations/` (timestamped `1700000000000_*.sql`)
+- 76 migrations in `api-backend/migrations/` (timestamped `1700000000000_*.sql`)
 - Schema covers: networks, users, parties (advertisers/publishers), offers, tracking-domains, clicks, conversions, ledger (append-only money), api-keys, fraud-alerts, ai, audit-log, smart-links, segmentations, automations, control-center, etc.
 
 ## Authentication

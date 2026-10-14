@@ -159,7 +159,7 @@ User enters credentials → POST /api/auth/login
  ```css
  --accent: 13 148 136; /* teal-600, used as rgb(var(--accent) / 0.5) */
  ```
-- Fonts: **Sora** (UI), **Space Mono** (IDs/tokens/codes)
+- Fonts: **Inter** (UI), **Space Mono** (IDs/tokens/codes)
 - Theme: Light default, optional dark (`.dark` class on `<html>`)
 - Custom components via `ui.tsx` (shadcn/ui-style primitive components)
 
