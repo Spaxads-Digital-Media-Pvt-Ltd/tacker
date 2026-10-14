@@ -22,6 +22,15 @@ export interface Session {
   expiresAt: number | null;
   /** Set on an impersonation session: the id of the admin viewing this portal account. */
   impersonatedBy?: string;
+  /** Signed in with an invite's temporary password: choose a new one before anything else (O1). */
+  mustChangePassword?: boolean;
+}
+
+/** The first-sign-in password was chosen: the session can go to the app. */
+export function markPasswordChanged(): void {
+  if (isImpersonating()) return;
+  const s = loadSession();
+  if (s) saveSession({ ...s, mustChangePassword: false });
 }
 
 /** Update just the access token + expiry after a silent refresh, keeping identity fields. */

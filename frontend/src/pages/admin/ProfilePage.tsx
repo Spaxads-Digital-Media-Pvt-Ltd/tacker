@@ -4,6 +4,7 @@
  * compliance anonymize via /api/me/anonymize.
  */
 import { useEffect, useState, type ReactNode, type FormEvent, type ChangeEvent } from 'react';
+import { PASSWORD_MIN, PASSWORD_HINT } from '../../auth/passwordPolicy';
 import { Copy, Check, Shield, Pencil, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { ROLE_LABELS } from '../../auth/roles';
@@ -517,7 +518,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
         <form onSubmit={submit} className="space-y-4">
           {error && <p className="text-small text-danger-text">{error}</p>}
           {mismatch && <p className="text-small text-danger-text">Passwords don't match.</p>}
-          <Field label="New password"><input type="password" className="input" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={8} placeholder="At least 8 characters" /></Field>
+          <Field label="New password"><input type="password" className="input" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={PASSWORD_MIN} placeholder={PASSWORD_HINT} /></Field>
           <Field label="Confirm new password"><input type="password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} required /></Field>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>

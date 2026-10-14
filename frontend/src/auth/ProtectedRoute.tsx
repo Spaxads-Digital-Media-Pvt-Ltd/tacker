@@ -14,6 +14,10 @@ export function ProtectedRoute({ allow, children }: { allow: Role; children: Rea
   if (!session) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
+  // Still on an invite's temporary password: choosing a new one comes first (O1).
+  if (session.mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
+  }
   if (session.role !== allow) {
     return <Navigate to={ROLE_HOME[session.role]} replace />;
   }

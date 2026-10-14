@@ -11,7 +11,9 @@
 Four role-gated surfaces (UX-only gating — backend enforces authorization):
 ```
 /login — Login page
-/forgot-password — Password reset
+/forgot-password — "Forgot password?": emails a one-time reset link (O1)
+/reset-password — Where that link lands: choose a new password (token dropped from the address bar)
+/change-password — First sign-in with an invite's temporary password: choose your own first (ProtectedRoute sends every route here while `session.mustChangePassword`)
 /impersonate — Starts an admin impersonation session in this tab (opened by Impersonate)
 /admin/* — Super Admin (role: super_admin)
 /app/* — Network Admin (role: admin)

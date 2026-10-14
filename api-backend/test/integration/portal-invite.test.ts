@@ -140,7 +140,8 @@ d('portal logins are provisioned in-product (live DB, fake Supabase)', () => {
       expect(await authUserOf('publishers', id)).toBe(inv.authUserId);
       const user = sb.users.get(inv.authUserId)!;
       expect(user.email).toBe(email.toLowerCase());
-      expect(user.app_metadata).toEqual({ kind: 'publisher', network_id: fx.networkA, owner_id: id });
+      // A temporary password: the first sign-in must choose a new one (O1).
+      expect(user.app_metadata).toEqual({ kind: 'publisher', network_id: fx.networkA, owner_id: id, must_change_password: true });
 
       // No SMTP outside production → the response carries the credentials, and they match the login.
       expect(inv.credentials).toMatchObject({ email: email.toLowerCase() });
@@ -179,7 +180,7 @@ d('portal logins are provisioned in-product (live DB, fake Supabase)', () => {
       expect(res.body.data).toMatchObject({ invited: true, hasPortalAccount: true });
       const authUserId = res.body.data.invite.authUserId as string;
       expect(await authUserOf('advertisers', res.body.data.id)).toBe(authUserId);
-      expect(sb.users.get(authUserId)!.app_metadata).toEqual({ kind: 'advertiser', network_id: fx.networkA, owner_id: res.body.data.id });
+      expect(sb.users.get(authUserId)!.app_metadata).toEqual({ kind: 'advertiser', network_id: fx.networkA, owner_id: res.body.data.id, must_change_password: true });
 
       const again = await invite(res.body.data.id, 'advertisers');
       expect(again.status).toBe(200);
@@ -372,7 +373,7 @@ d('portal logins are provisioned in-product (live DB, fake Supabase)', () => {
       expect(pub.metadata.signup?.at).toBeTruthy();
 
       const user = sb.users.get(pub.auth_user_id)!;
-      expect(user.app_metadata).toEqual({ kind: 'publisher', network_id: fx.networkA, owner_id: pub.id });
+      expect(user.app_metadata).toEqual({ kind: 'publisher', network_id: fx.networkA, owner_id: pub.id, must_change_password: true });
       expect(user.password).toBe(res.body.data.credentials.temporaryPassword);
 
       const pending = await request(dash).get('/api/publishers').query({ paged: '1', tab: 'pending', pageSize: 200 }).set(admin);

@@ -58,3 +58,32 @@ export function offerDetailsEmail(p: {
     html: [`<p>Hello ${e(p.partnerName)},</p>`, `<p>${e(p.networkName)} shared these offers with you:</p>`, `<ul>${items}</ul>`].join('\n'),
   };
 }
+
+/** Team member invite (O1): their sign-in and a temporary password they must change at first sign-in. */
+export function staffInviteEmail(p: {
+  networkName: string; name: string; inviterName: string | null; loginUrl: string; email: string; password: string;
+}): { subject: string; html: string } {
+  return {
+    subject: `You've been invited to ${p.networkName}`,
+    html: [
+      `<p>Hello ${e(p.name)},</p>`,
+      `<p>${p.inviterName ? `${e(p.inviterName)} has invited you` : "You've been invited"} to join the <strong>${e(p.networkName)}</strong> team dashboard.</p>`,
+      `<p>Sign in at <a href="${e(p.loginUrl)}">${e(p.loginUrl)}</a></p>`,
+      `<p>Email: ${e(p.email)}<br>Temporary password: <code>${e(p.password)}</code></p>`,
+      `<p>You'll be asked to choose your own password when you first sign in.</p>`,
+    ].join('\n'),
+  };
+}
+
+/** Password reset (O1): a one-time link to choose a new password. */
+export function passwordResetEmail(p: { networkName: string; resetUrl: string; expiresInMinutes: number }): { subject: string; html: string } {
+  return {
+    subject: `Reset your ${p.networkName} password`,
+    html: [
+      `<p>Hello,</p>`,
+      `<p>Someone asked to reset the password for your ${e(p.networkName)} account. If that was you, choose a new password here:</p>`,
+      `<p><a href="${e(p.resetUrl)}">Reset my password</a></p>`,
+      `<p>The link works once and expires in ${p.expiresInMinutes} minutes. If you didn't ask for this, ignore this email — your password stays the same.</p>`,
+    ].join('\n'),
+  };
+}

@@ -35,6 +35,7 @@ export default function Login() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const ended = ENDED[params.get('ended') ?? ''] ?? null;
+  const resetDone = params.get('reset') === 'done';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +50,7 @@ export default function Login() {
     try {
       await (asSuperAdmin ? signInPlatform : signIn)(email, password);
       const s = loadSession();
-      navigate(s ? ROLE_HOME[s.role] : '/', { replace: true });
+      navigate(s?.mustChangePassword ? '/change-password' : s ? ROLE_HOME[s.role] : '/', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -100,9 +101,13 @@ export default function Login() {
               <div className="mt-5 rounded-[var(--radius)] border border-danger-bg bg-danger-bg px-4 py-3 text-small text-danger-text">
                 {error}
               </div>
-            ) : ended && (
+            ) : ended ? (
               <div className="mt-5 rounded-[var(--radius)] border border-warning-bg bg-warning-bg px-4 py-3 text-small text-warning-text">
                 {ended}
+              </div>
+            ) : resetDone && (
+              <div className="mt-5 rounded-[var(--radius)] border border-success-bg bg-success-bg px-4 py-3 text-small text-success-text">
+                Your password was updated. Sign in with the new one.
               </div>
             )}
 

@@ -6,12 +6,18 @@
  * triggered the email (an invite, an invoice, a balance request) always completes.
  *
  * Templates live with their callers (escapeHtml below for any text that isn't the platform's own).
- * Scheduled reports use the same path without a toggle — their own schedule is the opt-in.
+ * Some emails have no toggle and always go out (ALWAYS_ON_EMAILS): scheduled reports — their own
+ * schedule is the opt-in — and account security mail (team invites, password resets).
  */
 import { query } from '../db/pool.js';
 import { sendNetworkEmail, type MailAttachment } from '../mailer.js';
 import { logger } from '../logger.js';
 import type { SystemEmailKey } from './system-emails.js';
+
+/** Sent regardless of the Communication Hub toggles. */
+export const ALWAYS_ON_EMAILS = ['scheduled_report', 'staff_invite', 'password_reset'] as const;
+export type AlwaysOnEmail = (typeof ALWAYS_ON_EMAILS)[number];
+const alwaysOn = (e: string): e is AlwaysOnEmail => (ALWAYS_ON_EMAILS as readonly string[]).includes(e);
 
 export interface TransactionalResult {
   sent: boolean;
@@ -33,12 +39,12 @@ export async function systemEmailEnabled(networkId: string, key: SystemEmailKey)
 
 export async function sendTransactional(
   networkId: string,
-  event: SystemEmailKey | 'scheduled_report',
+  event: SystemEmailKey | AlwaysOnEmail,
   recipients: (string | null | undefined)[],
   mail: { subject: string; html: string; attachments?: MailAttachment[] },
 ): Promise<TransactionalResult> {
   const to = Array.from(new Set(recipients.map((r) => r?.trim()).filter((r): r is string => !!r)));
-  if (event !== 'scheduled_report' && !(await systemEmailEnabled(networkId, event))) {
+  if (!alwaysOn(event) && !(await systemEmailEnabled(networkId, event))) {
     return { sent: false, skipped: 'disabled', reason: 'This email is turned off in Communication Hub › Automated System Emails.', recipients: to };
   }
   if (!to.length) return { sent: false, skipped: 'no_recipients', reason: 'No email address to send to.', recipients: to };

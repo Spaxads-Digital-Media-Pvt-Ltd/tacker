@@ -45,21 +45,28 @@ async function createAuthUser(args: BaseArgs, appMetadata: Record<string, unknow
  return id;
 }
 
+/**
+ * `must_change_password` (O1): the password was set by someone else (an invite's temporary password,
+ * or one a Super Admin typed for a network owner) — the first sign-in must choose a new one.
+ */
+const firstSignInChange = (on: boolean | undefined) => (on ? { must_change_password: true } : {});
+
 /** Admin (network staff) login. Claims: network_id, kind=admin, role. */
 export function provisionAdmin(
- args: BaseArgs & { networkId: string; role: 'admin' | 'manager' | 'finance' | 'read_only' },
+ args: BaseArgs & { networkId: string; role: 'admin' | 'manager' | 'finance' | 'read_only'; mustChangePassword?: boolean },
 ): Promise<string> {
- return createAuthUser(args, { kind: 'admin', network_id: args.networkId, role: args.role });
+ return createAuthUser(args, { kind: 'admin', network_id: args.networkId, role: args.role, ...firstSignInChange(args.mustChangePassword) });
 }
 
 /** Portal login for a publisher/advertiser. Claims: network_id, kind, owner_id (their party id). */
 export function provisionPortalUser(
- args: BaseArgs & { networkId: string; kind: 'publisher' | 'advertiser'; ownerId: string },
+ args: BaseArgs & { networkId: string; kind: 'publisher' | 'advertiser'; ownerId: string; mustChangePassword?: boolean },
 ): Promise<string> {
  return createAuthUser(args, {
  kind: args.kind,
  network_id: args.networkId,
  owner_id: args.ownerId,
+ ...firstSignInChange(args.mustChangePassword),
  });
 }
 
@@ -189,7 +196,7 @@ export async function ensurePortalLogin(args: {
  const temporaryPassword = generateTemporaryPassword();
  try {
  const authUserId = await provisionPortalUser({
- email, password: temporaryPassword, networkId: args.networkId, kind: args.kind, ownerId: args.ownerId,
+ email, password: temporaryPassword, networkId: args.networkId, kind: args.kind, ownerId: args.ownerId, mustChangePassword: true,
  });
  return { authUserId, email, outcome: 'created', temporaryPassword };
  } catch (err) {
@@ -217,7 +224,7 @@ export async function ensurePortalLogin(args: {
  const moveEmail = (user.email ?? '').toLowerCase() !== email;
  await updateAuthUser(sb, user.id, email, {
  password: temporaryPassword,
- app_metadata: claims,
+ app_metadata: { ...claims, must_change_password: true },
  ...(moveEmail ? { email, email_confirm: true } : {}),
  });
  return { authUserId: user.id, email, outcome: 'reissued', temporaryPassword };

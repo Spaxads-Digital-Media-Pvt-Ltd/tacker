@@ -9,6 +9,8 @@
 - **Token storage**:
  - Access token: `localStorage` (`tracker.session.v2`)
  - Refresh token: httpOnly cookie `tracker_rt` (sameSite: 'lax', path: `/api/auth`, 30 days)
+- **Invites + first sign-in (O1)**: team members, partners and advertisers are invited with an emailed temporary password; their login carries `app_metadata.must_change_password` (also a network owner created by the Super Admin). Until they choose a new password, `dashboardAuth` allows only `GET /api/me` and `PATCH /api/me/password` (else 403 `password_change_required`); the SPA routes them to `/change-password`, then refreshes its token
+- **Password reset (O1)**: `POST /api/auth/forgot-password` → Supabase `generateLink('recovery')` (also the address lookup) → OUR link `/reset-password?token=<hashed_token>` emailed through the account's network SMTP (Supabase never emails). `POST /api/auth/reset-password` redeems it with `verifyOtp` on a throwaway client (never the shared admin client), sets the password, clears the flag and signs the login out globally. Same answer for every address; switched-off accounts get no link and can't redeem one; rate limited per IP and per address (Redis fixed windows, fail open)
 - **Custom claims**: Stored in Supabase `app_metadata`:
  - `network_id` — tenant ID
  - `kind` — `admin` / `publisher` / `advertiser`

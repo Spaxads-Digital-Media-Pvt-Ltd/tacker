@@ -3,7 +3,7 @@
  * an httpOnly cookie the browser sends automatically (credentials: 'include'); JS never sees it.
  */
 import { ApiError } from '../lib/api.js';
-import { saveSession, clearSession, updateToken, isImpersonating, type Session } from './session';
+import { saveSession, clearSession, updateToken, isImpersonating, loadSession, markPasswordChanged, type Session } from './session';
 import type { Role } from './roles';
 
 interface Identity {
@@ -13,6 +13,7 @@ interface Identity {
   ownerId: string | null;
   email: string;
   name?: string;
+  mustChangePassword?: boolean;
 }
 interface AuthPayload {
   accessToken: string;
@@ -38,7 +39,39 @@ function toSession(p: AuthPayload): Session {
     networkId: p.identity.networkId,
     ownerId: p.identity.ownerId,
     expiresAt: p.expiresAt,
+    ...(p.identity.mustChangePassword ? { mustChangePassword: true } : {}),
   };
+}
+
+/** POST to an unauthenticated /api/auth endpoint; throws ApiError with the server's message. */
+async function authPost(path: string, body: unknown): Promise<void> {
+  const res = await fetch(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw new ApiError(json.error?.code ?? 'request_failed', json.error?.message ?? 'Something went wrong', res.status, json.error?.details);
+}
+
+/** "Forgot password?" — the server answers the same for any address (it never says which exist). */
+export const requestPasswordReset = (email: string): Promise<void> => authPost('/api/auth/forgot-password', { email });
+
+/** Redeem the emailed link's token with the new password. */
+export const resetPassword = (token: string, password: string): Promise<void> => authPost('/api/auth/reset-password', { token, password });
+
+/**
+ * First sign-in with a temporary password (O1): set the new password, then trade the refresh cookie
+ * for a token that no longer carries "must change password".
+ */
+export async function changeInitialPassword(password: string): Promise<void> {
+  const token = loadSession()?.token;
+  const res = await fetch('/api/me/password', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    credentials: 'include', body: JSON.stringify({ password }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw new ApiError(json.error?.code ?? 'request_failed', json.error?.message ?? 'Could not update the password', res.status, json.error?.details);
+  if (!(await refreshToken())) throw new ApiError('unauthorized', 'Your password was updated — sign in again with it.', 401);
+  markPasswordChanged();
 }
 
 export async function login(email: string, password: string): Promise<Session> {

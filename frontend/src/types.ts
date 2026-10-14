@@ -52,6 +52,8 @@ export interface DashboardUser {
   id: string; ref?: number; name: string; email: string; role: string; status: string;
   businessUnit?: string | null; partnerManager?: boolean; advertiserManager?: boolean;
   primaryPhone?: string | null; title?: string | null; superUser?: boolean;
+  /** A login exists for them (Resend invite / password reset act on it). */
+  hasLogin?: boolean;
   createdAt: string; updatedAt: string;
 }
 

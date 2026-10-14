@@ -24,6 +24,13 @@ import {
 import type { DashboardKind, AdminRole } from '../../middleware/types.js';
 
 const ROLES: readonly AdminRole[] = ['admin', 'manager', 'finance', 'read_only'];
+
+/**
+ * What a login still on its temporary password (an invite — `must_change_password` in its claims)
+ * may do: read who it is, and choose a new password (O1). Anything else → 403
+ * password_change_required, which sends the SPA to its change-password page.
+ */
+const PASSWORD_CHANGE_ALLOWED = new Set(['GET /api/me', 'PATCH /api/me/password']);
 const KINDS: readonly DashboardKind[] = ['admin', 'publisher', 'advertiser'];
 
 
@@ -71,6 +78,10 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  const kind = rawKind as DashboardKind;
 
  const userId = String(payload.sub ?? '');
+ if (meta['must_change_password'] === true
+ && !PASSWORD_CHANGE_ALLOWED.has(`${req.method} ${req.originalUrl.split('?')[0]!.replace(/\/+$/, '')}`)) {
+ return next(new AppError('forbidden', 'Choose a new password before you continue.', { reason: 'password_change_required' }));
+ }
  if (kind === 'admin') {
  const rawRole = claim('role') || 'read_only';
  const role: AdminRole = (ROLES as readonly string[]).includes(rawRole)

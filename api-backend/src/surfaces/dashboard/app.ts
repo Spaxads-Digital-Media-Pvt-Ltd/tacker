@@ -220,11 +220,16 @@ export function buildDashboardApp(): Express {
     sendOk(res, { ok: true, name: b.name, ...b });
   }));
 
-  // Change own password (Profile → Change password).
+  // Change own password (Profile → Change password, and the first sign-in with an invite's temporary
+  // password: this also clears `must_change_password` — the SPA then refreshes its token, O1).
   authed.patch('/me/password', notWhileImpersonating(), validateBody(z.object({ password: passwordSchema })), asyncHandler(async (req, res) => {
     const userId = (req.identity as { userId?: string }).userId;
     if (!userId) return sendOk(res, { ok: false });
-    await getSupabaseAdmin().auth.admin.updateUserById(userId, { password: (req.body as { password: string }).password });
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(userId, {
+      password: (req.body as { password: string }).password,
+      app_metadata: { must_change_password: false },
+    });
+    if (error) throw badRequest(error.message);
     sendOk(res, { ok: true });
   }));
 

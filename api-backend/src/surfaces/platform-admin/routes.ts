@@ -164,6 +164,8 @@ export function platformRoutes(): Router {
  password: b.owner.password,
  networkId: net.id,
  role: 'admin',
+ // A password the Super Admin typed: the owner chooses their own at first sign-in (O1).
+ mustChangePassword: true,
  });
  ownerUserId = (await client.query<{ id: string }>(
  `INSERT INTO users (network_id, auth_user_id, email, name, role, status)

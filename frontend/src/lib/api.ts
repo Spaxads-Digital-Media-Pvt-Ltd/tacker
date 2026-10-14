@@ -98,6 +98,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       const err = body.error ?? { code: 'unknown', message: res.statusText };
       const reason = (err.details as { reason?: unknown } | undefined)?.reason;
       if (typeof reason === 'string' && ENDED_REASONS.has(reason) && isOwnSession(session)) endSession(reason);
+      if (reason === 'password_change_required' && !location.pathname.startsWith('/change-password')) location.href = '/change-password';
       throw new ApiError(err.code, err.message, res.status, err.details);
     }
     const data = body.data as T;

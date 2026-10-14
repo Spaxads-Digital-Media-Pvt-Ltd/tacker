@@ -8,6 +8,8 @@ interface AuthContextValue {
   /** Super Admin sign-in via the platform-admin surface (POST /platform/login). */
   signInPlatform: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Re-read the stored session (after the first-sign-in password change updated it). */
+  reloadSession: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -30,7 +32,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
   }, []);
 
-  const value = useMemo(() => ({ session, signIn, signInPlatform, signOut }), [session, signIn, signInPlatform, signOut]);
+  const reloadSession = useCallback(() => setSession(loadSession()), []);
+
+  const value = useMemo(() => ({ session, signIn, signInPlatform, signOut, reloadSession }), [session, signIn, signInPlatform, signOut, reloadSession]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

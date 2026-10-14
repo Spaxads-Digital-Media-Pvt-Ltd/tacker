@@ -19,3 +19,16 @@ export function getSupabaseAdmin(): SupabaseClient {
   }
   return admin;
 }
+
+/**
+ * A throwaway client for ONE user-scoped auth call (redeeming a password-reset link): verifyOtp
+ * keeps the user's session on the client it runs on, so it never runs on the shared admin client.
+ */
+export function createEphemeralAuthClient(): SupabaseClient {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Supabase admin client requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
+  }
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}

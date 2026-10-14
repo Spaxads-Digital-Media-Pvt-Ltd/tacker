@@ -48,6 +48,8 @@ const userDto = (r: UserRow) => {
     email: r.email,
     role: r.role,
     status: r.status,
+    /** A login exists for them (Resend invite / password reset need one). */
+    hasLogin: Boolean(r.auth_user_id),
     businessUnit: (m['businessUnit'] as string) ?? null,
     partnerManager: Boolean(m['partnerManager']),
     advertiserManager: Boolean(m['advertiserManager']),

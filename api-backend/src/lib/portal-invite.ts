@@ -13,7 +13,8 @@
  * outside production the response carries the credentials so dev/staging can proceed (never in
  * production — there, fix SMTP and invite again, which re-issues a fresh temporary password).
  */
-import { env, isProd } from '../config/env.js';
+import { isProd } from '../config/env.js';
+import { appUrl } from './app-url.js';
 import { query } from './db/pool.js';
 import { ScopedDb } from './db/scoped-db.js';
 import { AppError } from './http/errors.js';
@@ -36,11 +37,8 @@ export interface PortalInviteResult {
  credentials?: { loginUrl: string; email: string; temporaryPassword: string };
 }
 
-/** The SPA's login page: the first configured dashboard origin (the CORS list), else the Vite dev server. */
-export function portalLoginUrl(): string {
- const origin = env.DASHBOARD_ORIGINS?.split(',').map((s) => s.trim()).find((s) => s && s !== '*');
- return `${(origin ?? 'http://localhost:5173').replace(/\/+$/, '')}/login`;
-}
+/** The SPA's login page (lib/app-url.ts). */
+export const portalLoginUrl = (): string => appUrl('/login');
 
 const escapeHtml = (s: string): string =>
  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -62,7 +60,7 @@ function inviteEmail(p: { kind: PortalKind; networkName: string; loginUrl: strin
  `<p>${intro}</p>`,
  `<p>Sign in at <a href="${url}">${url}</a></p>`,
  `<p>Email: ${escapeHtml(p.email)}<br>Temporary password: <code>${escapeHtml(p.password)}</code></p>`,
- `<p>Please change this temporary password after you sign in.</p>`,
+ `<p>You'll be asked to choose your own password when you first sign in.</p>`,
  ].join('\n'),
  };
 }
