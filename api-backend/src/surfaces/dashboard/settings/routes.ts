@@ -24,6 +24,8 @@ import { getCategoryCatalog, getAllCatalogs, categoryFromTab } from '../../../li
 import { invalidateNetworkOfferConfigs } from '../../tracking/offer-cache.js';
 import { maskIntegrations, mergeIntegrationsPatch } from '../../../lib/integrations/settings.js';
 import { encryptSecret } from '../../../lib/crypto/secret-box.js';
+import { retentionWindows } from '../../../lib/retention/retention.js';
+import { env } from '../../../config/env.js';
 
 interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
@@ -55,9 +57,31 @@ const smtpSchema = z.object({
   secure: z.boolean().optional(),
 });
 
+// Retention windows (F-21): days, 0 = keep forever, null = back to the platform default. Floors keep a
+// typo from wiping recent data: clicks ≥ 30 days (longer than typical attribution windows),
+// conversions ≥ 90 days (pending ones may still be awaiting approval). Ledgered conversions are never
+// pruned whatever the window (lib/retention/retention.ts).
+const days = (min: number) => z.number().int().max(3650).refine((v) => v === 0 || v >= min, { message: `0 (keep forever) or at least ${min}` });
+const retentionSchema = z.object({
+  clickDays: days(30).nullable().optional(),
+  conversionDays: days(90).nullable().optional(),
+});
+
 const integrationsSchema = z.object({
   values: z.record(z.string(), z.unknown()),   // freeform integration key/values (webhook URLs, ids)
 });
+
+/** A network's retention settings as the API shows them: its own values, the effective windows, the defaults. */
+function retentionView(settings: Record<string, unknown>) {
+  const own = (settings['retention'] as { clickDays?: number; conversionDays?: number } | undefined) ?? {};
+  return {
+    clickDays: own.clickDays ?? null,
+    conversionDays: own.conversionDays ?? null,
+    effective: retentionWindows(settings),
+    defaults: { clickDays: env.CLICK_RETENTION_DAYS, conversionDays: env.CONVERSION_RETENTION_DAYS },
+    ledgeredConversions: 'kept forever',
+  };
+}
 
 export function settingsRoutes(): Router {
   const r = Router();
@@ -72,7 +96,26 @@ export function settingsRoutes(): Router {
       general: { nid: Number(net.ref), name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
       smtp: { ...smtpSafe, passwordSet: Boolean(password) },
       integrations: maskIntegrations((s['integrations'] as Record<string, unknown> | undefined) ?? {}),
+      retention: retentionView(s),
     });
+  }));
+
+  // Retention (F-21) — admin only: it decides when data is deleted.
+  r.put('/retention', requireRole('admin'), validateBody(retentionSchema), asyncHandler(async (req, res) => {
+    const networkId = req.scope!.networkId;
+    const b = req.body as z.infer<typeof retentionSchema>;
+    const net = await loadNetwork(networkId);
+    const before = retentionView(net.settings ?? {});
+    const retention = { ...((net.settings?.['retention'] as Record<string, unknown> | undefined) ?? {}) };
+    for (const k of ['clickDays', 'conversionDays'] as const) {
+      if (b[k] === null) delete retention[k];
+      else if (b[k] !== undefined) retention[k] = b[k];
+    }
+    const settings = { ...net.settings, retention };
+    await saveSettings(networkId, settings);
+    const after = retentionView(settings);
+    await writeAudit(req, { action: 'settings.retention.update', entityType: 'network', entityId: networkId, before, after });
+    sendOk(res, after);
   }));
 
   // General — also writes core network columns.

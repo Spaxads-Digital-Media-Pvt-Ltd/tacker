@@ -54,7 +54,7 @@ Client Browser
 │ - click-persist: durable write from Redis queue │
 │ - outbound-postback: fire postbacks to publishers │
 │ - fraud-scan: scheduled fraud analysis │
-│ - retention: prune old clicks/conversions │
+│ - retention: prune old clicks/conversions (per network; ledgered conversions kept) │
 │ - facebook-capi: CAPI batch │
 │ - offer-feed-sync: outbound offers │
 │ - scheduled-actions / alert-rules / automation-webhook (Automation, F-17a) │

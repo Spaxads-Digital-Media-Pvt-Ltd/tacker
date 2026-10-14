@@ -202,9 +202,12 @@ Fraud Scan (scheduled):
  → each NEW alert → deliverAlert (lib/alerts/deliver.ts): email via network SMTP + webhook via safeRequest
    → outcome stored on the alert (metadata.delivery); a still-open alert is not re-sent
 
-Retention:
- retention queue → DELETE clicks > CLICK_RETENTION_DAYS days old
- DELETE conversions > CONVERSION_RETENTION_DAYS days old
+Retention (daily, per network — F-21):
+ retention queue → for each network, its windows (settings.retention, else CLICK_/CONVERSION_RETENTION_DAYS; 0 = keep forever)
+ → DELETE its clicks + postback_logs older than the click window (bounded ctid batches, (network_id, created_at) index)
+ → DELETE its conversions older than the conversion window that NO ledger entry references
+   (a ledgered conversion — earned, billed or reversed — is kept forever, like the ledger itself)
+ → nothing financial references a click (conversions carry their own money; the ledger keys on conversions)
 
 Facebook CAPI:
  Conversion recorded → facebook-capi queue → batch send to Facebook API

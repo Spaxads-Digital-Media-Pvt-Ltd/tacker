@@ -120,7 +120,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `postback/` | Postback test utilities |
 | `postback-controls/` | Dynamic postback control evaluation |
 | `reporting/` | Reporting aggregation: provider (postgres.ts — raw or rollups + raw tail), rollups.ts (worker + window), time-zone.ts (report zones), labels.ts (entity names on rows) |
-| `retention/` | Click/conversion pruning |
+| `retention/` | Per-network click / postback-log / conversion pruning; conversions any ledger entry references are never pruned (F-21) |
 | `tiered-commissions/` | Tiered commission calculation |
 
 ### Tracking-Specific (in `surfaces/tracking/`)

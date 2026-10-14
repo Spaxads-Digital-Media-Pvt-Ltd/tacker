@@ -30,8 +30,8 @@
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry trace sampling | `0` |
 | `ANTHROPIC_API_KEY` | AI ops layer (Phase 7) | — |
 | `MAXMIND_LICENSE_KEY` | GeoIP2 DB updates | — |
-| `CLICK_RETENTION_DAYS` | Days to keep clicks before pruning | `90` |
-| `CONVERSION_RETENTION_DAYS` | Days to keep conversions before pruning | `400` |
+| `CLICK_RETENTION_DAYS` | Default days to keep clicks + postback logs (a network can override in Settings › Retention; 0 = keep forever) | `90` |
+| `CONVERSION_RETENTION_DAYS` | Default days to keep conversions that never touched the ledger (per-network override as above). Ledgered conversions are never pruned (F-21) | `400` |
 | `REPORTING_ROLLUPS` | `on` = the Postgres reporting provider reads the 15-minute rollups when a report fits them (F-20); `off` = raw tables only (the vitest config pins `off`) | `on` |
 
 ### Surface Ports
