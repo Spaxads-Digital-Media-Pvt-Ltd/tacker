@@ -6,8 +6,8 @@
  * transparently refreshes the token once (via the httpOnly refresh cookie) and retries. If the
  * refresh fails the session is cleared and the user is sent to login.
  */
-import { loadSession, clearSession } from '../auth/session';
-import { refreshToken } from '../auth/authClient';
+import { loadSession, clearSession, type Session } from '../auth/session';
+import { refreshToken, logout } from '../auth/authClient';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 const REQUEST_TIMEOUT = 30_000;
@@ -22,6 +22,22 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * Refusals that mean the account itself was switched off — a partner / advertiser set inactive or
+ * deleted, a team member disabled (the API tags them with `details.reason`). The session can't
+ * recover, so it's ended (refresh cookie too) and the login page says why.
+ */
+const ENDED_REASONS = new Set(['account_inactive', 'account_disabled', 'account_deleted']);
+let ending = false;
+function endSession(reason: string): void {
+  if (ending) return;
+  ending = true;
+  void logout().finally(() => {
+    if (!location.pathname.startsWith('/login')) location.href = `/login?ended=${encodeURIComponent(reason)}`;
+    else ending = false;
+  });
 }
 
 interface Envelope<T> {
@@ -80,6 +96,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const body = (await res.json().catch(() => ({}))) as Envelope<T>;
     if (!res.ok || body.ok === false) {
       const err = body.error ?? { code: 'unknown', message: res.statusText };
+      const reason = (err.details as { reason?: unknown } | undefined)?.reason;
+      if (typeof reason === 'string' && ENDED_REASONS.has(reason) && isOwnSession(session)) endSession(reason);
       throw new ApiError(err.code, err.message, res.status, err.details);
     }
     const data = body.data as T;
@@ -97,6 +115,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new NetworkError('network', e instanceof Error ? e.message : 'Network error');
   }
 }
+
+/** A signed-in person's own session (not an admin's impersonation tab, which ends on its own). */
+const isOwnSession = (s: Session | null): boolean => !!s && !s.impersonatedBy && s.role !== 'super_admin';
 
 export const api = {
   get: <T>(path: string) => request<T>(path),

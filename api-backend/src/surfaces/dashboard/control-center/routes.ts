@@ -9,8 +9,7 @@ import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
 import { forgetStaffState } from '../../../lib/auth/staff-state.js';
-import { getSupabaseAdmin } from '../../../lib/supabase.js';
-import { logger } from '../../../lib/logger.js';
+import { syncLogin } from '../../../lib/auth/login-sync.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { getTableScope } from '../../../lib/db/table-registry.js';
@@ -86,26 +85,6 @@ const updateUserSchema = createUserSchema.partial().extend({
   status: z.enum(['active', 'invited', 'disabled']).optional(),
 });
 
-/**
- * Mirror a team member's role / disabled state onto their login (the role claim; a ban stops sign-in
- * and token refresh). Best effort: the users row is what dashboardAuth enforces either way.
- */
-async function syncStaffLogin(authUserId: string | null | undefined, change: { role?: string; disabled?: boolean }): Promise<'synced' | 'no_change' | 'no_login' | 'not_configured' | 'failed'> {
-  if (change.role === undefined && change.disabled === undefined) return 'no_change';
-  if (!authUserId) return 'no_login';
-  let sb: ReturnType<typeof getSupabaseAdmin>;
-  try { sb = getSupabaseAdmin(); } catch { return 'not_configured'; }
-  const { error } = await sb.auth.admin.updateUserById(authUserId, {
-    ...(change.role !== undefined ? { app_metadata: { role: change.role } } : {}),
-    ...(change.disabled !== undefined ? { ban_duration: change.disabled ? '876000h' : 'none' } : {}),
-  });
-  if (error) {
-    logger.warn({ err: error.message, authUserId }, 'team member login sync failed');
-    return 'failed';
-  }
-  return 'synced';
-}
-
 export function controlCenterRoutes(): Router {
   const r = Router();
 
@@ -174,9 +153,10 @@ export function controlCenterRoutes(): Router {
       patch['metadata'] = JSON.stringify(meta);
       const [updated] = await db.update<UserRow>('users', patch, { id });
       forgetStaffState(networkId, before.auth_user_id);
-      const loginSync = await syncStaffLogin(before.auth_user_id, {
+      // The login follows (role claim; a ban while disabled) — lib/auth/login-sync.ts.
+      const loginSync = await syncLogin(before.auth_user_id, {
         ...(b.role !== undefined && b.role !== before.role ? { role: b.role } : {}),
-        ...(b.status !== undefined && b.status !== before.status ? { disabled: b.status === 'disabled' } : {}),
+        ...(b.status !== undefined && b.status !== before.status ? { blocked: b.status === 'disabled' } : {}),
       });
       await writeAudit(req, { action: 'user.update', entityType: 'users', entityId: id, before, after: updated });
       sendOk(res, { ...userDto(updated ?? before), loginSync });

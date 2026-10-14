@@ -11,13 +11,16 @@
  * until then we read role/network from verified custom claims and default safely.
  */
 import type { Request, Response, NextFunction } from 'express';
-import { unauthorized, forbidden, serviceUnavailable } from '../../lib/http/errors.js';
+import { AppError, unauthorized, forbidden, serviceUnavailable } from '../../lib/http/errors.js';
 import { verifySupabaseJwt } from '../../lib/auth/verify-jwt.js';
 import {
  isImpersonationToken, verifyImpersonationToken, signImpersonationToken, impersonationConfigured,
 } from '../../lib/auth/impersonation-token.js';
 import { networkState, inactiveNetworkMessage } from '../../lib/networks/state.js';
 import { staffState } from '../../lib/auth/staff-state.js';
+import {
+ portalAccountStatus, portalAccessAllowed, inactiveAccountMessage, deletedAccountMessage,
+} from '../../lib/auth/portal-state.js';
 import type { DashboardKind, AdminRole } from '../../middleware/types.js';
 
 const ROLES: readonly AdminRole[] = ['admin', 'manager', 'finance', 'read_only'];
@@ -106,9 +109,22 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  if (staff?.status === 'disabled') {
  req.identity = undefined;
  req.scope = undefined;
- return next(forbidden('This account is disabled. Ask an admin of your network to re-enable it.'));
+ return next(new AppError('forbidden', 'This account is disabled. Ask an admin of your network to re-enable it.', { reason: 'account_disabled' }));
  }
  if (staff && (ROLES as readonly string[]).includes(staff.role)) id.role = staff.role as AdminRole;
+ }
+ // Partners / advertisers: the account row decides too — a deleted account, or one set inactive,
+ // loses portal access on its next request. An admin may still impersonate an inactive account
+ // (to look at it for support), but not one that no longer exists.
+ if (id.surface === 'dashboard' && id.kind !== 'admin') {
+ const status = await portalAccountStatus(req.scope!.networkId, id.kind, id.ownerId);
+ if (status === null || (!id.impersonatedBy && !portalAccessAllowed(status))) {
+ req.identity = undefined;
+ req.scope = undefined;
+ return next(status === null
+ ? new AppError('unauthorized', deletedAccountMessage(id.kind), { reason: 'account_deleted' })
+ : new AppError('forbidden', inactiveAccountMessage(id.kind), { reason: 'account_inactive' }));
+ }
  }
  } catch (err) {
  return next(err);

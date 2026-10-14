@@ -8,7 +8,7 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
-import { notFound } from '../../../lib/http/errors.js';
+import { notFound, conflict } from '../../../lib/http/errors.js';
 import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
@@ -38,6 +38,8 @@ import { invitePortalUser, inviteOnCreate, inviteAuditView, portalLoginUrl } fro
 import { sendTransactional, networkName, type TransactionalResult } from '../../../lib/email/transactional.js';
 import { balanceRequestEmail } from '../../../lib/email/templates.js';
 import { invalidatePartnerStatus } from '../../tracking/partner-status.js';
+import { forgetPortalAccount, portalAccessAllowed } from '../../../lib/auth/portal-state.js';
+import { applyPortalStatusChange, removeLogin, type LoginSync } from '../../../lib/auth/login-sync.js';
 
 const TABLE = 'publishers';
 const POSTBACKS = 'publisher_postbacks';
@@ -194,6 +196,7 @@ export function publishersAdminRoutes(): Router {
     const db = dbForRequest(req);
     const pub = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
     if (!pub) throw notFound('Publisher not found');
+    if (!portalAccessAllowed(pub.status)) throw conflict('This partner is inactive — set it to active (or pending) before sending a portal invite.');
     const invite = await invitePortalUser({
       networkId: db.scope.networkId, kind: 'publisher', ownerId: pub.id,
       email: pub.contact_email, linkedAuthUserId: pub.auth_user_id,
@@ -291,10 +294,15 @@ export function publishersAdminRoutes(): Router {
       if (b.customFields !== undefined) patch['metadata'] = mergeCustomFields(before.metadata, b.customFields);
 
       const [row] = await db.update<PublisherRow>(TABLE, patch, { id: req.params.id });
-      // Tracking reads partner status from a Redis cache (F-08) — a status change applies on the next click.
-      if (b.status !== undefined && b.status !== before.status) await invalidatePartnerStatus(db.scope.networkId, before.id);
+      let loginSync: LoginSync | undefined;
+      if (b.status !== undefined && b.status !== before.status) {
+        // Tracking reads partner status from a Redis cache (F-08) — a status change applies on the next click.
+        await invalidatePartnerStatus(db.scope.networkId, before.id);
+        // Portal + API access follow at once; an inactive partner's login is blocked (O6).
+        loginSync = await applyPortalStatusChange(db.scope.networkId, 'publisher', before, before.status, b.status);
+      }
       await writeAudit(req, { action: 'publisher.update', entityType: 'publisher', entityId: req.params.id, before, after: row });
-      sendOk(res, toAdminDTO((await loadPublisher(db.scope.networkId, before.id)) ?? row ?? before));
+      sendOk(res, { ...toAdminDTO((await loadPublisher(db.scope.networkId, before.id)) ?? row ?? before), ...(loginSync ? { loginSync } : {}) });
     }),
   );
 
@@ -307,8 +315,11 @@ export function publishersAdminRoutes(): Router {
       if (!before) throw notFound('Publisher not found');
       await db.delete(TABLE, { id: req.params.id });
       await invalidatePartnerStatus(db.scope.networkId, before.id);
-      await writeAudit(req, { action: 'publisher.delete', entityType: 'publisher', entityId: req.params.id, before });
-      sendOk(res, { deleted: true });
+      // Portal + API access end at once, and the login is deleted with the account (O6).
+      forgetPortalAccount(db.scope.networkId, 'publisher', before.id);
+      const login = await removeLogin(before.auth_user_id);
+      await writeAudit(req, { action: 'publisher.delete', entityType: 'publisher', entityId: req.params.id, before, after: { login } });
+      sendOk(res, { deleted: true, login });
     }),
   );
 

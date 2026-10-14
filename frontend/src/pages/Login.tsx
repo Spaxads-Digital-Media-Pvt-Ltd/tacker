@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_HOME } from '../auth/roles';
 import { loadSession } from '../auth/session';
@@ -23,9 +23,18 @@ function FlowGraphic() {
   );
 }
 
+/** Why the last session ended (lib/api.ts sends people here with ?ended=<reason>). */
+const ENDED: Record<string, string> = {
+  account_inactive: 'Your account was set to inactive, so you have been signed out. Contact the network to re-enable it.',
+  account_disabled: 'Your team account was disabled, so you have been signed out. Ask an admin of your network to re-enable it.',
+  account_deleted: 'Your account no longer exists, so you have been signed out.',
+};
+
 export default function Login() {
   const { signIn, signInPlatform } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const ended = ENDED[params.get('ended') ?? ''] ?? null;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -87,9 +96,13 @@ export default function Login() {
               {asSuperAdmin ? 'Super Admin console — platform operators only.' : 'Your dashboard is chosen automatically from your account.'}
             </p>
 
-            {error && (
+            {error ? (
               <div className="mt-5 rounded-[var(--radius)] border border-danger-bg bg-danger-bg px-4 py-3 text-small text-danger-text">
                 {error}
+              </div>
+            ) : ended && (
+              <div className="mt-5 rounded-[var(--radius)] border border-warning-bg bg-warning-bg px-4 py-3 text-small text-warning-text">
+                {ended}
               </div>
             )}
 

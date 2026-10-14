@@ -33,6 +33,8 @@ import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { apiKeyManagementRoutes } from '../api-keys/routes.js';
 import { invitePortalUser, inviteOnCreate, inviteAuditView } from '../../../lib/portal-invite.js';
+import { forgetPortalAccount, portalAccessAllowed } from '../../../lib/auth/portal-state.js';
+import { applyPortalStatusChange, removeLogin } from '../../../lib/auth/login-sync.js';
 
 const TABLE = 'advertisers';
 
@@ -297,8 +299,12 @@ export function advertisersAdminRoutes(): Router {
       if (b.customFields !== undefined) patch['metadata'] = mergeCustomFields(before.metadata, b.customFields);
 
       const [row] = await db.update<AdvertiserRow>(TABLE, patch, { id: req.params.id });
+      // Portal + API access follow a status change at once; an inactive advertiser's login is blocked (O6).
+      const loginSync = b.status !== undefined && b.status !== before.status
+        ? await applyPortalStatusChange(db.scope.networkId, 'advertiser', before, before.status, b.status)
+        : undefined;
       await writeAudit(req, { action: 'advertiser.update', entityType: 'advertiser', entityId: req.params.id, before, after: row });
-      sendOk(res, toAdminDTO(row ?? before));
+      sendOk(res, { ...toAdminDTO(row ?? before), ...(loginSync ? { loginSync } : {}) });
     }),
   );
 
@@ -319,8 +325,11 @@ export function advertisersAdminRoutes(): Router {
       if (offers > 0) throw conflict(`This advertiser still has ${offers} offer(s). Move or delete them first, or set the advertiser to inactive.`);
       if (invoices > 0) throw conflict(`This advertiser has ${invoices} invoice(s), which are financial records. Set the advertiser to inactive instead of deleting it.`);
       await db.delete(TABLE, { id: req.params.id });
-      await writeAudit(req, { action: 'advertiser.delete', entityType: 'advertiser', entityId: req.params.id, before });
-      sendOk(res, { deleted: true });
+      // Portal + API access end at once, and the login is deleted with the account (O6).
+      forgetPortalAccount(db.scope.networkId, 'advertiser', before.id);
+      const login = await removeLogin(before.auth_user_id);
+      await writeAudit(req, { action: 'advertiser.delete', entityType: 'advertiser', entityId: req.params.id, before, after: { login } });
+      sendOk(res, { deleted: true, login });
     }),
   );
 
@@ -343,6 +352,7 @@ export function advertisersAdminRoutes(): Router {
     const db = dbForRequest(req);
     const adv = await db.selectOne<AdvertiserRow>(TABLE, { id: req.params.id });
     if (!adv) throw notFound('Advertiser not found');
+    if (!portalAccessAllowed(adv.status)) throw conflict('This advertiser is inactive — set it to active (or pending) before sending a portal invite.');
     const invite = await invitePortalUser({
       networkId: db.scope.networkId, kind: 'advertiser', ownerId: adv.id,
       email: adv.contact_email, linkedAuthUserId: adv.auth_user_id,
