@@ -17,6 +17,7 @@ import {
  isImpersonationToken, verifyImpersonationToken, signImpersonationToken, impersonationConfigured,
 } from '../../lib/auth/impersonation-token.js';
 import { networkState, inactiveNetworkMessage } from '../../lib/networks/state.js';
+import { staffState } from '../../lib/auth/staff-state.js';
 import type { DashboardKind, AdminRole } from '../../middleware/types.js';
 
 const ROLES: readonly AdminRole[] = ['admin', 'manager', 'finance', 'read_only'];
@@ -96,6 +97,18 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  return next(state === null
  ? unauthorized('This login belongs to a network that no longer exists. Sign in with an account on an active network.')
  : forbidden(inactiveNetworkMessage(state)));
+ }
+ // Team members: the users row decides — a disabled member is refused, and a role change applies
+ // now (the token's role claim is only the fallback for a login with no users row).
+ const id = req.identity!;
+ if (id.surface === 'dashboard' && id.kind === 'admin') {
+ const staff = await staffState(req.scope!.networkId, id.userId);
+ if (staff?.status === 'disabled') {
+ req.identity = undefined;
+ req.scope = undefined;
+ return next(forbidden('This account is disabled. Ask an admin of your network to re-enable it.'));
+ }
+ if (staff && (ROLES as readonly string[]).includes(staff.role)) id.role = staff.role as AdminRole;
  }
  } catch (err) {
  return next(err);

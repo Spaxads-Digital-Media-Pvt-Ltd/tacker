@@ -7,7 +7,10 @@ import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound, badRequest } from '../../../lib/http/errors.js';
+import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
+import { forgetStaffState } from '../../../lib/auth/staff-state.js';
+import { getSupabaseAdmin } from '../../../lib/supabase.js';
+import { logger } from '../../../lib/logger.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { getTableScope } from '../../../lib/db/table-registry.js';
@@ -29,6 +32,7 @@ const CONFIG_SECTIONS = ['platform', 'partners', 'advertisers', 'security'] as c
 export interface UserRow {
   id: string; ref: string; name: string | null; email: string; role: string; status: string;
   metadata: Record<string, unknown> | string; created_at: string; updated_at: string;
+  auth_user_id?: string | null;
 }
 
 function parseMeta(v: Record<string, unknown> | string): Record<string, unknown> {
@@ -82,6 +86,26 @@ const updateUserSchema = createUserSchema.partial().extend({
   status: z.enum(['active', 'invited', 'disabled']).optional(),
 });
 
+/**
+ * Mirror a team member's role / disabled state onto their login (the role claim; a ban stops sign-in
+ * and token refresh). Best effort: the users row is what dashboardAuth enforces either way.
+ */
+async function syncStaffLogin(authUserId: string | null | undefined, change: { role?: string; disabled?: boolean }): Promise<'synced' | 'no_change' | 'no_login' | 'not_configured' | 'failed'> {
+  if (change.role === undefined && change.disabled === undefined) return 'no_change';
+  if (!authUserId) return 'no_login';
+  let sb: ReturnType<typeof getSupabaseAdmin>;
+  try { sb = getSupabaseAdmin(); } catch { return 'not_configured'; }
+  const { error } = await sb.auth.admin.updateUserById(authUserId, {
+    ...(change.role !== undefined ? { app_metadata: { role: change.role } } : {}),
+    ...(change.disabled !== undefined ? { ban_duration: change.disabled ? '876000h' : 'none' } : {}),
+  });
+  if (error) {
+    logger.warn({ err: error.message, authUserId }, 'team member login sync failed');
+    return 'failed';
+  }
+  return 'synced';
+}
+
 export function controlCenterRoutes(): Router {
   const r = Router();
 
@@ -111,17 +135,34 @@ export function controlCenterRoutes(): Router {
   );
 
   // --- Accounts: user edits. Creating a team user is POST /api/users (users/routes.ts) — this file
-  // had a second, identical create (F-25·F-28: collapsed).
+  // had a second, identical create (F-25·F-28: collapsed). Role and status take effect on the
+  // person's next request (dashboardAuth reads the users row — lib/auth/staff-state.ts); the login
+  // is updated too (role claim; disabled = banned from signing in / refreshing). Nobody can disable
+  // or demote themselves, and the network always keeps an active admin.
   r.patch(
     '/users/:id',
     requireRole('admin'),
     validateBody(updateUserSchema),
     asyncHandler(async (req, res) => {
       const db = dbForRequest(req);
+      const networkId = req.scope!.networkId;
       const id = req.params.id ?? '';
       const before = await db.selectOne<UserRow>('users', { id });
       if (!before) throw notFound('User not found');
       const b = req.body as z.infer<typeof updateUserSchema>;
+      const losesAdmin = before.role === 'admin' && before.status !== 'disabled'
+        && (b.status === 'disabled' || (b.role !== undefined && b.role !== 'admin'));
+      const callerId = req.identity?.surface === 'dashboard' ? req.identity.userId : null;
+      if (losesAdmin || b.status === 'disabled') {
+        if (before.auth_user_id && before.auth_user_id === callerId) {
+          throw badRequest("You can't disable your own account or remove your own admin role — ask another admin.");
+        }
+      }
+      if (losesAdmin) {
+        const others = await query<{ n: string }>(
+          `SELECT COUNT(*)::text AS n FROM users WHERE network_id = $1 AND id <> $2 AND role = 'admin' AND status <> 'disabled'`, [networkId, id]);
+        if (Number(others.rows[0]?.n ?? 0) === 0) throw conflict("This is the network's only active admin — make someone else an admin first.");
+      }
       const patch: Record<string, unknown> = {};
       if (b.name !== undefined) patch['name'] = b.name;
       if (b.role !== undefined) patch['role'] = b.role;
@@ -132,8 +173,13 @@ export function controlCenterRoutes(): Router {
       }
       patch['metadata'] = JSON.stringify(meta);
       const [updated] = await db.update<UserRow>('users', patch, { id });
+      forgetStaffState(networkId, before.auth_user_id);
+      const loginSync = await syncStaffLogin(before.auth_user_id, {
+        ...(b.role !== undefined && b.role !== before.role ? { role: b.role } : {}),
+        ...(b.status !== undefined && b.status !== before.status ? { disabled: b.status === 'disabled' } : {}),
+      });
       await writeAudit(req, { action: 'user.update', entityType: 'users', entityId: id, before, after: updated });
-      sendOk(res, userDto(updated ?? before));
+      sendOk(res, { ...userDto(updated ?? before), loginSync });
     }),
   );
 

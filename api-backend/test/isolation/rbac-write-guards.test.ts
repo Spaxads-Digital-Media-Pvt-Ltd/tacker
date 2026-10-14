@@ -12,8 +12,9 @@ import { operatorToken, bearer } from '../helpers/tokens.js';
 const db = vi.hoisted(() => ({ queries: [] as string[] }));
 vi.mock('../../src/lib/db/pool.js', () => ({
   query: async (sql: string) => {
-    // dashboardAuth's "network still exists" check; every other statement is recorded.
+    // dashboardAuth's own lookups (the network's state, the team member's row); every other statement is recorded.
     if (/FROM networks WHERE id = \$1/.test(sql)) return { rows: [{ status: 'active' }], rowCount: 1 };
+    if (/FROM users WHERE network_id = \$1 AND auth_user_id = \$2/.test(sql)) return { rows: [], rowCount: 0 };
     db.queries.push(sql);
     return { rows: [], rowCount: 0 };
   },

@@ -1,9 +1,9 @@
 /**
  * Control Center › Accounts — real data on both sub-tabs. Accounts reads the same `/api/users`
- * table already used to populate Partner/Account Manager pickers elsewhere (Manage Partners, etc.)
- * — real team-member rows, though this app has no dedicated fields for Business Unit, Partner/
- * Advertiser Manager flags, Primary Phone, Title, or Super User, so those render as "—" rather than
- * fabricated. History Log reads the real `audit_log` table (GET /api/audit-log) — every mutating
+ * table already used to populate Partner/Account Manager pickers elsewhere (Manage Partners, etc.):
+ * real team-member rows; Business Unit, the manager flags, Primary Phone, Title and Super User are
+ * kept in each row's metadata ("—" when unset). A member's name opens the edit form — role and
+ * status changes take effect on their next request (EditAccountForm). History Log reads the real `audit_log` table (GET /api/audit-log) — every mutating
  * admin action in this app already writes there via writeAudit(); this is the un-filtered,
  * network-wide feed, same real data other pages already show a per-entity slice of. Toolbar (date
  * range, Service filter, search, Table Actions) and the green "NEW!" badge match the reference's
@@ -99,8 +99,96 @@ function AddAccountForm({ onCancel, onCreated }: { onCancel: () => void; onCreat
   );
 }
 
+/**
+ * Edit a team member (PATCH /api/control-center/users/:id). Role and status take effect on their
+ * next request; Disabled shuts them out at once. Only changed fields are sent.
+ */
+function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onCancel: () => void; onSaved: (note: string | null) => void }) {
+  const [name, setName] = useState(user.name);
+  const [role, setRole] = useState(user.role);
+  const [status, setStatus] = useState(user.status);
+  const [businessUnit, setBusinessUnit] = useState(user.businessUnit ?? '');
+  const [primaryPhone, setPrimaryPhone] = useState(user.primaryPhone ?? '');
+  const [title, setTitle] = useState(user.title ?? '');
+  const [partnerManager, setPartnerManager] = useState(Boolean(user.partnerManager));
+  const [advertiserManager, setAdvertiserManager] = useState(Boolean(user.advertiserManager));
+  const [superUser, setSuperUser] = useState(Boolean(user.superUser));
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const body: Record<string, unknown> = {};
+    const put = (k: string, now: unknown, was: unknown) => { if (now !== was) body[k] = now; };
+    put('name', name.trim(), user.name);
+    put('role', role, user.role);
+    put('status', status, user.status);
+    put('businessUnit', businessUnit.trim(), user.businessUnit ?? '');
+    put('primaryPhone', primaryPhone.trim(), user.primaryPhone ?? '');
+    put('title', title.trim(), user.title ?? '');
+    put('partnerManager', partnerManager, Boolean(user.partnerManager));
+    put('advertiserManager', advertiserManager, Boolean(user.advertiserManager));
+    put('superUser', superUser, Boolean(user.superUser));
+    if (!Object.keys(body).length) { onCancel(); return; }
+    if (!name.trim()) { setSaveError('Name is required.'); return; }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      const res = await api.patch<{ loginSync?: string }>(`/api/control-center/users/${user.id}`, body);
+      onSaved(res.loginSync === 'failed'
+        ? 'Saved. Their login could not be updated right now — access is still enforced from this account record.'
+        : null);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save account.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="card mb-3 space-y-4">
+      <p className="text-small font-semibold text-fg">Edit {user.name}</p>
+      {saveError && <p className="text-small text-danger-text">{saveError}</p>}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required /></Field>
+        <Field label="Email"><input className="input" value={user.email} disabled /></Field>
+        <Field label="Role *">
+          <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="admin">Admin</option>
+            <option value="manager">Manager</option>
+            <option value="finance">Finance</option>
+            <option value="read_only">Read Only</option>
+          </select>
+        </Field>
+        <Field label="Status *">
+          <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="active">Active</option>
+            <option value="invited">Invited</option>
+            <option value="disabled">Disabled (no access)</option>
+          </select>
+        </Field>
+        <Field label="Business Unit"><input className="input" value={businessUnit} onChange={(e) => setBusinessUnit(e.target.value)} /></Field>
+        <Field label="Primary Phone"><input className="input" value={primaryPhone} onChange={(e) => setPrimaryPhone(e.target.value)} /></Field>
+        <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
+      </div>
+      <div className="flex flex-wrap gap-4 text-small text-fg">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={partnerManager} onChange={(e) => setPartnerManager(e.target.checked)} className="h-4 w-4 rounded border-border" />Partner Manager</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={advertiserManager} onChange={(e) => setAdvertiserManager(e.target.checked)} className="h-4 w-4 rounded border-border" />Advertiser Manager</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={superUser} onChange={(e) => setSuperUser(e.target.checked)} className="h-4 w-4 rounded border-border" />Super User</label>
+      </div>
+      <p className="text-tiny text-fg-muted">A role or status change applies on their next click — Disabled signs them out of the dashboard at once. You can’t disable or demote yourself, and the network always keeps an active admin.</p>
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+      </div>
+    </form>
+  );
+}
+
 function AccountsList() {
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<DashboardUser | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const { data, loading, error, refetch } = useQuery<DashboardUser[]>('/api/users');
   const rows = data ?? [];
   if (loading) return <StateBlock><Spinner /></StateBlock>;
@@ -108,6 +196,9 @@ function AccountsList() {
   return (
     <div>
       {adding && <AddAccountForm onCancel={() => setAdding(false)} onCreated={() => { setAdding(false); refetch(); }} />}
+      {editing && <EditAccountForm key={editing.id} user={editing} onCancel={() => setEditing(null)}
+        onSaved={(n) => { setEditing(null); setNote(n); refetch(); }} />}
+      {note && <p className="mb-3 rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg">{note}</p>}
       <div className="mb-3 flex items-center justify-between">
         {!adding && <button className="btn-primary" onClick={() => setAdding(true)}>+ Add Account</button>}
       </div>
@@ -120,7 +211,10 @@ function AccountsList() {
             <tbody>
               {rows.map((u) => (
                 <tr key={u.id} className="bg-surface text-fg hover:bg-accent-subtle/40">
-                  <td className="font-medium text-accent-text">{u.name}</td>
+                  <td className="font-medium">
+                    <button type="button" className="text-accent-text hover:underline" title="Edit this team member" onClick={() => { setAdding(false); setNote(null); setEditing(u); }}>{u.name}</button>
+                    {u.status !== 'active' && <span className="ml-2 align-middle"><Badge value={u.status} /></span>}
+                  </td>
                   <td className="px-4 py-3 text-fg-secondary">{u.businessUnit ?? '—'}</td>
                   <td >{u.email}</td>
                   <td className="px-4 py-3"><Badge value={u.role} /></td>
