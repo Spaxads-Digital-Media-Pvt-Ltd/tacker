@@ -570,7 +570,10 @@ export function offersAdminRoutes(): Router {
  SELECT network_id, advertiser_id, name || ' (copy)', 'draft', destination_url, payout_model, default_payout,
  default_revenue, currency, daily_conversion_cap, total_conversion_cap, daily_click_cap, attribution_window_s,
  dedup_window_s, allowed_traffic_types, fallback_url, objective, visibility, category, preview_url,
- tracking_domain_id, metadata
+ tracking_domain_id,
+ -- The copy is its own offer (O7): it keeps every setting but not the offer-feed link, or the next
+ -- feed sync would update the copy instead of the original.
+ COALESCE(metadata, '{}'::jsonb) - 'feedExternalId' - 'feedSource'
  FROM offers WHERE network_id = $1 AND id = $2
  RETURNING *`,
  [networkId, src.id],

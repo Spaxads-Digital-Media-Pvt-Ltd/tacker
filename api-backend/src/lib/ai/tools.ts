@@ -113,15 +113,17 @@ export const AI_TOOLS: AiTool[] = [
         `SELECT COUNT(*)::text n FROM clicks WHERE network_id = $1 AND created_at >= now() - interval '30 days'`,
         [ctx.networkId],
       )).rows[0]!.n;
-      const c = (await query<{ n: string; payout: string; revenue: string }>(
-        `SELECT COUNT(*)::text n, COALESCE(SUM(payout),0)::text payout, COALESCE(SUM(revenue),0)::text revenue
+      // Exact money (O9): the margin comes from Postgres's numeric, not JS floats.
+      const c = (await query<{ n: string; payout: string; revenue: string; margin: string }>(
+        `SELECT COUNT(*)::text n, COALESCE(SUM(payout),0)::text payout, COALESCE(SUM(revenue),0)::text revenue,
+                (COALESCE(SUM(revenue),0) - COALESCE(SUM(payout),0))::numeric(16,4)::text margin
            FROM conversions WHERE network_id = $1 AND status = 'approved' AND created_at >= now() - interval '30 days'`,
         [ctx.networkId],
       )).rows[0]!;
       return {
         windowDays: 30, clicks: Number(clicks), conversions: Number(c.n),
         revenue: c.revenue, payout: c.payout,
-        margin: (Number(c.revenue) - Number(c.payout)).toFixed(4),
+        margin: c.margin,
       };
     },
   },

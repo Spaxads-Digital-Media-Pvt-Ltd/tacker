@@ -52,6 +52,8 @@
  - `api-backend/src/lib/integrations/offer-feed-sync.ts`
  - `api-backend/src/surfaces/workers/processors/offer-feed-sync.ts`
 - **Data flow**: `offerFeedUrl` (+ optional key sent as `Authorization: Bearer` / `x-api-key`) → GET JSON (`[...]`, `{offers:[...]}` or `{data:[...]}`) → upsert offers for `offerFeedAdvertiserId`. `demo://offer-feed` returns built-in demo offers.
+- **Money (O9)**: payout / revenue are parsed exactly — the JSON number's own source text where the runtime provides it (Node 21+), exponent notation included — and rounded half-up to 4 dp (`roundMoney`, `lib/money.ts`); an offer whose amount isn't a usable decimal is skipped and reported (`skipped` in the sync result, `offerFeedLastSyncError`), never imported as 0.
+- **Re-sync**: the feed owns name / URL / status / payout / revenue / currency; the offer's other settings (targeting, notes, custom fields…) are kept — the feed keys are merged into `metadata`, not replacing it. A **copied** offer drops `feedExternalId` / `feedSource` (O7), so the feed keeps updating the original only.
 - **Security**: the URL is tenant-supplied, so it is fetched through `lib/net/safe-http.ts` `safeRequest` (audit F-06): http(s) only, no redirects, no loopback/private/link-local targets outside `NODE_ENV=development` (checked on the connected address), 30 s total deadline, 16 MB body cap. A refused URL fails the sync with `blocked_destination: …` (saved as `offerFeedLastSyncError`).
 
 ## PIN API
