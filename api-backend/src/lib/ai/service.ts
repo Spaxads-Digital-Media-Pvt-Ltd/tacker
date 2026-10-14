@@ -11,7 +11,10 @@ import { AppError } from '../http/errors.js';
 import { pool, query } from '../db/pool.js';
 import { logger } from '../logger.js';
 import { AI_TOOLS, toolByName, type ToolContext } from './tools.js';
+import { reserveAiChat, recordAiTokens } from './quota.js';
 
+// A newer model (Claude Opus 5.5, `claude-opus-5-5`) exists; moving to it is the owner's call
+// (prompting, cost) — this id is still valid.
 const MODEL = 'claude-opus-4-8';
 const MAX_ITERATIONS = 6;
 
@@ -79,7 +82,10 @@ export async function runChat(args: ChatArgs): Promise<ChatResult> {
     // Ownership check: the conversation must belong to this network (deny-by-default, spec §3A).
     const { rows } = await query(`SELECT id FROM ai_conversations WHERE id = $1 AND network_id = $2`, [conversationId, args.networkId]);
     if (rows.length === 0) throw new AppError('not_found', 'Conversation not found');
-  } else {
+  }
+  // The network's daily AI budget (429 when spent) — counted before anything is created or called.
+  await reserveAiChat(args.networkId);
+  if (!conversationId) {
     conversationId = (await query<{ id: string }>(
       `INSERT INTO ai_conversations (network_id, user_id, title) VALUES ($1, $2, $3) RETURNING id`,
       [args.networkId, args.userId ?? null, args.message.slice(0, 80)],
@@ -92,43 +98,49 @@ export async function runChat(args: ChatArgs): Promise<ChatResult> {
   const tools = AI_TOOLS.map((t) => t.definition);
 
   let reply = '';
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const resp = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 4096,
-      // Adaptive thinking (`thinking: { type: 'adaptive' }`) improves reasoning on Opus 4.8 but
-      // isn't typed by this SDK version; enable it when the SDK is upgraded. Tool-returned numbers
-      // are exact regardless, so answer correctness doesn't depend on it.
-      system: systemPrompt(args.networkId),
-      tools,
-      messages,
-    });
-    // Echo the full assistant content (thinking + tool_use blocks) back on the next turn.
-    messages.push({ role: 'assistant', content: resp.content });
-
-    if (resp.stop_reason !== 'tool_use') {
-      reply = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
-      break;
-    }
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const block of resp.content) {
-      if (block.type !== 'tool_use') continue;
-      const tool = toolByName.get(block.name);
-      let result: unknown;
-      try {
-        result = tool ? await tool.execute(ctx, block.input as Record<string, unknown>) : { error: 'unknown_tool' };
-      } catch (err) {
-        result = { error: err instanceof Error ? err.message : 'tool_failed' };
-      }
-      toolCalls.push({ name: block.name, input: block.input });
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: block.id,
-        content: JSON.stringify(result).slice(0, 20_000), // bound tool output size
+  let tokens = 0;
+  try {
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+      const resp = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 4096,
+        // Adaptive thinking (`thinking: { type: 'adaptive' }`) improves reasoning on Opus 4.8 but
+        // isn't typed by this SDK version; enable it when the SDK is upgraded. Tool-returned numbers
+        // are exact regardless, so answer correctness doesn't depend on it.
+        system: systemPrompt(args.networkId),
+        tools,
+        messages,
       });
+      tokens += (resp.usage?.input_tokens ?? 0) + (resp.usage?.output_tokens ?? 0);
+      // Echo the full assistant content (thinking + tool_use blocks) back on the next turn.
+      messages.push({ role: 'assistant', content: resp.content });
+
+      if (resp.stop_reason !== 'tool_use') {
+        reply = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
+        break;
+      }
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const block of resp.content) {
+        if (block.type !== 'tool_use') continue;
+        const tool = toolByName.get(block.name);
+        let result: unknown;
+        try {
+          result = tool ? await tool.execute(ctx, block.input as Record<string, unknown>) : { error: 'unknown_tool' };
+        } catch (err) {
+          result = { error: err instanceof Error ? err.message : 'tool_failed' };
+        }
+        toolCalls.push({ name: block.name, input: block.input });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: JSON.stringify(result).slice(0, 20_000), // bound tool output size
+        });
+      }
+      messages.push({ role: 'user', content: toolResults });
     }
-    messages.push({ role: 'user', content: toolResults });
+  } finally {
+    await recordAiTokens(args.networkId, tokens); // what was spent, even if a turn failed
   }
 
   if (!reply) reply = 'I could not complete that request within the tool-call limit. Please narrow the question.';

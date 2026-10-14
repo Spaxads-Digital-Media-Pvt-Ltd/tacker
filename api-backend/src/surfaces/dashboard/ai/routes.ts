@@ -11,6 +11,7 @@ import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { runChat, isAiConfigured } from '../../../lib/ai/service.js';
+import { aiQuota } from '../../../lib/ai/quota.js';
 import { requireRole } from '../auth.js';
 
 const chatSchema = z.object({
@@ -21,7 +22,8 @@ const chatSchema = z.object({
 export function aiRoutes(): Router {
   const r = Router();
 
-  r.get('/status', (_req, res) => sendOk(res, { configured: isAiConfigured() }));
+  // configured + today's AI budget for this network (F-25·F-28: chats / tokens per UTC day).
+  r.get('/status', asyncHandler(async (req, res) => sendOk(res, { configured: isAiConfigured(), quota: await aiQuota(req.scope!.networkId) })));
 
   r.get(
     '/conversations',

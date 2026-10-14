@@ -58,11 +58,11 @@ export function errorHandler(
  ok: false,
  error: { code: err.code, message: err.message, ...(details !== undefined ? { details } : {}) },
  };
- res.status(err.status).json(body);
- // Set Retry-After for rate-limited responses (HTTP 429).
+ // Retry-After for rate-limited responses (HTTP 429) — before the body is sent, or it never goes out.
  if (err.code === 'rate_limited' && typeof details?.retryAfter === 'number') {
  res.setHeader('Retry-After', String(details.retryAfter));
  }
+ res.status(err.status).json(body);
  return;
  }
 

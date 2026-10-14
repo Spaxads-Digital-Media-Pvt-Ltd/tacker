@@ -29,6 +29,8 @@
 | `SENTRY_DSN` | Error tracking (no-op if absent) | — |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry trace sampling | `0` |
 | `ANTHROPIC_API_KEY` | AI ops layer (Phase 7) | — |
+| `AI_DAILY_CHAT_LIMIT` | AI chats per network per UTC day on `/api/ai/chat`; `0` = no cap | `200` |
+| `AI_DAILY_TOKEN_LIMIT` | Model tokens (input + output, every tool-loop turn) per network per UTC day; `0` = no cap | `2000000` |
 | `MAXMIND_LICENSE_KEY` | GeoIP2 DB updates | — |
 | `CLICK_RETENTION_DAYS` | Default days to keep clicks + postback logs (a network can override in Settings › Retention; 0 = keep forever) | `90` |
 | `CONVERSION_RETENTION_DAYS` | Default days to keep conversions that never touched the ledger (per-network override as above). Ledgered conversions are never pruned (F-21) | `400` |

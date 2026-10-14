@@ -100,7 +100,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 ### `lib/` Modules
 | Module | Purpose |
 |---|---|
-| `ai/` | Anthropic SDK integration, tool definitions |
+| `ai/` | Anthropic SDK integration, tool definitions, quota.ts (per-network daily chat / token budget in Redis → 429) |
 | `analytics/` | Analytics writer (ClickHouse interface, deferred) |
 | `apikeys/` | API key generation (`adv_live_*`/`pub_live_*`/`net_live_*`), sha256 hashing |
 | `auth/` | JWT verification via jose (JWKS ES256 + HS256 fallback) |

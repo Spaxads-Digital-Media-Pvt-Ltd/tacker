@@ -114,6 +114,11 @@ const schema = z.object({
   // Network purge (audit F-26): days a soft-deleted network waits before it can be purged (its
   // data hard-deleted); 0 = no wait.
   NETWORK_PURGE_GRACE_DAYS: z.coerce.number().int().min(0).default(30),
+
+  // AI budget per network per UTC day on /api/ai/chat (audit F-25·F-28; lib/ai/quota.ts): chats,
+  // and model tokens (input + output, every tool-loop turn). 0 = no cap.
+  AI_DAILY_CHAT_LIMIT: z.coerce.number().int().min(0).default(200),
+  AI_DAILY_TOKEN_LIMIT: z.coerce.number().int().min(0).default(2_000_000),
 });
 
 const parsed = schema.safeParse(process.env);
