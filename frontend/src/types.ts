@@ -561,6 +561,8 @@ export interface TrackingDomain {
   verificationState: 'unverified' | 'pending' | 'verified' | 'failed';
   sslStatus: 'none' | 'pending' | 'issued' | 'error';
   isPrimary: boolean;
+  /** Custom hosts: the DNS TXT record that verifies them (F-15). */
+  dnsRecord?: { type: string; name: string; value: string } | null;
   createdAt: string;
   updatedAt: string;
 }
