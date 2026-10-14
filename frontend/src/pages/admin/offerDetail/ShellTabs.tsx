@@ -39,18 +39,28 @@ export function ForwardingRulesTab({ base, pubOptions = [] }: { base: string; pu
   );
 }
 
+const CAP_OPTIONS = [
+  { value: 'daily_click', label: 'Daily clicks' }, { value: 'daily_conversion', label: 'Daily conversions' }, { value: 'total_conversion', label: 'Total conversions' },
+];
+const capLabel = (v: unknown) => CAP_OPTIONS.find((o) => o.value === v)?.label ?? String(v ?? '—');
+const isCapChange = (f: Record<string, string | boolean>) => f.actionType === 'cap_change';
+
 export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; pubOptions?: PubOptions }) {
   return (
     <>
-    <p className="mb-3 rounded-card border border-border bg-page px-3 py-2 text-[11px] text-fg-muted">Pending actions run automatically at their scheduled time (checked every minute). cap_change needs a cap type and value, which can be set through the API for now.</p>
+    <p className="mb-3 rounded-card border border-border bg-page px-3 py-2 text-[11px] text-fg-muted">Pending actions run automatically at their scheduled time (checked every minute). Activate / pause can target selected partners; archive and cap change apply to the whole offer. A cap change with an empty value removes that cap.</p>
     <CollectionTab
       basePath={`${base}/scheduled-actions`}
       addLabel="Action"
       emptyText="No scheduled actions."
       editable
+      // An empty cap value on a cap change means "remove the cap" (null), not "leave it out".
+      prepareBody={(body, form) => (isCapChange(form) && body['capValue'] === undefined ? { ...body, capValue: null } : body)}
       fields={[
         { key: 'actionType', label: 'Type', type: 'select', options: ['activate', 'pause', 'archive', 'cap_change'], default: 'pause' },
-        { key: 'partnerIds', label: 'Partners', type: 'multiselect', options: pubOptions, placeholder: 'Type to search partners…' },
+        { key: 'capType', label: 'Cap to change', type: 'select', options: CAP_OPTIONS, required: true, default: 'daily_click', showIf: isCapChange },
+        { key: 'capValue', label: 'New cap value (empty = remove the cap)', type: 'number', placeholder: 'e.g. 500', showIf: isCapChange },
+        { key: 'partnerIds', label: 'Partners', type: 'multiselect', options: pubOptions, placeholder: 'Type to search partners…', showIf: (f) => f.actionType === 'activate' || f.actionType === 'pause' },
         { key: 'event', label: 'Event' },
         { key: 'scheduledTime', label: 'Scheduled Time (ISO 8601)', placeholder: '2026-09-01T00:00:00Z' },
         { key: 'internalNotes', label: 'Internal Notes', type: 'textarea' },
@@ -58,9 +68,14 @@ export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; p
       ] as FieldDef[]}
       columns={[
         col('Type', (r) => <span className="font-medium capitalize text-fg">{String(r.actionType).replace('_', ' ')}</span>),
+        col('Cap', (r) => (r.actionType === 'cap_change' ? `${capLabel(r.capType)} → ${r.capValue ?? 'no cap'}` : '—')),
         col('Partners', (r) => count(r.partnerIds)),
         col('Event', (r) => (r.event ? String(r.event) : '—')),
         col('Scheduled Time', (r) => fmt(r.scheduledTime)),
+        col('Status', (r) => {
+          const err = (r.result as { error?: string } | null | undefined)?.error;
+          return <span className={r.status === 'failed' ? 'text-danger-text' : undefined} title={err ?? undefined}>{String(r.status ?? '—')}{err ? ` — ${err}` : ''}</span>;
+        }),
         col('Internal Notes', (r) => (r.internalNotes ? String(r.internalNotes) : '—')),
         col('Created By', (r) => (r.createdBy ? String(r.createdBy) : 'System')),
         col('Created', (r) => fmt(r.createdAt)),

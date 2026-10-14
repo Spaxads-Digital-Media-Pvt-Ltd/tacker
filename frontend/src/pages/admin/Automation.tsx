@@ -8,7 +8,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs } from '../../shared-components/primitives/ui';
-import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
+import { EmptyShellTable, type ShellRow, type AddField } from '../../shared-components/primitives/EmptyShellTable';
 import type { Offer, Publisher } from '../../types';
 
 const TOP_TABS = ['Scheduled Actions', 'Alerts', 'Webhooks'] as const;
@@ -27,6 +27,22 @@ const TITLES: Record<string, string> = {
 };
 
 const ACTION_TYPES = new Set(['activate', 'pause', 'archive', 'cap_change']);
+const SCHEDULED_ACTION_FIELDS: AddField[] = [
+  { name: 'Type', required: true, options: [
+    { value: 'pause', label: 'Pause' }, { value: 'activate', label: 'Activate' },
+    { value: 'archive', label: 'Archive' }, { value: 'cap_change', label: 'Cap change' },
+  ] },
+  { name: 'Offers', required: true, placeholder: 'Offer name or ID' },
+  { name: 'Scheduled Time', required: true, placeholder: 'YYYY-MM-DD HH:MM (your local time)' },
+  { name: 'Partners', placeholder: 'Activate / pause only — names or IDs, comma separated' },
+  { name: 'Cap Type', options: [
+    { value: 'daily_click', label: 'Daily clicks' }, { value: 'daily_conversion', label: 'Daily conversions' },
+    { value: 'total_conversion', label: 'Total conversions' },
+  ] },
+  { name: 'Cap Value', placeholder: 'Cap change only — empty removes the cap' },
+  { name: 'Event' },
+  { name: 'Internal Notes' },
+];
 
 interface ScheduledAction {
   id: string; displayId: number | null;
@@ -140,6 +156,7 @@ function ScheduledActionsPanel() {
       onStatusFilterChange={(v) => setStatusFilter(v as StatusFilter)}
       rows={rows}
       loading={loading}
+      addFields={SCHEDULED_ACTION_FIELDS}
       onAddSubmit={async (v) => {
         const offerList = offers ?? [];
         const pubList = publishers ?? [];
@@ -148,13 +165,19 @@ function ScheduledActionsPanel() {
         const rawType = (v['Type']?.trim() || 'pause').toLowerCase().replace(/\s+/g, '_');
         const actionType = ACTION_TYPES.has(rawType) ? rawType : 'pause';
         const scheduledRaw = v['Scheduled Time']?.trim();
-        const scheduledTime = scheduledRaw ? new Date(scheduledRaw).toISOString() : null;
+        if (!scheduledRaw || Number.isNaN(Date.parse(scheduledRaw))) return 'Enter the scheduled time, e.g. 2026-11-01 09:00.';
+        const scheduledTime = new Date(scheduledRaw).toISOString();
+        const capValueRaw = v['Cap Value']?.trim() ?? '';
+        if (actionType === 'cap_change' && !v['Cap Type']) return 'Pick the Cap Type to change.';
+        if (actionType === 'cap_change' && capValueRaw !== '' && !/^\d+$/.test(capValueRaw)) return 'Cap Value must be a whole number (or empty to remove the cap).';
+        if ((actionType === 'archive' || actionType === 'cap_change') && v['Partners']?.trim()) return 'Partners apply to activate / pause only — clear the Partners field for this type.';
         await api.post('/api/automation/scheduled-actions', {
           offerId,
           actionType,
+          ...(actionType === 'cap_change' ? { capType: v['Cap Type'] || undefined, capValue: capValueRaw === '' ? null : Number(capValueRaw) } : {}),
           partnerIds: resolvePartnerIds(v['Partners'], pubList),
           event: v['Event']?.trim() || null,
-          scheduledTime: scheduledTime && !Number.isNaN(Date.parse(scheduledTime)) ? scheduledTime : null,
+          scheduledTime,
           internalNotes: v['Internal Notes']?.trim() || null,
           status: 'pending',
         });

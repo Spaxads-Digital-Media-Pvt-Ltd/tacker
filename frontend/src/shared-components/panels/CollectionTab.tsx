@@ -23,7 +23,11 @@ export interface FieldDef {
   required?: boolean;
   placeholder?: string;
   default?: string | boolean;
+  /** Show (and send) the field only while this holds for the form's current values. */
+  showIf?: (form: Record<string, string | boolean>) => boolean;
 }
+
+const isShown = (fd: FieldDef, form: Record<string, string | boolean>) => !fd.showIf || fd.showIf(form);
 
 /** `multiselect` holds its value as a comma-joined string in form state (like `tags`) and converts
  * at the request/response boundary, so form state stays string-only. */
@@ -60,6 +64,7 @@ function formFromRow(fields: FieldDef[], row: Row): Record<string, string | bool
 function toBody(fields: FieldDef[], form: Record<string, string | boolean>, original?: Row): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const fd of fields) {
+    if (!isShown(fd, form)) continue;
     const v = form[fd.key];
     if (fd.type === 'checkbox') { body[fd.key] = Boolean(v); continue; }
     if (isArrayField(fd.type)) { body[fd.key] = String(v).split(',').map((s) => s.trim()).filter(Boolean); continue; }
@@ -74,7 +79,7 @@ function toBody(fields: FieldDef[], form: Record<string, string | boolean>, orig
 }
 
 export function CollectionTab({
-  basePath, listPath, fields, columns, addLabel, emptyText, editable = false, searchKeys, searchPlaceholder = 'Search…',
+  basePath, listPath, fields, columns, addLabel, emptyText, editable = false, searchKeys, searchPlaceholder = 'Search…', prepareBody,
 }: {
   basePath: string;
   /** GET target, if it needs query params (e.g. a category filter) that mustn't leak into the
@@ -88,6 +93,8 @@ export function CollectionTab({
   /** When set, renders a search box that client-side filters the fetched rows by these row keys. */
   searchKeys?: string[];
   searchPlaceholder?: string;
+  /** Last word on the request body (add + edit), e.g. to send null where an empty field means "none". */
+  prepareBody?: (body: Record<string, unknown>, form: Record<string, string | boolean>) => Record<string, unknown>;
 }) {
   const { data, loading, error, refetch } = useQuery<Row[]>(listPath ?? basePath);
   const [open, setOpen] = useState(false);
@@ -140,11 +147,11 @@ export function CollectionTab({
         : !shown || shown.length === 0 ? <StateBlock>No rows match “{q}”.</StateBlock>
         : <Table columns={withActions} rows={shown} rowKey={(r) => r.id} />}
 
-      {open && <FormModal title={addLabel} fields={fields}
+      {open && <FormModal title={addLabel} fields={fields} prepareBody={prepareBody}
         onSubmit={(body) => api.post(basePath, body)}
         onClose={() => setOpen(false)} onDone={() => { setOpen(false); refetch(); }} />}
 
-      {editRow && <FormModal title="Edit" fields={fields} initial={editRow}
+      {editRow && <FormModal title="Edit" fields={fields} initial={editRow} prepareBody={prepareBody}
         onSubmit={(body) => api.patch(`${basePath}/${editRow.id}`, body)}
         onClose={() => setEditRow(null)} onDone={() => { setEditRow(null); refetch(); }} />}
     </div>
@@ -152,9 +159,10 @@ export function CollectionTab({
 }
 
 function FormModal({
-  title, fields, initial, onSubmit, onClose, onDone,
+  title, fields, initial, onSubmit, onClose, onDone, prepareBody,
 }: {
   title: string; fields: FieldDef[]; initial?: Row;
+  prepareBody?: (body: Record<string, unknown>, form: Record<string, string | boolean>) => Record<string, unknown>;
   onSubmit: (body: Record<string, unknown>) => Promise<unknown>;
   onClose: () => void; onDone: () => void;
 }) {
@@ -165,7 +173,8 @@ function FormModal({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const res = await run(toBody(fields, form, initial));
+    const body = toBody(fields, form, initial);
+    const res = await run(prepareBody ? prepareBody(body, form) : body);
     if (res !== null) onDone();
   };
 
@@ -181,7 +190,7 @@ function FormModal({
     >
       <form id={formId} onSubmit={submit} className="space-y-3">
         {error && <p className="text-small text-danger-text">{error}</p>}
-        {fields.filter((fd) => fd.type !== 'hidden').map((fd) => (
+        {fields.filter((fd) => fd.type !== 'hidden' && isShown(fd, form)).map((fd) => (
           // `multiselect` renders its own label, so it isn't wrapped in <Field>.
           fd.type === 'multiselect'
             ? <div key={fd.key}>{renderInput(fd, form[fd.key] ?? '', (v) => set(fd.key, v))}</div>
