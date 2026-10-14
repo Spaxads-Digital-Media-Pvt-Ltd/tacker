@@ -25,7 +25,8 @@
 | `IMPERSONATION_JWT_SECRET` | Signs admin impersonation sessions (30 min). ≥32 chars (`openssl rand -hex 32`). Unset → "Impersonate" answers 503 | — |
 | `TRACKING_BASE_DOMAIN` | Base for tenant subdomains | `ourtracking.com` |
 | `TRACKING_RL_POSTBACK_PER_CLICK_LIMIT` | `/postback` rate limit per `click_id` (sliding 5-min window; each request is weighted by the buckets it touches, so 100 ≈ 20 postbacks for one click within a minute). Off in development/test | `100` |
-| `TRACKING_TRUSTED_PROXIES` | Extra proxies (comma-separated IPv4/IPv6 IPs or CIDRs) allowed to set `X-Forwarded-For` on the tracking surface, e.g. an Nginx/LB not on the same host. Loopback + Cloudflare's published ranges are always trusted | — |
+| `TRUSTED_PROXIES` | Proxies every surface trusts to set `X-Forwarded-For` (O2): comma-separated IPv4/IPv6 IPs or CIDRs, and `private` (10/8, 172.16/12, 192.168/16, fc00::/7). Loopback + Cloudflare's published ranges are always trusted. **AWS ALB + Cloudflare: `private`** | — |
+| `TRACKING_TRUSTED_PROXIES` | Older name — merged into `TRUSTED_PROXIES` | — |
 | `SENTRY_DSN` | Error tracking (no-op if absent) | — |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry trace sampling | `0` |
 | `ANTHROPIC_API_KEY` | AI ops layer (Phase 7) | — |

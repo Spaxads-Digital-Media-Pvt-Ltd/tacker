@@ -44,9 +44,10 @@ never be cached either. Do **not** enable "Cache Everything" on the tracking zon
 
 ## Client IP at the origin (how `req.ip` is derived)
 
-The tracking server does **not** read `CF-Connecting-IP` (or `True-Client-IP` / `X-Real-IP`). It
-derives the click IP from **`X-Forwarded-For` only**, via Fastify's `trustProxy` with the check in
-`src/surfaces/tracking/trusted-proxy.ts`:
+No surface reads `CF-Connecting-IP` (or `True-Client-IP` / `X-Real-IP`). Every surface — tracking
+(Fastify `trustProxy`), dashboard, public API and platform admin (Express `trust proxy`, set in
+`lib/http/express-app.ts`) — derives the client IP from **`X-Forwarded-For` only**, with the one check
+in `src/lib/net/trusted-proxy.ts` (O2):
 
 1. Start from the TCP socket peer. If it is not a trusted proxy, that address **is** the client
    and `X-Forwarded-For` is ignored entirely (in production such a direct connection is also
@@ -57,7 +58,14 @@ derives the click IP from **`X-Forwarded-For` only**, via Fastify's `trustProxy`
 
 Trusted proxies: loopback (`127.0.0.1`, `::1`), Cloudflare's published IPv4 + IPv6 ranges
 (pinned in `trusted-proxy.ts` from <https://www.cloudflare.com/ips-v4/> and `/ips-v6/` — re-check
-when Cloudflare changes them), plus `TRACKING_TRUSTED_PROXIES` (comma-separated IPs/CIDRs).
+when Cloudflare changes them), plus `TRUSTED_PROXIES` (comma-separated IPs/CIDRs and the keyword
+`private` = 10/8, 172.16/12, 192.168/16, fc00::/7; the older `TRACKING_TRUSTED_PROXIES` is merged in).
+
+**AWS + Cloudflare** (Cloudflare → AWS Application Load Balancer → the app): set
+`TRUSTED_PROXIES=private` (the load balancer's nodes have VPC addresses) — or the VPC CIDR itself.
+The ALB appends the Cloudflare edge address to `X-Forwarded-For`, Cloudflare had appended the visitor's,
+so `req.ip` = the visitor. Lock the load balancer's security group to Cloudflare's ranges so nobody can
+reach the origin directly (even then a spoofed `X-Forwarded-For` is never believed — see step 2).
 
 Cloudflare appends the visitor's IP to `X-Forwarded-For` by default, so no edge rule is needed.
 What the **origin proxy** (Nginx / load balancer) must do — confirm against the real deployment,
@@ -67,7 +75,7 @@ this repository contains no Nginx config:
 |---|---|---|
 | Nginx on the same host, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` | Correct client IP | None |
 | Nginx with `real_ip` (`set_real_ip_from` Cloudflare ranges, `real_ip_header CF-Connecting-IP`) then `$proxy_add_x_forwarded_for` | Correct client IP | None |
-| Nginx / LB on **another host or container** | Click IP = the proxy; production guard returns 403 | Add its address(es) to `TRACKING_TRUSTED_PROXIES` |
+| Nginx / LB on **another host or container** (e.g. an AWS ALB) | Client IP = the proxy; production guard returns 403 | `TRUSTED_PROXIES=private` (or its address / CIDR) |
 | Nginx **overwrites** `X-Forwarded-For` with `$remote_addr` (no `real_ip`) | Click IP = a Cloudflare edge address | Append instead (`$proxy_add_x_forwarded_for`) |
 | Cloudflare connects straight to the tracking port (no origin proxy) | Correct client IP | None (the tracking server speaks plain HTTP — TLS must terminate somewhere) |
 

@@ -17,6 +17,11 @@ import { env } from '../../config/env.js';
 import { buildHealthReport } from './health.js';
 import { errorHandler, notFoundHandler } from './envelope.js';
 import { metricsText, metricsContentType, httpDuration } from '../metrics.js';
+import { buildTrustedProxyCheck, configuredProxies } from '../net/trusted-proxy.js';
+
+// X-Forwarded-For is believed only from trusted proxies (loopback, Cloudflare, TRUSTED_PROXIES — see
+// lib/net/trusted-proxy.ts), so req.ip is the real visitor on every surface (O2).
+const isTrustedProxy = buildTrustedProxyCheck(configuredProxies(env));
 
 type CorsOrigin = string | string[] | false;
 
@@ -47,6 +52,7 @@ function buildCorsMiddleware(origin: string | string[]): express.RequestHandler 
 export function createBaseApp(surface: string, corsOrigin?: CorsOrigin): Express {
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', (addr: string) => isTrustedProxy(addr));
   app.use(helmet({ crossOriginEmbedderPolicy: false }));
   // 6mb matches the branding data-URL uploads (Control Center logos). Creatives no longer send file
   // bytes in JSON — they upload the raw file to object storage (F-27, POST /api/creatives/upload).

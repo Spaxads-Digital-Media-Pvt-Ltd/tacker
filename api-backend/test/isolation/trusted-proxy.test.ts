@@ -1,12 +1,12 @@
 /**
- * Tracking-surface proxy trust (tracking/trusted-proxy.ts): only loopback, Cloudflare's PUBLISHED
+ * Proxy trust (lib/net/trusted-proxy.ts — every surface): only loopback, Cloudflare's PUBLISHED
  * ranges and TRACKING_TRUSTED_PROXIES may report a client address, and req.ip is the first
  * untrusted X-Forwarded-For hop walking from the right. Plus the production guard that rejects
  * direct (non-proxied) connections. No DB needed — /healthz never touches Postgres.
  */
 import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import Fastify from 'fastify';
-import { buildTrustedProxyCheck, CLOUDFLARE_IPV4, CLOUDFLARE_IPV6 } from '../../src/surfaces/tracking/trusted-proxy.js';
+import { buildTrustedProxyCheck, configuredProxies, CLOUDFLARE_IPV4, CLOUDFLARE_IPV6 } from '../../src/lib/net/trusted-proxy.js';
 import { buildTrackingApp } from '../../src/surfaces/tracking/app.js';
 import { env } from '../../src/config/env.js';
 
@@ -103,5 +103,26 @@ describe('production guard: direct (non-proxied) connections are rejected', () =
   });
   it('in test/dev the guard is off (local work)', async () => {
     expect((await health('198.18.0.9')).statusCode).toBe(200);
+  });
+});
+
+describe('TRUSTED_PROXIES (O2): `private` for a load balancer inside a VPC, merged with the older name', () => {
+  it('`private` trusts RFC 1918 + IPv6 unique-local addresses, nothing public', () => {
+    const check = buildTrustedProxyCheck('private');
+    for (const ip of ['10.0.3.17', '172.16.0.1', '172.31.255.254', '192.168.1.20', 'fd12:3456::1', '::ffff:10.1.2.3']) expect(check(ip), ip).toBe(true);
+    for (const ip of ['8.8.8.8', '172.32.0.1', '11.0.0.1', '2001:db8::1', '100.64.0.1']) expect(check(ip), ip).toBe(false);
+    expect(check('104.16.0.1')).toBe(true); // Cloudflare stays trusted
+  });
+  it('keywords mix with CIDRs; unknown words are reported, never widened', () => {
+    const bad: string[] = [];
+    const check = buildTrustedProxyCheck('PRIVATE, cloudflare, 198.51.100.0/24, everything', (e) => bad.push(e));
+    expect(check('198.51.100.9')).toBe(true);
+    expect(check('10.9.9.9')).toBe(true);
+    expect(check('203.0.113.1')).toBe(false);
+    expect(bad).toEqual(['everything']);
+  });
+  it('configuredProxies merges TRUSTED_PROXIES with TRACKING_TRUSTED_PROXIES', () => {
+    expect(configuredProxies({ TRUSTED_PROXIES: 'private', TRACKING_TRUSTED_PROXIES: '198.51.100.7' })).toBe('private,198.51.100.7');
+    expect(configuredProxies({ TRUSTED_PROXIES: ' ', TRACKING_TRUSTED_PROXIES: undefined })).toBe('');
   });
 });

@@ -15,16 +15,11 @@ import { advertiserApi } from './advertiser.js';
 import { publisherApi } from './publisher.js';
 import { networkApi } from './network.js';
 import { openApiSpec } from './openapi.js';
-import { buildTrustedProxyCheck } from '../tracking/trusted-proxy.js';
-import { env } from '../../config/env.js';
-
-// The API IP whitelist (F-16) needs the real client address: trust X-Forwarded-For only from the
-// same proxies the tracking surface trusts (loopback, Cloudflare, TRACKING_TRUSTED_PROXIES).
-const isTrustedProxy = buildTrustedProxyCheck(env.TRACKING_TRUSTED_PROXIES);
 
 export function buildPublicApiApp(): Express {
+  // The API IP whitelist (F-16) needs the real client address — createBaseApp trusts the same proxies
+  // as every surface (lib/net/trusted-proxy.ts).
   const app = createBaseApp('public-api');
-  app.set('trust proxy', (addr: string) => isTrustedProxy(addr));
 
   // Public, unauthenticated API docs.
   app.get('/api/v1/openapi.json', (_req, res) => res.json(openApiSpec()));

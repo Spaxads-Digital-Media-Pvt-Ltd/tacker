@@ -266,7 +266,7 @@ Only an **active** partner of the network is attributed (`surfaces/tracking/part
 ### IP lists (Control Center › Security) — enforced (F-16)
 - `PUT /api/control-center/ip-blacklist { ranges: [{from, to?}] }` — IPs, CIDRs or same-family from–to ranges (IPv4/IPv6; malformed → 422). `/click` from a listed client IP is diverted (like a blocking traffic control), from the next click on.
 - `POST/DELETE /api/control-center/api-whitelist` (IP or CIDR; malformed → 422) — when a network has any entry, its **network-audience** API keys only work from listed IPs (others → 403); advertiser/publisher keys are not restricted by it.
-- Both use the real client IP: X-Forwarded-For is trusted only from loopback, Cloudflare ranges and `TRACKING_TRUSTED_PROXIES` (tracking + public-api surfaces). Lists are cached per network in Redis and busted on write; a cache/DB error fails open.
+- Both use the real client IP: X-Forwarded-For is trusted only from loopback, Cloudflare ranges and `TRUSTED_PROXIES` (every surface since O2 — `lib/net/trusted-proxy.ts`). Lists are cached per network in Redis and busted on write; a cache/DB error fails open.
 
 ### Finance (dashboard)
 - `POST /api/finance/conversions/:conversionId/approve` — pending → approved: tiered commission, earning + billing ledger entries, partner postback (honours "Fire Partner Postback"). Admin/finance.

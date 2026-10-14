@@ -20,7 +20,7 @@ import { getFraudConfigCached } from '../../lib/fraud/rules.js';
 import { tierPayout } from '../../lib/partner-tiers.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
-import { buildTrustedProxyCheck } from './trusted-proxy.js';
+import { buildTrustedProxyCheck, configuredProxies } from '../../lib/net/trusted-proxy.js';
 import { SOURCE_PARAMS, firstNonBlank } from './click-params.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
@@ -90,15 +90,15 @@ function pickByPriority(items: { offer_id: string; position: number | null }[]):
 // X-Forwarded-For headers cannot be trusted unless the immediate socket peer is a known proxy.
 // Cloudflare + nginx must be the only direct front-ends. A direct-connect attacker who bypasses
 // them hits this check regardless of host-header spoofing. Skipped in dev/test for local work.
-// Loopback, Cloudflare's published ranges (IPv4 + IPv6) and TRACKING_TRUSTED_PROXIES — see trusted-proxy.ts.
-const isTrustedProxy = buildTrustedProxyCheck(env.TRACKING_TRUSTED_PROXIES, (entry) =>
- logger.warn({ entry }, 'TRACKING_TRUSTED_PROXIES: ignoring malformed entry (not an IP or CIDR)'));
+// Loopback, Cloudflare's published ranges (IPv4 + IPv6) and TRUSTED_PROXIES — see lib/net/trusted-proxy.ts.
+const isTrustedProxy = buildTrustedProxyCheck(configuredProxies(env), (entry) =>
+ logger.warn({ entry }, 'TRUSTED_PROXIES: ignoring malformed entry (not an IP, CIDR or "private")'));
 
 export function buildTrackingApp(): FastifyInstance {
  const app = Fastify({
  logger: { level: env.LOG_LEVEL },
- // Cloudflare → Nginx → us. X-Forwarded-For is walked from the RIGHT and only hops from a trusted
- // proxy (isTrustedProxy: loopback, Cloudflare, TRACKING_TRUSTED_PROXIES) are skipped, so req.ip is
+ // Cloudflare → load balancer → us. X-Forwarded-For is walked from the RIGHT and only hops from a trusted
+ // proxy (isTrustedProxy: loopback, Cloudflare, TRUSTED_PROXIES) are skipped, so req.ip is
  // the first untrusted address — the real client. `true` trusted every hop and took the LEFTMOST
  // entry, which the client itself can write (a spoofed "X-Forwarded-For: 1.2.3.4" became the click IP).
  // A direct connection (no trusted proxy in front) keeps its socket address — e.g. 127.0.0.1 locally.

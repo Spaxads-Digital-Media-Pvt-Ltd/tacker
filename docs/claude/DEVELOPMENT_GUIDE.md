@@ -151,6 +151,12 @@ Optional:
 - **Local dev**: Docker Compose (Redis + Postgres)
 - **Staging/prod**: Supabase Postgres (via pooler), hosted Redis
 
+### Behind Cloudflare + AWS (client IPs)
+Set `TRUSTED_PROXIES=private` on every surface so the visitor's IP (not the load balancer's) is used for
+login rate limits, the API IP whitelist, audit logs, login history and click geo / fraud — Cloudflare's
+ranges are trusted already. Allow only Cloudflare's ranges into the load balancer's security group.
+Details: `api-backend/docs/cloudflare-edge.md` › "Client IP at the origin".
+
 ### Surface Ports
 | Surface | Port |
 |---|---|

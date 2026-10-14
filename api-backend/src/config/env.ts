@@ -81,7 +81,10 @@ const schema = z.object({
  REPORTING_ROLLUPS: z.enum(['on', 'off']).default('on'),
 
  TRACKING_BASE_DOMAIN: z.string().min(1).default('ourtracking.com'),
- TRACKING_TRUSTED_PROXIES: z.string().optional(), // comma-sep trusted IPs/CIDRs; loopback always trusted
+ TRACKING_TRUSTED_PROXIES: z.string().optional(), // older name for TRUSTED_PROXIES (merged)
+ // Proxies every surface trusts for X-Forwarded-For (O2): comma-sep IPs / CIDRs and `private`
+ // (RFC 1918 + fc00::/7 — e.g. an AWS load balancer). Loopback + Cloudflare are always trusted.
+ TRUSTED_PROXIES: z.string().optional(),
  TRACKING_ALLOWED_HOSTS: z.string().optional(), // comma-sep allowlist; empty = all (after validation)
  TRACKING_REJECT_RAW_IPS: z.coerce.boolean().default(true),
 
