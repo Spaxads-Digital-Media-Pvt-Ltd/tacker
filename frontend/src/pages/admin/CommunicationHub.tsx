@@ -838,7 +838,7 @@ function EmailLogTab() {
                   <tr key={e.id} className="bg-surface text-fg">
                     <td className="whitespace-nowrap text-fg-secondary">{fmt(e.createdAt)}</td>
                     <td className="whitespace-nowrap">{e.label}</td>
-                    <td className="font-mono text-tiny">{e.recipient}</td>
+                    <td className="text-small">{e.recipient}</td>
                     <td className="max-w-[280px] truncate" title={e.subject}>{e.subject}</td>
                     <td><StatusPill status={e.status} />{e.sentAt && <span className="ml-2 text-tiny text-fg-muted">{fmt(e.sentAt)}</span>}</td>
                     <td>{e.attempts}</td>
