@@ -12,7 +12,7 @@
 - **Custom claims**: Stored in Supabase `app_metadata`:
  - `network_id` — tenant ID
  - `kind` — `admin` / `publisher` / `advertiser`
- - `role` — `admin` / `manager` / `finance` / `read_only` (admin users)
+ - `role` — `admin` / `manager` / `finance` / `read_only` (admin users). For a team member with a `users` row, that row is what's enforced: `dashboardAuth` reads its `role` + `status` per request (`lib/auth/staff-state.ts`, cached 15 s), so a role change applies on their next request and `status = disabled` is refused (403) even with a valid token. Edits (`PATCH /api/control-center/users/:id`) also update the login (role claim; a ban while disabled) when Supabase Auth is configured
  - `owner_id` — Party ID (publisher/advertiser portals)
 - **JWKS endpoint**: `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`
 
@@ -27,6 +27,7 @@
 - `POST /api/{publishers|advertisers}/:id/impersonate` (admin) mints a 30-min HS256 token, issuer `tracker-impersonation`, signed with `IMPERSONATION_JWT_SECRET` (optional; 503 when unset) — never the account's own credentials
 - `dashboardAuth` routes it by issuer to its own verifier → portal identity of that account + `impersonatedBy`; it can't authenticate admin routes or other surfaces
 - Writes are audited to the admin (`audit_log.impersonated_by`); password/email/anonymize/API-key changes are refused; `/api/me` exposes `impersonating` for the SPA banner
+- SPA: the token opens in a new tab as that tab's own session (`sessionStorage`, `tracker.impersonation.v1`) — the admin's localStorage login and refresh cookie are never replaced, refreshed or revoked from it; the token is passed in the URL fragment (never sent to a server) and wiped from the address bar; a 401 ends the session
 
 ### 3. API Key (Public REST API)
 - Format: `<audience>_<env>_<publicId>_<secret>`
