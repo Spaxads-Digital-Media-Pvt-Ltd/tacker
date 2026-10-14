@@ -43,6 +43,7 @@ import type {
  SortOnlyKey,
 } from './types.js';
 import { MONEY_SORT_METRICS, moneyFieldsOf, money4 } from './types.js';
+import { isUtcZone } from './time-zone.js';
 
 /** Metrics computed by the per-side aggregates (`money_by_currency` is assembled separately below). */
 type SideMetric = Exclude<Metric, 'money_by_currency'>;
@@ -175,6 +176,12 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  const params: Array<unknown | unknown[]> = [req.networkId];
  const phArr = (v: unknown[]) => { params.push(v); return `{p${params.length}:Array(String)}`; };
  const phTs = (v: unknown) => { params.push(v); return `parseDateTime64BestEffort({p${params.length}:String}, 3)`; };
+ // F-20: day / hour bucket in the request's time zone (a constant-folded query parameter); UTC
+ // reports keep the old SQL. A bucket then reads as that zone's local wall time.
+ let zoneArg = '';
+ if (!isUtcZone(req.timeZone) && gb.some((d) => d === 'day' || d === 'hour')) { params.push(req.timeZone); zoneArg = `, {p${params.length}:String}`; }
+ const zoned = (d: Dimension, base: string): string =>
+ (zoneArg && (d === 'day' || d === 'hour') ? base.replace(/\)$/, `${zoneArg})`) : base);
 
  const clickWhere: string[] = ['c.network_id = {p1:String}'];
  const convWhere: string[] = ['k.network_id = {p1:String}'];
@@ -255,7 +262,7 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  // Click-side advertiser grouping: map offer → advertiser via the Postgres mapping (NULL when the
  // offer has none, matching the Postgres provider's LEFT JOIN offers).
  const clickDim = (d: Dimension): string => {
- if (d !== 'advertiser') return DIM_SQL_CLICK[d];
+ if (d !== 'advertiser') return zoned(d, DIM_SQL_CLICK[d]);
  const from = phArr(offerAdv.map((o) => o.id));
  const to = phArr(offerAdv.map((o) => o.advertiser_id));
  return `nullIf(transform(toString(c.offer_id), ${from}, ${to}, ''), '')`;
@@ -280,7 +287,7 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  WHERE ${clickWhere.join(' AND ')}
  ${gbHas ? `GROUP BY ${groupIdx}` : ''}`;
 
- const convSel = gb.map((d, i) => `${DIM_SQL_CONV[d]} AS d${i}`).join(', ');
+ const convSel = gb.map((d, i) => `${zoned(d, DIM_SQL_CONV[d])} AS d${i}`).join(', ');
  const convMetrics = ALL_METRICS.map(m => `${METRIC_CONV[m]} AS ${m}`).join(', ');
  // `money_by_currency` (opt-in): one sumMap per group over the approved conversions with a currency —
  // keys = currency, values = payout, revenue and a row count. The count keeps a currency whose

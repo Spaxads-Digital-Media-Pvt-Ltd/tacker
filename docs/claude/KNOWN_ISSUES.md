@@ -92,3 +92,6 @@ Saved and shown, but not acted on by the tracker yet — each page says so: Link
 
 ### 16. Schema Uses Serial Ref Numbers
 The `ref` column on entities (offers, publishers, advertisers, etc.) is a `serial` (auto-increment integer). This is visible to users as display IDs. Consider if this should remain sequential.
+
+### 18. Report time zones and entity lists (F-20 follow-ups)
+The API now buckets `day`/`hour` in a `tz` zone and `/dashboard` uses the network timezone, but the report pages still send UTC-day ranges (`toIso` in `frontend/src/lib/reportMath.ts`) and no `tz`, so their tables stay UTC; a page that wants local days should send `tz` plus plain dates (and compute "today" in that zone). `/api/reports/grouped` (Click report grouped mode) stays raw + UTC. Report rows now carry `labels` (entity names), but the report pages still load full offer / partner / advertiser lists — they also feed the filter pickers, so dropping them needs a picker that searches server-side.

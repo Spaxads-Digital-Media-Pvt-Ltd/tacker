@@ -76,6 +76,9 @@ const schema = z.object({
  REPORTING_PROVIDER: z
  .enum(['postgres', 'clickhouse', 'clickhouse_with_fallback'])
  .default('postgres'),
+ // F-20: the Postgres provider reads the 15-minute rollups (lib/reporting/rollups.ts) when a report
+ // fits them. 'off' = always the raw tables (the test config pins it so mocked SQL stays stable).
+ REPORTING_ROLLUPS: z.enum(['on', 'off']).default('on'),
 
  TRACKING_BASE_DOMAIN: z.string().min(1).default('ourtracking.com'),
  TRACKING_TRUSTED_PROXIES: z.string().optional(), // comma-sep trusted IPs/CIDRs; loopback always trusted

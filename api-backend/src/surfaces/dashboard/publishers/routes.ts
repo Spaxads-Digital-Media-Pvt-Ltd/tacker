@@ -19,6 +19,7 @@ import { requireRole, requirePortal, startImpersonation } from '../auth.js';
 import { balanceSummary, type CurrencyBalance } from '../../../lib/ledger/ledger.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
+import { attachLabels } from '../../../lib/reporting/labels.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
 import {
   createPublisherSchema, updatePublisherSchema, createPostbackSchema,
@@ -478,7 +479,7 @@ export function publisherPortalRoutes(): Router {
     validateQuery(reportQuerySchema),
     asyncHandler(async (req, res) => {
       const request = buildReportRequest(req.scope!.networkId, res.locals.query, 'publisher', { publisherId: ownerIdOf(req) });
-      sendOk(res, await getReportingProvider().runReport(request));
+      sendOk(res, await attachLabels(req.scope!.networkId, await getReportingProvider().runReport(request)));
     }),
   );
 

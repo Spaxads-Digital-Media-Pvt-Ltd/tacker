@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../http/pagination.js';
 import { queryBool, queryDate } from '../http/query-params.js';
 import { MONEY_FIELDS, SORT_ONLY_KEYS } from './types.js';
+import { isValidTimeZone, isUtcZone, zonedDayStart, addDays, inclusiveBefore } from './time-zone.js';
 import type { Dimension, Metric, MoneyField, OrderKey, ReportRequest, ReportFilters, FilterValue, SortOnlyKey } from './types.js';
 
 export type ReportAudience = 'admin' | 'network' | 'publisher' | 'advertiser';
@@ -97,6 +98,8 @@ export const reportQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
   orderBy: z.string().max(40).optional(),
   orderDir: z.enum(['asc', 'desc']).optional(),
+  // F-20: bucket `day` / `hour` (and read a plain-date from/to) in this IANA zone; default UTC.
+  tz: z.string().max(64).refine(isValidTimeZone, { message: 'must be an IANA time zone, e.g. Asia/Kolkata' }).optional(),
 }).refine((q) => !q.from || !q.to || Date.parse(q.from) <= Date.parse(inclusiveTo(q.to)), { message: '`from` must not be after `to`', path: ['from'] });
 
 type RawQuery = z.infer<typeof reportQuerySchema>;
@@ -166,9 +169,15 @@ export function buildReportRequest(
   const orderBy: OrderKey | undefined = raw.orderBy && (allowedMetrics as string[]).includes(raw.orderBy) && !OPT_IN_METRICS.has(raw.orderBy as Metric)
     ? (raw.orderBy as Metric) : raw.orderBy && sortOnlyAllowed(raw.orderBy) ? raw.orderBy : undefined;
 
+  // A plain date is a day of the report's time zone (UTC unless `tz` names another); a datetime is
+  // taken as given.
+  const tz = raw.tz && !isUtcZone(raw.tz) ? raw.tz : undefined;
+  const plainDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const from = raw.from && tz && plainDate(raw.from) ? zonedDayStart(raw.from, tz).toISOString() : utcDayStart(raw.from);
+  const to = raw.to && tz && plainDate(raw.to) ? inclusiveBefore(zonedDayStart(addDays(raw.to, 1), tz)) : inclusiveTo(raw.to);
   const user: ReportFilters = {
-    ...(raw.from ? { from: utcDayStart(raw.from) } : {}),
-    ...(raw.to ? { to: inclusiveTo(raw.to) } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
     offerId: multi(raw.offerId),
     publisherId: multi(raw.publisherId),
     advertiserId: multi(raw.advertiserId),
@@ -219,5 +228,6 @@ export function buildReportRequest(
     // From the audience policy, never the caller's metric list: a publisher's `money_by_currency` is
     // payout-only and an advertiser's revenue-only.
     moneyFields: audienceMoneyFields(audience),
+    ...(tz ? { timeZone: tz } : {}),
   };
 }

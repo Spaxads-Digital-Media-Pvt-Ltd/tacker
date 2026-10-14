@@ -58,6 +58,7 @@ Client Browser
 │ - facebook-capi: CAPI batch │
 │ - offer-feed-sync: outbound offers │
 │ - scheduled-actions / alert-rules / automation-webhook (Automation, F-17a) │
+│ - smart-link-kpi (F-17b), reporting-rollup (15-min rollups, F-20) │
 └─────────────────────────────────────────────────────┘
  │
  ▼

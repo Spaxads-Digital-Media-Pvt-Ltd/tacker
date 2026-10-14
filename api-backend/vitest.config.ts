@@ -17,6 +17,8 @@ export default defineConfig({
    SUPABASE_URL: process.env.SUPABASE_URL ?? 'https://test.supabase.co',
    SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET ?? 'test-jwt-secret-do-not-use-in-prod',
    INTEGRATION_DB: process.env.INTEGRATION_DB ?? '',
+   // Reports read the raw tables unless a test opts in to the rollups (F-20 tests do, per provider).
+   REPORTING_ROLLUPS: process.env.REPORTING_ROLLUPS ?? 'off',
   },
  },
 });

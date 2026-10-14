@@ -4,17 +4,30 @@
  * FULL-OUTER-JOINed on the group key, so a group with clicks-but-no-conversions (or vice-versa)
  * still appears. All grouping/aggregation is in SQL — never row-by-row in Node (spec §3B).
  *
+ * Rollups (audit F-20): when a report only groups / filters by what the 15-minute rollups carry and
+ * the rollup worker has a window (lib/reporting/rollups.ts), whole buckets inside that window come
+ * from stats_clicks_15m / stats_conversions_15m and the rest — the recent hours, partial buckets at the
+ * edges of the range, dirty buckets, anything before the backfill — from the raw tables: UNION ALL,
+ * then aggregated as one, so the numbers are exactly the raw query's. Day / hour group in the
+ * request's time zone (UTC unless the request names one).
+ *
  * Dimension/metric names come ONLY from the whitelists below; all VALUES are parameterized.
  */
 import { query } from '../db/pool.js';
+import { env } from '../../config/env.js';
 import { MONEY_SORT_METRICS, moneyFieldsOf } from './types.js';
 import { mbcJsonSql } from './money-by-currency.js';
+import { rollupWindow, binSql, type RollupWindow } from './rollups.js';
+import { formatInZone, isUtcZone } from './time-zone.js';
 import type { Dimension, Metric, MetricValue, MoneyByCurrency, ReportRequest, ReportResult, ReportRow, ReportingProvider, SortOnlyKey } from './types.js';
 
-const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers?: boolean }> = {
+type DimMap = Record<Dimension, { click: string; conv: string }>;
+
+/** `tz` is a SQL expression: the literal 'UTC' or a parameter placeholder. */
+const dimSql = (tz: string): DimMap => ({
   offer: { click: 'clicks.offer_id', conv: 'c.offer_id' },
   publisher: { click: 'clicks.publisher_id', conv: 'c.publisher_id' },
-  advertiser: { click: 'o.advertiser_id', conv: 'c.advertiser_id', clickNeedsOffers: true },
+  advertiser: { click: 'o.advertiser_id', conv: 'c.advertiser_id' },
   smartLink: { click: 'clicks.smart_link_id', conv: 'k.smart_link_id' },
   country: { click: 'clicks.country', conv: 'k.country' },
   device: { click: 'clicks.device', conv: 'k.device' },
@@ -23,14 +36,39 @@ const DIM_SQL: Record<Dimension, { click: string; conv: string; clickNeedsOffers
   isp: { click: 'clicks.isp', conv: 'k.isp' },
   browser: { click: 'clicks.browser', conv: 'k.browser' },
   os: { click: 'clicks.os', conv: 'k.os' },
-  day: { click: "date_trunc('day', clicks.created_at, 'UTC')", conv: "date_trunc('day', c.created_at, 'UTC')" },
-  hour: { click: "date_trunc('hour', clicks.created_at, 'UTC')", conv: "date_trunc('hour', c.created_at, 'UTC')" },
+  day: { click: `date_trunc('day', clicks.created_at, ${tz})`, conv: `date_trunc('day', c.created_at, ${tz})` },
+  hour: { click: `date_trunc('hour', clicks.created_at, ${tz})`, conv: `date_trunc('hour', c.created_at, ${tz})` },
   sub1: { click: 'clicks.sub1', conv: 'k.sub1' },
   sub2: { click: 'clicks.sub2', conv: 'k.sub2' },
   sub3: { click: 'clicks.sub3', conv: 'k.sub3' },
   sub4: { click: 'clicks.sub4', conv: 'k.sub4' },
   sub5: { click: 'clicks.sub5', conv: 'k.sub5' },
-};
+});
+
+/** The same dimensions over the rollups (r = stats_clicks_15m, rv = stats_conversions_15m). */
+const rollupDimSql = (tz: string): Partial<DimMap> => ({
+  offer: { click: 'r.offer_id', conv: 'rv.offer_id' },
+  publisher: { click: 'r.publisher_id', conv: 'rv.publisher_id' },
+  advertiser: { click: 'o.advertiser_id', conv: 'rv.advertiser_id' },
+  smartLink: { click: 'r.smart_link_id', conv: 'rv.smart_link_id' },
+  country: { click: 'r.country', conv: 'rv.country' },
+  device: { click: 'r.device', conv: 'rv.device' },
+  day: { click: `date_trunc('day', r.bucket, ${tz})`, conv: `date_trunc('day', rv.bucket, ${tz})` },
+  hour: { click: `date_trunc('hour', r.bucket, ${tz})`, conv: `date_trunc('hour', rv.bucket, ${tz})` },
+});
+
+const ROLLUP_DIMS = new Set<Dimension>(['offer', 'publisher', 'advertiser', 'smartLink', 'country', 'device', 'day', 'hour']);
+const ROLLUP_FILTERS = new Set<string>([
+  'from', 'to', 'offerId', 'publisherId', 'advertiserId', 'smartLinkId', 'country', 'device',
+  'excludeOfferId', 'excludePublisherId', 'excludeAdvertiserId', 'excludeSmartLinkId', 'excludeCountry', 'excludeDevice',
+]);
+
+/** Can the rollups answer this report? (Everything else — city, ISP, subs, "ignore fail traffic" — is raw.) */
+export function rollupEligible(req: ReportRequest): boolean {
+  if (!req.groupBy.every((d) => ROLLUP_DIMS.has(d))) return false;
+  return Object.entries(req.filters).every(([k, v]) =>
+    v == null || v === '' || v === false || (Array.isArray(v) && v.length === 0) || ROLLUP_FILTERS.has(k));
+}
 
 // ORDER BY expressions over the outer `s` row (cr/epc are ratios, computed the same way as below).
 // `currencies` / `money_by_currency` are never sort keys (request.ts refuses them as orderBy).
@@ -44,49 +82,80 @@ const ORDER_COL: Record<OrderMetric, string> = {
   invalid_clicks: 's.invalid_clicks', total_conversions: 's.total_conversions', avg_fraud_score: 's.avg_fraud_score',
 };
 
+export interface PostgresProviderOptions {
+  /** Read the rollups when a report fits them (default: REPORTING_ROLLUPS). */
+  rollups?: boolean;
+}
+
 export class PostgresReportingProvider implements ReportingProvider {
+  constructor(private readonly opts: PostgresProviderOptions = {}) {}
+
   async runReport(req: ReportRequest): Promise<ReportResult> {
+    const useRollups = (this.opts.rollups ?? env.REPORTING_ROLLUPS === 'on') && rollupEligible(req);
+    const window = useRollups ? await rollupWindow(req.networkId) : null;
+    return this.build(req, window);
+  }
+
+  private async build(req: ReportRequest, w: RollupWindow | null): Promise<ReportResult> {
     const gb = req.groupBy;
     const params: unknown[] = [req.networkId];
+    // The report time zone: the literal 'UTC' (unchanged SQL) or a parameter — bound only when a
+    // day / hour dimension uses it (Postgres rejects a parameter nothing references).
+    const zoned = !isUtcZone(req.timeZone) && gb.some((d) => d === 'day' || d === 'hour');
+    let tzSql = `'UTC'`;
+    if (zoned) {
+      params.push(req.timeZone);
+      tzSql = `$${params.length}::text`;
+    }
+    const DIM_SQL = dimSql(tzSql);
+    const ROLL_DIM_SQL = rollupDimSql(tzSql);
+    const hybrid = w != null;
+
     const clickWhere = ['clicks.network_id = $1'];
     // Status is applied per-metric via FILTER below (not a hard WHERE) so both "total_conversions"
     // (all statuses) and "conversions"/payout/revenue (approved-only, the financially-realized ones)
     // can be computed from the same aggregated group.
     const convWhere = ['c.network_id = $1'];
+    // The same filters over the rollups (only used for a hybrid read).
+    const rollClickWhere = ['r.network_id = $1'];
+    const rollConvWhere = ['rv.network_id = $1'];
 
     // Every include filter accepts one value (`= $n`) or an array (an IN-list, via
     // `::text = ANY($n::text[])` — text-cast so it works uniformly whether the underlying column is
     // uuid or text). The Dimensional Report's multi-select "click row(s) to filter" needs this; every
-    // other caller still just passes a single value.
-    const add = (value: unknown, clickExpr: string, convExpr: string, op: '=' | '<>' | '>=' | '<=' = '='): void => {
-      if (value == null || value === '') return;
+    // other caller still just passes a single value. Returns the value's placeholder.
+    const add = (value: unknown, clickExpr: string, convExpr: string, op: '=' | '<>' | '>=' | '<=' = '=', roll?: [string, string]): string | null => {
+      if (value == null || value === '') return null;
       // Exclusions keep rows whose value is NULL ("exclude smart link X" must not also drop all
       // traffic that has no smart link) — hence the explicit IS NULL / IS DISTINCT FROM.
       const exclude = op === '<>';
       if (Array.isArray(value)) {
-        if (value.length === 0) return;
+        if (value.length === 0) return null;
         params.push(value);
         const p = `$${params.length}`;
         const cmp = (e: string) => (exclude ? `(${e} IS NULL OR ${e}::text <> ALL(${p}::text[]))` : `${e}::text = ANY(${p}::text[])`);
         clickWhere.push(cmp(clickExpr));
         convWhere.push(cmp(convExpr));
-        return;
+        if (roll) { rollClickWhere.push(cmp(roll[0])); rollConvWhere.push(cmp(roll[1])); }
+        return p;
       }
       params.push(value);
       const p = `$${params.length}`;
       const cmp = (e: string) => (exclude ? `${e}::text IS DISTINCT FROM ${p}::text` : `${e} ${op} ${p}`);
       clickWhere.push(cmp(clickExpr));
       convWhere.push(cmp(convExpr));
+      if (roll) { rollClickWhere.push(cmp(roll[0])); rollConvWhere.push(cmp(roll[1])); }
+      return p;
     };
     const f = req.filters;
-    add(f.from, 'clicks.created_at', 'c.created_at', '>=');
-    add(f.to, 'clicks.created_at', 'c.created_at', '<=');
-    add(f.offerId, 'clicks.offer_id', 'c.offer_id');
-    add(f.publisherId, 'clicks.publisher_id', 'c.publisher_id');
-    add(f.advertiserId, 'o.advertiser_id', 'c.advertiser_id');
-    add(f.smartLinkId, 'clicks.smart_link_id', 'k.smart_link_id');
-    add(f.country, 'clicks.country', 'k.country');
-    add(f.device, 'clicks.device', 'k.device');
+    const fromP = add(f.from, 'clicks.created_at', 'c.created_at', '>=');
+    const toP = add(f.to, 'clicks.created_at', 'c.created_at', '<=');
+    add(f.offerId, 'clicks.offer_id', 'c.offer_id', '=', ['r.offer_id', 'rv.offer_id']);
+    add(f.publisherId, 'clicks.publisher_id', 'c.publisher_id', '=', ['r.publisher_id', 'rv.publisher_id']);
+    add(f.advertiserId, 'o.advertiser_id', 'c.advertiser_id', '=', ['o.advertiser_id', 'rv.advertiser_id']);
+    add(f.smartLinkId, 'clicks.smart_link_id', 'k.smart_link_id', '=', ['r.smart_link_id', 'rv.smart_link_id']);
+    add(f.country, 'clicks.country', 'k.country', '=', ['r.country', 'rv.country']);
+    add(f.device, 'clicks.device', 'k.device', '=', ['r.device', 'rv.device']);
     add(f.city, 'clicks.city', 'k.city');
     add(f.region, 'clicks.region', 'k.region');
     add(f.isp, 'clicks.isp', 'k.isp');
@@ -98,12 +167,12 @@ export class PostgresReportingProvider implements ReportingProvider {
     add(f.sub4, 'clicks.sub4', 'k.sub4');
     add(f.sub5, 'clicks.sub5', 'k.sub5');
     // "Exclusions" (Everflow's own term) — same dimensions, inverted with <>.
-    add(f.excludeOfferId, 'clicks.offer_id', 'c.offer_id', '<>');
-    add(f.excludePublisherId, 'clicks.publisher_id', 'c.publisher_id', '<>');
-    add(f.excludeAdvertiserId, 'o.advertiser_id', 'c.advertiser_id', '<>');
-    add(f.excludeSmartLinkId, 'clicks.smart_link_id', 'k.smart_link_id', '<>');
-    add(f.excludeCountry, 'clicks.country', 'k.country', '<>');
-    add(f.excludeDevice, 'clicks.device', 'k.device', '<>');
+    add(f.excludeOfferId, 'clicks.offer_id', 'c.offer_id', '<>', ['r.offer_id', 'rv.offer_id']);
+    add(f.excludePublisherId, 'clicks.publisher_id', 'c.publisher_id', '<>', ['r.publisher_id', 'rv.publisher_id']);
+    add(f.excludeAdvertiserId, 'o.advertiser_id', 'c.advertiser_id', '<>', ['o.advertiser_id', 'rv.advertiser_id']);
+    add(f.excludeSmartLinkId, 'clicks.smart_link_id', 'k.smart_link_id', '<>', ['r.smart_link_id', 'rv.smart_link_id']);
+    add(f.excludeCountry, 'clicks.country', 'k.country', '<>', ['r.country', 'rv.country']);
+    add(f.excludeDevice, 'clicks.device', 'k.device', '<>', ['r.device', 'rv.device']);
     // "Others › Ignore Fail Traffic" — drop fraud-flagged clicks from click-side metrics entirely, and
     // the conversions those clicks produced (a conversion with no resolvable click — offline/manual —
     // has nothing flagged and is kept; array_length of NULL or '{}' is NULL).
@@ -112,17 +181,58 @@ export class PostgresReportingProvider implements ReportingProvider {
       convWhere.push('array_length(k.fraud_flags, 1) IS NULL');
     }
 
+    // Hybrid read: whole buckets in [rs, re) that aren't dirty come from the rollups; every raw row
+    // outside them from the raw tables. rs/re clip the rollup window to the requested range (only
+    // buckets lying entirely inside it).
+    let inRollup = (_col: string) => 'false';
+    let outsideRollup = (_col: string) => 'true';
+    if (hybrid) {
+      params.push(w.low);
+      const lowP = `$${params.length}::timestamptz`;
+      params.push(w.high);
+      const highP = `$${params.length}::timestamptz`;
+      params.push(w.dirty);
+      const dirtyP = `$${params.length}::timestamptz[]`;
+      const rs = fromP ? `GREATEST(${lowP}, ${binSql(`${fromP}::timestamptz - interval '1 microsecond'`)} + interval '15 minutes')` : lowP;
+      const re = toP ? `LEAST(${highP}, ${binSql(`${toP}::timestamptz + interval '1 microsecond'`)})` : highP;
+      inRollup = (col) => `${col} >= ${rs} AND ${col} < ${re} AND ${col} <> ALL(${dirtyP})`;
+      outsideRollup = (col) => `(${col} < ${rs} OR ${col} >= ${re} OR ${binSql(col)} = ANY(${dirtyP}))`;
+    }
+
     const needsOffers = gb.includes('advertiser') || f.advertiserId != null || f.excludeAdvertiserId != null;
     const groupIdx = gb.map((_, i) => `d${i}`).join(', ');
+    const comma = gb.length ? ',' : '';
+    const rawClickDims = gb.map((d, i) => `${DIM_SQL[d].click} AS d${i}`).join(', ');
+    const rawConvDims = gb.map((d, i) => `${DIM_SQL[d].conv} AS d${i}`).join(', ');
+    const rollClickDims = gb.map((d, i) => `${ROLL_DIM_SQL[d]!.click} AS d${i}`).join(', ');
+    const rollConvDims = gb.map((d, i) => `${ROLL_DIM_SQL[d]!.conv} AS d${i}`).join(', ');
+    const groupSql = gb.length ? `GROUP BY ${groupIdx}` : '';
 
-    const clicksCte =
-      `SELECT ${gb.map((d, i) => `${DIM_SQL[d].click} AS d${i}`).join(', ')}${gb.length ? ',' : ''}
+    const clicksCte = !hybrid
+      ? `SELECT ${rawClickDims}${comma}
               COUNT(*) AS clicks, COUNT(*) FILTER (WHERE clicks.is_unique) AS unique_clicks,
               COUNT(*) FILTER (WHERE array_length(clicks.fraud_flags, 1) > 0) AS invalid_clicks,
               COALESCE(AVG(clicks.fraud_score), 0) AS avg_fraud_score
          FROM clicks ${needsOffers ? 'LEFT JOIN offers o ON o.id = clicks.offer_id AND o.network_id = clicks.network_id' : ''}
         WHERE ${clickWhere.join(' AND ')}
-        ${gb.length ? `GROUP BY ${groupIdx}` : ''}`;
+        ${groupSql}`
+      : `SELECT ${groupIdx}${comma}
+              SUM(u.clicks) AS clicks, SUM(u.unique_clicks) AS unique_clicks, SUM(u.invalid_clicks) AS invalid_clicks,
+              COALESCE(SUM(u.fs)::numeric / NULLIF(SUM(u.clicks), 0), 0) AS avg_fraud_score
+         FROM (
+           SELECT ${rawClickDims}${comma}
+                  COUNT(*) AS clicks, COUNT(*) FILTER (WHERE clicks.is_unique) AS unique_clicks,
+                  COUNT(*) FILTER (WHERE array_length(clicks.fraud_flags, 1) > 0) AS invalid_clicks,
+                  SUM(clicks.fraud_score) AS fs
+             FROM clicks ${needsOffers ? 'LEFT JOIN offers o ON o.id = clicks.offer_id AND o.network_id = clicks.network_id' : ''}
+            WHERE ${clickWhere.join(' AND ')} AND ${outsideRollup('clicks.created_at')}
+            ${groupSql}
+           UNION ALL
+           SELECT ${rollClickDims}${comma} r.clicks, r.unique_clicks, r.invalid_clicks, r.fraud_score_sum
+             FROM stats_clicks_15m r ${needsOffers ? 'LEFT JOIN offers o ON o.id = r.offer_id AND o.network_id = r.network_id' : ''}
+            WHERE ${rollClickWhere.join(' AND ')} AND ${inRollup('r.bucket')}
+         ) u
+        ${groupSql}`;
 
     // `currencies` (opt-in): the distinct currencies of exactly the conversions that feed payout /
     // revenue / margin (approved), so a caller can tell a single-currency sum from a mixed one.
@@ -132,8 +242,16 @@ export class PostgresReportingProvider implements ReportingProvider {
     const moneySort = req.orderBy != null && MONEY_SORT_METRICS.has(req.orderBy);
     const convFrom = `FROM conversions c LEFT JOIN clicks k ON k.click_id = c.click_id AND k.network_id = c.network_id
         WHERE ${convWhere.join(' AND ')}`;
-    const convCte =
-      `SELECT ${gb.map((d, i) => `${DIM_SQL[d].conv} AS d${i}`).join(', ')}${gb.length ? ',' : ''}
+    // `money_by_currency` (opt-in): the same approved conversions summed per (group, currency) — NULL
+    // currency excluded — then folded into one jsonb object per group carrying only the audience's
+    // money fields (whitelisted names; values numeric(14,4) text).
+    const wantMbc = req.metrics.includes('money_by_currency');
+
+    let convCtes: string;
+    let mbcCtes = '';
+    if (!hybrid) {
+      convCtes = `cv AS (
+        SELECT ${rawConvDims}${comma}
               COUNT(*) AS total_conversions,
               COUNT(*) FILTER (WHERE c.status = 'approved') AS conversions,
               COALESCE(SUM(c.payout) FILTER (WHERE c.status = 'approved'), 0) AS payout,
@@ -143,14 +261,9 @@ export class PostgresReportingProvider implements ReportingProvider {
               COUNT(*) FILTER (WHERE c.status = 'approved' AND c.currency IS NULL) AS cur_null,
               MIN(c.currency) FILTER (WHERE c.status = 'approved') AS cur_one` : ''}
          ${convFrom}
-        ${gb.length ? `GROUP BY ${groupIdx}` : ''}`;
-
-    // `money_by_currency` (opt-in): the same approved conversions summed per (group, currency) — NULL
-    // currency excluded — then folded into one jsonb object per group carrying only the audience's
-    // money fields (whitelisted names; values numeric(14,4) text).
-    const wantMbc = req.metrics.includes('money_by_currency');
-    const mbcCtes = wantMbc
-      ? `, cm AS (
+        ${groupSql})`;
+      if (wantMbc) {
+        mbcCtes = `, cm AS (
          SELECT ${gb.map((d, i) => `${DIM_SQL[d].conv} AS d${i}, `).join('')}c.currency AS cur,
                 COALESCE(SUM(c.payout), 0) AS p, COALESCE(SUM(c.revenue), 0) AS r
          ${convFrom} AND c.status = 'approved' AND c.currency IS NOT NULL
@@ -158,8 +271,44 @@ export class PostgresReportingProvider implements ReportingProvider {
        ), cmj AS (
          SELECT ${gb.map((_, i) => `cm.d${i}, `).join('')}${mbcJsonSql('cm', moneyFieldsOf(req))} AS mbc
            FROM cm ${gb.length ? `GROUP BY ${gb.map((_, i) => `cm.d${i}`).join(', ')}` : ''}
-       )`
-      : '';
+       )`;
+      }
+    } else {
+      // Per (group, currency) from both sources, then folded per group — the currency split is what
+      // `currencies`, the money-sort classification and `money_by_currency` are computed from.
+      convCtes = `cvu AS (
+        SELECT ${rawConvDims}${comma} c.currency AS cur,
+               COUNT(*) AS total_conversions,
+               COUNT(*) FILTER (WHERE c.status = 'approved') AS conversions,
+               COALESCE(SUM(c.payout) FILTER (WHERE c.status = 'approved'), 0) AS payout,
+               COALESCE(SUM(c.revenue) FILTER (WHERE c.status = 'approved'), 0) AS revenue
+          ${convFrom} AND ${outsideRollup('c.created_at')}
+         GROUP BY ${gb.map((_, i) => `d${i}, `).join('')}cur
+        UNION ALL
+        SELECT ${rollConvDims}${comma} rv.currency, rv.total_conversions, rv.conversions, rv.payout, rv.revenue
+          FROM stats_conversions_15m rv
+         WHERE ${rollConvWhere.join(' AND ')} AND ${inRollup('rv.bucket')}
+      ), cv AS (
+        SELECT ${groupIdx}${comma}
+               SUM(total_conversions) AS total_conversions, SUM(conversions) AS conversions,
+               COALESCE(SUM(payout), 0) AS payout, COALESCE(SUM(revenue), 0) AS revenue${wantCurrencies ? `,
+               array_agg(DISTINCT cur ORDER BY cur) FILTER (WHERE conversions > 0 AND cur IS NOT NULL) AS currencies` : ''}${moneySort ? `,
+               COUNT(DISTINCT cur) FILTER (WHERE conversions > 0) AS cur_n,
+               COALESCE(SUM(conversions) FILTER (WHERE cur IS NULL), 0) AS cur_null,
+               MIN(cur) FILTER (WHERE conversions > 0) AS cur_one` : ''}
+          FROM cvu
+         ${groupSql})`;
+      if (wantMbc) {
+        mbcCtes = `, cm AS (
+         SELECT ${gb.map((_, i) => `d${i}, `).join('')}cur, COALESCE(SUM(payout), 0) AS p, COALESCE(SUM(revenue), 0) AS r
+           FROM cvu WHERE conversions > 0 AND cur IS NOT NULL
+          GROUP BY ${gb.map((_, i) => `d${i}, `).join('')}cur
+       ), cmj AS (
+         SELECT ${gb.map((_, i) => `cm.d${i}, `).join('')}${mbcJsonSql('cm', moneyFieldsOf(req))} AS mbc
+           FROM cm ${gb.length ? `GROUP BY ${gb.map((_, i) => `cm.d${i}`).join(', ')}` : ''}
+       )`;
+      }
+    }
     // cm's groups are a subset of cv's, so they attach on the merged group key (same NULL sentinel).
     const mbcJoin = !wantMbc ? '' : gb.length
       ? 'LEFT JOIN cmj ON ' + gb.map((_, i) => `COALESCE(COALESCE(cl.d${i}, cv.d${i})::text, '~NULL~') = COALESCE(cmj.d${i}::text, '~NULL~')`).join(' AND ')
@@ -179,8 +328,10 @@ export class PostgresReportingProvider implements ReportingProvider {
     const orderCol = req.orderBy && req.orderBy in ORDER_COL ? ORDER_COL[req.orderBy as OrderMetric] : (chronological ? 's.d0' : ORDER_COL['clicks']);
     const orderDir = req.orderDir ? (req.orderDir === 'asc' ? 'ASC' : 'DESC') : (chronological && !req.orderBy ? 'ASC' : 'DESC');
 
+    // Money: round(x, 4), not ::numeric(14,4) — a group's SUM can exceed the 10 integer digits one
+    // amount column holds (the cast overflowed → 500; F-22 fixed the same in mbcJsonSql / /dashboard).
     const baseSql =
-      `WITH cl AS (${clicksCte}), cv AS (${convCte})${mbcCtes}
+      `WITH cl AS (${clicksCte}), ${convCtes}${mbcCtes}
        SELECT ${dimSelect ? dimSelect + ',' : ''}
               COALESCE(cl.clicks,0)::int AS clicks,
               COALESCE(cl.unique_clicks,0)::int AS unique_clicks,
@@ -188,9 +339,9 @@ export class PostgresReportingProvider implements ReportingProvider {
               COALESCE(cl.avg_fraud_score,0)::numeric(5,1) AS avg_fraud_score,
               COALESCE(cv.conversions,0)::int AS conversions,
               COALESCE(cv.total_conversions,0)::int AS total_conversions,
-              COALESCE(cv.payout,0)::numeric(14,4) AS payout,
-              COALESCE(cv.revenue,0)::numeric(14,4) AS revenue,
-              (COALESCE(cv.revenue,0) - COALESCE(cv.payout,0))::numeric(14,4) AS margin${wantCurrencies ? `,
+              round(COALESCE(cv.payout,0), 4) AS payout,
+              round(COALESCE(cv.revenue,0), 4) AS revenue,
+              round(COALESCE(cv.revenue,0) - COALESCE(cv.payout,0), 4) AS margin${wantCurrencies ? `,
               COALESCE(cv.currencies, '{}'::text[]) AS currencies` : ''}${wantMbc ? `,
               COALESCE(cmj.mbc, '{}'::jsonb) AS money_by_currency` : ''}${moneySort ? `,
               -- 0 = money in exactly one currency, 1 = no approved conversion, 2 = mixed / unknown currency.
@@ -221,12 +372,15 @@ export class PostgresReportingProvider implements ReportingProvider {
 
     const { rows } = await query<Record<string, unknown>>(sql, pageParams);
 
+    // Day / hour buckets in a non-UTC zone read as local wall time with their offset
+    // ('2026-10-13T00:00:00+05:30'); UTC keeps the ISO instant ('2026-10-13T00:00:00.000Z').
+    const fmtTime = (d: Date) => (zoned ? formatInZone(d, req.timeZone!) : d.toISOString());
     const wanted = new Set(req.metrics);
     const out: ReportRow[] = rows.map((row) => {
       const dimensions: Record<string, string | null> = {};
       gb.forEach((d, i) => {
         const v = row[`d${i}`];
-        dimensions[d] = v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+        dimensions[d] = v == null ? null : v instanceof Date ? fmtTime(v) : String(v);
       });
 
       const clicks = Number(row['clicks']);

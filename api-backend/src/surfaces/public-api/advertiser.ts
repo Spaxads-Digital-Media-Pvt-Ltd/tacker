@@ -15,6 +15,7 @@ import type { OfferRow } from '../../domain/entities.js';
 import { recordConversion } from '../tracking/conversions/record.js';
 import { reportQuerySchema, buildReportRequest } from '../../lib/reporting/request.js';
 import { getReportingProvider } from '../../lib/reporting/index.js';
+import { attachLabels } from '../../lib/reporting/labels.js';
 import { requireScope, apiIdentity } from './auth.js';
 import { getStoredClick } from '../tracking/click-store.js';
 
@@ -130,7 +131,7 @@ export function advertiserApi(): Router {
  asyncHandler(async (req, res) => {
  const id = apiIdentity(req);
  const request = buildReportRequest(id.networkId, res.locals.query, 'advertiser', { advertiserId: id.ownerId });
- sendOk(res, await getReportingProvider().runReport(request));
+ sendOk(res, await attachLabels(id.networkId, await getReportingProvider().runReport(request)));
  }),
  );
 

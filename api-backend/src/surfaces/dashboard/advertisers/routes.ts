@@ -18,6 +18,7 @@ import type { AdvertiserRow } from '../../../domain/entities.js';
 import { requireRole, requirePortal, startImpersonation } from '../auth.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
+import { attachLabels } from '../../../lib/reporting/labels.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
 import {
   createAdvertiserSchema, updateAdvertiserSchema, debugPostbackSchema, type DebugPostback,
@@ -405,7 +406,7 @@ export function advertiserPortalRoutes(): Router {
     validateQuery(reportQuerySchema),
     asyncHandler(async (req, res) => {
       const request = buildReportRequest(req.scope!.networkId, res.locals.query, 'advertiser', { advertiserId: ownerIdOf(req) });
-      sendOk(res, await getReportingProvider().runReport(request));
+      sendOk(res, await attachLabels(req.scope!.networkId, await getReportingProvider().runReport(request)));
     }),
   );
 

@@ -14,6 +14,7 @@ export const QUEUE = {
  alertRules: 'alert-rules',
  automationWebhook: 'automation-webhook',
  smartLinkKpi: 'smart-link-kpi',
+ reportingRollup: 'reporting-rollup',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

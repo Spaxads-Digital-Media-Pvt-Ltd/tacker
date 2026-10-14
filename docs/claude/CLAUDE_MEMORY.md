@@ -85,7 +85,7 @@ api-backend/src/
 │ ├── tracking/main.ts → Fastify /click /postback /pixel /iframe /sl
 │ ├── public-api/main.ts → Express /api/v1/advertiser|publisher|network/*
 │ ├── platform-admin/main.ts → Express /platform/*
-│ └── workers/main.ts → BullMQ processors (click-persist, outbound-postback, fraud-scan, retention, facebook-capi, offer-feed-sync, domain-verify, scheduled-actions, alert-rules, automation-webhook)
+│ └── workers/main.ts → BullMQ processors (click-persist, outbound-postback, fraud-scan, retention, facebook-capi, offer-feed-sync, domain-verify, scheduled-actions, alert-rules, automation-webhook, smart-link-kpi, reporting-rollup)
 ```
 
 ---

@@ -32,6 +32,7 @@
 | `MAXMIND_LICENSE_KEY` | GeoIP2 DB updates | — |
 | `CLICK_RETENTION_DAYS` | Days to keep clicks before pruning | `90` |
 | `CONVERSION_RETENTION_DAYS` | Days to keep conversions before pruning | `400` |
+| `REPORTING_ROLLUPS` | `on` = the Postgres reporting provider reads the 15-minute rollups when a report fits them (F-20); `off` = raw tables only (the vitest config pins `off`) | `on` |
 
 ### Surface Ports
 | Variable | Default | Description |

@@ -848,25 +848,44 @@ describe('`moneyByCurrency` on /summary, /dashboard, /grouped, /goals, Pacing, /
     expect(calls()[1]!.sql).toContain("jsonb_build_object('payout', round(cm.p, 4)::text, 'revenue', round(cm.r, 4)::text, 'margin', round(cm.r - cm.p, 4)::text)");
   });
 
-  it('/dashboard: per period, only currencies with conversions in that period', async () => {
-    queryMock.mockImplementation(async (sql: string) => {
-      if (sql.includes('GROUP BY currency')) return { rows: [
-        { currency: 'EUR', n_today: 0, p_today: '0.0000', r_today: '0.0000', m_today: '0.0000', n_yesterday: 1, p_yesterday: '2.0000', r_yesterday: '5.0000', m_yesterday: '3.0000', n_month: 1, p_month: '2.0000', r_month: '5.0000', m_month: '3.0000', n_last_month: 0, p_last_month: '0.0000', r_last_month: '0.0000', m_last_month: '0.0000' },
-        { currency: 'USD', n_today: 2, p_today: '1.5000', r_today: '4.0000', m_today: '2.5000', n_yesterday: 0, p_yesterday: '0.0000', r_yesterday: '0.0000', m_yesterday: '0.0000', n_month: 2, p_month: '1.5000', r_month: '4.0000', m_month: '2.5000', n_last_month: 0, p_last_month: '0.0000', r_last_month: '0.0000', m_last_month: '0.0000' },
-      ] };
-      return { rows: [{}] };
+  it('/dashboard: per period, only currencies with conversions in that period (one provider report per period)', async () => {
+    // F-20: /dashboard reads one grand-total provider report per period (+ one by hour for today);
+    // each period's per-currency money is that period's own money_by_currency.
+    const day = (offset: number) => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() + offset); return d; };
+    const today = day(0).toISOString();
+    const yesterday = day(-1).toISOString();
+    const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const lastMonthStart = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() - 1, 1)).toISOString();
+    const MBC: Record<string, unknown> = {
+      [today]: { USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
+      [yesterday]: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } },
+      [monthStart.toISOString()]: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' }, USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
+      [lastMonthStart]: {},
+    };
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("settings->'general'->>'timezone'")) return { rows: [{ tz: null }] };
+      if (sql.startsWith('SELECT COUNT(*)::int AS total')) return { rows: [{ total: 1 }] };
+      if (sql.includes("date_trunc('hour'")) return { rows: [] };
+      return { rows: [{ clicks: 0, conversions: 0, payout: '0.0000', revenue: '0.0000', margin: '0.0000', currencies: [], money_by_currency: MBC[String(params[1])] ?? {} }] };
     });
     const res = await request(reportsApp()).get('/dashboard');
     expect(res.status).toBe(200);
+    expect(res.body.data.timeZone).toBe('UTC');
     expect(res.body.data.moneyByCurrency).toEqual({
       today: { USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
       yesterday: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } },
       month: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' }, USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
       lastMonth: {},
     });
-    const q = calls().find((x) => x.sql.includes('GROUP BY currency'))!;
-    expect(q.sql).toContain("network_id = $1 AND status = 'approved' AND currency IS NOT NULL");
-    expect(q.params).toEqual([NET]);
+    // Network-scoped, the periods' UTC bounds (yesterday / last month end where the next one begins).
+    const pages = calls().filter((x) => x.sql.startsWith('SELECT s.* FROM') && !x.sql.includes("date_trunc('hour'"));
+    expect(pages.map((x) => x.params.slice(0, 3)).sort((a, b) => String(a[1]).localeCompare(String(b[1])))).toEqual([
+      [NET, lastMonthStart, new Date(monthStart.getTime() - 1).toISOString().replace('Z', '999Z')],
+      [NET, monthStart.toISOString(), 1],
+      [NET, yesterday, new Date(day(0).getTime() - 1).toISOString().replace('Z', '999Z')],
+      [NET, today, 1],
+    ].sort((a, b) => String(a[1]).localeCompare(String(b[1]))));
+    for (const p of pages) expect(p.sql).toContain("COALESCE(SUM(c.payout) FILTER (WHERE c.status = 'approved'), 0) AS payout");
   });
 
   it('/grouped rows carry moneyByCurrency and totals merge it per currency (exact decimals)', async () => {

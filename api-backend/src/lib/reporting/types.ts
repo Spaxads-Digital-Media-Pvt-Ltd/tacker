@@ -97,6 +97,8 @@ export interface ReportRequest {
    * metrics this request itself lists (fail-closed).
    */
   moneyFields?: MoneyField[];
+  /** IANA time zone the `day` / `hour` dimensions bucket in (F-20); absent = UTC. */
+  timeZone?: string;
 }
 
 export type MetricValue = string | number | string[] | MoneyByCurrency;
@@ -104,6 +106,9 @@ export type MetricValue = string | number | string[] | MoneyByCurrency;
 export interface ReportRow {
   dimensions: Record<string, string | null>;
   metrics: Record<string, MetricValue>;
+  /** Names for the entity dimensions (offer / publisher / advertiser / smartLink) — F-20; set by the
+   * report endpoints (lib/reporting/labels.ts) so pages needn't load whole entity lists to map ids. */
+  labels?: Record<string, { ref: number | null; name: string } | null>;
 }
 
 export interface ReportResult {

@@ -119,7 +119,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `observability/` | Sentry, Prometheus metrics |
 | `postback/` | Postback test utilities |
 | `postback-controls/` | Dynamic postback control evaluation |
-| `reporting/` | Reporting aggregation |
+| `reporting/` | Reporting aggregation: provider (postgres.ts — raw or rollups + raw tail), rollups.ts (worker + window), time-zone.ts (report zones), labels.ts (entity names on rows) |
 | `retention/` | Click/conversion pruning |
 | `tiered-commissions/` | Tiered commission calculation |
 
@@ -155,6 +155,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Alert Rules | `alert-rules.ts` | `alert-rules` | Every 5 min — evaluates Automation alert rules via the reporting provider (lib/automation/alert-rules.ts) |
 | Automation Webhooks | `automation-webhook.ts` | `automation-webhook` | Continuous — event deliveries with retries/backoff through safeRequest (lib/automation/webhooks.ts) |
 | Smart-Link KPI | `smart-link-kpi.ts` | `smart-link-kpi` | Every 10 min — re-scores due KPI smart links (lib/smart-links/kpi.ts) |
+| Reporting Rollups | `reporting-rollup.ts` | `reporting-rollup` | Every minute — freeze / dirty re-roll / backfill of the 15-min rollups (lib/reporting/rollups.ts) |
 
 ### Queue Definitions (`surfaces/workers/queues.ts`)
 Exports `QUEUE` constant mapping queue names to BullMQ queue instances.

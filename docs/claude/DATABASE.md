@@ -227,6 +227,10 @@ API keys for the Public REST API.
 | `investigations` | Fraud investigations |
 | `login_events` | Login audit trail |
 | `audit_log` | Audit trail (`impersonated_by` = the admin behind writes made while impersonating a portal account — migration 1700000069000) |
+| `stats_clicks_15m` | Click rollups per 15-min UTC bucket × network/offer/publisher/smart link/country/device: clicks, unique, invalid, fraud_score_sum (migration 072, F-20) |
+| `stats_conversions_15m` | Conversion rollups per bucket × network/offer/publisher/advertiser/smart link/country/device (click's)/currency: total + approved count, approved payout/revenue (unbounded numeric) |
+| `stats_rollup_state` | Rollup window (`low_mark`, `high_mark`) + `backfill_floor` |
+| `stats_dirty_buckets` | (network, bucket) to re-roll — written by the `clicks_stats_dirty` / `conversions_stats_dirty` triggers (`stats_mark_dirty()`) for rows landing/changing in buckets > 2h old |
 | `communication_hub` | Communication hub config |
 | `customer_value_rules` | Customer value adjustment rules |
 | `customer_value_data_points` | Custom customer data |

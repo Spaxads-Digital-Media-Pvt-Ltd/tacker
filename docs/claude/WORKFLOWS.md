@@ -158,13 +158,24 @@ External system calls /api/v1/advertiser/...
 
 ```
 Admin clicks ReportView
- → useQuery('/api/reports/<type>?from=...&to=...&...')
- → adminReportsRoutes() handler
- → Query Postgres with date range + group_by + filters
- → Aggregate by group_by (max 4 dimensions)
- → Compute metrics (clicks, conversions, payout, revenue, margin, cr, epc)
- → Return { rows, summary }
+ → useQuery('/api/reports/<type>?from=...&to=...&...[&tz=...]')
+ → adminReportsRoutes() handler → buildReportRequest (audience policy; tz → day/hour zone + local-day from/to)
+ → getReportingProvider().runReport — Postgres provider:
+   - fits the rollups (dims ⊆ offer/publisher/advertiser/smartLink/country/device/day/hour, filters on
+     those + range; no city/region/isp/browser/os/subs, no excludeInvalid) and REPORTING_ROLLUPS=on and a
+     rollup window exists → whole non-dirty 15-min buckets inside [low_mark, high_mark) ∩ range from
+     stats_clicks_15m / stats_conversions_15m, UNION ALL the raw rows outside them, aggregated as one (exact)
+   - otherwise raw clicks/conversions only
+ → attachLabels (entity names for id dimensions)
+ → Return { rows, total }
  → SPA: ReportView renders table + chart
+
+reporting-rollup queue (every minute, lib/reporting/rollups.ts):
+ 1. freeze: [high_mark, floor15(now − 3h)) rolled up per network, high_mark advanced (one tx, ≤ 6h/run)
+ 2. dirty: buckets marked by the clicks/conversions triggers (late rows, later status changes —
+    rows whose bucket is > 2h old) re-rolled and cleared
+ 3. backfill: one chunk (24h) below low_mark until backfill_floor (oldest raw row at first run)
+ Raw-retention deletes don't touch the rollups (aggregates outlive raw rows).
 ```
 
 ## Background Job Flow

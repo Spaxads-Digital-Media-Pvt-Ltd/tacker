@@ -18,7 +18,9 @@ import { addMoney } from '../../../lib/money.js';
 import { inclusiveTo, utcDayStart } from '../../../lib/reporting/request.js';
 import { redactRawParams, redactUrl } from '../../../lib/reporting/redact.js';
 import { mbcJsonSql, mergeMoneyByCurrency } from '../../../lib/reporting/money-by-currency.js';
-import { money4, type MoneyByCurrency } from '../../../lib/reporting/types.js';
+import { money4, MONEY_FIELDS, type MoneyByCurrency } from '../../../lib/reporting/types.js';
+import { getReportingProvider } from '../../../lib/reporting/index.js';
+import { isValidTimeZone, isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore } from '../../../lib/reporting/time-zone.js';
 
 /** Admin endpoints: every money field per currency (CTE alias `cm` with columns cur / p / r). */
 const MBC_JSON = mbcJsonSql('cm');
@@ -221,6 +223,25 @@ function groupedFilters(networkId: string, f: Grouped, isClicks: boolean) {
   return { where: where.join(' AND '), params };
 }
 
+const dashboardSchema = z.object({
+  tz: z.string().max(64).refine(isValidTimeZone, { message: 'must be an IANA time zone, e.g. Asia/Kolkata' }).optional(),
+});
+
+/** The report time zone: `?tz=` → the network's (Settings › General) → UTC. */
+async function reportTimeZone(networkId: string, param: string | undefined): Promise<string> {
+  if (param) return param;
+  const { rows } = await query<{ tz: string | null }>(`SELECT settings->'general'->>'timezone' AS tz FROM networks WHERE id = $1`, [networkId]);
+  const tz = rows[0]?.tz;
+  return isValidTimeZone(tz) ? tz : 'UTC';
+}
+
+/** The first day of the month before `date`'s (YYYY-MM-DD). */
+function previousMonthFirst(date: string): string {
+  const y = Number(date.slice(0, 4));
+  const m = Number(date.slice(5, 7));
+  return m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, '0')}-01`;
+}
+
 export function mountDetailReports(r: Router): void {
   r.get('/grouped', validateQuery(groupedSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
@@ -335,108 +356,75 @@ export function mountDetailReports(r: Router): void {
   }));
 
   // ── Full "Today's Stats" dashboard: per-period totals + today's hourly series (Everflow-style) ──
-  r.get('/dashboard', asyncHandler(async (req, res) => {
+  // F-20: read through the reporting provider — the 15-minute rollups plus the raw tail — instead of
+  // scanning two months of raw rows per load; the periods and the hourly series are in the network's
+  // time zone (Settings › General), `?tz=` overrides, UTC when neither is set.
+  r.get('/dashboard', validateQuery(dashboardSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
-    // Period buckets via FILTER (one scan each over the current+previous month window).
-    const PERIOD: [string, string][] = [
-      ['today', `created_at >= date_trunc('day', now(), 'UTC')`],
-      ['yesterday', `created_at >= date_trunc('day', now(), 'UTC') - interval '1 day' AND created_at < date_trunc('day', now(), 'UTC')`],
-      ['month', `created_at >= date_trunc('month', now(), 'UTC')`],
-      ['last_month', `created_at >= date_trunc('month', now(), 'UTC') - interval '1 month' AND created_at < date_trunc('month', now(), 'UTC')`],
-    ];
-    const P = (col: string) => PERIOD.map(([k, cond]) => `
-      COALESCE(${col} FILTER (WHERE ${cond}),0) AS ${k}`).join(',');
-    // Money is summed (and the margin subtracted) as numeric in SQL and returned as 4dp text —
-    // never JS float arithmetic on currency (F-22). round(x, 4), not ::numeric(14,4): a SUM can
-    // exceed the 10 integer digits a single amount column has (that cast overflowed → 500).
-    const sumOf = (col: string, cond: string) => `COALESCE(SUM(${col}) FILTER (WHERE ${cond}),0)`;
-    const PM = (pfx: 'p' | 'r' | 'm') => PERIOD.map(([k, cond]) => `
-      round(${pfx === 'p' ? sumOf('payout', cond) : pfx === 'r' ? sumOf('revenue', cond) : `${sumOf('revenue', cond)} - ${sumOf('payout', cond)}`}, 4)::text AS ${pfx}_${k}`).join(',');
-    const since = `created_at >= date_trunc('month', now(), 'UTC') - interval '1 month'`;
-
-    const [clk, cv, ser, byCur] = await Promise.all([
-      query<Record<string, string>>(`SELECT ${P('COUNT(*)')} FROM clicks WHERE network_id = $1 AND ${since}`, [nid]),
-      query<Record<string, string>>(
-        `SELECT ${P('COUNT(*)')},
-                ${PM('p')},
-                ${PM('r')},
-                ${PM('m')},
-                -- Per period: currencies of the approved conversions behind the money sums (>1 = mixed).
-                ${P(`array_agg(DISTINCT currency ORDER BY currency)`)
-                  .replace(/FILTER \(WHERE /g, 'FILTER (WHERE currency IS NOT NULL AND ')
-                  .replace(/,0\) AS (\w+)/g, `,'{}'::text[]) AS c_$1`)}
-           FROM conversions WHERE network_id = $1 AND status = 'approved' AND ${since}`, [nid]),
-      query<{ h: number; clicks: number; conversions: number; revenue: string; payout: string; margin: string }>(
-        `SELECT date_part('hour', h.created_at AT TIME ZONE 'UTC')::int AS h, -- UTC hours, like the UTC 'today' window
-                COUNT(*) FILTER (WHERE src = 'click')::int AS clicks,
-                COUNT(*) FILTER (WHERE src = 'conv')::int AS conversions,
-                round(COALESCE(SUM(revenue),0), 4)::text AS revenue,
-                round(COALESCE(SUM(payout),0), 4)::text AS payout,
-                round(COALESCE(SUM(revenue),0) - COALESCE(SUM(payout),0), 4)::text AS margin
-           FROM (
-             SELECT created_at, 'click' AS src, 0::numeric revenue, 0::numeric payout FROM clicks
-              WHERE network_id = $1 AND created_at >= date_trunc('day', now(), 'UTC')
-             UNION ALL
-             SELECT created_at, 'conv' AS src, revenue, payout FROM conversions
-              WHERE network_id = $1 AND status = 'approved' AND created_at >= date_trunc('day', now(), 'UTC')
-           ) h GROUP BY 1`, [nid]),
-      // Per period, the same approved conversions' money per currency (NULL currency excluded).
-      query<Record<string, string | number>>(
-        `SELECT currency,${PERIOD.map(([k, cond]) => `
-                COUNT(*) FILTER (WHERE ${cond})::int AS n_${k},
-                round(COALESCE(SUM(payout) FILTER (WHERE ${cond}),0), 4)::text AS p_${k},
-                round(COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0), 4)::text AS r_${k},
-                round(COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0) - COALESCE(SUM(payout) FILTER (WHERE ${cond}),0), 4)::text AS m_${k}`).join(',')}
-           FROM conversions WHERE network_id = $1 AND status = 'approved' AND currency IS NOT NULL AND ${since}
-          GROUP BY currency ORDER BY currency`, [nid]),
+    const tz = await reportTimeZone(nid, (res.locals.query as z.infer<typeof dashboardSchema>).tz);
+    const today = localDate(new Date(), tz);
+    const todayStart = zonedDayStart(today, tz);
+    const monthStart = zonedDayStart(`${today.slice(0, 7)}-01`, tz);
+    const PERIODS = {
+      today: { from: todayStart.toISOString() },
+      yesterday: { from: zonedDayStart(addDays(today, -1), tz).toISOString(), to: inclusiveBefore(todayStart) },
+      month: { from: monthStart.toISOString() },
+      lastMonth: { from: zonedDayStart(previousMonthFirst(today), tz).toISOString(), to: inclusiveBefore(monthStart) },
+    } as const;
+    const provider = getReportingProvider();
+    const base = { networkId: nid, offset: 0, moneyFields: [...MONEY_FIELDS], ...(isUtcZone(tz) ? {} : { timeZone: tz }) };
+    const [periodRows, hourly] = await Promise.all([
+      Promise.all((Object.keys(PERIODS) as (keyof typeof PERIODS)[]).map(async (k) => {
+        const r = await provider.runReport({
+          ...base, groupBy: [], filters: PERIODS[k], limit: 1,
+          metrics: ['clicks', 'conversions', 'payout', 'revenue', 'margin', 'currencies', 'money_by_currency'],
+        });
+        return [k, r.rows[0]?.metrics ?? {}] as const;
+      })),
+      provider.runReport({
+        ...base, groupBy: ['hour'], filters: { from: todayStart.toISOString() }, limit: 100,
+        metrics: ['clicks', 'conversions', 'payout', 'revenue', 'margin'],
+      }),
     ]);
-    const mbcFor = (k: string): MoneyByCurrency => Object.fromEntries(byCur.rows
-      .filter((r) => Number(r[`n_${k}`] ?? 0) > 0)
-      .map((r) => [String(r['currency']), { payout: String(r[`p_${k}`]), revenue: String(r[`r_${k}`]), margin: String(r[`m_${k}`]) }]));
-
-    const c = clk.rows[0]!; const v = cv.rows[0]!;
-    // Counts are integers; money stays the 4dp text SQL produced.
-    const periods = (o: Record<string, string>, pfx = '') => ({
-      today: Number(o[`${pfx}today`] ?? 0), yesterday: Number(o[`${pfx}yesterday`] ?? 0),
-      month: Number(o[`${pfx}month`] ?? 0), lastMonth: Number(o[`${pfx}last_month`] ?? 0),
-    });
-    const moneyPeriods = (pfx: 'p' | 'r' | 'm') => ({
-      today: String(v[`${pfx}_today`]), yesterday: String(v[`${pfx}_yesterday`]),
-      month: String(v[`${pfx}_month`]), lastMonth: String(v[`${pfx}_last_month`]),
-    });
-    const clicks = periods(c);
-    const conversions = periods(v);
-    const curr = (o: Record<string, unknown>, k: string): string[] => (Array.isArray(o[`c_${k}`]) ? (o[`c_${k}`] as string[]) : []);
-    const mk = (fn: (k: 'today' | 'yesterday' | 'month' | 'lastMonth') => number) =>
-      ({ today: fn('today'), yesterday: fn('yesterday'), month: fn('month'), lastMonth: fn('lastMonth') });
+    const m = Object.fromEntries(periodRows) as Record<keyof typeof PERIODS, Record<string, unknown>>;
+    const per = <T>(fn: (x: Record<string, unknown>) => T) =>
+      ({ today: fn(m.today), yesterday: fn(m.yesterday), month: fn(m.month), lastMonth: fn(m.lastMonth) });
+    // Counts are integers; money stays the 4dp text SQL produced (never JS float arithmetic — F-22).
+    const clicks = per((x) => Number(x['clicks'] ?? 0));
+    const conversions = per((x) => Number(x['conversions'] ?? 0));
+    const money = (k: string) => per((x) => String(x[k] ?? '0.0000'));
     const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 10_000) / 100 : 0); // a rate, not money
-    const cr = mk((k) => pct(conversions[k], clicks[k]));
+    const cr = { today: pct(conversions.today, clicks.today), yesterday: pct(conversions.yesterday, clicks.yesterday),
+      month: pct(conversions.month, clicks.month), lastMonth: pct(conversions.lastMonth, clicks.lastMonth) };
 
-    // Today's 24 hourly slots. SQL returns only the hours that have data, in no particular order, so
-    // every series is bucketed by the row's hour — never by its position in the result.
-    const series = <T>(empty: T, fn: (row: typeof ser.rows[number]) => T): T[] => {
+    // Today's 24 hourly slots, by each row's local hour — the provider returns only the hours that
+    // have data, so a series is never filled by row position.
+    const series = <T>(empty: T, fn: (x: Record<string, unknown>) => T): T[] => {
       const a = Array<T>(24).fill(empty);
-      for (const row of ser.rows) a[row.h] = fn(row);
+      for (const row of hourly.rows) {
+        const h = Number((row.dimensions['hour'] ?? '').slice(11, 13));
+        if (Number.isInteger(h) && h >= 0 && h < 24) a[h] = fn(row.metrics);
+      }
       return a;
     };
-    const clicksSeries = series(0, (r) => r.clicks);
-    const conversionsSeries = series(0, (r) => r.conversions);
-    const crSeries = clicksSeries.map((n, h) => pct(conversionsSeries[h]!, n));
+    const clicksSeries = series(0, (x) => Number(x['clicks'] ?? 0));
+    const conversionsSeries = series(0, (x) => Number(x['conversions'] ?? 0));
     sendOk(res, {
+      timeZone: tz,
       clicks, conversions,
-      revenue: moneyPeriods('r'),
-      payout: moneyPeriods('p'),
-      margin: moneyPeriods('m'),
-      currencies: { today: curr(v, 'today'), yesterday: curr(v, 'yesterday'), month: curr(v, 'month'), lastMonth: curr(v, 'last_month') },
-      moneyByCurrency: { today: mbcFor('today'), yesterday: mbcFor('yesterday'), month: mbcFor('month'), lastMonth: mbcFor('last_month') },
+      revenue: money('revenue'),
+      payout: money('payout'),
+      margin: money('margin'),
+      currencies: per((x) => (Array.isArray(x['currencies']) ? (x['currencies'] as string[]) : [])),
+      moneyByCurrency: per((x) => (x['money_by_currency'] ?? {}) as MoneyByCurrency),
       cr,
       series: {
         clicks: clicksSeries,
         conversions: conversionsSeries,
-        revenue: series('0.0000', (r) => r.revenue),
-        payout: series('0.0000', (r) => r.payout),
-        margin: series('0.0000', (r) => r.margin),
-        cr: crSeries,
+        revenue: series('0.0000', (x) => String(x['revenue'])),
+        payout: series('0.0000', (x) => String(x['payout'])),
+        margin: series('0.0000', (x) => String(x['margin'])),
+        cr: clicksSeries.map((n, h) => pct(conversionsSeries[h]!, n)),
       },
     });
   }));

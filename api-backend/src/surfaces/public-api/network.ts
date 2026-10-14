@@ -16,6 +16,7 @@ import { createPayoutRun } from '../../lib/ledger/ledger.js';
 import { CURRENCY_RE } from '../../lib/money.js';
 import { reportQuerySchema, buildReportRequest } from '../../lib/reporting/request.js';
 import { getReportingProvider } from '../../lib/reporting/index.js';
+import { attachLabels } from '../../lib/reporting/labels.js';
 import { requireScope, apiIdentity } from './auth.js';
 
 export function networkApi(): Router {
@@ -77,7 +78,7 @@ export function networkApi(): Router {
  asyncHandler(async (req, res) => {
  const id = apiIdentity(req);
  const request = buildReportRequest(id.networkId, res.locals.query, 'network');
- sendOk(res, await getReportingProvider().runReport(request));
+ sendOk(res, await attachLabels(id.networkId, await getReportingProvider().runReport(request)));
  }),
  );
 
