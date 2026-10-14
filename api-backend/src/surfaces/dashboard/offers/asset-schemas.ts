@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import { moneySchema } from '../../../lib/money.js';
 import { isRedirectUrlSafe } from '../../../lib/url-security.js';
+import { postbackUrl } from '../../../lib/url-schemas.js';
 
 export const createGoalSchema = z.object({
   name: z.string().min(1).max(200),
@@ -94,7 +95,7 @@ export type CreateScheduledAction = z.infer<typeof createScheduledActionSchema>;
 export const POSTBACK_LEVELS = ['conversion', 'event', 'cpc'] as const;
 export const createOfferPostbackSchema = z.object({
   publisherId: z.string().uuid(),
-  url: z.string().url().max(2000),
+  url: postbackUrl,
   method: z.enum(['GET', 'POST']).default('GET'),
   event: z.string().max(100).nullable().optional(),
   level: z.enum(POSTBACK_LEVELS).default('conversion'),

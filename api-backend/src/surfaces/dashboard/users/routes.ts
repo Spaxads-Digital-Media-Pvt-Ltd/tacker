@@ -7,11 +7,12 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody } from '../../../lib/http/validate.js';
-import { badRequest } from '../../../lib/http/errors.js';
+import { badRequest, serviceUnavailable } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { getSupabaseAdmin } from '../../../lib/supabase.js';
+import { generateTemporaryPassword } from '../../../lib/provisioning.js';
 import { userDto, type UserRow } from '../control-center/routes.js';
 
 const createUserSchema = z.object({
@@ -51,8 +52,14 @@ export function usersRoutes(): Router {
         title: b.title ?? null,
         superUser: b.superUser ?? false,
       };
-      const tempPassword = `Tmp${Math.random().toString(36).slice(2)}!9Aa`;
-      const sb = getSupabaseAdmin();
+      // A random, never-shown password (crypto, not Math.random). NOTE: nothing delivers it and there
+      // is no self-serve reset yet, so the new user can't sign in until an invite flow exists
+      // (KNOWN_ISSUES #22).
+      const tempPassword = generateTemporaryPassword();
+      let sb: ReturnType<typeof getSupabaseAdmin>;
+      try { sb = getSupabaseAdmin(); } catch {
+        throw serviceUnavailable('Team logins are unavailable: Supabase Auth is not configured on this server (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).');
+      }
       const { data: authData, error } = await sb.auth.admin.createUser({
         email: b.email,
         password: tempPassword,

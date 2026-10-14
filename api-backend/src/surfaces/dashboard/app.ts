@@ -60,7 +60,6 @@ import { smartSwitchRoutes } from './smartswitch/routes.js';
 import { usersRoutes } from './users/routes.js';
 import { postbacksRoutes } from './postbacks/routes.js';
 import { partnerTiersRoutes } from './partner-tiers/routes.js';
-import { businessUnitsRoutes } from './business-units/routes.js';
 import { offerApplicationsRoutes } from './offer-applications/routes.js';
 import { questionnairesRoutes } from './questionnaires/routes.js';
 import { trafficBlockingRoutes } from './traffic-blocking/routes.js';
@@ -383,7 +382,6 @@ export function buildDashboardApp(): Express {
   authed.use('/users', requireAdmin, usersRoutes());
   authed.use('/postbacks', requireAdmin, postbacksRoutes());
   authed.use('/partner-tiers', requireAdmin, partnerTiersRoutes());
-  authed.use('/business-units', requireAdmin, businessUnitsRoutes());
   authed.use('/offer-applications', requireAdmin, offerApplicationsRoutes());
   authed.use('/questionnaires', requireAdmin, questionnairesRoutes());
   authed.use('/traffic-blocking', requireAdmin, trafficBlockingRoutes());

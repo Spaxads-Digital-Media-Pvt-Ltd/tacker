@@ -15,7 +15,6 @@ import { writeAudit } from '../../../lib/audit.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
-import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import { validIpEntry, invalidateNetworkIpBlacklist, invalidateNetworkApiWhitelist } from '../../../lib/net/ip-lists.js';
 import {
   getControlCenterConfig,
@@ -111,46 +110,8 @@ export function controlCenterRoutes(): Router {
     }),
   );
 
-  // --- Accounts: extended user CRUD ---
-  r.post(
-    '/users',
-    requireRole('admin'),
-    validateBody(createUserSchema),
-    asyncHandler(async (req, res) => {
-      const db = dbForRequest(req);
-      const b = req.body as z.infer<typeof createUserSchema>;
-      const networkId = req.scope!.networkId;
-      const metadata = {
-        businessUnit: b.businessUnit ?? null,
-        partnerManager: b.partnerManager ?? false,
-        advertiserManager: b.advertiserManager ?? false,
-        primaryPhone: b.primaryPhone ?? null,
-        title: b.title ?? null,
-        superUser: b.superUser ?? false,
-      };
-      const tempPassword = `Tmp${Math.random().toString(36).slice(2)}!9Aa`;
-      const sb = getSupabaseAdmin();
-      const { data: authData, error } = await sb.auth.admin.createUser({
-        email: b.email,
-        password: tempPassword,
-        email_confirm: true,
-        app_metadata: { kind: 'admin', network_id: networkId, role: b.role },
-        user_metadata: { name: b.name },
-      });
-      if (error || !authData.user) throw badRequest(error?.message ?? 'Failed to create auth user');
-      const row = await db.insert<UserRow>('users', {
-        auth_user_id: authData.user.id,
-        email: b.email,
-        name: b.name,
-        role: b.role,
-        status: 'invited',
-        metadata: JSON.stringify(metadata),
-      });
-      await writeAudit(req, { action: 'user.create', entityType: 'users', entityId: row.id, after: row });
-      sendOk(res, userDto(row), undefined, 201);
-    }),
-  );
-
+  // --- Accounts: user edits. Creating a team user is POST /api/users (users/routes.ts) — this file
+  // had a second, identical create (F-25·F-28: collapsed).
   r.patch(
     '/users/:id',
     requireRole('admin'),

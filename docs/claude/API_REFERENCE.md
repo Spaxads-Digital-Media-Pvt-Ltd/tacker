@@ -60,10 +60,9 @@
 | GET,POST,PATCH,DELETE | `/api/traffic-controls/*` | Traffic controls | admin |
 | GET,POST,PATCH,DELETE | `/api/offer-custom-settings/*` | Offer custom settings — per-partner overrides, ENFORCED at runtime (`lib/offer-settings/custom-settings.ts`). Body = v2 typed fields in camelCase (`category`, **`offerId` required**, `partnerId`/`partnerIds`/`applyAllPartners`, `status` active\|inactive, `effectiveFrom/To`, `targeting{countries,devices,os,browsers}`, `payoutModel/payoutValue`, `revenueModel/revenueValue`, `goalId`, `firePartnerPostback`, `caps{clicks\|conversions\|payout\|revenue:{daily\|weekly\|monthly\|global}}` or flat `capType+capInterval+capValue`, `throttleRate`, `conversionStatus`, `landingPageUrl`, creative fields). Per-category checks → 400; bad enum/missing offerId → 422. Writes bust the offer's cached config | admin |
 | GET,POST,PATCH,DELETE | `/api/smartswitch/*` | SmartSwitch rule catalog (stored, never evaluated — the UI hides the module unless `VITE_FEATURE_SMARTSWITCH=true`, F-17b) | admin |
-| GET,POST,PATCH,DELETE | `/api/users/*` | Users | admin |
-| GET,POST,PATCH,DELETE | `/api/postbacks/*` | Postbacks | admin |
+| GET,POST,PATCH,DELETE | `/api/users/*` | Users. `POST /` (admin) is the one team-user create (the copy at `/api/control-center/users` was removed): a Supabase login with a random, never-shown password — **no invite is sent and there is no self-serve reset yet, so the new user can't sign in** (KNOWN_ISSUES #22); 503 when Supabase Auth isn't configured. Edits: `PATCH /api/control-center/users/:id` | admin |
+| GET,POST,PATCH,DELETE | `/api/postbacks/*` | Postbacks — network-wide view of `publisher_postbacks`; the partner's (`/api/publishers/:id/postbacks`) and the offer's (`/api/offers/:id/postbacks`) are scoped views of the same table. All three take only http(s) URLs (`postbackUrl`, lib/url-schemas.ts) | admin |
 | GET,POST,PATCH,DELETE | `/api/partner-tiers/*` | Partner tiers (F-17b): members of an **active** tier linked to an offer with `applyMargin` are paid `revenue × (1 − marginPct/100)` — at /click (frozen on the click) and on conversion (off the final revenue) — after the partner's own rates (S2S payout, custom setting, per-offer override) and before goal / country / default payout; a partner in several such tiers gets the lowest margin. `autoApprovePartners`: a member's `POST /api/portal/offers/:id/request` on a linked offer is approved at once (`offer.access.auto_approve`). Tier / link edits bust the offer configs | admin |
-| GET,POST,PATCH,DELETE | `/api/business-units/*` | Business units | admin |
 | GET,POST,PATCH,DELETE | `/api/offer-applications/*` | Offer applications | admin |
 | GET,POST,PATCH,DELETE | `/api/questionnaires/*` | Questionnaires | admin |
 | GET,POST,PATCH,DELETE | `/api/traffic-blocking/*` | Traffic blocking | admin |
@@ -75,7 +74,7 @@
 | GET,POST,PATCH,DELETE | `/api/postback-controls/*` | Postback controls | admin |
 | GET,POST,PATCH,DELETE | `/api/advertiser-invoices/*` | Advertiser invoices. `POST /` returns the invoice plus `email` (F-24: emailed to the advertiser's contact address when `visibleToAdvertiser`, without `notes`; else `null`) | admin |
 | GET,POST,PATCH,DELETE | `/api/tiered-commissions/*` | Tiered commissions | admin |
-| GET,POST,PATCH,DELETE | `/api/control-center/*` | Control center (incl. the Category / Channel catalogs: `/api/control-center/categories`, `/api/control-center/channels`) | admin |
+| GET,POST,PATCH,DELETE | `/api/control-center/*` | Control center (incl. the Category / Channel / Business Unit catalogs: `/api/control-center/categories`, `/api/control-center/channels`, `/api/control-center/business-units` — the only business-unit API; delete is a soft delete) | admin |
 
 ### Path ids (Offers, Partners, Advertisers and their sub-resources)
 
