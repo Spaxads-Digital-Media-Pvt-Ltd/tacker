@@ -197,6 +197,22 @@ Automation (F-17a):
  conversion recorded / approved / rejected, alert raised, action run → emitAutomationEvent
  → automation-webhook queue → safeRequest (retries + backoff) → automation_webhook_deliveries
 
+Scheduled reports (F-24):
+ Report page Save / Load → PUT /api/saved-reports/by-name (server = source of truth; localStorage cache,
+ lib/savedReports.ts) → admin/manager PATCH /api/saved-reports/:id { schedule (cron, network zone),
+ recipients, rangePreset } → next_run_at
+ scheduled-reports queue (every minute, lib/reporting/saved-reports.ts runDueSavedReports):
+ due rows claimed FOR UPDATE SKIP LOCKED and next_run_at advanced first (a failed run waits for its
+ next slot) → the saved page config → the same report request the page makes, for the rolling range
+ (whole local days) → reporting provider (table + totals) → entity labels → summary HTML + CSV
+ attachment (formula-safe cells) → sendTransactional('scheduled_report') → last_run_status
+ sent | skipped (SMTP not configured / refused — the reason is kept) | failed
+
+Transactional email (F-24):
+ invite / share offer details / request balances / invoice create → sendTransactional(event)
+ → the network's Communication Hub toggle for the event (default on) → no recipient? → network SMTP
+ → { sent, skipped?, reason? } on the response; the action itself never fails because of email
+
 Fraud Scan (scheduled):
  fraud-scan queue → query clicks + conversions → evaluate rules → create alerts
  → each NEW alert → deliverAlert (lib/alerts/deliver.ts): email via network SMTP + webhook via safeRequest

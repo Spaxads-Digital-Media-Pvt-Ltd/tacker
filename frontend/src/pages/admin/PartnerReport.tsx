@@ -37,6 +37,7 @@ import {
   type SavedReportConfig, loadSavedReports, persistSavedReports,
   useGraphRows, GraphCappedNote,
 } from '../../shared-components/primitives/ReportPageKit';
+import { useServerSavedReports } from '../../lib/savedReports';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
   IGNORE_FAIL_PARAM, readUrlFlag,
@@ -191,6 +192,7 @@ export default function PartnerReport() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric>('partner-report'));
+  useServerSavedReports('partner-report', setSavedReports); // the server is the source of truth (F-24)
   const pageMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!pageMenuOpen) return;

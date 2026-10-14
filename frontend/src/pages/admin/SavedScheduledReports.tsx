@@ -2,31 +2,32 @@
  * Reporting › Saved & Scheduled — verified against the live reference (URL `/reporting/reports`,
  * three tabs: Saved Reports | Scheduled Reports | Requested Reports).
  *
- * Saved Reports is real, not a shell: every report page built this session with a page-kebab
- * "Save"/"Load" (Offer/Partner/Advertiser/Smart Link/Daily/Hourly Report) persists named configs to
- * localStorage via components/ReportPageKit.tsx's loadSavedReports/persistSavedReports, keyed per
- * report type. This page reads all of those keys and merges them into the one unified list the
- * reference shows — real names, real report types, real date ranges — with a working Delete.
+ * Saved Reports is real, not a shell: every report page with a page-kebab "Save"/"Load"
+ * (Offer/Partner/Advertiser/Smart Link/Daily/Hourly Report) saves named configs to the server
+ * (/api/saved-reports, F-24) with a per-user localStorage cache per report type (lib/savedReports.ts's
+ * loadSavedReports/persistSavedReports). This page loads them from the server and merges them into
+ * the one unified list the reference shows — real names, report types, date ranges — with Delete.
  * Flex and Nested (Analytics) saved reports are listed too. "Open" reopens the report WITH the saved
  * config, as URL params the target page reads on load (lib/savedReportLink.ts) — dates, filters,
  * exclusions, metric filters, Ignore Fail Traffic, sort, plus Flex dimensions / Nested parent+child.
  * Hidden columns aren't URL state on those pages, so they're only applied via the page's own Load menu.
  *
- * Scheduled Reports and Requested Reports are honest empty shells (components/EmptyShellTable.tsx,
- * the same pattern as PartnerReferralsReport.tsx/ProductsReport.tsx/RefundsReport.tsx) — this app
- * has no report-scheduling or async-export-request backend (no email delivery worker, no job queue
- * for "run this report and notify me when it's ready"), a finding already established earlier this
- * session when every report's page-kebab omitted "Schedule Report"/"Request Report" for the same
- * reason. Columns match the reference exactly: Scheduled = ID | Name | Report Type | Interval |
- * Frequency | Week Day | Day | Format. Requested = ID | Name | Report Type | Format | File | Error |
- * Processed at | Created.
+ * Scheduled Reports lists the saved reports that have a schedule (F-24): the scheduled-reports worker
+ * emails them as CSV; a schedule (5-field cron in the network's time zone + recipients + a rolling
+ * range) is set through the API — PATCH /api/saved-reports/:id — as there is no schedule form yet.
+ * Requested Reports is an honest empty shell (no async export-request queue). Columns match the
+ * reference: Scheduled = ID | Name | Report Type | Interval | Frequency | Week Day | Day | Format.
+ * Requested = ID | Name | Report Type | Format | File | Error | Processed at | Created.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MoreVertical, Search } from 'lucide-react';
 import { PageHeader, Tabs, StateBlock } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
-import { loadSavedReports, persistSavedReports, type SavedReportConfig } from '../../shared-components/primitives/ReportPageKit';
+import { loadSavedReports, persistSavedReports, syncSavedReports } from '../../lib/savedReports';
+import type { SavedReportConfig } from '../../shared-components/primitives/ReportPageKit';
+import { useQuery } from '../../lib/useApi';
+import type { ShellRow } from '../../shared-components/primitives/EmptyShellTable';
 import { SAVED_REPORT_SOURCES, savedReportHref } from '../../lib/savedReportLink';
 
 const TABS = ['Saved Reports', 'Scheduled Reports', 'Requested Reports'] as const;
@@ -42,6 +43,14 @@ function formatDate(iso: string): string {
 
 function useSavedRows() {
   const [tick, setTick] = useState(0);
+  // The server is the source of truth: refresh every report type's cache from it once on load.
+  useEffect(() => {
+    let live = true;
+    void syncSavedReports(SAVED_REPORT_SOURCES.map((src) => src.key)).then(() => {
+      if (live) setTick((t) => t + 1);
+    }).catch(() => { /* keep the cache */ });
+    return () => { live = false; };
+  }, []);
   const rows = useMemo<SavedRow[]>(() => {
     const out: SavedRow[] = [];
     for (const src of SAVED_REPORT_SOURCES) {
@@ -122,6 +131,22 @@ function SavedReportsTab() {
 }
 
 const SCHEDULED_COLUMNS = ['ID', 'Name', 'Report Type', 'Interval', 'Frequency', 'Week Day', 'Day', 'Format'];
+const RANGE_LABEL: Record<string, string> = {
+  yesterday: 'Yesterday', last_7_days: 'Last 7 days', last_30_days: 'Last 30 days', month_to_date: 'Month to date', last_month: 'Last month',
+};
+interface ServerSaved { id: string; page: string; name: string; schedule: string | null; rangePreset: string }
+
+function ScheduledReportsTab() {
+  const { data, loading, error } = useQuery<ServerSaved[]>('/api/saved-reports?scope=network'); // every scheduled report in the network, not just mine
+  const rows: ShellRow[] = (data ?? []).filter((r) => r.schedule).map((r) => ({
+    id: r.id,
+    cells: {
+      ID: r.id.slice(0, 8), Name: r.name, 'Report Type': SAVED_REPORT_SOURCES.find((s) => s.key === r.page)?.label ?? r.page,
+      Interval: RANGE_LABEL[r.rangePreset] ?? r.rangePreset, Frequency: r.schedule ?? '—', 'Week Day': '—', Day: '—', Format: 'CSV (email)',
+    },
+  }));
+  return <EmptyShellTable columns={SCHEDULED_COLUMNS} search={false} rows={rows} loading={loading} error={error} />;
+}
 const REQUESTED_COLUMNS = ['ID', 'Name', 'Report Type', 'Format', 'File', 'Error', 'Processed at', 'Created'];
 
 export default function SavedScheduledReports() {
@@ -135,8 +160,8 @@ export default function SavedScheduledReports() {
       {tab === 'Saved Reports' && <SavedReportsTab />}
       {tab === 'Scheduled Reports' && (
         <div className="space-y-3">
-          <p className="text-small text-fg-muted">Scheduled Reports aren't available yet — this network has no report-scheduling or email-delivery worker configured.</p>
-          <EmptyShellTable columns={SCHEDULED_COLUMNS} search={false} />
+          <p className="text-small text-fg-muted">Scheduled reports are emailed as CSV on their schedule. A schedule is set through the API for now (PATCH /api/saved-reports/:id).</p>
+          <ScheduledReportsTab />
         </div>
       )}
       {tab === 'Requested Reports' && (

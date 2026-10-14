@@ -51,6 +51,8 @@ import {
  scheduledActionParams, validateScheduledAction, scheduledActionDtoExtras, type ScheduledActionParams,
 } from '../../../lib/automation/scheduled-actions.js';
 import { tierAutoApproves } from '../../../lib/partner-tiers.js';
+import { sendTransactional, networkName } from '../../../lib/email/transactional.js';
+import { offerDetailsEmail } from '../../../lib/email/templates.js';
 import {
  toAdminDTO,
  toAdvertiserDTO,
@@ -327,24 +329,39 @@ export function offersAdminRoutes(): Router {
  sendOk(res, { total, active: by['active'] ?? 0, pending: by['draft'] ?? 0, paused: (by['paused'] ?? 0) + (by['archived'] ?? 0) });
  }));
 
- // "Share Offer(s) Details" (Table Actions). This app has no outbound-email infrastructure, so
- // this doesn't actually send mail — it records a real, queryable audit trail entry per offer
- // (who shared what with which partner, and when), which is the honest equivalent given what's
- // actually available. Registered before /:id.
+ // "Share Offer(s) Details" (Table Actions) — emails the partner the offers' details (name, payout,
+ // preview, their tracking link) — "Offer Details Shared" system email (F-24) — and records an audit
+ // entry per offer (who shared what with which partner, and when). Registered before /:id.
  r.post('/share-details', requireRole('admin', 'manager'), validateBody(shareDetailsSchema), asyncHandler(async (req, res) => {
  const db = dbForRequest(req);
  const b = req.body as z.infer<typeof shareDetailsSchema>;
  const pub = await db.selectOne<PublisherRow>('publishers', { id: b.publisherId });
  if (!pub) throw badRequest('publisherId does not belong to this network');
+ const networkId = db.scope.networkId;
+ const fallbackHost = await primaryTrackingHost(networkId);
+ const shared: { ref: number | null; name: string; payout: string | null; currency: string | null; previewUrl: string | null; trackingLink: string | null }[] = [];
  for (const offerId of b.offerIds) {
  const offer = await db.selectOne<OfferRow>(OFFERS, { id: offerId });
  if (!offer) continue;
+ // This partner's own payout on the offer when they have one, else the offer default.
+ const own = (await query<{ p: string | null }>(
+ `SELECT payout_override::text AS p FROM offer_publisher_access WHERE network_id = $1 AND offer_id = $2 AND publisher_id = $3`,
+ [networkId, offerId, pub.id])).rows[0]?.p;
+ const host = (await offerTrackingHost(networkId, offer.tracking_domain_id)) ?? fallbackHost;
+ shared.push({
+ ref: offer.ref != null ? Number(offer.ref) : null, name: offer.name, payout: own ?? offer.default_payout,
+ currency: offer.currency, previewUrl: offer.preview_url ?? null, trackingLink: portalClickUrl(host, offerId, pub.id),
+ });
  await writeAudit(req, {
  action: 'offer.share_details', entityType: 'offer', entityId: offerId,
  after: { publisherId: pub.id, publisherName: pub.name },
  });
  }
- sendOk(res, { shared: true, count: b.offerIds.length, publisherName: pub.name });
+ const email = shared.length
+ ? await sendTransactional(networkId, 'offer_details_shared', [pub.contact_email],
+ offerDetailsEmail({ networkName: await networkName(networkId), partnerName: pub.name, offers: shared }))
+ : null;
+ sendOk(res, { shared: true, count: b.offerIds.length, publisherName: pub.name, email });
  }));
 
  r.get(

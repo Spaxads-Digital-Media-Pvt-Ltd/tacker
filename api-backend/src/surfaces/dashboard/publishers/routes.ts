@@ -34,7 +34,9 @@ import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { badRequest } from '../../../lib/http/errors.js';
-import { invitePortalUser, inviteOnCreate, inviteAuditView } from '../../../lib/portal-invite.js';
+import { invitePortalUser, inviteOnCreate, inviteAuditView, portalLoginUrl } from '../../../lib/portal-invite.js';
+import { sendTransactional, networkName, type TransactionalResult } from '../../../lib/email/transactional.js';
+import { balanceRequestEmail } from '../../../lib/email/templates.js';
 import { invalidatePartnerStatus } from '../../tracking/partner-status.js';
 
 const TABLE = 'publishers';
@@ -142,26 +144,32 @@ export function publishersAdminRoutes(): Router {
     sendOk(res, { total, active: by['active'] ?? 0, pending: by['pending'] ?? 0, suspended: by['inactive'] ?? 0 });
   }));
 
-  // "Request Outstanding Balances" (Table Actions) — no outbound-email infra to actually send a
-  // request, so this computes each selected publisher's REAL approved-but-unpaid balance (the same
-  // ledger the publisher portal itself reads) and records it as a real audit_log entry. Registered
-  // before /:id.
+  // "Request Outstanding Balances" (Table Actions) — computes each selected publisher's REAL
+  // approved-but-unpaid balance (the same ledger the publisher portal itself reads), records it in the
+  // audit log and (F-24) emails it to the partner's contact address — "Outstanding Balance Request"
+  // system email; nobody is emailed about a zero balance. Registered before /:id.
   r.post('/request-balances', requireRole('admin', 'manager'), validateBody(requestBalancesSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const networkId = db.scope.networkId;
     const b = req.body as z.infer<typeof requestBalancesSchema>;
     // Never a cross-currency sum: balance/currency are null when the balance spans several
     // currencies; `balances` is always the per-currency split.
-    const results: { publisherId: string; balance: string | null; currency: string | null; balances: CurrencyBalance[] }[] = [];
+    const results: { publisherId: string; balance: string | null; currency: string | null; balances: CurrencyBalance[]; email: TransactionalResult | null }[] = [];
+    const netName = await networkName(networkId);
     for (const publisherId of b.publisherIds) {
       const pub = await db.selectOne<PublisherRow>(TABLE, { id: publisherId });
       if (!pub) continue;
       const { balance, currency, balances } = await balanceSummary(networkId, 'publisher', publisherId, 'approved');
+      const owed = balances.filter((x) => Number(x.balance) > 0); // a sign test, not money arithmetic
+      const email = owed.length
+        ? await sendTransactional(networkId, 'partner_balance_request', [pub.contact_email],
+          balanceRequestEmail({ networkName: netName, partnerName: pub.name, balances: owed, loginUrl: portalLoginUrl() }))
+        : null;
       await writeAudit(req, {
         action: 'publisher.request_balance', entityType: 'publisher', entityId: publisherId,
-        after: { balance, currency, balances },
+        after: { balance, currency, balances, emailed: email?.sent ?? false, ...(email?.skipped ? { emailSkipped: email.skipped } : {}) },
       });
-      results.push({ publisherId, balance, currency, balances });
+      results.push({ publisherId, balance, currency, balances, email });
     }
     sendOk(res, { requested: results });
   }));

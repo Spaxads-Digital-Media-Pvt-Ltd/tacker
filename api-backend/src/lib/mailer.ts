@@ -30,12 +30,15 @@ export interface SendResult {
   error?: string;
 }
 
+export interface MailAttachment { filename: string; content: string; contentType?: string }
+
 /** Sends `subject`/`html` to every address in `recipients` via the network's own SMTP config. */
 export async function sendNetworkEmail(
   networkId: string,
   recipients: string[],
   subject: string,
   html: string,
+  opts: { attachments?: MailAttachment[] } = {},
 ): Promise<{ sent: number; results: SendResult[]; configError?: string }> {
   const smtp = await loadSmtp(networkId);
   if (!smtp.host || !smtp.username || !smtp.password || !smtp.fromEmail) {
@@ -62,7 +65,7 @@ export async function sendNetworkEmail(
   const results: SendResult[] = [];
   for (const recipient of recipients) {
     try {
-      await transport.sendMail({ from, to: recipient, subject, html });
+      await transport.sendMail({ from, to: recipient, subject, html, ...(opts.attachments?.length ? { attachments: opts.attachments } : {}) });
       results.push({ recipient, ok: true });
     } catch (e) {
       results.push({ recipient, ok: false, error: e instanceof Error ? e.message : 'Send failed' });

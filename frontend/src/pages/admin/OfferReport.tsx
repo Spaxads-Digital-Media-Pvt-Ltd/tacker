@@ -37,6 +37,7 @@ import {
   type SavedReportConfig, loadSavedReports, persistSavedReports,
   useGraphRows, GraphCappedNote,
 } from '../../shared-components/primitives/ReportPageKit';
+import { useServerSavedReports } from '../../lib/savedReports';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlIds, readUrlMetricFilters, writeUrlMetricFilters,
   IGNORE_FAIL_PARAM, readUrlFlag,
@@ -323,6 +324,7 @@ export default function OfferReport() {
   const [loadOpen, setLoadOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric>('offer-report'));
+  useServerSavedReports('offer-report', setSavedReports); // the server is the source of truth (F-24)
   const pageMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!pageMenuOpen) return;

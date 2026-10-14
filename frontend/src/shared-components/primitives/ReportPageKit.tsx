@@ -17,7 +17,6 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreVertical, Search } from 'lucide-react';
 import type { FilterCategory, FilterValues } from './CategorizedFilters';
 import { chipsFromValues, withoutValue, type ChipCategory, type FilterChip } from '../../lib/filterChips';
-import { cleanFilterValues } from '../../lib/reportFilterState';
 import { api } from '../../lib/api';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { GRAPH_DAY_CAP, REPORT_PAGE_SIZE, graphCappedNote, pageThrough, type PageResponse } from '../../lib/reportPaging';
@@ -639,39 +638,5 @@ export interface SavedReportConfig<OrderMetric extends string> {
   from: string; to: string; filters: FilterValues; exclusions: FilterValues; metricFilters: MetricFilters; ignoreFailTraffic: boolean;
   orderBy: OrderMetric; orderDir: 'asc' | 'desc'; hiddenColumns: string[];
 }
-/**
- * Saved presets live in localStorage and outlive code changes, so every field is shape-checked and
- * defaulted here — an old or hand-edited entry must never crash a report page on load.
- */
-export function loadSavedReports<OrderMetric extends string>(key: string): { name: string; config: SavedReportConfig<OrderMetric> }[] {
-  let raw: unknown;
-  try { raw = JSON.parse(localStorage.getItem(`tracker.savedReports.${key}`) ?? '[]'); } catch { return []; }
-  if (!Array.isArray(raw)) return [];
-  const out: { name: string; config: SavedReportConfig<OrderMetric> }[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const { name, config } = item as { name?: unknown; config?: Record<string, unknown> };
-    if (typeof name !== 'string' || !config || typeof config !== 'object') continue;
-    const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
-    out.push({
-      name,
-      config: {
-        ...(config as object),
-        from: str(config['from'], daysAgo(30)),
-        to: str(config['to'], todayStr()),
-        filters: cleanFilterValues(config['filters']),
-        exclusions: cleanFilterValues(config['exclusions']),
-        metricFilters: (config['metricFilters'] && typeof config['metricFilters'] === 'object' ? config['metricFilters'] : {}) as MetricFilters,
-        ignoreFailTraffic: config['ignoreFailTraffic'] === true,
-        // '' is kept: it's the Daily/Hourly default order (chronological), not a missing value.
-        orderBy: (typeof config['orderBy'] === 'string' ? config['orderBy'] : 'clicks') as OrderMetric,
-        orderDir: config['orderDir'] === 'asc' ? 'asc' : 'desc',
-        hiddenColumns: Array.isArray(config['hiddenColumns']) ? (config['hiddenColumns'] as unknown[]).filter((c): c is string => typeof c === 'string') : [],
-      },
-    });
-  }
-  return out;
-}
-export function persistSavedReports<OrderMetric extends string>(key: string, list: { name: string; config: SavedReportConfig<OrderMetric> }[]): void {
-  try { localStorage.setItem(`tracker.savedReports.${key}`, JSON.stringify(list)); } catch { /* best-effort */ }
-}
+// Saved presets (server + localStorage cache) live in lib/savedReports.ts (F-24).
+export { loadSavedReports, persistSavedReports } from '../../lib/savedReports';

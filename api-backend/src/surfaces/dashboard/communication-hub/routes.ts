@@ -12,12 +12,11 @@
  *    Scheduled" — show this is a legitimately empty state there too).
  *  - Partner Banners' Published/Scheduled/Drafts/Expired status is derived on read from
  *    publish_at/expire_at vs. now(), so the tabs are always accurate without a cron job.
- *  - "Automated System Emails" lists real events this app's own data model can fire on
- *    (Partner sign-up, Offer Applications, Offer Creatives, Invoices, Postbacks, Alerts) —
- *    the enabled/disabled toggle persists for real, but actually wiring a send into each of
- *    those ~14 action handlers is a separate, much larger project than Communication Hub itself,
- *    so toggling does not yet trigger a send (same "real state, not yet wired" honesty already
- *    used elsewhere in this app for out-of-scope automation).
+ *  - "Automated System Emails" lists real events this app's own data model can fire on. Each has a
+ *    persisted on/off toggle; the events in SENT_SYSTEM_EMAILS (portal invites, outstanding-balance
+ *    requests, offer details shared, partner / advertiser invoice generated) are emailed by the
+ *    transactional layer, which honours the toggle (F-24, lib/email/transactional.ts) — the rest are
+ *    stored toggles without a send behind them yet (`wired: false` in the list).
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -32,28 +31,10 @@ import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { sendNetworkEmail } from '../../../lib/mailer.js';
+import { SYSTEM_EMAIL_CATALOG, SENT_SYSTEM_EMAILS } from '../../../lib/email/system-emails.js';
 import type { Request } from 'express';
 
 const STATUSES = ['active', 'pending', 'inactive'] as const;
-
-// Real events this app's own data model can already fire on — see file header for why the
-// enabled toggle is real but not yet wired to an actual send.
-export const SYSTEM_EMAIL_CATALOG = [
-  { key: 'partner_signup_approved', label: 'Partner Sign-Up Approved', category: 'partner' },
-  { key: 'partner_signup_rejected', label: 'Partner Sign-Up Rejected', category: 'partner' },
-  { key: 'offer_application_approved', label: 'Offer Application Approved', category: 'partner' },
-  { key: 'offer_application_denied', label: 'Offer Application Denied', category: 'partner' },
-  { key: 'new_offer_creative_available', label: 'New Offer Creative Available', category: 'partner' },
-  { key: 'partner_offer_now_available', label: 'Partner Offer Now Available', category: 'partner' },
-  { key: 'partner_offer_now_unavailable', label: 'Partner Offer Now Unavailable', category: 'partner' },
-  { key: 'partner_invoice_generated', label: 'Partner Invoice Generated', category: 'partner' },
-  { key: 'advertiser_invoice_generated', label: 'Advertiser Invoice Generated', category: 'advertiser' },
-  { key: 'advertiser_postback_received', label: 'Advertiser Postback Received', category: 'advertiser' },
-  { key: 'new_conversion_recorded', label: 'New Conversion Recorded', category: 'advertiser' },
-  { key: 'alert_threshold_triggered', label: 'Alert Threshold Triggered', category: 'misc' },
-  { key: 'payout_batch_completed', label: 'Payout Batch Completed', category: 'misc' },
-  { key: 'fraud_rule_triggered', label: 'Fraud Rule Triggered', category: 'misc' },
-] as const;
 
 interface AudienceRow {
   id: string; name: string; group_type: 'publishers' | 'advertisers';
@@ -404,7 +385,7 @@ export function communicationHubRoutes(): Router {
       'SELECT settings FROM networks WHERE id = $1', [req.scope!.networkId],
     );
     const stored = (rows[0]?.settings?.['communicationHub'] as { systemEmails?: Record<string, boolean> } | undefined)?.systemEmails ?? {};
-    sendOk(res, SYSTEM_EMAIL_CATALOG.map((e) => ({ ...e, enabled: stored[e.key] ?? true })));
+    sendOk(res, SYSTEM_EMAIL_CATALOG.map((e) => ({ ...e, enabled: stored[e.key] ?? true, wired: SENT_SYSTEM_EMAILS.has(e.key) })));
   }));
   r.put('/system-emails/:key', requireRole('admin'), validateBody(z.object({ enabled: z.boolean() })), asyncHandler(async (req, res) => {
     const key = req.params.key ?? '';

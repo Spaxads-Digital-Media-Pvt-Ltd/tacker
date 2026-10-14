@@ -231,6 +231,7 @@ API keys for the Public REST API.
 | `stats_conversions_15m` | Conversion rollups per bucket × network/offer/publisher/advertiser/smart link/country/device (click's)/currency: total + approved count, approved payout/revenue (unbounded numeric) |
 | `stats_rollup_state` | Rollup window (`low_mark`, `high_mark`) + `backfill_floor` |
 | `stats_dirty_buckets` | (network, bucket) to re-roll — written by the `clicks_stats_dirty` / `conversions_stats_dirty` triggers (`stats_mark_dirty()`) for rows landing/changing in buckets > 2h old |
+| `saved_reports` | Report pages' saved configs per owner (`network_id`, `owner_user_id`, `page`, `name` unique together; `config` jsonb) + optional schedule: `schedule` (5-field cron, network zone), `range_preset`, `recipients` text[], `next_run_at` (due index), `last_run_at` / `last_run_status` (sent\|skipped\|failed) / `last_run_detail` (migration 073, F-24) |
 | `communication_hub` | Communication hub config |
 | `customer_value_rules` | Customer value adjustment rules |
 | `customer_value_data_points` | Custom customer data |

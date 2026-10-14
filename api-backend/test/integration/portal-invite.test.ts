@@ -322,6 +322,27 @@ d('portal logins are provisioned in-product (live DB, fake Supabase)', () => {
       }
     });
 
+    it("the network's Portal Invite system-email toggle applies: off → the login is made but not emailed (F-24)", async () => {
+      const set = (key: string, enabled: boolean) =>
+        request(dash).put(`/api/communication-hub/system-emails/${key}`).set(admin).send({ enabled });
+      mail.mode = 'ok';
+      expect((await set('partner_portal_invite', false)).status).toBe(200);
+      try {
+        const res = await createPartner({ contactEmail: newEmail() });
+        expect(res.status).toBe(201);
+        expect(res.body.data).toMatchObject({ invited: true, hasPortalAccount: true });
+        expect(res.body.data.invite).toMatchObject({ emailed: false, emailError: expect.stringMatching(/turned off in Communication Hub/) });
+        expect(res.body.data.invite.credentials.temporaryPassword).toBeTruthy(); // outside production
+        expect(mail.sent).toHaveLength(0);
+        // The advertiser invite has its own toggle (still on).
+        const adv = await request(dash).post('/api/advertisers').set(admin).send({ name: `Adv ${randomUUID().slice(0, 6)}`, contactEmail: newEmail() });
+        expect(adv.body.data.invite).toMatchObject({ emailed: true });
+        expect(mail.sent).toHaveLength(1);
+      } finally {
+        await set('partner_portal_invite', true);
+      }
+    });
+
     it('the audit log records the invite, never the temporary password', async () => {
       const created = await createPartner({ contactEmail: newEmail() });
       const password = created.body.data.invite.credentials.temporaryPassword as string;

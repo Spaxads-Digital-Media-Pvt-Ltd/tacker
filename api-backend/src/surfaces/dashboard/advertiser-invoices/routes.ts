@@ -18,6 +18,9 @@ import { settleInvoice } from '../../../lib/ledger/ledger.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { dateOnly } from '../../../lib/date-only.js';
+import { sendTransactional, networkName } from '../../../lib/email/transactional.js';
+import { invoiceIssuedEmail } from '../../../lib/email/templates.js';
+import { portalLoginUrl } from '../../../lib/portal-invite.js';
 
 const TABLE = 'advertiser_invoices';
 
@@ -200,7 +203,19 @@ export function advertiserInvoicesRoutes(): Router {
     }
     await writeAudit(req, { action: 'advertiser-invoice.create', entityType: TABLE, entityId: row.id, after: row });
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE i.id = $1 AND i.network_id = $2`, [row.id, networkId]);
-    sendOk(res, dto(rows[0]!), undefined, 201);
+    const inv = dto(rows[0]!);
+    // F-24: "Advertiser Invoice Generated" — emailed when the invoice is visible to the advertiser. Its
+    // single `notes` field may be internal, so it isn't included.
+    let email: Awaited<ReturnType<typeof sendTransactional>> | null = null;
+    if (inv.visibleToAdvertiser) {
+      const to = (await query<{ contact_email: string | null }>('SELECT contact_email FROM advertisers WHERE id = $1 AND network_id = $2', [b.advertiserId, networkId])).rows[0];
+      email = await sendTransactional(networkId, 'advertiser_invoice_generated', [to?.contact_email], invoiceIssuedEmail({
+        networkName: await networkName(networkId), recipientName: inv.advertiserName, audience: 'advertiser', ref: inv.ref,
+        periodStart: inv.periodStart ?? '', periodEnd: inv.periodEnd ?? '', amount: inv.billedAmount, currency: inv.currency,
+        paymentTerms: inv.paymentTerms, notes: null, loginUrl: portalLoginUrl(),
+      }));
+    }
+    sendOk(res, { ...inv, email }, undefined, 201);
   }));
 
   r.get('/:id', asyncHandler(async (req, res) => {

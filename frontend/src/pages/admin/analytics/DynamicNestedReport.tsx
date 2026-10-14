@@ -36,6 +36,7 @@ import {
   fetchAllPages, useReportExport, ExportStatus,
   useGraphRows, GraphCappedNote,
 } from '../../../shared-components/primitives/ReportPageKit';
+import { useServerSavedReports } from '../../../lib/savedReports';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlMetricFilters, writeUrlMetricFilters,
   IGNORE_FAIL_PARAM, readUrlFlag,
@@ -262,6 +263,7 @@ export default function DynamicNestedReport() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric>('nested-report') as unknown as { name: string; config: SavedConfig }[]);
+  useServerSavedReports('nested-report', setSavedReports); // the server is the source of truth (F-24)
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const pageMenuRef = useRef<HTMLDivElement>(null);

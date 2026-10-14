@@ -7,7 +7,9 @@
  * network's own SMTP (lib/mailer.ts). Receiving the password is what proves the address belongs to
  * the person signing in. The user changes it after signing in (PATCH /api/me/password).
  *
- * When the email can't be sent (SMTP not configured, or the send failed) the login still exists;
+ * The email goes through the transactional layer (F-24), so the network's "Partner / Advertiser
+ * Portal Invite" system-email toggle applies. When the email isn't sent (toggle off, SMTP not
+ * configured, or the send failed) the login still exists;
  * outside production the response carries the credentials so dev/staging can proceed (never in
  * production — there, fix SMTP and invite again, which re-issues a fresh temporary password).
  */
@@ -15,7 +17,7 @@ import { env, isProd } from '../config/env.js';
 import { query } from './db/pool.js';
 import { ScopedDb } from './db/scoped-db.js';
 import { AppError } from './http/errors.js';
-import { sendNetworkEmail } from './mailer.js';
+import { sendTransactional } from './email/transactional.js';
 import { ensurePortalLogin, type PortalKind, type PortalLogin } from './provisioning.js';
 import { logger } from './logger.js';
 
@@ -97,12 +99,12 @@ export async function invitePortalUser(args: {
  kind: args.kind, networkName: rows[0]?.name ?? 'your network', loginUrl,
  email: login.email, password: login.temporaryPassword, signup: args.signup,
  });
- const sent = await sendNetworkEmail(args.networkId, [login.email], mail.subject, mail.html);
- if (sent.sent > 0) return { ...base, emailed: true };
+ const sent = await sendTransactional(args.networkId, args.kind === 'publisher' ? 'partner_portal_invite' : 'advertiser_portal_invite', [login.email], mail);
+ if (sent.sent) return { ...base, emailed: true };
  return {
  ...base,
  emailed: false,
- emailError: sent.configError ?? sent.results[0]?.error ?? 'The invite email could not be sent.',
+ emailError: sent.reason ?? 'The invite email could not be sent.',
  ...(isProd ? {} : { credentials: { loginUrl, email: login.email, temporaryPassword: login.temporaryPassword } }),
  };
 }

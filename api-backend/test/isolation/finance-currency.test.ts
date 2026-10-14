@@ -293,14 +293,16 @@ d('ledger currency safety (live DB)', () => {
     it('POST /publishers/request-balances (+ audit after carries balances)', async () => {
       const res = await request(app).post('/api/publishers/request-balances').set(auth).send({ publisherIds: [fx.pubA1, fx.pubA2, fx.pubB1] });
       expect(res.status).toBe(200);
+      // F-24: each owed balance is also emailed to the partner — these have no contact email.
+      const noAddress = { sent: false, skipped: 'no_recipients', reason: 'No email address to send to.', recipients: [] };
       expect(res.body.data.requested).toEqual([
-        { publisherId: fx.pubA1, balance: null, currency: null, balances: mixed },
-        { publisherId: fx.pubA2, balance: '1.2500', currency: 'USD', balances: [{ currency: 'USD', balance: '1.2500' }] },
+        { publisherId: fx.pubA1, balance: null, currency: null, balances: mixed, email: noAddress },
+        { publisherId: fx.pubA2, balance: '1.2500', currency: 'USD', balances: [{ currency: 'USD', balance: '1.2500' }], email: noAddress },
       ]);
       const audit = (await query<{ after: Record<string, unknown> }>(
         `SELECT after FROM audit_log WHERE network_id = $1 AND action = 'publisher.request_balance' AND entity_id = $2::text ORDER BY created_at DESC LIMIT 1`,
         [fx.networkA, fx.pubA1])).rows[0];
-      expect(audit?.after).toEqual({ balance: null, currency: null, balances: mixed });
+      expect(audit?.after).toEqual({ balance: null, currency: null, balances: mixed, emailed: false, emailSkipped: 'no_recipients' });
     });
 
     it('portal GET /earnings and /summary', async () => {

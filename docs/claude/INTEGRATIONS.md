@@ -63,10 +63,11 @@
 
 ## Email (Nodemailer)
 - **Purpose**: Outbound email (notifications, alerts, invitations)
-- **Where used**: Communication hub, notifications
+- **Where used**: Communication hub sends, fraud / automation alerts, and (F-24) transactional emails — portal invites, offer details shared, balance requests, invoices issued — plus scheduled reports (CSV attachment)
 - **Files**:
- - `api-backend/src/lib/mailer.ts`
-- **Authentication**: SMTP credentials (configured via env)
+ - `api-backend/src/lib/mailer.ts` (`sendNetworkEmail`, attachments)
+ - `api-backend/src/lib/email/transactional.ts` (per-event Communication Hub toggles), `templates.ts`
+- **Authentication**: each network's own SMTP settings (Settings › SMTP; password stored encrypted)
 - **Data flow**: Backend → SMTP server → recipient
 
 ## Redis (BullMQ)

@@ -22,6 +22,9 @@ import { settleInvoice } from '../../../lib/ledger/ledger.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { dateOnly } from '../../../lib/date-only.js';
+import { sendTransactional, networkName } from '../../../lib/email/transactional.js';
+import { invoiceIssuedEmail } from '../../../lib/email/templates.js';
+import { portalLoginUrl } from '../../../lib/portal-invite.js';
 
 const TABLE = 'partner_invoices';
 
@@ -213,7 +216,18 @@ export function partnerInvoicesRoutes(): Router {
     }
     await writeAudit(req, { action: 'invoice.create', entityType: TABLE, entityId: row.id, after: row });
     const { rows } = await query<JoinedRow>(`${SELECT} WHERE i.id = $1 AND i.network_id = $2`, [row.id, networkId]);
-    sendOk(res, dto(rows[0]!), undefined, 201);
+    const inv = dto(rows[0]!);
+    // F-24: "Partner Invoice Generated" — emailed to the partner when the invoice is visible to them.
+    let email: Awaited<ReturnType<typeof sendTransactional>> | null = null;
+    if (inv.visibleToPartner) {
+      const to = (await query<{ contact_email: string | null }>('SELECT contact_email FROM publishers WHERE id = $1 AND network_id = $2', [b.publisherId, networkId])).rows[0];
+      email = await sendTransactional(networkId, 'partner_invoice_generated', [to?.contact_email], invoiceIssuedEmail({
+        networkName: await networkName(networkId), recipientName: inv.publisherName, audience: 'partner', ref: inv.ref,
+        periodStart: inv.periodStart ?? '', periodEnd: inv.periodEnd ?? '', amount: inv.billedAmount, currency: inv.currency,
+        paymentTerms: inv.paymentTerms, notes: inv.publicNotes, loginUrl: portalLoginUrl(),
+      }));
+    }
+    sendOk(res, { ...inv, email }, undefined, 201);
   }));
 
   const bulkApprovePaySchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) });
