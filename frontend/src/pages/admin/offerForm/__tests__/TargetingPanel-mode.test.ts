@@ -3,7 +3,7 @@
 // (nothing to save with zero values), and since the UI derived its displayed mode from
 // `rule?.mode ?? 'include'`, that undefined rule made the toggle visibly snap back to Include —
 // so switching modes appeared to do nothing until at least one value had been typed.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 
 type Mode = 'include' | 'exclude';

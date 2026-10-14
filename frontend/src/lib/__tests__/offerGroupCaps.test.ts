@@ -1,5 +1,5 @@
 // Regression tests for offer-group cap display (lib/offerGroupCaps.ts) — legacy malformed caps.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { capValue } from '../offerGroupCaps.ts';
 

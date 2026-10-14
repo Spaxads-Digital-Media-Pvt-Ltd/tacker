@@ -1,5 +1,5 @@
 // Click Report filter modal logic (lib/clickReportFilters.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import {
   CLICK_FIELDS, DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, GROUPED_CONVERSIONS_NOTE, MAX_CLICK_IDS, groupDimensionHeader, partitionFields, untrackedToggleLabel, TABLE_ORDER, appliedFilterCount, chipValues,

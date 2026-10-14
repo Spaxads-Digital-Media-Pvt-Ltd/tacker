@@ -1,6 +1,6 @@
 // Per-currency breakdowns, money sorting, money-filter applicability and period comparisons
 // (lib/reportCurrency.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import {
   addDecimal, combineMoneyByCurrency, comparePeriods, currencySpan, filterWithMoneyRule, formatBreakdown, hasMoneyFilter,

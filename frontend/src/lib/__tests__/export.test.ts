@@ -1,5 +1,5 @@
 // Regression tests for CSV export (lib/export.ts) — formula injection + RFC 4180 quoting.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { csvCell, toCsv, withCurrencyColumn } from '../export.ts';
 

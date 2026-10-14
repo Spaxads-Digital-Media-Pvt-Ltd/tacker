@@ -1,5 +1,5 @@
 // Add Conversion amount check (lib/moneyInput.ts) — imports the real module; same rule as the backend.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { checkMoneyInput } from '../moneyInput.ts';
 

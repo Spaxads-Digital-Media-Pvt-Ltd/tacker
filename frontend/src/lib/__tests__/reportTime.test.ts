@@ -1,6 +1,6 @@
 // Daily/Hourly bucket labels (lib/reportTime.ts) — imports the real module. Run under a non-UTC
 // TZ too (e.g. TZ=America/New_York) to see the ClickHouse case fail without the fix.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { formatReportDay, formatReportHour, parseReportTimestamp, reportBucketDay } from '../reportTime.ts';
 

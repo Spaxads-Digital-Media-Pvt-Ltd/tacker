@@ -1,6 +1,6 @@
 // Regression test: simulate the date-input onChange handler from GeneralTab.tsx (lines 130–132).
 // Verifies: valid dates are accepted, empty/invalid strings are ignored (no crash).
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 
 // Reproduces the EXACT handler logic (guard order matters: isNaN check before toISOString).

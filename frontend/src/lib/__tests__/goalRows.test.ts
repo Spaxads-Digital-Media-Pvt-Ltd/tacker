@@ -1,5 +1,5 @@
 // Event Report row identity (lib/goalRows.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { goalRowKey, isUnmatchedGoalRow } from '../goalRows.ts';
 

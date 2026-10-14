@@ -1,6 +1,6 @@
 // Flex Report sort / export rules (lib/flexReport.ts) — imports the real module and the real
 // deriveRow the page uses for its Clicks column.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { FLEX_COLUMN_SORT, DEFAULT_FLEX_ORDER, flexOrderBy, flexExportRow } from '../flexReport.ts';
 import { deriveRow } from '../reportMath.ts';
