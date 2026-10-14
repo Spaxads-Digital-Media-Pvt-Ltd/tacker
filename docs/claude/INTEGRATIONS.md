@@ -70,6 +70,13 @@
 - **Authentication**: each network's own SMTP settings (Settings › SMTP; password stored encrypted)
 - **Data flow**: Backend → SMTP server → recipient
 
+## Supabase Storage (files)
+- **Purpose**: Public file hosting for offer thumbnails and offer creatives (F-27)
+- **Files**: `api-backend/src/lib/storage/supabase-storage.ts` (`uploadPublicObject`, REST, service-role, backend only), `api-backend/src/lib/creatives/files.ts`
+- **Buckets**: `offer-thumbnails` (2 MB files), `offer-creatives` (5 MB bucket limit; uploads capped at 2 MB) — created public on first upload
+- **Authentication**: `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`; unset → uploads fail with a clear 400
+- **Data flow**: SPA → raw file → dashboard API → Storage → public URL stored on the row. Control Center branding logos are still stored inline (data: URLs in settings)
+
 ## Redis (BullMQ)
 - **Purpose**: Queue backend, config cache, atomic operations
 - **Where used**: Everywhere
@@ -98,4 +105,3 @@
 - No email service provider (SendGrid, Mailgun) — uses raw SMTP
 - No analytics CDN
 - No payment processor
-- No cloud storage

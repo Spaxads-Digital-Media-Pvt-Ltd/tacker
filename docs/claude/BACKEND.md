@@ -120,6 +120,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `postback/` | Postback test utilities |
 | `postback-controls/` | Dynamic postback control evaluation |
 | `reporting/` | Reporting aggregation: provider (postgres.ts — raw or rollups + raw tail), rollups.ts (worker + window), time-zone.ts (report zones), labels.ts (entity names on rows), saved-reports.ts (saved configs → report requests, CSV, scheduled runs — F-24) |
+| `creatives/` | files.ts (creative uploads to object storage, allowed types, list-safe url columns, data: URI parsing), backfill.ts (inline data: files → storage, `npm run creatives:backfill`) — F-27 |
 | `email/` | system-emails.ts (Automated System Emails catalog + which are sent), transactional.ts (`sendTransactional`: toggle → recipients → network SMTP, never throws), templates.ts (F-24) |
 | `scheduling/` | cron.ts — 5-field cron parse + next run in a time zone (DST-safe) |
 | `retention/` | Per-network click / postback-log / conversion pruning; conversions any ledger entry references are never pruned (F-21) |

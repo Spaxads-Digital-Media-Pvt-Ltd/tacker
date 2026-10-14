@@ -10,9 +10,10 @@
  *
  * All four dropdowns (Add / Table Actions / row kebab / Add Macro) use the shared MenuPopover so a
  * menu open never eats the first click on another trigger. Filter is a real SearchFilterDrawer
- * (Type / Offer / Partner visibility) over the fetched list. File "upload" is a
- * genuine drag-or-browse that stores the bytes inline as a data: URI (no asset host in this build);
- * Bulk Add fans several files into one creative each; Preview renders the stored asset.
+ * (Type / Offer / Partner visibility) over the fetched list. File upload is a genuine drag-or-browse
+ * that sends the file to object storage (POST /api/creatives/upload, F-27) — the creative keeps only
+ * its URL; Bulk Add fans several files into one creative each; Preview renders the stored asset (a
+ * file from before storage, still inline, is fetched from the creative's own detail).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search, MoreVertical, Eye, SlidersHorizontal, X } from 'lucide-react';
@@ -26,14 +27,14 @@ import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitiv
 import { DualListPicker } from '../../shared-components/panels/DualListPicker';
 import {
   ADD_MENU, FILE_ACCEPT, TYPE_LABEL, MACROS,
-  readFileAsDataUrl, typeToMenuKey, type Creative, type CreativeType, type MenuKey,
+  uploadCreativeFile, typeToMenuKey, type Creative, type CreativeType, type MenuKey,
 } from '../../data/creatives';
 import type { Offer } from '../../types';
 
 const PAGE_SIZE = 25;
 const STATUSES = ['active', 'paused', 'deleted'] as const;
 const ALL_COLUMNS = ['Name', 'Offer'] as const;
-const UPLOAD_HINT = 'Stored inline in the creative record (max 2 MB). This build has no external asset host — for a hosted asset, use a Link creative instead.';
+const UPLOAD_HINT = 'Uploaded to file storage (max 2 MB: PNG, JPEG, WebP, GIF, MP4, WebM, MOV, ZIP or TXT). For a hosted asset, use a Link creative instead.';
 
 function AddMenu({ onPick }: { onPick: (key: MenuKey | 'bulk') => void }) {
   return (
@@ -196,9 +197,10 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
   const [htmlValue, setHtmlValue] = useState(existing?.html ?? '');
   const [emailFrom, setEmailFrom] = useState(existing?.emailFrom ?? '');
   const [emailSubject, setEmailSubject] = useState(existing?.emailSubject ?? '');
-  const [fileDataUrl, setFileDataUrl] = useState<string | null>(existing?.url ?? null);
-  const [fileName, setFileName] = useState<string | null>(existing?.url ? 'Current file attached' : null);
+  const [fileUrl, setFileUrl] = useState<string | null>(existing?.url ?? null);
+  const [fileName, setFileName] = useState<string | null>(existing?.url || existing?.urlInline ? 'Current file attached' : null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Escape closes the modal — but only when a nested popover (the Add Macro menu) isn't the thing
   // being dismissed, so hitting Esc to close that menu doesn't also blow away the whole form.
@@ -219,8 +221,10 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
 
   const onFile = async (f: File) => {
     setFileError(null);
-    try { setFileDataUrl(await readFileAsDataUrl(f)); setFileName(f.name); }
-    catch (e) { setFileError(e instanceof Error ? e.message : 'Could not read file.'); }
+    setUploading(true);
+    try { setFileUrl(await uploadCreativeFile(f)); setFileName(f.name); }
+    catch (e) { setFileError(e instanceof Error ? e.message : 'Upload failed.'); }
+    finally { setUploading(false); }
   };
 
   const { run, busy, error } = useMutation((body: Record<string, unknown>) =>
@@ -228,19 +232,21 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
 
   const submit = async () => {
     const body: Record<string, unknown> = { name, type, status, visibleToPartners, offerIds };
-    if (menuKey === 'link') body['url'] = linkValue;
+    // The url is sent only when it changed — an untouched file (or one still inline from before
+    // object storage, which the list doesn't carry) stays as it is.
+    if (menuKey === 'link') { if (linkValue !== (existing?.url ?? '')) body['url'] = linkValue; }
     else if (menuKey === 'emailOrHtml') {
       if (subKind === 'html') body['html'] = htmlValue;
       else { body['emailFrom'] = emailFrom || null; body['emailSubject'] = emailSubject || null; }
-    } else {
-      body['url'] = fileDataUrl;
+    } else if (fileUrl !== (existing?.url ?? null)) {
+      body['url'] = fileUrl;
     }
     const res = await run(body);
     if (res !== null) onSaved();
   };
 
-  const valid = name.trim() && offerIds.length > 0 &&
-    (menuKey === 'link' ? linkValue.trim() : menuKey === 'emailOrHtml' ? (subKind === 'html' ? htmlValue.trim() : true) : !!fileDataUrl);
+  const valid = name.trim() && offerIds.length > 0 && !uploading &&
+    (menuKey === 'link' ? linkValue.trim() : menuKey === 'emailOrHtml' ? (subKind === 'html' ? htmlValue.trim() : true) : !!(fileUrl || existing?.urlInline));
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
@@ -287,7 +293,7 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
 
           {isFile && (
             <Field label={`Upload ${menu.label} File *`}>
-              <UploadBox accept={FILE_ACCEPT[menuKey]} fileName={fileName} error={fileError} onFile={onFile} />
+              <UploadBox accept={FILE_ACCEPT[menuKey]} fileName={uploading ? 'Uploading…' : fileName} error={fileError} onFile={onFile} />
             </Field>
           )}
         </div>
@@ -319,7 +325,7 @@ function BulkAddModal({ offers, onClose, onSaved }: { offers: Offer[]; onClose: 
     try {
       for (let i = 0; i < files.length; i++) {
         const f = files[i]!;
-        const url = await readFileAsDataUrl(f);
+        const url = await uploadCreativeFile(f);
         await api.post('/api/creatives', {
           name: f.name.replace(/\.[^.]+$/, ''), type, status, visibleToPartners, offerIds, url,
         });
@@ -369,7 +375,10 @@ function BulkAddModal({ offers, onClose, onSaved }: { offers: Offer[]; onClose: 
 }
 
 function PreviewModal({ creative, onClose }: { creative: Creative; onClose: () => void }) {
-  const { type, url, html, emailFrom, emailSubject, name, width, height, language, visibleToPartners } = creative;
+  // A file still inline from before object storage (F-27) isn't in the list — the detail has it.
+  const { data: detail } = useQuery<Creative>(creative.urlInline ? `/api/creatives/${creative.id}` : null);
+  const { type, html, emailFrom, emailSubject, name, width, height, language, visibleToPartners } = creative;
+  const url = creative.url ?? detail?.url ?? null;
   const isInlineData = !!url && url.startsWith('data:');
   return (
     <Modal open onClose={onClose} title={`Preview — ${name}`} size="xl">
@@ -419,7 +428,7 @@ function PreviewModal({ creative, onClose }: { creative: Creative; onClose: () =
   );
 }
 
-const canPreview = (r: Creative) => !!(r.url || r.html || r.type === 'email');
+const canPreview = (r: Creative) => !!(r.url || r.urlInline || r.html || r.type === 'email');
 
 export default function Creatives() {
   const { data, loading, error, refetch } = useQuery<Creative[]>('/api/creatives');

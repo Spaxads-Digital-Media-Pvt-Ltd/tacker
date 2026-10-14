@@ -17,6 +17,7 @@ import { writeAudit } from '../../../lib/audit.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { requireRole } from '../auth.js';
 import type { PublisherRow } from '../../../domain/entities.js';
+import { isInlineData } from '../../../lib/creatives/files.js';
 import {
   createGoalSchema, updateGoalSchema,
   createCreativeSchema, updateCreativeSchema,
@@ -173,7 +174,8 @@ export const GOAL_ASSET: AssetSpec = {
   },
 };
 const creativeDTO = (r: Row) => ({
-  id: r.id, ref: Number(r.ref), name: r.name, type: r.type, url: r.url, html: r.html,
+  // F-27: a not-yet-migrated inline (data:) file's bytes are never sent — GET /api/creatives/:id has it.
+  id: r.id, ref: Number(r.ref), name: r.name, type: r.type, url: isInlineData(r.url) ? null : r.url, urlInline: isInlineData(r.url), html: r.html,
   width: r.width, height: r.height, language: r.language, status: r.status,
   visibleToPartners: r.visible_to_partners, emailFrom: r.email_from, emailSubject: r.email_subject,
   offerId: r.offer_id, createdAt: r.created_at, updatedAt: r.updated_at,

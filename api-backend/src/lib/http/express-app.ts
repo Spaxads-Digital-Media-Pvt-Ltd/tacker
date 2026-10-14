@@ -48,7 +48,8 @@ export function createBaseApp(surface: string, corsOrigin?: CorsOrigin): Express
   const app = express();
   app.disable('x-powered-by');
   app.use(helmet({ crossOriginEmbedderPolicy: false }));
-  // 6mb matches creatives / branding data-URL uploads (zod max 6_000_000 on creative url).
+  // 6mb matches the branding data-URL uploads (Control Center logos). Creatives no longer send file
+  // bytes in JSON — they upload the raw file to object storage (F-27, POST /api/creatives/upload).
   app.use(express.json({ limit: '6mb' }));
   app.use(pinoHttp({ logger: surfaceLogger(surface) }));
 

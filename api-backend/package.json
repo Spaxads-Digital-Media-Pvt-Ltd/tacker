@@ -34,6 +34,7 @@
  "provision:demo-admin": "tsx scripts/provision-demo-admin.ts",
  "provision:demo-portals": "tsx scripts/provision-demo-portals.ts",
  "settings:secrets": "tsx scripts/settings-secrets.ts",
+ "creatives:backfill": "tsx scripts/backfill-creatives.ts",
  "dev:localhost-domain": "tsx scripts/add-localhost-domain.ts",
  "tunnel": "tsx scripts/ngrok-tunnel.ts",
  "reconcile": "tsx scripts/reconcile.ts",

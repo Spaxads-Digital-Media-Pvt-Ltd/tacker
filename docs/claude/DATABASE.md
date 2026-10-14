@@ -209,7 +209,7 @@ API keys for the Public REST API.
 | `offer_publisher_access` | Per-offer publisher allow/deny |
 | `offer_templates` | Offer templates |
 | `offer_groups` | Offer groups with shared caps |
-| `offer_creatives` | Creative assets for offers |
+| `offer_creatives` | Creative assets for offers — `url` is an object-storage or hosted http(s) URL (F-27); rows from before may still hold the file inline as a `data:` URI until `npm run creatives:backfill` |
 | `traffic_controls` | Offer traffic control rules |
 | `traffic_blockings` | Partner traffic blocking rules |
 | `partner_tiers` | Partner tier definitions |

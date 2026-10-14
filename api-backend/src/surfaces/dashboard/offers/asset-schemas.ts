@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import { moneySchema } from '../../../lib/money.js';
+import { isRedirectUrlSafe } from '../../../lib/url-security.js';
 
 export const createGoalSchema = z.object({
   name: z.string().min(1).max(200),
@@ -20,13 +21,19 @@ export const createGoalSchema = z.object({
 });
 export const updateGoalSchema = createGoalSchema.partial();
 
+/**
+ * A creative's file / link (F-27): an http(s) URL — a hosted asset, or the object-storage URL that
+ * POST /api/creatives/upload returned. File bytes inline as a data: URI are no longer stored.
+ */
+export const creativeUrlSchema = z.string().trim().max(2000)
+  .refine((u) => !/^data:/i.test(u), { message: 'Upload the file (POST /api/creatives/upload) and send its URL — inline data: URLs are not stored' })
+  .refine((u) => /^data:/i.test(u) || isRedirectUrlSafe(u), { message: 'Must be an http(s) URL' });
+
+/** One creative — shared by both creatives APIs (/api/creatives and /api/offers/:id/creatives). */
 export const createCreativeSchema = z.object({
   name: z.string().min(1).max(200),
   type: z.enum(['image', 'html', 'link', 'email', 'video', 'archive', 'thumbnail', 'text']).default('image'),
-  // Real uploaded files are stored as data: URIs client-side (no asset host in this app) — plain
-  // .url() rejects nothing a data: URI needs, but the length cap must fit a real small file's
-  // base64 payload, not just a link.
-  url: z.string().max(6_000_000).nullable().optional(),
+  url: creativeUrlSchema.nullable().optional(),
   html: z.string().max(100_000).nullable().optional(),
   width: z.number().int().min(0).nullable().optional(),
   height: z.number().int().min(0).nullable().optional(),

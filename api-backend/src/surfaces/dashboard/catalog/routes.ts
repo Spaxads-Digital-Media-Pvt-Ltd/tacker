@@ -12,6 +12,7 @@ import { query } from '../../../lib/db/pool.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
+import { listUrlColumns } from '../../../lib/creatives/files.js';
 
 export function catalogRoutes(): Router {
   const r = Router();
@@ -19,7 +20,7 @@ export function catalogRoutes(): Router {
 
   r.get('/creatives', asyncHandler(async (req, res) => {
     const { rows } = await query(
-      `SELECT c.id, c.name, c.type, c.url, c.width, c.height, c.status, c.created_at,
+      `SELECT c.id, c.name, c.type, ${listUrlColumns('c')}, c.width, c.height, c.status, c.created_at,
               o.name AS offer_name, o.id AS offer_id
          FROM offer_creatives c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
         WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT ${LIST_CAP}`, [nid(req)]);

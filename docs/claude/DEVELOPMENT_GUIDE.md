@@ -128,7 +128,7 @@ Required:
 - `DATABASE_URL` — Postgres connection string
 - `REDIS_URL` — Redis connection string
 - `SUPABASE_URL` — Supabase project URL (for JWKS)
-- `SUPABASE_SERVICE_ROLE_KEY` — Supabase admin key
+- `SUPABASE_SERVICE_ROLE_KEY` — Supabase admin key (also file storage for offer thumbnails / creatives). With storage configured, run `npm run creatives:backfill` once (`-- --dry-run` to preview) to move creatives stored inline before F-27 into storage
 - `SUPABASE_JWT_SECRET` — For HS256 test token verification
 - `PLATFORM_ADMIN_JWT_SECRET` — Super admin JWT secret
 - `SETTINGS_ENC_KEY` — Encryption key for settings secrets (32 bytes hex/base64). After first deploying it, run `npm run settings:secrets -- encrypt` once to encrypt values stored before (`decrypt` undoes it)
