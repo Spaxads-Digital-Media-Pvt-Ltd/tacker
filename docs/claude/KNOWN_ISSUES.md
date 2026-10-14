@@ -85,7 +85,7 @@ The entire application is based on the Phase 0 scaffold specification. Some infr
 Some of the 50+ dashboard route modules have minimal implementations. As phases advance, these will grow significantly.
 
 ### 15. Frontend Mock Data
-`frontend/src/pages/dashboardMock.ts` contains mock data. This should be removed once real endpoints are fully populated.
+`frontend/src/pages/dashboardMock.ts` holds dev-only sample data for the admin dashboard (shown in dev when a dashboard request errors, or with `VITE_DEMO_DATA=true`). DashboardHome passes it only under `import.meta.env.DEV`, so production builds don't include it (F-25·F-28).
 
 ### 17. Stored-but-not-enforced settings (labelled in the UI)
 Saved and shown, but not acted on by the tracker yet — each page says so: Link Templates, Coupon Codes (no coupon-based attribution), Reporting Adjustments (not applied to ledger/reports), invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), SmartSwitch rules (module hidden behind `VITE_FEATURE_SMARTSWITCH`, F-17b), group-level shared caps, CPC-level postbacks.

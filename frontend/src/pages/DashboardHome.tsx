@@ -111,9 +111,10 @@ function moneyKpi(data: Pick<Dashboard, MoneyField | 'currencies' | 'moneyByCurr
 type KpiRow = [label: string, value: string, title?: string];
 
 /** Dev-only: swap in sample data when a request errors, so the dashboard is previewable without
- * a live api-backend. No-op in production and a no-op once the real API responds. */
-function withMock<T>(q: { data: T | null; loading: boolean; error: string | null }, mock: T): { data: T | null; loading: boolean; error: string | null } {
-  if (DEMO_MODE || (import.meta.env.DEV && q.error)) return { data: mock, loading: false, error: null };
+ * a live api-backend. A no-op once the real API responds. Callers pass `mock` only under
+ * `import.meta.env.DEV` (else null), so production builds drop the sample data entirely. */
+function withMock<T>(q: { data: T | null; loading: boolean; error: string | null }, mock: T | null): { data: T | null; loading: boolean; error: string | null } {
+  if (mock !== null && (DEMO_MODE || q.error)) return { data: mock, loading: false, error: null };
   return q;
 }
 
@@ -177,7 +178,7 @@ function CustomizeCards({ visible, onChange }: { visible: Record<SectionId, bool
 
 function AdminDashboard({ name }: { name: string }) {
   const navigate = useNavigate();
-  const { data: raw, loading, error } = withMock(useQuery<DashboardResponse>('/api/reports/dashboard'), MOCK_DASHBOARD);
+  const { data: raw, loading, error } = withMock(useQuery<DashboardResponse>('/api/reports/dashboard'), import.meta.env.DEV ? MOCK_DASHBOARD : null);
   const data = useMemo(() => (raw ? plotSeries(raw) : null), [raw]);
   // Money without a currency of its own (no conversions, older API) is in the network's default.
   const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
@@ -431,7 +432,7 @@ function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll, currency }: {
   const topQs = new URLSearchParams({
     groupBy: dimKey, metrics: withCurrenciesMetric('clicks,conversions,revenue'), orderBy: metric, orderDir: 'desc', limit: '6', from: win.from, to: win.to,
   });
-  const q = withMock(useQuery<AggResult>(`/api/reports?${topQs.toString()}`), mockTopRows(dimKey));
+  const q = withMock(useQuery<AggResult>(`/api/reports?${topQs.toString()}`), import.meta.env.DEV ? mockTopRows(dimKey) : null);
   const rcOf = (r: AggRow): RowCurrency => resolveCurrency(currenciesOf(r.metrics), currency);
   const valueOf = (r: AggRow) => Number(r.metrics[metric] ?? 0);
   // Server-ranked; the local sort only orders the mock rows the same way in dev/demo mode — by
@@ -447,7 +448,7 @@ function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll, currency }: {
   const seriesPath = id
     ? `/api/reports?groupBy=hour&metrics=${withCurrenciesMetric('clicks,conversions,revenue')}&${filterKey}=${encodeURIComponent(id)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
     : null;
-  const series = withMock(useQuery<AggResult>(seriesPath), mockHourlySeries());
+  const series = withMock(useQuery<AggResult>(seriesPath), import.meta.env.DEV ? mockHourlySeries() : null);
   const points = [...(series.data?.rows ?? [])]
     .sort((a, b) => new Date(a.dimensions.hour ?? 0).getTime() - new Date(b.dimensions.hour ?? 0).getTime())
     .map((r) => Number(r.metrics[metric] ?? 0));

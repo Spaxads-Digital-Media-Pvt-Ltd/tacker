@@ -268,7 +268,7 @@ api-backend/src/
 5. **Queue connection leak risk** if `makeQueueConnection()` called repeatedly without close
 6. **Two brand name sources** of truth across repos
 7. **Phase 0 scaffold** — many route modules are empty/minimal stubs
-8. **`dashboardMock.ts`** contains mock data that should be removed
+8. **`dashboardMock.ts`** — dev-only dashboard sample data; not in production builds
 
 ---
 
