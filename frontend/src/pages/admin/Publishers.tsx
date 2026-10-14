@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText } from 'lucide-react';
-import { api } from '../../lib/api';
-import { useQuery, useMutation } from '../../lib/useApi';
+import { useQuery } from '../../lib/useApi';
+import { useImpersonate } from '../../lib/impersonation';
 import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { TableActionsMenu } from './PublishersTableActions';
@@ -63,38 +63,41 @@ function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; on
 }
 
 /** Row action menu, verified against the live reference: Edit is real; View Partner Report / View
- * Conversion Report deep-link to Reports pre-filtered to this partner. Impersonate mints a real
- * Supabase magic-link for the partner's OWN linked portal account — partners without one show a
- * disabled state with an explanatory tooltip rather than faking a login. */
+ * Conversion Report deep-link to Reports pre-filtered to this partner. Impersonate opens the
+ * partner's portal in a new tab as a 30-minute admin session (F-10, lib/impersonation.ts) — it needs
+ * no portal login of their own; the admin's sign-in elsewhere is untouched. */
 function RowActionMenu({ publisher }: { publisher: Publisher }) {
   const nav = useNavigate();
-  const impersonate = useMutation(() => api.post<{ link: string }>(`/api/publishers/${publisher.id}/impersonate`, {}));
+  const impersonate = useImpersonate('publisher', publisher.id);
+  const [errDismissed, setErrDismissed] = useState(false);
 
   const go = (api: { close: () => void }, to: string) => { api.close(); nav(to); };
-  const doImpersonate = async (api: { close: () => void }) => {
-    if (!publisher.hasPortalAccount) return;
+  const doImpersonate = (api: { close: () => void }) => {
     api.close();
-    const res = await impersonate.run(undefined);
-    if (res) window.open(res.link, '_blank', 'noopener');
+    setErrDismissed(false);
+    void impersonate.start();
   };
 
   return (
+    <>
     <TableRowMenu>
       {(api) => (
         <>
           <MenuItem icon={Pencil} onSelect={() => go(api, `/app/publishers/${publisher.id}/edit`)}>Edit</MenuItem>
           <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/partner?publisherId=${publisher.id}`)}>View Partner Report</MenuItem>
           <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/conversion?publisherId=${publisher.id}`)}>View Conversion Report</MenuItem>
-          {publisher.hasPortalAccount ? (
-            <MenuItem icon={User} onSelect={() => doImpersonate(api)}>{impersonate.busy ? 'Impersonating…' : 'Impersonate'}</MenuItem>
-          ) : (
-            <div title="This partner has no linked portal account yet" className="opacity-50 pointer-events-none">
-              <MenuItem icon={User} onSelect={() => {}}>Impersonate</MenuItem>
-            </div>
-          )}
+          <MenuItem icon={User} onSelect={() => doImpersonate(api)}>{impersonate.busy ? 'Impersonating…' : 'Impersonate'}</MenuItem>
         </>
       )}
     </TableRowMenu>
+    {impersonate.error && !errDismissed && createPortal(
+      <button type="button" onClick={() => setErrDismissed(true)} title="Dismiss"
+        className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-left text-small text-danger-text shadow-elevated">
+        {impersonate.error}
+      </button>,
+      document.body,
+    )}
+    </>
   );
 }
 

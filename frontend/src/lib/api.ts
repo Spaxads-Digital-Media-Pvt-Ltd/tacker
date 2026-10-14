@@ -48,6 +48,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const session = loadSession();
     let res = await doFetch(path, init, session?.token ?? null);
     if (res.status === 401) {
+      // An impersonation tab (F-10): its short-lived token can't be refreshed — the refresh cookie
+      // is the admin's own. End the impersonation in this tab only.
+      if (session?.impersonatedBy) {
+        clearSession();
+        if (!location.pathname.startsWith('/impersonate')) location.href = '/impersonate?ended=expired';
+        throw new ApiError('unauthorized', 'The impersonation session has ended', 401);
+      }
       // A Super Admin session holds the platform surface's own short-lived token, which no refresh
       // cookie backs — never trade it in at /api/auth/refresh (a leftover tenant cookie would swap
       // in a tenant token). A /platform/* 401 means it expired → sign in again; a 401 from a tenant

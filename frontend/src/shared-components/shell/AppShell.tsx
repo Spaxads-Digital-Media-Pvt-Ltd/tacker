@@ -13,6 +13,7 @@ import { NotificationsBell, AccountLink, HelpMenu } from './SidebarUtilityMenu';
 import { SectionTabs } from './SectionTabs';
 import { NavFlyout } from './NavFlyout';
 import { SearchModal } from './SearchModal';
+import { ImpersonationBanner } from './ImpersonationBanner';
 
 /** Flatten a role's nav (groups + leaves) to {to,label} pairs for route→title resolution. */
 function flattenNav(role: Role): { to: string; label: string }[] {
@@ -324,8 +325,14 @@ export function AppShell() {
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col bg-page">
+        {session.impersonatedBy && <ImpersonationBanner session={session} />}
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
-          email={session.email} onSignOut={async () => { await signOut(); navigate('/login'); }}
+          email={session.email} onSignOut={async () => {
+            // Signing out of an impersonation tab only ends the impersonation (see auth/session.ts).
+            const impersonating = Boolean(session.impersonatedBy);
+            await signOut();
+            navigate(impersonating ? '/impersonate?ended=1' : '/login');
+          }}
           onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
         <main className="flex-1 overflow-auto px-12 pt-4 pb-12">
           <div className="w-full animate-fade-in">

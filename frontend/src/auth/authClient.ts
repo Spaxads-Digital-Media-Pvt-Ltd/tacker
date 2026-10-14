@@ -3,7 +3,7 @@
  * an httpOnly cookie the browser sends automatically (credentials: 'include'); JS never sees it.
  */
 import { ApiError } from '../lib/api.js';
-import { saveSession, clearSession, updateToken, type Session } from './session';
+import { saveSession, clearSession, updateToken, isImpersonating, type Session } from './session';
 import type { Role } from './roles';
 
 interface Identity {
@@ -120,6 +120,8 @@ export function refreshToken(): Promise<string | null> {
 }
 
 export async function logout(): Promise<void> {
+  // An impersonation tab only ends the impersonation: the refresh cookie is the admin's own.
+  if (isImpersonating()) { clearSession(); return; }
   try {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
   } catch {
