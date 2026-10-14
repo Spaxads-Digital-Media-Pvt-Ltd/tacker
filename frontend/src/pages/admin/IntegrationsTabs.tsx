@@ -1,7 +1,7 @@
 /**
  * Everflow-style Integrations tabs — Connected / Not connected sections, each card backend-wired.
  */
-import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
@@ -108,6 +108,33 @@ function CardList({ cards, onConfigure }: { cards: CatalogCard[]; onConfigure: (
 interface FraudConfig {
   enabled: boolean; velocityPerMinute: number; datacenterRatioThreshold: number;
   minClickToConversionSeconds: number; crSpikeThreshold: number; minClicksForCrAlert: number; scanWindowHours: number;
+  /** F-23: clicks scoring at least this are diverted at /click (null = flag only). */
+  blockScore: number | null;
+  /** Points each signal adds to a click's fraud score (0–100). */
+  weights: Record<WeightKey, number>;
+  alertEmails: string[];
+  /** Masked on read (origin + "/…"); sending the masked value back keeps the stored URL. */
+  alertWebhookUrl: string | null;
+  alertWebhookUrlSet: boolean;
+}
+
+type WeightKey = 'datacenter' | 'velocity' | 'botUserAgent' | 'ipqsProxy' | 'ipqsVpn' | 'ipqsTor' | 'ipqsBot';
+const WEIGHT_LABELS: [WeightKey, string][] = [
+  ['datacenter', 'Datacenter / hosting IP'], ['velocity', 'Too many clicks per minute'], ['botUserAgent', 'Bot, headless or no user agent'],
+  ['ipqsProxy', 'IPQS: proxy'], ['ipqsVpn', 'IPQS: VPN'], ['ipqsTor', 'IPQS: Tor'], ['ipqsBot', 'IPQS: bot'],
+];
+
+/** The extra (F-23) fraud settings, edited as text and turned into the PUT body on save. */
+interface FraudExtras { blockScore: string; weights: Record<WeightKey, string>; alertEmails: string; webhook: string }
+
+function fraudExtrasFrom(rules: FraudConfig | null | undefined): FraudExtras {
+  const w = rules?.weights;
+  return {
+    blockScore: rules?.blockScore != null ? String(rules.blockScore) : '',
+    weights: Object.fromEntries(WEIGHT_LABELS.map(([k]) => [k, w?.[k] != null ? String(w[k]) : ''])) as Record<WeightKey, string>,
+    alertEmails: (rules?.alertEmails ?? []).join('\n'),
+    webhook: rules?.alertWebhookUrl ?? '',
+  };
 }
 
 interface SmtpSettings {
@@ -130,14 +157,16 @@ function ConfigureModals({
   const [fbForm, setFbForm] = useState({ fbPixelId: '', fbAccessToken: '' });
   const [pinKey, setPinKey] = useState('');
   const [fraudForm, setFraudForm] = useState<Partial<FraudConfig>>({});
+  const [fraudExtras, setFraudExtras] = useState<FraudExtras>(() => fraudExtrasFrom(null));
   const [smtpForm, setSmtpForm] = useState<SmtpSettings & { password?: string }>({});
 
   const putIntegrations = useMutation((values: Record<string, unknown>) => api.put('/api/settings/integrations', { values }));
   const putSmtp = useMutation((body: SmtpSettings & { password?: string }) => api.put('/api/settings/smtp', body));
   const putFraud = useMutation((body: Partial<FraudConfig>) => api.put('/api/fraud-rules', body));
 
-  const cur = settings?.integrations ?? {};
-  const smtp = settings?.smtp ?? {};
+  // Memoised: a fresh {} each render would re-run the reset effect below on every keystroke.
+  const cur = useMemo(() => settings?.integrations ?? {}, [settings]);
+  const smtp = useMemo<SmtpSettings>(() => settings?.smtp ?? {}, [settings]);
   // Credentials never come back from GET /api/settings — only `<key>Set` (true when one is stored).
   const isSet = (key: string) => Boolean(cur[`${key}Set`]);
 
@@ -150,6 +179,7 @@ function ConfigureModals({
     setAgreementUrl((cur['esignAgreementUrl'] as string) ?? '');
     setFbForm({ fbPixelId: (cur['fbPixelId'] as string) ?? '', fbAccessToken: '' });
     setFraudForm(rules ?? {});
+    setFraudExtras(fraudExtrasFrom(rules));
     setSmtpForm({ host: smtp.host ?? '', port: smtp.port ?? 587, username: smtp.username ?? '', fromEmail: smtp.fromEmail ?? '', fromName: smtp.fromName ?? '', secure: smtp.secure ?? false });
   }, [active, cur, rules, smtp]);
 
@@ -191,7 +221,20 @@ function ConfigureModals({
 
   const saveFraud = async (e: FormEvent) => {
     e.preventDefault();
-    if (await putFraud.run(fraudForm)) { refetchRules(); onSaved(); onClose(); }
+    const pick = (k: keyof FraudConfig) => fraudForm[k] ?? rules?.[k];
+    const body: Record<string, unknown> = {
+      enabled: pick('enabled'), velocityPerMinute: pick('velocityPerMinute'), datacenterRatioThreshold: pick('datacenterRatioThreshold'),
+      minClickToConversionSeconds: pick('minClickToConversionSeconds'), crSpikeThreshold: pick('crSpikeThreshold'),
+      minClicksForCrAlert: pick('minClicksForCrAlert'), scanWindowHours: pick('scanWindowHours'),
+      blockScore: fraudExtras.blockScore.trim() === '' ? null : Number(fraudExtras.blockScore),
+      weights: Object.fromEntries(WEIGHT_LABELS.filter(([k]) => fraudExtras.weights[k].trim() !== '').map(([k]) => [k, Number(fraudExtras.weights[k])])),
+      alertEmails: fraudExtras.alertEmails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean),
+    };
+    // The stored webhook comes back masked; unchanged = keep it, emptied = remove it.
+    const hook = fraudExtras.webhook.trim();
+    if (hook !== (rules?.alertWebhookUrl ?? '')) body['alertWebhookUrl'] = hook === '' ? null : hook;
+    for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
+    if (await putFraud.run(body as Partial<FraudConfig>)) { refetchRules(); onSaved(); onClose(); }
   };
 
   const saveSmtp = async (e: FormEvent) => {
@@ -260,6 +303,41 @@ function ConfigureModals({
               <input className="input" type="number" step="0.01" min="0" max="1" value={fraudForm[k] ?? rules?.[k] ?? ''} onChange={(e) => setFraudForm((f) => ({ ...f, [k]: Number(e.target.value) }))} />
             </Field>
           ))}
+
+          <div className="space-y-3 border-t border-border pt-3">
+            <p className="text-small font-semibold text-fg">Blocking</p>
+            <Field label="Block clicks at fraud score (1–100)">
+              <input className="input" type="number" min="1" max="100" placeholder="Empty = flag only, never block"
+                value={fraudExtras.blockScore} onChange={(e) => setFraudExtras((x) => ({ ...x, blockScore: e.target.value }))} />
+            </Field>
+            <p className="text-tiny text-fg-muted">Every click gets a score from the signals below. At or above this score the click is sent to the offer’s fallback URL and not counted; below it the click is tracked and flagged. Server-to-server clicks are never blocked.</p>
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-3">
+            <p className="text-small font-semibold text-fg">Signal weights (points added to the score, 0–100)</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {WEIGHT_LABELS.map(([k, label]) => (
+                <Field key={k} label={label}>
+                  <input className="input" type="number" min="0" max="100" value={fraudExtras.weights[k]}
+                    onChange={(e) => setFraudExtras((x) => ({ ...x, weights: { ...x.weights, [k]: e.target.value } }))} />
+                </Field>
+              ))}
+            </div>
+            <p className="text-tiny text-fg-muted">IPQS signals need the IPQualityScore integration connected and enabled on the offer.</p>
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-3">
+            <p className="text-small font-semibold text-fg">Alert delivery</p>
+            <Field label="Email new fraud alerts to (one per line, up to 20)">
+              <textarea className="input min-h-[70px]" value={fraudExtras.alertEmails}
+                onChange={(e) => setFraudExtras((x) => ({ ...x, alertEmails: e.target.value }))} placeholder="fraud@yourcompany.com" />
+            </Field>
+            <Field label="Webhook URL (POSTed as JSON for every new alert)">
+              <input className="input" value={fraudExtras.webhook} placeholder="https://hooks.yourcompany.com/fraud"
+                onChange={(e) => setFraudExtras((x) => ({ ...x, webhook: e.target.value }))} />
+            </Field>
+            {rules?.alertWebhookUrlSet && <p className="text-tiny text-fg-muted">A webhook is saved — only its address is shown. Leave it as is to keep it, or clear the field to remove it.</p>}
+          </div>
           <button type="submit" className="btn-primary" disabled={putFraud.busy}>{putFraud.busy ? 'Saving…' : 'Save'}</button>
         </form>
       )}
