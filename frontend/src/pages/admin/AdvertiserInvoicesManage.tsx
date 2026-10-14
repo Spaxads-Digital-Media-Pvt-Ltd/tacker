@@ -9,22 +9,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDateOnly } from '../../lib/dateOnly';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, Pencil, CreditCard, Trash2, Clock, MoreVertical } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, Pencil, CreditCard, Clock, MoreVertical, Ban } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
-import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { AdvertiserInvoice, Advertiser, DashboardUser } from '../../types';
+import { VoidInvoiceModal } from './VoidInvoiceModal';
 
-const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', deleted: 'bg-danger-text' };
-const STATUS_LABEL: Record<string, string> = { unpaid: 'Unpaid', paid: 'Paid', deleted: 'Deleted' };
+const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', void: 'bg-fg-muted', deleted: 'bg-danger-text' };
+const STATUS_LABEL: Record<string, string> = { unpaid: 'Unpaid', paid: 'Paid', void: 'Void', deleted: 'Deleted (old)' };
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All', dot: 'bg-fg-muted' },
   { value: 'unpaid', label: 'Unpaid', dot: STATUS_DOT['unpaid']! },
   { value: 'paid', label: 'Paid', dot: STATUS_DOT['paid']! },
-  { value: 'deleted', label: 'Deleted', dot: STATUS_DOT['deleted']! },
+  { value: 'void', label: 'Void', dot: STATUS_DOT['void']! },
+  { value: 'deleted', label: 'Deleted (old)', dot: STATUS_DOT['deleted']! },
 ] as const;
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
 /** Filter value for invoices with no payment terms recorded (null / empty). */
@@ -151,34 +152,29 @@ function PayModal({ invoice, onClose, onDone }: { invoice: AdvertiserInvoice; on
 
 function RowMenu({ invoice, onChanged }: { invoice: AdvertiserInvoice; onChanged: () => void }) {
   const nav = useNavigate();
-  const del = useMutation(() => api.del(`/api/advertiser-invoices/${invoice.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-
-  const confirm = useConfirm();
-  const doDelete = async (api: { close: () => void }) => {
-    api.close();
-    void confirm({
-      title: 'Delete invoice?', message: `Are you sure you want to delete invoice ID ${invoice.ref}?`,
-      confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(undefined)) onChanged(); },
-    });
-  };
+  const [voiding, setVoiding] = useState(false);
+  const closed = invoice.status === 'void' || invoice.status === 'deleted';
 
   return (
     <>
       <TableRowMenu>
         {(api) => (
           <>
-            <MenuItem icon={Pencil} disabled={invoice.status === 'deleted'} onSelect={() => { api.close(); nav(`/app/adv-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
+            <MenuItem icon={Pencil} disabled={closed} onSelect={() => { api.close(); nav(`/app/adv-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
             <MenuItem icon={CreditCard} disabled={invoice.status !== 'unpaid'} onSelect={() => { api.close(); setPayOpen(true); }}>Pay</MenuItem>
-            <MenuItem icon={Trash2} tone="danger" disabled={invoice.status === 'deleted'} onSelect={() => doDelete(api)}>Delete</MenuItem>
+            {/* Invoices are never deleted (O8): unpaid ones are voided; paid ones are final. */}
+            <MenuItem icon={Ban} tone="danger" disabled={invoice.status !== 'unpaid'} onSelect={() => { api.close(); setVoiding(true); }}>
+              {invoice.status === 'paid' ? 'Paid — final' : 'Void Invoice'}
+            </MenuItem>
             <MenuItem icon={Clock} onSelect={() => { api.close(); setHistoryOpen(true); }}>History</MenuItem>
           </>
         )}
       </TableRowMenu>
       {historyOpen && <HistoryModal invoiceId={invoice.id} onClose={() => setHistoryOpen(false)} />}
       {payOpen && <PayModal invoice={invoice} onClose={() => setPayOpen(false)} onDone={onChanged} />}
+      {voiding && <VoidInvoiceModal invoiceRef={invoice.ref} endpoint={`/api/advertiser-invoices/${invoice.id}/void`} onClose={() => setVoiding(false)} onVoided={onChanged} />}
     </>
   );
 }

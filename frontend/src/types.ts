@@ -424,7 +424,8 @@ export interface PartnerInvoice {
   publisherId: string;
   publisherRef?: number;
   publisherName: string;
-  status: 'unpaid' | 'paid' | 'deleted';
+  /** 'void' = voided unpaid invoice (O8); 'deleted' only on rows soft-deleted before that. */
+  status: 'unpaid' | 'paid' | 'void' | 'deleted';
   visibleToPartner: boolean;
   paymentTerms: string | null;
   paymentMethod: string | null;
@@ -437,11 +438,18 @@ export interface PartnerInvoice {
   paidAt: string | null;
   publicNotes: string | null;
   internalNotes: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface PartnerInvoiceSummary { currency: string; billedAmount: string; paymentsAmount: string; balance: string; otherCurrencies: string[] }
+export interface PartnerInvoiceSummary {
+  currency: string; billedAmount: string; paymentsAmount: string; balance: string; otherCurrencies: string[];
+  /** Every currency's own totals (O4). */
+  byCurrency?: { currency: string; billedAmount: string; paymentsAmount: string; balance: string }[];
+}
 
 export interface PartnerInvoiceLedgerEntry {
   id: string;
@@ -492,7 +500,8 @@ export interface AdvertiserInvoice {
   advertiserId: string;
   advertiserRef?: number;
   advertiserName: string;
-  status: 'unpaid' | 'paid' | 'deleted';
+  /** 'void' = voided unpaid invoice (O8); 'deleted' only on rows soft-deleted before that. */
+  status: 'unpaid' | 'paid' | 'void' | 'deleted';
   visibleToAdvertiser: boolean;
   paymentTerms: string | null;
   currency: string;
@@ -503,11 +512,18 @@ export interface AdvertiserInvoice {
   balance: string;
   paidAt: string | null;
   notes: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface AdvertiserInvoiceSummary { currency: string; billedAmount: string; paidAmount: string; balance: string; otherCurrencies: string[] }
+export interface AdvertiserInvoiceSummary {
+  currency: string; billedAmount: string; paidAmount: string; balance: string; otherCurrencies: string[];
+  /** Every currency's own totals (O4). */
+  byCurrency?: { currency: string; billedAmount: string; paidAmount: string; balance: string }[];
+}
 
 export interface AdvertiserInvoiceLedgerEntry {
   id: string;

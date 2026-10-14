@@ -4,12 +4,13 @@
  * real ledger for that advertiser/period at creation — not entered manually. Edit only allows
  * changing the advertiser-facing/administrative fields, not the period or amount.
  */
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { AdvertiserInvoice, Advertiser } from '../../types';
+import { InvoiceCurrencyPicker } from './InvoiceCurrencyPicker';
 
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
 
@@ -25,9 +26,9 @@ function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolea
 }
 
 interface FormState {
-  advertiserId: string; periodStart: string; periodEnd: string; hidden: boolean; paymentTerms: string; notes: string;
+  advertiserId: string; periodStart: string; periodEnd: string; currency: string; hidden: boolean; paymentTerms: string; notes: string;
 }
-const INITIAL: FormState = { advertiserId: '', periodStart: '', periodEnd: '', hidden: false, paymentTerms: '', notes: '' };
+const INITIAL: FormState = { advertiserId: '', periodStart: '', periodEnd: '', currency: '', hidden: false, paymentTerms: '', notes: '' };
 
 export default function AdvertiserInvoiceForm() {
   const { id } = useParams();
@@ -43,10 +44,15 @@ export default function AdvertiserInvoiceForm() {
   useEffect(() => {
     if (!existing) return;
     setForm({
-      advertiserId: existing.advertiserId, periodStart: existing.periodStart, periodEnd: existing.periodEnd,
+      advertiserId: existing.advertiserId, periodStart: existing.periodStart, periodEnd: existing.periodEnd, currency: existing.currency,
       hidden: !existing.visibleToAdvertiser, paymentTerms: existing.paymentTerms ?? '', notes: existing.notes ?? '',
     });
   }, [existing]);
+
+  const setCurrency = useCallback((currency: string) => setForm((f) => ({ ...f, currency })), []);
+  const previewPath = !isEdit && form.advertiserId && form.periodStart && form.periodEnd && form.periodEnd >= form.periodStart
+    ? `/api/advertiser-invoices/preview?advertiserId=${form.advertiserId}&periodStart=${form.periodStart}&periodEnd=${form.periodEnd}`
+    : null;
 
   if (isEdit && loading) return <StateBlock><Spinner /></StateBlock>;
 
@@ -61,6 +67,7 @@ export default function AdvertiserInvoiceForm() {
     }
     const res = await create.run({
       advertiserId: form.advertiserId, periodStart: form.periodStart, periodEnd: form.periodEnd,
+      ...(form.currency ? { currency: form.currency } : {}),
       visibleToAdvertiser: !form.hidden, paymentTerms: form.paymentTerms || null, notes: form.notes || null,
     });
     if (res) nav('/app/adv-invoices');
@@ -102,7 +109,15 @@ export default function AdvertiserInvoiceForm() {
                 : <input type="date" className="input" required min={form.periodStart || undefined} value={form.periodEnd} onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))} />}
             </Field>
           </div>
-          {!isEdit && <p className="-mt-4 text-tiny text-fg-secondary">Billed amount is calculated automatically from this Advertiser's ledger activity within the payment period.</p>}
+          {isEdit ? (
+            <Field label="Currency"><input className="input" disabled value={existing?.currency ?? ''} /></Field>
+          ) : (
+            <div>
+              <label className="label">Currency *</label>
+              <InvoiceCurrencyPicker previewPath={previewPath} value={form.currency} onChange={setCurrency} what="billed" />
+              <p className="mt-1.5 text-tiny text-fg-secondary">The billed amount is what this advertiser was billed in that currency over the period (from the ledger).</p>
+            </div>
+          )}
 
           <div>
             <label className="label">Invoice Hidden From Advertiser</label>
@@ -116,7 +131,7 @@ export default function AdvertiserInvoiceForm() {
 
           <div className="flex justify-end gap-2 border-t border-border pt-4">
             <Link to="/app/adv-invoices" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+            <button type="submit" className="btn-primary" disabled={busy || (!isEdit && previewPath !== null && !form.currency)}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
         </form>
       </div>

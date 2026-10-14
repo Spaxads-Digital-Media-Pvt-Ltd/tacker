@@ -318,6 +318,9 @@ export function publishersAdminRoutes(): Router {
       const db = dbForRequest(req);
       const before = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
       if (!before) throw notFound('Publisher not found');
+      // Invoices are financial records (O8) — deleting the partner would cascade them away.
+      const invoices = await db.count('partner_invoices', { publisher_id: req.params.id });
+      if (invoices > 0) throw conflict(`This partner has ${invoices} invoice(s), which are financial records. Set the partner to inactive instead of deleting it.`);
       await db.delete(TABLE, { id: req.params.id });
       await invalidatePartnerStatus(db.scope.networkId, before.id);
       // Portal + API access end at once, and the login is deleted with the account (O6).

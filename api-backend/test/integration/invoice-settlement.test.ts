@@ -88,7 +88,7 @@ d('invoice payment settles the ledger exactly once (live DB)', () => {
       const inv = await partnerInvoice(pub, MARCH);
       expect((await payPartner(inv.body.data.id)).status).toBe(200);
       const again = await payPartner(inv.body.data.id);
-      expect(again.status).toBe(400);
+      expect(again.status).toBe(409); // already paid (O8: a state conflict)
       expect(await payoutDebits(pub)).toEqual({ n: 1, total: '25.0000' });
     });
 
@@ -173,7 +173,7 @@ d('invoice payment settles the ledger exactly once (live DB)', () => {
       expect(await payoutDebits(paidPub)).toEqual({ n: 1, total: '70.0000' });
     });
 
-    it('overlapping periods for the same partner → 409; an adjacent period is fine; deleting frees the period', async () => {
+    it('overlapping periods for the same partner → 409; an adjacent period is fine; voiding frees the period', async () => {
       const pub = await newPublisher();
       await earn(pub, '10.00', '2026-03-15T12:00:00Z');
       const march = await partnerInvoice(pub, MARCH);
@@ -184,7 +184,8 @@ d('invoice payment settles the ledger exactly once (live DB)', () => {
       expect(overlap.body.error.message).toContain(`Invoice #${march.body.data.ref} already covers 2026-03-01 to 2026-03-31`);
       expect((await partnerInvoice(pub, APRIL)).status).toBe(201);
 
-      expect((await request(dash).delete(`/api/partner-invoices/${march.body.data.id}`).set(auth)).status).toBe(200);
+      // Invoices aren't deleted (O8) — voiding the unpaid one frees its period.
+      expect((await request(dash).post(`/api/partner-invoices/${march.body.data.id}/void`).set(auth).send({ reason: 'Wrong dates' })).status).toBe(200);
       expect((await partnerInvoice(pub, MARCH)).status).toBe(201);
     });
 
@@ -222,7 +223,7 @@ d('invoice payment settles the ledger exactly once (live DB)', () => {
         .send({ advertiserId: adv, periodStart: today, periodEnd: today });
       expect(later.body.data.billedAmount).toBe('0.00');
 
-      expect((await request(dash).post(`/api/advertiser-invoices/${inv.body.data.id}/pay`).set(auth)).status).toBe(400);
+      expect((await request(dash).post(`/api/advertiser-invoices/${inv.body.data.id}/pay`).set(auth)).status).toBe(409); // already paid
       expect((await request(dash).post('/api/advertiser-invoices').set(auth).send({ advertiserId: adv, ...MARCH })).status).toBe(409);
     });
   });

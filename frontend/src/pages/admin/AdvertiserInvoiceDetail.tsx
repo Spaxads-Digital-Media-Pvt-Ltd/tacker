@@ -11,8 +11,8 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Spinner, StateBlock, Overlay, type Column } from '../../shared-components/primitives/ui';
 import type { AdvertiserInvoice, AdvertiserInvoiceLedgerEntry } from '../../types';
 
-const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', deleted: 'bg-danger-text' };
-const STATUS_LABEL: Record<string, string> = { unpaid: 'Unpaid', paid: 'Paid', deleted: 'Deleted' };
+const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', void: 'bg-fg-muted', deleted: 'bg-danger-text' };
+const STATUS_LABEL: Record<string, string> = { unpaid: 'Unpaid', paid: 'Paid', void: 'Void', deleted: 'Deleted (old)' };
 const money = (v: string | number, c = 'USD') => `${c} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}`;
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -51,7 +51,7 @@ export default function AdvertiserInvoiceDetail() {
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-h3 font-medium text-fg">General</h3>
           <div className="flex gap-2">
-            <button type="button" className="btn-ghost !py-1 !text-tiny" onClick={() => nav(`/app/adv-invoices/${invoice.id}/edit`)}>Edit</button>
+            {invoice.status !== 'void' && invoice.status !== 'deleted' && <button type="button" className="btn-ghost !py-1 !text-tiny" onClick={() => nav(`/app/adv-invoices/${invoice.id}/edit`)}>Edit</button>}
             {invoice.status === 'unpaid' && <button type="button" className="btn-primary !py-1 !text-tiny" onClick={() => setConfirming(true)}>Pay Invoice</button>}
           </div>
         </div>
@@ -68,6 +68,12 @@ export default function AdvertiserInvoiceDetail() {
           <Row label="Paid">{money(invoice.paidAmount, invoice.currency)}</Row>
           <Row label="Balance">{money(invoice.balance, invoice.currency)}</Row>
           <Row label="Invoice Hidden From Advertiser">{invoice.visibleToAdvertiser ? <span className="text-danger-text">NO</span> : 'YES'}</Row>
+          {invoice.status === 'void' && (
+            <>
+              <Row label="Voided">{invoice.voidedAt ? new Date(invoice.voidedAt).toLocaleString() : '—'}</Row>
+              <Row label="Void Reason">{invoice.voidReason ?? '—'}</Row>
+            </>
+          )}
         </div>
       </div>
 
