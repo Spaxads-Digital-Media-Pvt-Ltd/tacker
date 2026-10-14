@@ -182,14 +182,14 @@ Scheduled reports use the same sender without a toggle (their schedule is the op
 ### Subscription
 | Method | Endpoint | Purpose | Auth |
 |---|---|---|---|
-| GET,PATCH | `/api/subscription/*` | Subscription management | Authenticated |
+| GET,PATCH | `/api/subscription/*` | Subscription management. `GET /` adds (F-26) `period { start, end }` (the subscription's current period, else the UTC month) and `limits: [{ key: clicks\|conversions\|events\|offers\|seats, used, limit, pct, state: ok\|near\|over }]` for the limits the plan sets — over a limit is flagged (alerts `plan_limit_near` at 80 %, `plan_limit_reached` at 100 %, once per period), never blocked | Authenticated |
 
 ## Platform Admin API (port 4004, prefix `/platform`)
 
 | Method | Endpoint | Purpose | Auth |
 |---|---|---|---|
 | GET | `/platform/me` | Identity | Platform admin JWT |
-| GET,POST,PATCH,DELETE | `/platform/networks/*` | Network management | Platform admin |
+| GET,POST,PATCH,DELETE | `/platform/networks/*` | Network management. Lifecycle (F-26): `PATCH /:id { status }` — `suspended` / `deleted` stop the network at once (its tracking hosts no longer resolve → `/click`, `/sl`, postbacks 404 `unknown_tracking_host`; dashboard / portal requests 403 "This network is suspended/deleted…"; its API keys 403), `active` restores (clears `deleted_at`). `DELETE /:id` = **soft delete** (status `deleted`, `deleted_at`; every row kept) → `{ deleted, soft: true, status, deletedAt, purgeAfter, exportUrl }`. `GET /:id/export` streams `application/x-ndjson` (attachment): a header line `{ export: { format, networkId, slug, exportedAt, tables } }`, then `{ table, row }` for the network and every table holding its rows (incl. clicks, conversions, ledger_entries, postback_logs), one REPEATABLE READ snapshot, credentials redacted (`[redacted]`: postback secure codes, API key hashes, verification tokens, settings secrets); sets `exported_at`. `POST /:id/purge { confirm: <slug>, acknowledgeNoExport? }` = the hard delete: 409 unless deleted (`not_deleted`), past `NETWORK_PURGE_GRACE_DAYS` (`grace_period`, `details.purgeAfter`) and exported since the delete (`no_export`, unless waived); wrong confirm → 422. Deletes the network's Supabase logins first (linked admins / partners / advertisers + any login whose claims name the network) — Supabase not configured with logins, or one that can't be deleted → 503, nothing purged — then its data (cascade + clicks, conversions, postback_logs, its own audit_log / login_events) → `{ purged, authUsersDeleted, rowsDeleted, ledgerEntriesRetained }`. Kept: platform audit rows (network_id → NULL) and its ledger_entries (append-only). `GET /:id/usage` adds `plan`, `period`, `limits` (as `/api/subscription`). Every action is in the platform audit (`network.delete` / `network.export` / `network.purge`) | Platform admin |
 | GET,POST,PATCH,DELETE | `/platform/subscriptions/*` | Subscription management | Platform admin |
 | GET | `/platform/usage/*` | Usage tracking | Platform admin |
 

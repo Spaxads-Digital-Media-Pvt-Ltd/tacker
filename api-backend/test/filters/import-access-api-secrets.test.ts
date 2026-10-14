@@ -491,7 +491,7 @@ describe('offer DTOs — securityCode never reaches API-key consumers', () => {
       const sql = text.replace(/\s+/g, ' ');
       if (/FROM api_keys/.test(sql)) {
         return { rows: [{ id: 'k1', network_id: NET, audience, owner_id: audience === 'publisher' ? PUB : ADV,
-          scopes: ['offers:read'], rate_limit_tier: 'default' }], rowCount: 1 };
+          scopes: ['offers:read'], rate_limit_tier: 'default', network_status: 'active' }], rowCount: 1 };
       }
       if (/FROM offers|JOIN offers/.test(sql)) return { rows: [offerRow()], rowCount: 1 };
       if (/INSERT INTO audit_log/.test(sql)) return { rows: [{ id: 'audit-1' }] };

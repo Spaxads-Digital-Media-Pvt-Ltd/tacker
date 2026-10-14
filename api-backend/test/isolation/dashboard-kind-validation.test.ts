@@ -33,7 +33,7 @@ vi.mock('../../src/lib/auth/verify-jwt.js', () => ({
 vi.mock('../../src/lib/db/pool.js', () => ({
  query: async (sql: string, params: unknown[]) => {
  if (/FROM networks WHERE id = \$1/.test(sql)) {
- const rows = globalThis.__existingNetworks.has(String(params[0])) ? [{ '?column?': 1 }] : [];
+ const rows = globalThis.__existingNetworks.has(String(params[0])) ? [{ status: 'active' }] : [];
  return { rows, rowCount: rows.length };
  }
  return { rows: [], rowCount: 0 };

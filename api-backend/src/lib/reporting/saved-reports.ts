@@ -174,9 +174,12 @@ export async function runDueSavedReports(now: Date = new Date(), limit = 50): Pr
   let due: SavedReportRow[] = [];
   try {
     await client.query('BEGIN');
+    // Only active networks: a suspended or deleted one (F-26) emails nothing; its due reports run once
+    // it is restored.
     due = (await client.query<SavedReportRow>(
-      `SELECT * FROM saved_reports WHERE schedule IS NOT NULL AND next_run_at <= $1
-        ORDER BY next_run_at LIMIT ${limit} FOR UPDATE SKIP LOCKED`, [now])).rows;
+      `SELECT r.* FROM saved_reports r JOIN networks n ON n.id = r.network_id AND n.status = 'active'
+        WHERE r.schedule IS NOT NULL AND r.next_run_at <= $1
+        ORDER BY r.next_run_at LIMIT ${limit} FOR UPDATE OF r SKIP LOCKED`, [now])).rows;
     for (const r of due) {
       const tz = await networkTimeZone(r.network_id);
       let next: Date | null = null;

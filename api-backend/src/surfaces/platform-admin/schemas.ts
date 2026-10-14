@@ -48,3 +48,10 @@ export type CreateNetwork = z.infer<typeof createNetworkSchema>;
 export type UpdateNetwork = z.infer<typeof updateNetworkSchema>;
 export type CreatePlan = z.infer<typeof createPlanSchema>;
 export type AssignSubscription = z.infer<typeof assignSubscriptionSchema>;
+
+/** POST /platform/networks/:id/purge (F-26): `confirm` must be the network's slug. */
+export const purgeNetworkSchema = z.object({
+  confirm: z.string().min(1).max(100),
+  acknowledgeNoExport: z.boolean().default(false),
+});
+export type PurgeNetwork = z.infer<typeof purgeNetworkSchema>;

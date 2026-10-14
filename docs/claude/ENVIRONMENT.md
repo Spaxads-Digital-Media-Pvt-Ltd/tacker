@@ -32,6 +32,7 @@
 | `MAXMIND_LICENSE_KEY` | GeoIP2 DB updates | — |
 | `CLICK_RETENTION_DAYS` | Default days to keep clicks + postback logs (a network can override in Settings › Retention; 0 = keep forever) | `90` |
 | `CONVERSION_RETENTION_DAYS` | Default days to keep conversions that never touched the ledger (per-network override as above). Ledgered conversions are never pruned (F-21) | `400` |
+| `NETWORK_PURGE_GRACE_DAYS` | Days a soft-deleted network waits before `POST /platform/networks/:id/purge` may hard-delete it; `0` = no wait (F-26) | `30` |
 | `REPORTING_ROLLUPS` | `on` = the Postgres reporting provider reads the 15-minute rollups when a report fits them (F-20); `off` = raw tables only (the vitest config pins `off`) | `on` |
 
 ### Surface Ports

@@ -16,6 +16,7 @@ export const QUEUE = {
  smartLinkKpi: 'smart-link-kpi',
  reportingRollup: 'reporting-rollup',
  scheduledReports: 'scheduled-reports',
+ usageMeter: 'usage-meter',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];

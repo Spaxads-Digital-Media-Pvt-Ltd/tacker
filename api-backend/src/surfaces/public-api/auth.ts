@@ -15,10 +15,11 @@ import { hashKey } from '../../lib/apikeys/keys.js';
 import { checkRateLimit } from '../../lib/apikeys/rate-limit.js';
 import { getNetworkApiWhitelist } from '../../lib/net/ip-lists.js';
 import type { ApiAudience, ApiKeyIdentity } from '../../middleware/types.js';
+import { inactiveNetworkMessage, type NetworkState } from '../../lib/networks/state.js';
 
 interface KeyRow {
  id: string; network_id: string; audience: ApiAudience; owner_id: string;
- scopes: string[]; rate_limit_tier: string;
+ scopes: string[]; rate_limit_tier: string; network_status: NetworkState;
 }
 
 function extractKey(req: Request): string | null {
@@ -34,15 +35,17 @@ export function apiKeyAuth(req: Request, res: Response, next: NextFunction): voi
  if (!key) return next(unauthorized('Invalid or missing API key.'));
 
  query<KeyRow>(
- `SELECT id, network_id, audience, owner_id, scopes, rate_limit_tier
- FROM api_keys
- WHERE key_hash = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > now())
+ `SELECT k.id, k.network_id, k.audience, k.owner_id, k.scopes, k.rate_limit_tier, n.status AS network_status
+ FROM api_keys k JOIN networks n ON n.id = k.network_id
+ WHERE k.key_hash = $1 AND k.status = 'active' AND (k.expires_at IS NULL OR k.expires_at > now())
  LIMIT 1`,
  [hashKey(key)],
  )
  .then(async ({ rows }) => {
  const row = rows[0];
  if (!row) return next(unauthorized('Invalid or missing API key.'));
+ // A suspended or (soft-)deleted network's keys stop working (F-26).
+ if (row.network_status !== 'active') return next(forbidden(inactiveNetworkMessage(row.network_status)));
 
  // Control Center › Security › API IP whitelist (F-16): when the network has one, its NETWORK keys
  // only work from those addresses. (Advertiser/publisher keys are called from the partners' own

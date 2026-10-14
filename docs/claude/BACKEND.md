@@ -120,6 +120,8 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `postback/` | Postback test utilities |
 | `postback-controls/` | Dynamic postback control evaluation |
 | `reporting/` | Reporting aggregation: provider (postgres.ts — raw or rollups + raw tail), rollups.ts (worker + window), time-zone.ts (report zones), labels.ts (entity names on rows), saved-reports.ts (saved configs → report requests, CSV, scheduled runs — F-24) |
+| `networks/` | state.ts (`networkState` — active / suspended / deleted, checked by dashboardAuth; `networkStateChanged` drops the cached state + tracking hosts), lifecycle.ts (soft delete, NDJSON export, purge) — F-26 |
+| `usage/` | meter.ts — per-day usage into usage_records, usage vs plan limits, near / reached alerts (policy: flag, never block) — F-26 |
 | `creatives/` | files.ts (creative uploads to object storage, allowed types, list-safe url columns, data: URI parsing), backfill.ts (inline data: files → storage, `npm run creatives:backfill`) — F-27 |
 | `email/` | system-emails.ts (Automated System Emails catalog + which are sent), transactional.ts (`sendTransactional`: toggle → recipients → network SMTP, never throws), templates.ts (F-24) |
 | `scheduling/` | cron.ts — 5-field cron parse + next run in a time zone (DST-safe) |
@@ -159,6 +161,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Automation Webhooks | `automation-webhook.ts` | `automation-webhook` | Continuous — event deliveries with retries/backoff through safeRequest (lib/automation/webhooks.ts) |
 | Smart-Link KPI | `smart-link-kpi.ts` | `smart-link-kpi` | Every 10 min — re-scores due KPI smart links (lib/smart-links/kpi.ts) |
 | Reporting Rollups | `reporting-rollup.ts` | `reporting-rollup` | Every minute — freeze / dirty re-roll / backfill of the 15-min rollups (lib/reporting/rollups.ts) |
+| Usage Meter | `usage-meter.ts` | `usage-meter` | Hourly — meters each active network's clicks / conversions / events (today + yesterday, UTC) and raises plan-limit alerts (lib/usage/meter.ts) |
 | Scheduled Reports | `scheduled-reports.ts` | `scheduled-reports` | Every minute — emails due scheduled saved reports as CSV (lib/reporting/saved-reports.ts) |
 
 ### Queue Definitions (`surfaces/workers/queues.ts`)

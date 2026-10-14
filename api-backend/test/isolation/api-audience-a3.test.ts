@@ -28,14 +28,14 @@ const ADV_SCOPES = ['offers:read'];
 // --- Pool return factories ---
 function advertiserKeyPool(): unknown {
  return {
- rows: [{ id: 'key-adv-1', network_id: NET_ID, audience: 'advertiser', owner_id: ADV_ID, scopes: ADV_SCOPES, rate_limit_tier: 'default' }],
+ rows: [{ id: 'key-adv-1', network_id: NET_ID, audience: 'advertiser', owner_id: ADV_ID, scopes: ADV_SCOPES, rate_limit_tier: 'default', network_status: 'active' }],
  rowCount: 1,
  };
 }
 
 function scopedNetworkPool(): unknown {
  return {
- rows: [{ id: 'key-net-1', network_id: NET_ID, audience: 'network', owner_id: NET_ID, scopes: ['offers:read'], rate_limit_tier: 'default' }],
+ rows: [{ id: 'key-net-1', network_id: NET_ID, audience: 'network', owner_id: NET_ID, scopes: ['offers:read'], rate_limit_tier: 'default', network_status: 'active' }],
  rowCount: 1,
  };
 }
@@ -47,7 +47,7 @@ function emptyPool(): unknown {
 function fullPoolMock(sql?: string): unknown {
  if (/FROM api_keys/.test(sql ?? '')) {
  return {
- rows: [{ id: 'key-net-2', network_id: NET_ID, audience: 'network', owner_id: NET_ID, scopes: ['offers:read'], rate_limit_tier: 'default' }],
+ rows: [{ id: 'key-net-2', network_id: NET_ID, audience: 'network', owner_id: NET_ID, scopes: ['offers:read'], rate_limit_tier: 'default', network_status: 'active' }],
  rowCount: 1,
  };
  }

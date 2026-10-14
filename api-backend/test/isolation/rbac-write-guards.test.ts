@@ -13,7 +13,7 @@ const db = vi.hoisted(() => ({ queries: [] as string[] }));
 vi.mock('../../src/lib/db/pool.js', () => ({
   query: async (sql: string) => {
     // dashboardAuth's "network still exists" check; every other statement is recorded.
-    if (/FROM networks WHERE id = \$1/.test(sql)) return { rows: [{ '?column?': 1 }], rowCount: 1 };
+    if (/FROM networks WHERE id = \$1/.test(sql)) return { rows: [{ status: 'active' }], rowCount: 1 };
     db.queries.push(sql);
     return { rows: [], rowCount: 0 };
   },

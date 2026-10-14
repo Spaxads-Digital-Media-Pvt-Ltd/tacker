@@ -110,6 +110,10 @@ const schema = z.object({
   // retention job prunes them; 0 disables pruning.
   CLICK_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   CONVERSION_RETENTION_DAYS: z.coerce.number().int().min(0).default(400),
+
+  // Network purge (audit F-26): days a soft-deleted network waits before it can be purged (its
+  // data hard-deleted); 0 = no wait.
+  NETWORK_PURGE_GRACE_DAYS: z.coerce.number().int().min(0).default(30),
 });
 
 const parsed = schema.safeParse(process.env);

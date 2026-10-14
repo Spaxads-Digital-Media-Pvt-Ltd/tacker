@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { query } from '../../../lib/db/pool.js';
+import { usageVsPlan } from '../../../lib/usage/meter.js';
 
 export function subscriptionRoutes(): Router {
   const r = Router();
@@ -30,7 +31,9 @@ export function subscriptionRoutes(): Router {
         [networkId],
       )).rows;
 
-      sendOk(res, { subscription: sub, usage });
+      // F-26: this billing period against the plan's limits (ok | near | over — flagged, never blocked).
+      const { period, limits } = await usageVsPlan(networkId);
+      sendOk(res, { subscription: sub, usage, period, limits });
     }),
   );
 

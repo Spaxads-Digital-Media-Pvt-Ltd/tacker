@@ -197,6 +197,22 @@ Automation (F-17a):
  conversion recorded / approved / rejected, alert raised, action run → emitAutomationEvent
  → automation-webhook queue → safeRequest (retries + backoff) → automation_webhook_deliveries
 
+Network lifecycle (F-26):
+ platform admin PATCH status suspended|deleted / DELETE (soft) → networkStateChanged: tracking hosts
+ dropped from the host cache (the resolver only resolves hosts of ACTIVE networks → /click, /sl,
+ postbacks stop), dashboardAuth 403 (state cached 15 s per process), API keys 403, scheduled reports
+ paused → PATCH active restores everything (no data was touched)
+ → GET /platform/networks/:id/export (NDJSON snapshot, secrets redacted, exported_at)
+ → after NETWORK_PURGE_GRACE_DAYS: POST /:id/purge { confirm: slug } → delete Supabase logins (all or
+ nothing) → one transaction: clicks / conversions / postback_logs / own audit + logins rows, DELETE
+ networks (cascade) — ledger_entries and platform audit rows stay
+
+Usage metering (F-26, usage-meter queue, hourly):
+ per active network: COUNT clicks / conversions / events for yesterday + today (UTC) → upsert
+ usage_records → usage vs plan limits for the billing period (subscription period, else UTC month)
+ → ≥ 80 % plan_limit_near / ≥ 100 % plan_limit_reached alert, once per limit per period
+ → nothing is blocked; GET /api/subscription and /platform/networks/:id/usage show the state
+
 Scheduled reports (F-24):
  Report page Save / Load → PUT /api/saved-reports/by-name (server = source of truth; localStorage cache,
  lib/savedReports.ts) → admin/manager PATCH /api/saved-reports/:id { schedule (cron, network zone),

@@ -22,7 +22,9 @@ Top-level tenant entity. Each advertiser runs their own network.
 | `id` | uuid | PK |
 | `name` | text | Display name |
 | `slug` | text | URL-safe identifier |
-| `status` | enum | active/suspended/deleted |
+| `status` | enum | active/suspended/deleted — only `active` tracks, serves the dashboard and answers API keys; `deleted` = soft-deleted (F-26) |
+| `deleted_at` | timestamptz | When it was soft-deleted (purge grace period counts from here; cleared on restore) — migration 074 |
+| `exported_at` | timestamptz | Last full data export (a purge wants one taken after `deleted_at`) — migration 074 |
 | `default_currency` | text | Default currency |
 | `subscription_status` | text | Subscription state |
 | `plan_code` | text | Plan identifier |
@@ -231,6 +233,7 @@ API keys for the Public REST API.
 | `stats_conversions_15m` | Conversion rollups per bucket × network/offer/publisher/advertiser/smart link/country/device (click's)/currency: total + approved count, approved payout/revenue (unbounded numeric) |
 | `stats_rollup_state` | Rollup window (`low_mark`, `high_mark`) + `backfill_floor` |
 | `stats_dirty_buckets` | (network, bucket) to re-roll — written by the `clicks_stats_dirty` / `conversions_stats_dirty` triggers (`stats_mark_dirty()`) for rows landing/changing in buckets > 2h old |
+| `usage_records` | Daily usage per network × metric (`clicks`, `conversions`, `events` — conversions with an event name — written hourly by the usage-meter worker; `api_calls`, `storage` reserved), unique (network, metric, period_date) — migration 074 added `events` (F-26) |
 | `saved_reports` | Report pages' saved configs per owner (`network_id`, `owner_user_id`, `page`, `name` unique together; `config` jsonb) + optional schedule: `schedule` (5-field cron, network zone), `range_preset`, `recipients` text[], `next_run_at` (due index), `last_run_at` / `last_run_status` (sent\|skipped\|failed) / `last_run_detail` (migration 073, F-24) |
 | `communication_hub` | Communication hub config |
 | `customer_value_rules` | Customer value adjustment rules |

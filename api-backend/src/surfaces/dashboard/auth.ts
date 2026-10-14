@@ -16,34 +16,12 @@ import { verifySupabaseJwt } from '../../lib/auth/verify-jwt.js';
 import {
  isImpersonationToken, verifyImpersonationToken, signImpersonationToken, impersonationConfigured,
 } from '../../lib/auth/impersonation-token.js';
-import { query } from '../../lib/db/pool.js';
+import { networkState, inactiveNetworkMessage } from '../../lib/networks/state.js';
 import type { DashboardKind, AdminRole } from '../../middleware/types.js';
 
 const ROLES: readonly AdminRole[] = ['admin', 'manager', 'finance', 'read_only'];
 const KINDS: readonly DashboardKind[] = ['admin', 'publisher', 'advertiser'];
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const NETWORK_OK_TTL_MS = 60_000;
-const networkSeen = new Map<string, number>();
-
-/**
- * The `network_id` claim is stamped on the Supabase user at provisioning and outlives the network
- * row: after a network is deleted, its logins keep valid JWTs whose reads come back empty and whose
- * first INSERT dies on a `network_id` FK (23503 — surfaced as a misleading "still in use" 409).
- * Reject such tokens up front. Positive results are cached briefly; misses are never cached.
- */
-async function networkExists(networkId: string): Promise<boolean> {
- if (!UUID_RE.test(networkId)) return false;
- const until = networkSeen.get(networkId);
- if (until && until > Date.now()) return true;
- const { rows } = await query('SELECT 1 FROM networks WHERE id = $1', [networkId]);
- if (!rows.length) {
- networkSeen.delete(networkId);
- return false;
- }
- networkSeen.set(networkId, Date.now() + NETWORK_OK_TTL_MS);
- return true;
-}
 
 function bearer(req: Request): string | null {
  const h = req.header('authorization');
@@ -106,12 +84,18 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  return next(unauthorized('Invalid or expired token.'));
  }
 
- // Outside the try: a DB failure here is a 500, not "invalid token".
+ // The `network_id` claim is stamped on the Supabase user at provisioning and outlives the network
+ // row: a purged network's logins keep valid JWTs whose reads come back empty and whose first INSERT
+ // dies on a `network_id` FK — reject them up front. A suspended or (soft-)deleted network (F-26)
+ // has no dashboard or portal access either. Outside the try: a DB failure is a 500, not "invalid token".
  try {
- if (!(await networkExists(req.scope!.networkId))) {
+ const state = await networkState(req.scope!.networkId);
+ if (state !== 'active') {
  req.identity = undefined;
  req.scope = undefined;
- return next(unauthorized('This login belongs to a network that no longer exists. Sign in with an account on an active network.'));
+ return next(state === null
+ ? unauthorized('This login belongs to a network that no longer exists. Sign in with an account on an active network.')
+ : forbidden(inactiveNetworkMessage(state)));
  }
  } catch (err) {
  return next(err);

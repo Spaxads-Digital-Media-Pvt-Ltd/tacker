@@ -44,7 +44,7 @@ async function buildTestApp(
 	});
 
 	// Auth mock: api_keys lookup
-	const authKeyResp = { rows: [{ id: 'key-1', network_id: NET_A, audience: 'advertiser', owner_id: ADV_A, scopes: ['conversions:write'], rate_limit_tier: 'default' }], rowCount: 1 };
+	const authKeyResp = { rows: [{ id: 'key-1', network_id: NET_A, audience: 'advertiser', owner_id: ADV_A, scopes: ['conversions:write'], rate_limit_tier: 'default', network_status: 'active' }], rowCount: 1 };
 
 	vi.doMock('../../src/lib/db/pool.js', () => ({
 		pool: {

@@ -25,7 +25,12 @@ import {
 import {
  createNetworkSchema, updateNetworkSchema, createPlanSchema, assignSubscriptionSchema, loginSchema,
  type CreateNetwork, type UpdateNetwork, type CreatePlan, type AssignSubscription, type Login,
+ purgeNetworkSchema, type PurgeNetwork,
 } from './schemas.js';
+import { once } from 'node:events';
+import { softDeleteNetwork, exportNetwork, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
+import { networkStateChanged } from '../../lib/networks/state.js';
+import { usageVsPlan } from '../../lib/usage/meter.js';
 
 function clientIp(req: { socket?: { remoteAddress?: string } }): string {
  return req.socket?.remoteAddress ?? 'unknown';
@@ -191,23 +196,64 @@ export function platformRoutes(): Router {
  const sets: string[] = [];
  const params: unknown[] = [];
  if (b.name !== undefined) { params.push(b.name); sets.push(`name = $${params.length}`); }
- if (b.status !== undefined) { params.push(b.status); sets.push(`status = $${params.length}`); }
+ if (b.status !== undefined) {
+ params.push(b.status); sets.push(`status = $${params.length}`);
+ // 'deleted' is the soft delete (F-26); any other status restores it.
+ sets.push(b.status === 'deleted' ? 'deleted_at = COALESCE(deleted_at, now())' : 'deleted_at = NULL');
+ }
  if (sets.length === 0) throw badRequest('Nothing to update');
  params.push(req.params.id);
  const { rows } = await query(`UPDATE networks SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+ // Suspend / delete / restore applies at once: tracking hosts and the cached state are dropped.
+ if (b.status !== undefined && b.status !== before.status) await networkStateChanged(req.params.id!);
  await writePlatformAudit(req, req.params.id ?? null, { action: 'network.update', entityType: 'network', entityId: req.params.id, before, after: rows[0] });
  sendOk(res, rows[0]);
  }),
  );
 
+ // Delete = SOFT delete (F-26): tracking, the dashboard / portals and the API stop at once, every
+ // row is kept, PATCH { status: 'active' } restores it. The hard delete is POST /:id/purge below.
  r.delete(
  '/networks/:id',
  asyncHandler(async (req, res) => {
- const before = (await query(`SELECT * FROM networks WHERE id = $1`, [req.params.id])).rows[0];
- if (!before) throw notFound('Network not found');
- await query(`DELETE FROM networks WHERE id = $1`, [req.params.id]);
- await writePlatformAudit(req, null, { action: 'network.delete', entityType: 'network', entityId: req.params.id, before });
- sendOk(res, { deleted: true });
+ const { before, after } = await softDeleteNetwork(req.params.id!);
+ await writePlatformAudit(req, req.params.id ?? null, { action: 'network.delete', entityType: 'network', entityId: req.params.id, before, after: { status: after.status, deletedAt: after.deleted_at, soft: true } });
+ sendOk(res, {
+ deleted: true, soft: true, status: after.status, deletedAt: after.deleted_at,
+ purgeAfter: purgeAfter(after.deleted_at as Date), exportUrl: `/platform/networks/${after.id}/export`,
+ });
+ }),
+ );
+
+ // Every row the network owns, as NDJSON (one snapshot, credentials redacted) — take it before a purge.
+ r.get(
+ '/networks/:id/export',
+ asyncHandler(async (req, res) => {
+ const net = (await query<{ slug: string }>(`SELECT slug FROM networks WHERE id = $1`, [req.params.id])).rows[0];
+ if (!net) throw notFound('Network not found');
+ res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
+ res.setHeader('content-disposition', `attachment; filename="network-${net.slug}-${new Date().toISOString().slice(0, 10)}.ndjson"`);
+ const summary = await exportNetwork(req.params.id!, async (line) => {
+ if (!res.write(line)) await once(res, 'drain');
+ });
+ await writePlatformAudit(req, req.params.id ?? null, { action: 'network.export', entityType: 'network', entityId: req.params.id, after: summary });
+ res.end();
+ }),
+ );
+
+ // Purge = the hard delete: a soft-deleted network past its grace period, exported (or explicitly
+ // waived), confirmed by its slug. Deletes its Supabase logins first, then its data (F-26).
+ r.post(
+ '/networks/:id/purge',
+ validateBody(purgeNetworkSchema),
+ asyncHandler(async (req, res) => {
+ const b = req.body as PurgeNetwork;
+ const { before, result } = await purgeNetwork(req.params.id!, b);
+ await writePlatformAudit(req, null, {
+ action: 'network.purge', entityType: 'network', entityId: req.params.id,
+ before: { id: before.id, slug: before.slug, name: before.name, deletedAt: before.deleted_at, exportedAt: before.exported_at }, after: result,
+ });
+ sendOk(res, result);
  }),
  );
 
@@ -264,7 +310,9 @@ export function platformRoutes(): Router {
  GROUP BY metric`,
  [req.params.id],
  );
- sendOk(res, { networkId: req.params.id, windowDays: 30, metrics: rows });
+ // F-26: this billing period against the plan's limits (state ok | near | over — flagged, never blocked).
+ const plan = await usageVsPlan(req.params.id!);
+ sendOk(res, { networkId: req.params.id, windowDays: 30, metrics: rows, ...plan });
  }));
 
  return r;
