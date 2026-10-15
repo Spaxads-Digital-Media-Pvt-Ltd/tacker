@@ -20,6 +20,7 @@ import { query, pool } from '../../../lib/db/pool.js';
 import type { PoolClient } from 'pg';
 import { containsPattern } from '../../../lib/db/like.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { teamMembersByLogin, memberLabel, type TeamMember } from '../../../lib/auth/team-members.js';
 import { idempotentCreate } from '../../../lib/http/idempotency.js';
 import type {
  OfferRow,
@@ -204,12 +205,18 @@ interface ScheduledActionRow {
  status: string; created_at: string; updated_at: string;
  params?: ScheduledActionParams | null; executed_at?: string | null; result?: unknown;
 }
-const toScheduledActionDTO = (r: ScheduledActionRow) => ({
+const toScheduledActionDTO = (r: ScheduledActionRow, creators?: Map<string, TeamMember>) => ({
  id: r.id, actionType: r.action_type, partnerIds: r.partner_ids, event: r.event,
  scheduledTime: r.scheduled_time, internalNotes: r.internal_notes, createdBy: r.created_by,
+ // N2: who created it, by name — `createdBy` is their login id.
+ createdByName: r.created_by ? memberLabel(creators?.get(r.created_by)) : null,
  status: r.status, createdAt: r.created_at, updatedAt: r.updated_at,
  ...scheduledActionDtoExtras(r),
 });
+const scheduledActionDTOs = async (networkId: string, rows: ScheduledActionRow[]) => {
+ const creators = await teamMembersByLogin(networkId, rows.map((r) => r.created_by));
+ return rows.map((r) => toScheduledActionDTO(r, creators));
+};
 
 interface AuditLogRow {
  id: string; action: string; actor_type: string; actor_id: string | null;
@@ -835,7 +842,7 @@ export function offersAdminRoutes(): Router {
  const db = dbForRequest(req);
  await ensureOffer(db, req.params.id);
  const rows = await db.selectMany<ScheduledActionRow>(SCHEDULED_ACTIONS, { where: { offer_id: req.params.id }, orderBy: 'created_at', limit: 500 });
- sendOk(res, rows.map(toScheduledActionDTO));
+ sendOk(res, await scheduledActionDTOs(db.scope.networkId, rows));
  }));
 
  r.post(
@@ -864,7 +871,7 @@ export function offersAdminRoutes(): Router {
  status: b.status,
  });
  await writeAudit(req, { action: 'offer.scheduled_action.create', entityType: 'offer_scheduled_actions', entityId: row.id, after: row });
- sendOk(res, toScheduledActionDTO(row), undefined, 201);
+ sendOk(res, (await scheduledActionDTOs(db.scope.networkId, [row]))[0], undefined, 201);
  }),
  );
 
@@ -896,7 +903,7 @@ export function offersAdminRoutes(): Router {
  if (b.status === 'pending' && before.status !== 'pending') { patch['executed_at'] = null; patch['result'] = null; }
  const [row] = await db.update<ScheduledActionRow>(SCHEDULED_ACTIONS, patch, { id: req.params.actionId, offer_id: req.params.id });
  await writeAudit(req, { action: 'offer.scheduled_action.update', entityType: 'offer_scheduled_actions', entityId: req.params.actionId, before, after: row });
- sendOk(res, toScheduledActionDTO(row ?? before));
+ sendOk(res, (await scheduledActionDTOs(db.scope.networkId, [row ?? before]))[0]);
  }),
  );
 

@@ -14,6 +14,7 @@ import { notFound, validationFailed } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
+import { teamMembersByLogin, memberLabel, type TeamMember } from '../../../lib/auth/team-members.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { assertOutboundUrl, BlockedDestinationError } from '../../../lib/net/safe-http.js';
@@ -58,7 +59,7 @@ function parsePartnerIds(v: string[] | string): string[] {
   try { return JSON.parse(v) as string[]; } catch { return []; }
 }
 
-function toDto(r: ScheduledActionRow, displayId?: number) {
+function toDto(r: ScheduledActionRow, displayId?: number, creators?: Map<string, TeamMember>) {
   const partnerIds = parsePartnerIds(r.partner_ids);
   return {
     id: r.id,
@@ -75,6 +76,8 @@ function toDto(r: ScheduledActionRow, displayId?: number) {
     scheduledTime: r.scheduled_time,
     internalNotes: r.internal_notes,
     createdBy: r.created_by,
+    // N2: who created it, by name — `createdBy` is their login id.
+    createdByName: r.created_by ? memberLabel(creators?.get(r.created_by)) : null,
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -215,7 +218,8 @@ export function automationRoutes(): Router {
       params,
     );
     warnIfCapped(rows, LIST_CAP, 'automation.scheduled-actions');
-    sendOk(res, rows.map((row) => toDto(row, Number(row.display_id))));
+    const creators = await teamMembersByLogin(networkId, rows.map((row) => row.created_by));
+    sendOk(res, rows.map((row) => toDto(row, Number(row.display_id), creators)));
   }));
 
   r.post(
@@ -250,7 +254,7 @@ export function automationRoutes(): Router {
         entityId: row.id,
         after: row,
       });
-      sendOk(res, toDto(full!), undefined, 201);
+      sendOk(res, toDto(full!, undefined, await teamMembersByLogin(req.scope!.networkId, [full!.created_by])), undefined, 201);
     }),
   );
 
@@ -290,7 +294,7 @@ export function automationRoutes(): Router {
         after: updated,
       });
       const full = await fetchRow(req.scope!.networkId, id);
-      sendOk(res, toDto(full!));
+      sendOk(res, toDto(full!, undefined, await teamMembersByLogin(req.scope!.networkId, [full!.created_by])));
     }),
   );
 

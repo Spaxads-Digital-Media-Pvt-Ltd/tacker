@@ -153,8 +153,8 @@ function Popover({ anchorRef, panelRef, children }: {
 
 export function NotificationsBell({ expanded }: { expanded: boolean }) {
   const { open, setOpen, ref, panelRef } = usePopover();
-  // The tenant audit log is for network staff: a Super Admin session can't read it (it isn't on the
-  // platform surface, F-05), and partner / advertiser portals get a 403 — so only staff fetch it.
+  // The tenant audit log is network staff's — the shell only shows the bell to them (N1); the guard
+  // stays so nothing else (a Super Admin session, a portal) ever asks for it.
   const { session } = useAuth();
   const { data } = useQuery<HistoryRow[]>(session?.role === 'admin' ? '/api/audit-log' : null);
   const rows = (data ?? []).slice(0, 8);

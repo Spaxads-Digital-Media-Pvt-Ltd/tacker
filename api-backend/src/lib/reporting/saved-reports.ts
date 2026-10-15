@@ -17,6 +17,7 @@ import { isValidTimeZone, isUtcZone, localDate, zonedDayStart, addDays, inclusiv
 import { nextCronTime } from '../scheduling/cron.js';
 import { sendTransactionalNow, escapeHtml, networkName, type TransactionalResult } from '../email/transactional.js';
 import { logger } from '../logger.js';
+import { teamMembersByLogin, type TeamMember } from '../auth/team-members.js';
 import type { Dimension, Metric, ReportFilters, ReportRequest, ReportResult } from './types.js';
 
 /** The report pages that save configurations (the SPA's `tracker.savedReports.<page>` keys). */
@@ -48,21 +49,11 @@ export interface SavedReportRow {
 export const SCHEDULE_ANYONE_ROLES: readonly string[] = ['admin', 'manager'];
 
 /** The team member behind a saved report (saved_reports.owner_user_id is their login's id). */
-export interface ReportOwner { userId: string; name: string | null; email: string; role: string; status: string }
+export type ReportOwner = TeamMember;
 
 /** Where a report may be emailed: anywhere, or only to its owner's own address. */
 export type ScheduleTo = 'anyone' | 'self';
 export const scheduleToFor = (role: string): ScheduleTo => (SCHEDULE_ANYONE_ROLES.includes(role) ? 'anyone' : 'self');
-
-/** The team members (users rows) behind these owner ids, in one network. */
-export async function reportOwners(networkId: string, ownerIds: string[]): Promise<Map<string, ReportOwner>> {
-  const ids = [...new Set(ownerIds)].filter((id) => UUID_RE.test(id));
-  if (!ids.length) return new Map();
-  const { rows } = await query<ReportOwner>(
-    `SELECT auth_user_id::text AS "userId", name, email, role, status FROM users WHERE network_id = $1 AND auth_user_id = ANY($2::uuid[])`,
-    [networkId, ids]);
-  return new Map(rows.map((o) => [o.userId, o]));
-}
 
 /**
  * Who a run of this report emails — with its owner's permissions, as they are NOW:
@@ -80,7 +71,7 @@ export function deliveryFor(owner: ReportOwner | null | undefined, recipients: s
 }
 
 export async function savedReportDelivery(r: SavedReportRow): Promise<ReturnType<typeof deliveryFor>> {
-  return deliveryFor((await reportOwners(r.network_id, [r.owner_user_id])).get(r.owner_user_id), r.recipients);
+  return deliveryFor((await teamMembersByLogin(r.network_id, [r.owner_user_id])).get(r.owner_user_id), r.recipients);
 }
 
 /** The owner as the SPA shows it: name / email, whether it can go to anyone, and a disabled account. */

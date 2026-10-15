@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { createdByLabel } from '../../lib/createdBy';
 import { PageHeader, Tabs } from '../../shared-components/primitives/ui';
 import { EmptyShellTable, type ShellRow, type AddField } from '../../shared-components/primitives/EmptyShellTable';
 import type { Offer, Publisher } from '../../types';
@@ -49,7 +50,7 @@ interface ScheduledAction {
   offerId: string; offerName: string | null; offerRef: number | null;
   actionType: string; partnerCount: number; event: string | null;
   scheduledTime: string | null; internalNotes: string | null;
-  createdBy: string | null; createdAt: string; updatedAt: string;
+  createdBy: string | null; createdByName: string | null; createdAt: string; updatedAt: string;
 }
 
 interface AlertRule {
@@ -140,7 +141,7 @@ function ScheduledActionsPanel() {
       Event: r.event ?? '—',
       'Scheduled Time': fmt(r.scheduledTime),
       'Internal Notes': r.internalNotes ?? '—',
-      'Created By': r.createdBy ?? 'System',
+      'Created By': createdByLabel(r.createdBy, r.createdByName),
       Created: fmt(r.createdAt),
       Modified: fmt(r.updatedAt),
     },

@@ -20,8 +20,9 @@ import { parseCron, nextCronTime } from '../../../lib/scheduling/cron.js';
 import { overFixedWindow } from '../../../lib/fixed-window-limit.js';
 import {
   SAVED_REPORT_PAGES, RANGE_PRESETS, savedReportDto, networkTimeZone, sendSavedReport, savedReportDelivery,
-  reportOwners, ownerView, scheduleToFor, type SavedReportRow, type SavedReportOwnerView,
+  ownerView, scheduleToFor, type SavedReportRow, type SavedReportOwnerView,
 } from '../../../lib/reporting/saved-reports.js';
+import { teamMembersByLogin } from '../../../lib/auth/team-members.js';
 
 const page = z.enum(SAVED_REPORT_PAGES);
 const config = z.record(z.string(), z.unknown()).refine((c) => JSON.stringify(c).length <= 20_000, { message: 'config is too large' });
@@ -57,7 +58,7 @@ async function load(networkId: string, id: string): Promise<SavedReportRow> {
 /** Each row's owner, as the SPA shows it. A login with no team-member row: the caller's own role for
  *  their own reports (no email on record), otherwise as a run treats it (any address). */
 async function ownerViews(req: Request, rows: SavedReportRow[]): Promise<Map<string, SavedReportOwnerView | null>> {
-  const owners = await reportOwners(req.scope!.networkId, rows.map((r) => r.owner_user_id));
+  const owners = await teamMembersByLogin(req.scope!.networkId, rows.map((r) => r.owner_user_id));
   const me = userOf(req);
   const out = new Map<string, SavedReportOwnerView | null>();
   for (const r of rows) {

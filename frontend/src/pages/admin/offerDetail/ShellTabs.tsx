@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useQuery } from '../../../lib/useApi';
+import { createdByLabel } from '../../../lib/createdBy';
 import { Accordion } from '../../../shared-components/panels/Accordion';
 import { CollectionTab, type FieldDef } from '../../../shared-components/panels/CollectionTab';
 import { StateBlock, Spinner, Table, type Column } from '../../../shared-components/primitives/ui';
@@ -77,7 +78,7 @@ export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; p
           return <span className={r.status === 'failed' ? 'text-danger-text' : undefined} title={err ?? undefined}>{String(r.status ?? '—')}{err ? ` — ${err}` : ''}</span>;
         }),
         col('Internal Notes', (r) => (r.internalNotes ? String(r.internalNotes) : '—')),
-        col('Created By', (r) => (r.createdBy ? String(r.createdBy) : 'System')),
+        col('Created By', (r) => createdByLabel(r.createdBy, r.createdByName)),
         col('Created', (r) => fmt(r.createdAt)),
         col('Modified', (r) => fmt(r.updatedAt)),
       ]}

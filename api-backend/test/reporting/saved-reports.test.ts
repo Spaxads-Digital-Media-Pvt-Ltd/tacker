@@ -117,7 +117,7 @@ describe('reportCsv', () => {
 });
 
 describe("deliveryFor — a run is emailed with its owner's permissions (D4)", () => {
-  const owner = (role: string, status = 'active'): ReportOwner => ({ userId: A, name: 'Sam', email: ' Sam@Example.com ', role, status });
+  const owner = (role: string, status = 'active'): ReportOwner => ({ loginId: A, name: 'Sam', email: ' Sam@Example.com ', role, status });
   const saved = ['ops@example.com', 'sam@example.com'];
 
   it('admins and managers: the saved recipients', () => {

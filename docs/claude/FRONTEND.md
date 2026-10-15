@@ -141,7 +141,7 @@ User enters credentials → POST /api/auth/login
 - 401 response → call `/api/auth/refresh` (uses httpOnly cookie)
 - Token rotation: refresh response includes new token, cookie rotated
 - Deduped inflight refresh (one concurrent refresh at a time)
-- Super Admin sessions (platform token from `POST /platform/login`, see `authClient.loginPlatform`) are never refreshed: a `/platform/*` 401 clears the session → `/login`; a tenant `/api/*` 401 just fails that call (the shell's notifications bell doesn't query the tenant audit log for them)
+- Super Admin sessions (platform token from `POST /platform/login`, see `authClient.loginPlatform`) are never refreshed: a `/platform/*` 401 clears the session → `/login`; a tenant `/api/*` 401 just fails that call. The rail's notifications bell (audit feed + Notification Preferences) is network staff's: the shell only renders it for `session.role === 'admin'` (N1) — partner / advertiser portals and the Super Admin console don't show it. "Created By" columns (Automation, an offer's Scheduled Actions) show the API's `createdByName` via `lib/createdBy.ts` (`Unknown user` for a login with no team member, `System` for none) — never a raw id (N2)
 
 ### Role System
 | Role | Surface | Landing Route |

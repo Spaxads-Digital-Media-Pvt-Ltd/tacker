@@ -103,7 +103,7 @@ export function conversionImportsRoutes(): Router {
       `SELECT l.id, l.status, l.detail, l.row_count, l.total_processed, l.error_count, l.errors,
               l.created_at, l.processed_at, u.name AS created_by_name, u.email AS created_by_email
          FROM import_export_logs l
-         LEFT JOIN users u ON u.id = l.created_by AND u.network_id = l.network_id
+         LEFT JOIN users u ON u.auth_user_id = l.created_by AND u.network_id = l.network_id -- created_by = the login's id
         WHERE l.network_id = $1 AND l.kind = 'import' AND l.entity = 'conversions'
         ORDER BY l.created_at DESC LIMIT ${LIST_CAP}`,
       [req.scope!.networkId],
