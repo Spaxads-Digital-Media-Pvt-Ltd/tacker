@@ -27,7 +27,9 @@ import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
 import { evaluateGeoRules, resolveForcedGeo } from './geo-rules.js';
-import { checkTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT } from '../../lib/tracking-rate-limit.js';
+import {
+ checkTrackingRateLimit, peekTrackingRateLimit, chargeTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT,
+} from '../../lib/tracking-rate-limit.js';
 import { isClickCapped, isCustomClickCapped, clickCapReached } from './caps.js';
 import { getSmartLinkConfig } from './smart-link-cache.js';
 import { applicableSettings } from '../../lib/offer-settings/custom-settings.js';
@@ -101,7 +103,9 @@ function pickByPriority(items: { offer_id: string; position: number | null }[]):
 const isTrustedProxy = buildTrustedProxyCheck(configuredProxies(env), (entry) =>
  logger.warn({ entry }, 'TRUSTED_PROXIES: ignoring malformed entry (not an IP, CIDR or "private")'));
 
-export function buildTrackingApp(): FastifyInstance {
+/** `rateLimits`: the per-IP / per-click limits (default: on, except in development and tests). */
+export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyInstance {
+ const rateLimits = opts.rateLimits ?? (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test');
  const app = Fastify({
  logger: { level: env.LOG_LEVEL },
  // Cloudflare → load balancer → us. X-Forwarded-For is walked from the RIGHT and only hops from a trusted
@@ -181,7 +185,7 @@ export function buildTrackingApp(): FastifyInstance {
  const started = process.hrtime.bigint();
 
  // 0. Rate limit (AP-1): fail fast before any infra work. Skipped in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'click', CLICK_LIMIT);
  if (rl.limited) {
@@ -418,7 +422,7 @@ export function buildTrackingApp(): FastifyInstance {
  // approved on a non-public offer — is skipped; KPI links rotate by the worker's computed weights.
  app.get('/sl', async (req, reply) => {
  // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'sl', CLICK_LIMIT);
  if (rl.limited) {
@@ -538,26 +542,30 @@ export function buildTrackingApp(): FastifyInstance {
  }
 
  // A. S2S / postback (primary). GET and POST both supported.
+ // O3: an authenticated postback (a valid security code) is NEVER throttled — an advertiser's server
+ // may send thousands, and several per click (upsells, rev-share). Only FAILED postbacks (no / wrong
+ // code, unknown click, unknown host) use up the sending IP's budget and the click id's (a leaked
+ // click id can't be hammered from many IPs); an IP or click id over its budget is refused until
+ // the window moves on. Skipped in dev / tests.
  const postback = async (req: FastifyRequest, reply: FastifyReply) => {
  reply.header('cache-control', 'no-store'); // never let the edge cache a conversion ack
- // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
- const rl = await checkTrackingRateLimit(clientIp, 'postback', POSTBACK_LIMIT);
- if (rl.limited) {
- return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
- }
- // Per click_id too (F-01): a leaked click_id can't be hammered from many IPs at once.
  const cid = clickIdOf(req);
- if (cid) {
- const rlc = await checkTrackingRateLimit(cid, 'postback_click', POSTBACK_PER_CLICK_LIMIT);
- if (rlc.limited) {
- return reply.code(429).header('retry-after', String(rlc.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
- }
+ if (rateLimits) {
+ const [ipFailures, clickFailures] = await Promise.all([
+ peekTrackingRateLimit(clientIp, 'postback'), cid ? peekTrackingRateLimit(cid, 'postback_click') : Promise.resolve(0),
+ ]);
+ if (ipFailures >= POSTBACK_LIMIT || clickFailures >= POSTBACK_PER_CLICK_LIMIT) {
+ return reply.code(429).header('retry-after', '60').send(errorEnvelope('rate_limited', 'Too many failed postbacks — check the security code and click id', 429));
  }
  }
 
  const r = await handleConversion(req, 'postback');
+ if (rateLimits && (!r.networkResolved || r.outcome === 'click_not_found' || r.outcome === 'security_failed')) {
+ await Promise.all([
+ chargeTrackingRateLimit(clientIp, 'postback'), cid ? chargeTrackingRateLimit(cid, 'postback_click') : Promise.resolve(),
+ ]);
+ }
  if (!r.networkResolved) return reply.code(404).send(errorEnvelope('not_found', 'unknown_tracking_host', 404));
  if (r.outcome === 'click_not_found') return reply.code(404).send(errorEnvelope('not_found', 'click_not_found', 404));
  if (r.outcome === 'security_failed') return reply.code(403).send(errorEnvelope('forbidden', 'invalid or missing secure_code', 403));
@@ -569,7 +577,7 @@ export function buildTrackingApp(): FastifyInstance {
  // B. Pixel / image tag — always returns the 1x1 gif so the page renders (spec §6 caveats apply).
  app.get('/pixel', async (req, reply) => {
  // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'pixel', POSTBACK_LIMIT);
  if (rl.limited) {
@@ -584,7 +592,7 @@ export function buildTrackingApp(): FastifyInstance {
  // C. Iframe — serves a tiny document; same attribution core.
  app.get('/iframe', async (req, reply) => {
  // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'iframe', POSTBACK_LIMIT);
  if (rl.limited) {

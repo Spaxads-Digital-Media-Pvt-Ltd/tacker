@@ -252,7 +252,7 @@ No API-key response carries a secret: `/api/v1/network/offers` uses `toNetworkAp
 
 The advertiser postback URL shown in the dashboard is `…/postback?click_id={click_id}&txn_id={txn_id}&status=approved&secure_code=<real code>`.
 
-`/postback` is also rate-limited per `click_id` (`TRACKING_RL_POSTBACK_PER_CLICK_LIMIT`, alongside the per-IP limit; both off in development/test).
+`/postback` rate limits (O3): a postback with a valid security code is **never** throttled. Only failed postbacks (no / wrong code, unknown click, unknown host) use up a budget — per IP (`TRACKING_RL_POSTBACK_LIMIT`, 60 / 5 min) and per `click_id` (`TRACKING_RL_POSTBACK_PER_CLICK_LIMIT`, 20 / 5 min); past either, that IP / click id gets 429 (`Retry-After: 60`) until the window moves on. Every limiter counts a request once (sliding 5-min window of 1-min buckets). Off in development/test (`buildTrackingApp({ rateLimits: true })` turns them on). The per-click conversion guard (10 transaction ids / click / 10 min) applies only after the postback is authenticated.
 
 ### Pixel / Iframe
 Fired by the visitor's browser, so they carry no secret and are treated as untrusted (`conversions/origin.ts`, `record.ts`):

@@ -24,7 +24,10 @@
 |---|---|---|
 | `IMPERSONATION_JWT_SECRET` | Signs admin impersonation sessions (30 min). ≥32 chars (`openssl rand -hex 32`). Unset → "Impersonate" answers 503 | — |
 | `TRACKING_BASE_DOMAIN` | Base for tenant subdomains | `ourtracking.com` |
-| `TRACKING_RL_POSTBACK_PER_CLICK_LIMIT` | `/postback` rate limit per `click_id` (sliding 5-min window; each request is weighted by the buckets it touches, so 100 ≈ 20 postbacks for one click within a minute). Off in development/test | `100` |
+| `TRACKING_RL_CLICK_LIMIT` | `/click`, `/sl`: requests per IP per sliding 5-min window (each request counts once — O3) | `120` |
+| `TRACKING_RL_POSTBACK_LIMIT` | `/postback`: **failed** postbacks (no / wrong security code, unknown click) per IP per 5 min — an authenticated postback is never throttled (O3); also the per-IP limit for `/pixel` and `/iframe` (all requests) | `60` |
+| `TRACKING_RL_POSTBACK_PER_CLICK_LIMIT` | `/postback`: failed postbacks per `click_id` per 5 min (a leaked click id can't be hammered from many IPs). Off in development/test | `20` |
+| `LOGIN_RATE_LIMIT_ACCOUNT` / `LOGIN_RATE_LIMIT_IP` | Failed sign-ins per account / per IP per 15 min before the next attempt is refused (each failure counts once — O3) | `5` / `10` |
 | `TRUSTED_PROXIES` | Proxies every surface trusts to set `X-Forwarded-For` (O2): comma-separated IPv4/IPv6 IPs or CIDRs, and `private` (10/8, 172.16/12, 192.168/16, fc00::/7). Loopback + Cloudflare's published ranges are always trusted. **AWS ALB + Cloudflare: `private`** | — |
 | `TRACKING_TRUSTED_PROXIES` | Older name — merged into `TRUSTED_PROXIES` | — |
 | `SENTRY_DSN` | Error tracking (no-op if absent) | — |

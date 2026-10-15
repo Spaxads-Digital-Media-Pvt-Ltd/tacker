@@ -232,13 +232,6 @@ export async function recordConversion(input: RecordConversionInput): Promise<Re
 async function recordWithIdemKey(
  input: RecordConversionInput, redis: ReturnType<typeof getRedis>, idemKey: string, state: { committed: boolean },
 ): Promise<RecordConversionResult> {
- // T-2: per-click conversion abuse guard — limit distinct txnId variation per click.
- // Applied before click lookup. Fail open on Redis errors.
- if (input.txnId && input.txnId.trim().length > 0) {
- const abuse = await checkConversionAbuse(redis, input.clickId, input.txnId, input.networkId);
- if (abuse.limited) return { outcome: 'rejected' };
- }
-
  // Match the originating click (Redis fast path -> DB fallback).
  const click = await findClick(input.networkId, input.clickId);
  if (!click) {
@@ -267,6 +260,15 @@ async function recordWithIdemKey(
  if (browserFired && !conversionOriginAllowed(input.requestOrigin, allowedConversionHosts(offer, input.requestOrigin?.host ?? null))) {
  await redis.del(idemKey);
  return { outcome: 'security_failed' };
+ }
+
+ // T-2: per-click conversion abuse guard — limit distinct txnId variation per click. Only AFTER the
+ // request is authenticated: run before the security check, unauthenticated attempts with a leaked
+ // click id used up the click's allowance and the advertiser's real conversions were then refused.
+ // Fail open on Redis errors.
+ if (input.txnId && input.txnId.trim().length > 0) {
+ const abuse = await checkConversionAbuse(redis, input.clickId, input.txnId, input.networkId);
+ if (abuse.limited) return { outcome: 'rejected' };
  }
 
  const revCfg = offer?.revenue;

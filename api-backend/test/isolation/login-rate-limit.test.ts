@@ -1,229 +1,84 @@
 /**
- * Login rate limiter tests — unit (mocked Redis) + HTTP integration.
+ * Login rate limiter tests — unit (an in-memory Redis that really counts) + HTTP integration.
  *
- * Unit tests run in all environments by mocking the Redis singleton.
+ * O3: a failure counts ONCE (it used to INCR all 3 buckets — an account locked after 2 wrong
+ * passwords, an IP after 4). Now 5 failures lock the account and 10 the IP, for 15 minutes.
  * HTTP integration tests require INTEGRATION_DB=1 + INTEGRATION_REDIS=1.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { memoryRedis, type MemoryRedis } from '../helpers/memory-redis.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type FakeRedis = any;
+let redis: MemoryRedis;
+let down = false;
+vi.mock('../../src/lib/redis.js', () => ({
+ getRedis: () => { if (down) throw new Error('ECONNREFUSED'); return redis; },
+}));
 
-function makeMockRedis() {
- const incrResults: [Error | null, number | null][] = [];
- const store = new Map<string, number>();
+import { checkLoginRateLimit, recordLoginFailure, resetLoginCounter } from '../../src/lib/auth/login-rate-limit.js';
 
- const chainable: FakeRedis = {
- exec: async () => {
- const r: [Error | null, number | null][] = [];
- for (const pair of incrResults) r.push([pair[0], pair[1]]);
- return r;
- },
- get: (_k: string) => chainable,
- incr: (_k: string) => chainable,
- expire: (_k: string) => chainable,
- };
+describe('login rate limiter (unit, in-memory Redis)', () => {
+ beforeEach(() => { redis = memoryRedis(); down = false; vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-15T10:01:00Z')); });
+ afterEach(() => { vi.useRealTimers(); });
 
- const instance: FakeRedis = {
- incr: async (key: string) => {
- const cur = store.get(key) ?? 0;
- store.set(key, cur + 1);
- return cur + 1;
- },
- expire: async () => 1,
- del: async (...keys: string[]) => { for (const k of keys) store.delete(k); return 0; },
- pipeline: () => chainable,
- };
+ const fail = async (n: number, ip = '10.0.0.1', who = 'user@example.com') => { for (let i = 0; i < n; i++) await recordLoginFailure(ip, who); };
 
- function setResults(results: [Error | null, number | null][]) {
- incrResults.length = 0;
- for (const r of results) incrResults.push([r[0], r[1]]);
- }
-
- return { instance, setResults };
-}
-
-// ---------------------------------------------------------------------------
-// Unit tests: checkLoginRateLimit
-// ---------------------------------------------------------------------------
-
-describe('checkLoginRateLimit (unit, mocked Redis)', () => {
- let fake: FakeRedis;
- let sr: (r: [Error | null, number | null][]) => void;
- let getRedisMock: ReturnType<typeof vi.fn>;
-
- beforeEach(() => {
- const { instance, setResults } = makeMockRedis();
- fake = instance;
- sr = setResults;
- getRedisMock = vi.fn(() => fake);
- vi.doMock('../../src/lib/redis.js', () => ({ getRedis: getRedisMock }));
+ it('1. one failure counts once (it used to count 3)', async () => {
+ const r = await recordLoginFailure('10.0.0.1', 'user@example.com');
+ expect(r).toMatchObject({ limited: false, ipCount: 1, accountCount: 1 });
+ expect(await checkLoginRateLimit('10.0.0.1', 'user@example.com')).toMatchObject({ limited: false, ipCount: 1, accountCount: 1 });
  });
 
- afterEach(() => {
- vi.doUnmock('../../src/lib/redis.js');
- vi.resetModules();
+ it('2. five wrong passwords lock the account — not two', async () => {
+ await fail(4);
+ expect((await checkLoginRateLimit('10.0.0.1', 'user@example.com')).limited).toBe(false);
+ await fail(1);
+ expect(await checkLoginRateLimit('10.0.0.1', 'user@example.com')).toMatchObject({ limited: true, reason: 'account', retryAfterSeconds: 300 });
+ // …from any IP.
+ expect((await checkLoginRateLimit('203.0.113.5', 'user@example.com')).reason).toBe('account');
  });
 
- async function mod() {
- return import('../../src/lib/auth/login-rate-limit.js');
- }
-
- function fr(ipVals: number[], acctVals: number[]): [Error | null, number | null][] {
- const r: [Error | null, number | null][] = [];
- for (const v of ipVals) r.push([null, v]);
- for (const v of acctVals) r.push([null, v]);
- return r;
- }
-
- it('1. below threshold: limited=false, counts=3+3=6', async () => {
- sr(fr([1, 1, 1], [1, 1, 1]));
- const m = await mod();
- const result = await m.checkLoginRateLimit('10.0.0.1', 'user@example.com');
- expect(result.limited).toBe(false);
- expect(result.ipCount).toBe(3);
- expect(result.accountCount).toBe(3);
+ it('3. ten failures from one IP lock the IP — across accounts', async () => {
+ for (let i = 0; i < 9; i++) await recordLoginFailure('10.0.0.1', `u${i}@example.com`);
+ expect((await checkLoginRateLimit('10.0.0.1', 'other@example.com')).limited).toBe(false);
+ await recordLoginFailure('10.0.0.1', 'u9@example.com');
+ expect(await checkLoginRateLimit('10.0.0.1', 'other@example.com')).toMatchObject({ limited: true, reason: 'ip' });
  });
 
- it('2. IP limit exceeded (11>10): limited=true, reason=ip', async () => {
- sr(fr([5, 4, 2], [0, 0, 0]));
- const m = await mod();
- const result = await m.checkLoginRateLimit('10.0.0.1', 'user@example.com');
- expect(result.limited).toBe(true);
- expect(result.reason).toBe('ip');
- expect(result.retryAfterSeconds).toBe(300);
+ it('4. the window slides: failures older than 15 minutes stop counting; keys expire in seconds', async () => {
+ await fail(5);
+ expect((await checkLoginRateLimit('10.0.0.1', 'user@example.com')).limited).toBe(true);
+ for (const k of redis.keys()) expect(await redis.ttl(k)).toBeLessThanOrEqual(900);
+ vi.setSystemTime(new Date('2026-10-15T10:16:01Z'));
+ expect((await checkLoginRateLimit('10.0.0.1', 'user@example.com')).limited).toBe(false);
  });
 
- it('3. account limit exceeded (6>5): limited=true, reason=account', async () => {
- sr(fr([2, 0, 0], [3, 2, 1]));
- const m = await mod();
- const result = await m.checkLoginRateLimit('10.0.0.1', 'user@example.com');
- expect(result.limited).toBe(true);
- expect(result.reason).toBe('account');
- expect(result.retryAfterSeconds).toBe(300);
+ it('5. a successful login resets the account (not the IP)', async () => {
+ await fail(5);
+ await resetLoginCounter('user@example.com');
+ expect(await checkLoginRateLimit('10.0.0.1', 'user@example.com')).toMatchObject({ limited: false, accountCount: 0, ipCount: 5 });
  });
 
- it('4. different accounts same IP: IP limit enforced', async () => {
- sr(fr([5, 4, 2], [1, 0, 0]));
- const m = await mod();
- const result = await m.checkLoginRateLimit('10.0.0.1', 'other@example.com');
- expect(result.limited).toBe(true);
- expect(result.reason).toBe('ip');
- });
-
- it('5. same account different IP: account limit enforced', async () => {
- sr(fr([0, 0, 0], [3, 2, 1]));
- const m = await mod();
- const result = await m.checkLoginRateLimit('203.0.113.5', 'user@example.com');
- expect(result.limited).toBe(true);
- expect(result.reason).toBe('account');
- });
-
- it('6. recordLoginFailure increments counters (shared impl)', async () => {
- sr(fr([1, 1, 1], [1, 1, 1]));
- const m = await mod();
- const result = await m.recordLoginFailure('10.0.0.1', 'user@example.com');
- expect(result.limited).toBe(false);
- expect(result.ipCount).toBe(3);
- expect(result.accountCount).toBe(3);
- });
-
- it('7. Redis unavailable: fails open, no crash', async () => {
- const failRedis: FakeRedis = {
- incr: async () => { throw new Error('ECONNREFUSED'); },
- expire: async () => {},
- del: async () => 0,
- pipeline: () => { throw new Error('ECONNREFUSED'); },
- };
- getRedisMock.mockReturnValueOnce(failRedis);
- const m = await mod();
- const result = await m.checkLoginRateLimit('10.0.0.1', 'user@example.com');
- expect(result.limited).toBe(false);
- expect(result.ipCount).toBe(0);
- expect(result.accountCount).toBe(0);
- });
-
- it('8. Redis keys use SHA-256 hashes, not raw IP or email', async () => {
- const captured: string[] = [];
- const spyRedis: FakeRedis = {
- incr: async (key: string) => { captured.push(key); return 1; },
- expire: async () => 1,
- del: async () => 0,
- pipeline: () => {
- const keys: string[] = [];
- const self = {
- get: (key: string) => { keys.push(key); return self; },
- incr: (key: string) => { keys.push(key); return self; },
- expire: (key: string) => { keys.push(key); return self; },
- del: () => self,
- exec: async () => keys.map((_k: string) => [null, 1]),
- };
- return self;
- },
- };
- getRedisMock.mockReturnValueOnce(spyRedis);
- const m = await mod();
- await m.checkLoginRateLimit('10.0.0.1', 'user@example.com');
- for (const k of captured) {
+ it('6. keys are SHA-256 hashes — never the raw IP or email', async () => {
+ await fail(1);
+ const keys = redis.keys();
+ expect(keys.length).toBeGreaterThan(0);
+ for (const k of keys) {
  expect(k).not.toContain('10.0.0.1');
  expect(k).not.toContain('user@example.com');
  expect(k).toMatch(/^lr:(ip|acct):[0-9a-f]{64}:\d+$/);
  }
  });
 
- it('9. unknown account and known account produce same rate-limit result', async () => {
- sr(fr([1, 1, 1], [1, 1, 1]));
- const m = await mod();
- const r1 = await m.recordLoginFailure('10.0.0.1', 'unknown@example.com');
- const r2 = await m.recordLoginFailure('10.0.0.1', 'known@example.com');
- expect(r1.limited).toBe(r2.limited);
- expect(r1.ipCount).toBe(r2.ipCount);
- expect(r1.accountCount).toBe(r2.accountCount);
- });
-});
-
-// ---------------------------------------------------------------------------
-// Unit tests: resetLoginCounter
-// ---------------------------------------------------------------------------
-
-describe('resetLoginCounter (unit, mocked Redis)', () => {
- let fake: FakeRedis;
- let capturedDelKeys: string[];
- let getRedisMock: ReturnType<typeof vi.fn>;
-
- beforeEach(() => {
- capturedDelKeys = [];
- const { instance } = makeMockRedis();
- fake = instance;
- const spyRedis: FakeRedis = {
- ...fake,
- del: async (...keys: string[]) => { capturedDelKeys.push(...keys); return 0; },
- };
- getRedisMock = vi.fn(() => spyRedis);
- vi.doMock('../../src/lib/redis.js', () => ({ getRedis: getRedisMock }));
+ it('7. Redis unavailable: fails open, no crash', async () => {
+ down = true;
+ expect(await checkLoginRateLimit('10.0.0.1', 'user@example.com')).toMatchObject({ limited: false, ipCount: 0, accountCount: 0 });
+ expect(await recordLoginFailure('10.0.0.1', 'user@example.com')).toMatchObject({ limited: false });
  });
 
- afterEach(() => {
- vi.doUnmock('../../src/lib/redis.js');
- vi.resetModules();
- });
-
- it('10. deletes only acct keys, 3 keys for 3 buckets', async () => {
- const m = await import('../../src/lib/auth/login-rate-limit.js');
- await m.resetLoginCounter('user@example.com');
- expect(capturedDelKeys.length).toBe(3);
- for (const key of capturedDelKeys) {
- expect(key).toMatch(/^lr:acct:/);
- }
- });
-
- it('11. different identifiers produce different SHA-256 hashes in keys', async () => {
- const m = await import('../../src/lib/auth/login-rate-limit.js');
- await m.resetLoginCounter('user-a@example.com');
- await m.resetLoginCounter('user-b@example.com');
- expect(capturedDelKeys.length).toBe(6);
- const hashes = new Set(capturedDelKeys.map((k) => k.split(':')[2]));
- expect(hashes.size).toBe(2);
+ it('8. an unknown account and a known one are counted the same way', async () => {
+ const a = await recordLoginFailure('10.0.0.2', 'unknown@example.com');
+ const b = await recordLoginFailure('10.0.0.3', 'known@example.com');
+ expect([a.limited, a.ipCount, a.accountCount]).toEqual([b.limited, b.ipCount, b.accountCount]);
  });
 });
 
