@@ -157,6 +157,24 @@ login rate limits, the API IP whitelist, audit logs, login history and click geo
 ranges are trusted already. Allow only Cloudflare's ranges into the load balancer's security group.
 Details: `api-backend/docs/cloudflare-edge.md` › "Client IP at the origin".
 
+### Deploy checklist (each release)
+1. **Secrets / env** (per surface; values never in git): `DATABASE_URL`, `REDIS_URL`, `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY` (logins, invites, password resets, file storage), `SUPABASE_JWT_SECRET`,
+   `PLATFORM_ADMIN_JWT_SECRET`, `SETTINGS_ENC_KEY` (32 bytes — `openssl rand -hex 32`; keep it: settings
+   secrets can't be read without it), `IMPERSONATION_JWT_SECRET` (admin "Impersonate"; unset → 503),
+   `DASHBOARD_ORIGINS` (CORS — and its first origin is the app address in invite / reset emails), SMTP per
+   network (Settings), and behind Cloudflare + an AWS load balancer `TRUSTED_PROXIES=private` (next section).
+2. **Migrate**: `npm run migrate` (node-pg-migrate, forward-only in production).
+3. **One-off data steps** — idempotent, safe to re-run; preview each with `-- --dry-run` first:
+   - `npm run settings:secrets -- encrypt` — encrypts integration credentials / SMTP passwords stored in
+     plaintext before `SETTINGS_ENC_KEY` was set (D6; `decrypt` undoes it, e.g. before rotating the key).
+   - `npm run creatives:backfill` and `npm run images:backfill` — move creatives (F-27) and branding
+     logos / favicons / profile photos (O12) stored inline into object storage.
+4. **Run every surface**, including **workers** (`start:workers`): emails, postbacks, scheduled reports,
+   alert rules, SmartSwitch, rollups and retention all run there.
+5. **After deploy**: sign in, send a test email (Communication Hub › Email Log shows it), check
+   `/health` on each surface, and that a test click lands with the visitor's real IP (not the load balancer's).
+
 ### Surface Ports
 | Surface | Port |
 |---|---|
