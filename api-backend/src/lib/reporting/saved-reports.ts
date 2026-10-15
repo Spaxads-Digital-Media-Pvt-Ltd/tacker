@@ -4,6 +4,11 @@
  * A saved report can be scheduled (5-field cron in the network's time zone) and emailed to recipients:
  * the scheduled-reports worker re-runs it for a rolling range (yesterday, last 7 days, …) through the
  * reporting provider and sends a summary + the rows as CSV (lib/email/transactional.ts).
+ *
+ * Who it may go to (D4): every role can schedule its own reports, and a report is always sent with
+ * its OWNER's permissions — an admin's or manager's to any address; a Finance or Read-only member's
+ * only to that member's own email; a disabled member's to nobody. It is checked when the schedule is
+ * saved and again at every run, so a later role change or a disabled account applies at once.
  */
 import { pool, query } from '../db/pool.js';
 import { getReportingProvider } from './index.js';
@@ -39,8 +44,54 @@ export interface SavedReportRow {
   created_at: Date; updated_at: Date;
 }
 
-export const savedReportDto = (r: SavedReportRow) => ({
+/** Roles whose reports may be emailed to any address; every other role only to its own email (D4). */
+export const SCHEDULE_ANYONE_ROLES: readonly string[] = ['admin', 'manager'];
+
+/** The team member behind a saved report (saved_reports.owner_user_id is their login's id). */
+export interface ReportOwner { userId: string; name: string | null; email: string; role: string; status: string }
+
+/** Where a report may be emailed: anywhere, or only to its owner's own address. */
+export type ScheduleTo = 'anyone' | 'self';
+export const scheduleToFor = (role: string): ScheduleTo => (SCHEDULE_ANYONE_ROLES.includes(role) ? 'anyone' : 'self');
+
+/** The team members (users rows) behind these owner ids, in one network. */
+export async function reportOwners(networkId: string, ownerIds: string[]): Promise<Map<string, ReportOwner>> {
+  const ids = [...new Set(ownerIds)].filter((id) => UUID_RE.test(id));
+  if (!ids.length) return new Map();
+  const { rows } = await query<ReportOwner>(
+    `SELECT auth_user_id::text AS "userId", name, email, role, status FROM users WHERE network_id = $1 AND auth_user_id = ANY($2::uuid[])`,
+    [networkId, ids]);
+  return new Map(rows.map((o) => [o.userId, o]));
+}
+
+/**
+ * Who a run of this report emails — with its owner's permissions, as they are NOW:
+ * disabled → nobody; Finance / Read-only → their own current email only, whatever is saved;
+ * admin / manager → the saved recipients. A login with no team-member row (token claims only) keeps
+ * the saved recipients, as before. `ownerOnly`: saved recipients were narrowed to the owner.
+ */
+export function deliveryFor(owner: ReportOwner | null | undefined, recipients: string[]):
+  { recipients: string[]; ownerOnly: boolean } | { refused: string } {
+  if (!owner) return { recipients, ownerOnly: false };
+  if (owner.status === 'disabled') return { refused: "Not sent: its owner's account is disabled." };
+  if (scheduleToFor(owner.role) === 'anyone') return { recipients, ownerOnly: false };
+  const own = owner.email.trim().toLowerCase();
+  return { recipients: [own], ownerOnly: recipients.some((x) => x !== own) };
+}
+
+export async function savedReportDelivery(r: SavedReportRow): Promise<ReturnType<typeof deliveryFor>> {
+  return deliveryFor((await reportOwners(r.network_id, [r.owner_user_id])).get(r.owner_user_id), r.recipients);
+}
+
+/** The owner as the SPA shows it: name / email, whether it can go to anyone, and a disabled account. */
+export interface SavedReportOwnerView { name: string | null; email: string | null; scheduleTo: ScheduleTo; disabled: boolean }
+export const ownerView = (owner: ReportOwner): SavedReportOwnerView =>
+  ({ name: owner.name, email: owner.email, scheduleTo: scheduleToFor(owner.role), disabled: owner.status === 'disabled' });
+
+export const savedReportDto = (r: SavedReportRow, owner?: SavedReportOwnerView | null) => ({
   id: r.id, page: r.page, name: r.name, config: r.config, ownerUserId: r.owner_user_id,
+  owner: owner ? { name: owner.name, email: owner.email, disabled: owner.disabled } : null,
+  scheduleTo: owner?.scheduleTo ?? 'anyone',
   schedule: r.schedule, rangePreset: r.range_preset, recipients: r.recipients,
   nextRunAt: r.next_run_at, lastRunAt: r.last_run_at, lastRunStatus: r.last_run_status, lastRunDetail: r.last_run_detail,
   createdAt: r.created_at, updatedAt: r.updated_at,
@@ -198,9 +249,17 @@ export async function runDueSavedReports(now: Date = new Date(), limit = 50): Pr
     let status: 'sent' | 'skipped' | 'failed';
     let detail: string;
     try {
-      const { result, rows } = await sendSavedReport(r, now);
-      status = result.sent ? 'sent' : 'skipped';
-      detail = result.sent ? `${rows} rows to ${result.recipients.length} recipient(s)` : result.reason ?? 'not sent';
+      const to = await savedReportDelivery(r);
+      if ('refused' in to) {
+        status = 'skipped';
+        detail = to.refused;
+      } else {
+        const { result, rows } = await sendSavedReport({ ...r, recipients: to.recipients }, now);
+        status = result.sent ? 'sent' : 'skipped';
+        detail = result.sent
+          ? `${rows} rows to ${result.recipients.length} recipient(s)${to.ownerOnly ? " — its owner's own email only (Finance / Read-only)" : ''}`
+          : result.reason ?? 'not sent';
+      }
     } catch (err) {
       status = 'failed';
       detail = err instanceof Error ? err.message : 'Report failed';

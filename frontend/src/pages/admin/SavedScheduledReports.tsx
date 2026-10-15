@@ -12,10 +12,12 @@
  * exclusions, metric filters, Ignore Fail Traffic, sort, plus Flex dimensions / Nested parent+child.
  * Hidden columns aren't URL state on those pages, so they're only applied via the page's own Load menu.
  *
- * Scheduled Reports lists the network's saved reports that have a schedule (F-24): the
- * scheduled-reports worker emails them as CSV. "Schedule…" on a saved report (or "Edit schedule"
+ * Scheduled Reports lists the saved reports that have a schedule (F-24) — the whole network's, with
+ * each owner, for admins and managers; everyone else's own (D4: every role schedules its own) — and
+ * the scheduled-reports worker emails them as CSV. "Schedule…" on a saved report (or "Edit schedule"
  * here) opens ScheduleReportModal — daily / weekly / monthly at a time, or a cron, in the network's
- * time zone, plus recipients and a rolling date range; also Send now and Remove schedule.
+ * time zone, plus recipients (Finance / Read-only: their own email) and a rolling date range; also
+ * Send now and Remove schedule.
  * Requested Reports is an honest empty shell (no async export-request queue). Columns match the
  * reference: Scheduled = ID | Name | Report Type | Interval | Frequency | Week Day | Day | Format.
  * Requested = ID | Name | Report Type | Format | File | Error | Processed at | Created.
@@ -146,10 +148,16 @@ function SavedReportsTab() {
 
 const SCHEDULED_COLUMNS = ['ID', 'Name', 'Report Type', 'Interval', 'Frequency', 'Week Day', 'Day', 'Format', 'Last Run'];
 
-/** Every scheduled report in the network (not just mine) — admins / managers manage them all. */
+/** Admins / managers: every scheduled report in the network, with its owner (they manage them all).
+ *  Everyone else: their own. */
 function ScheduledReportsTab() {
   const nav = useNavigate();
-  const { data, loading, error, refetch } = useQuery<SavedReportDto[]>('/api/saved-reports?scope=network');
+  const me = useQuery<{ identity?: { role?: string } }>('/api/me');
+  const everyone = ['admin', 'manager'].includes(me.data?.identity?.role ?? '');
+  const list = useQuery<SavedReportDto[]>(me.loading ? null : everyone ? '/api/saved-reports?scope=network' : '/api/saved-reports');
+  const { data, error, refetch } = list;
+  const loading = me.loading || list.loading;
+  const columns = everyone ? [...SCHEDULED_COLUMNS.slice(0, 2), 'Owner', ...SCHEDULED_COLUMNS.slice(2)] : SCHEDULED_COLUMNS;
   const [editing, setEditing] = useState<SavedReportDto | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -180,7 +188,7 @@ function ScheduledReportsTab() {
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
           <table className="premium-table">
-            <thead><tr>{SCHEDULED_COLUMNS.map((c) => <th key={c}>{c}</th>)}<th className="w-9" /></tr></thead>
+            <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}<th className="w-9" /></tr></thead>
             <tbody>
               {rows.map((r) => {
                 const src = SAVED_REPORT_SOURCES.find((s) => s.key === r.page);
@@ -191,6 +199,11 @@ function ScheduledReportsTab() {
                     <td className="px-4 py-3">
                       <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => setEditing(r)}>{r.name}</button>
                     </td>
+                    {everyone && (
+                      <td className="px-4 py-3" title={r.owner?.disabled ? 'Account disabled — this report isn’t sent' : r.owner?.email ?? undefined}>
+                        <span className={r.owner?.disabled ? 'text-fg-muted line-through' : undefined}>{r.owner?.name || r.owner?.email || '—'}</span>
+                      </td>
+                    )}
                     <td className="px-4 py-3">{src?.label ?? r.page}</td>
                     <td className="px-4 py-3">{rangeLabel(r.rangePreset)}</td>
                     <td className="px-4 py-3">{d.frequency}</td>

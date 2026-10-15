@@ -43,6 +43,7 @@
 
 ### Secrets by role
 - Postback security codes — the network's (`GET /api/settings/security`, F-07) and each offer's (`securityCode` on offer responses, O5) — are visible to admin / manager only; finance and read-only see that a code exists, never its value (the SPA says it's hidden instead of showing a postback URL without it)
+- Scheduled reports (D4) — every role can schedule its own saved reports, but a report is emailed with its OWNER's permissions: an admin's / manager's to any address, a finance / read-only member's only to their own current email, a disabled member's to nobody. Checked on save (`PATCH /api/saved-reports/:id`, 403 `recipients_self_only`) and again at every run and Send now (`lib/reporting/saved-reports.ts` `deliveryFor`), so a demotion or a disabled account applies to schedules already set. Only admin / manager list everyone's (`?scope=network`); Send now is limited to 20 per person per hour
 
 ### 4. Tracking
 - Click: **No auth** (public redirect)

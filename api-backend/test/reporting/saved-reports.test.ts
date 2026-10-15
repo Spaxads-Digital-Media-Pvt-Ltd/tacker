@@ -1,10 +1,10 @@
 /**
  * Scheduled saved reports (audit F-24), the pure parts: the rolling range a run covers (whole local
  * days in the network's zone), the saved page config → the report request the page itself makes,
- * and the CSV attachment (formula-safe, entity names next to their ids).
+ * the CSV attachment (formula-safe, entity names next to their ids), and who a run emails (D4).
  */
 import { describe, it, expect } from 'vitest';
-import { presetRange, savedReportRequest, reportCsv } from '../../src/lib/reporting/saved-reports.js';
+import { presetRange, savedReportRequest, reportCsv, deliveryFor, type ReportOwner } from '../../src/lib/reporting/saved-reports.js';
 import type { ReportResult } from '../../src/lib/reporting/types.js';
 
 // 08:30 on Wed 14 Oct in Kolkata; still Tue 13 Oct (23:00) in New York.
@@ -113,5 +113,24 @@ describe('reportCsv', () => {
       `'+cmd,${B},'-,+2`,
       '',
     ]);
+  });
+});
+
+describe("deliveryFor — a run is emailed with its owner's permissions (D4)", () => {
+  const owner = (role: string, status = 'active'): ReportOwner => ({ userId: A, name: 'Sam', email: ' Sam@Example.com ', role, status });
+  const saved = ['ops@example.com', 'sam@example.com'];
+
+  it('admins and managers: the saved recipients', () => {
+    expect(deliveryFor(owner('admin'), saved)).toEqual({ recipients: saved, ownerOnly: false });
+    expect(deliveryFor(owner('manager'), saved)).toEqual({ recipients: saved, ownerOnly: false });
+  });
+  it('Finance and Read-only: their own current email only, whatever is saved', () => {
+    expect(deliveryFor(owner('finance'), saved)).toEqual({ recipients: ['sam@example.com'], ownerOnly: true });
+    expect(deliveryFor(owner('read_only'), ['sam@example.com'])).toEqual({ recipients: ['sam@example.com'], ownerOnly: false });
+    expect(deliveryFor(owner('read_only'), [])).toEqual({ recipients: ['sam@example.com'], ownerOnly: false });
+  });
+  it('a disabled owner: nobody; no team-member row: the saved recipients, as before', () => {
+    expect(deliveryFor(owner('admin', 'disabled'), saved)).toEqual({ refused: "Not sent: its owner's account is disabled." });
+    expect(deliveryFor(null, saved)).toEqual({ recipients: saved, ownerOnly: false });
   });
 });

@@ -2,11 +2,13 @@
  * Saved reports on the server + scheduled delivery — on a real Postgres (INTEGRATION_DB=1, as in CI)
  * with SMTP mocked at nodemailer, so the real mailer runs (settings, attachments) — audit F-24.
  *
- * A report page's saved configuration belongs to the user who saved it (synced by name). Scheduling
- * one emails report data out, so it needs an admin / manager, a valid 5-field cron and a recipient;
- * its next run is computed in the network's time zone. When it's due, the worker re-runs the saved
- * config for the rolling range and emails a summary + the rows as CSV, then waits for its next slot.
- * SMTP that isn't configured, or that refuses the mail, is recorded on the report — never thrown.
+ * A report page's saved configuration belongs to the user who saved it (synced by name). Every role
+ * can schedule its own (D4) — a valid 5-field cron and a recipient; its next run is computed in the
+ * network's time zone — and a report is emailed with its OWNER's permissions: an admin's / manager's
+ * anywhere, a Finance / Read-only member's only to their own email, a disabled member's to nobody —
+ * checked on save and again at every run. When it's due, the worker re-runs the saved config for the
+ * rolling range and emails a summary + the rows as CSV, then waits for its next slot. SMTP that isn't
+ * configured, or that refuses the mail, is recorded on the report — never thrown.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +34,7 @@ import { runDueSavedReports } from '../../src/lib/reporting/saved-reports.js';
 import { addDays, formatInZone, localDate, zonedDayStart } from '../../src/lib/reporting/time-zone.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
 import { operatorToken, bearer } from '../helpers/tokens.js';
+import { getRedis } from '../../src/lib/redis.js';
 
 const d = process.env.INTEGRATION_DB === '1' ? describe : describe.skip;
 const TZ = 'Asia/Kolkata';
@@ -42,6 +45,14 @@ d('saved reports + scheduled delivery (live DB, mock SMTP)', () => {
   const as = (role: string, userId: string = randomUUID(), networkId = fx.networkA) =>
     ({ userId, headers: bearer(operatorToken({ userId, networkId, role })) });
   let admin: ReturnType<typeof as>;
+  /** A team member with a users row — their role, status and email on record. */
+  const member = async (role: string, networkId = fx.networkA) => {
+    const who = as(role, randomUUID(), networkId);
+    const email = `${role.replace('_', '')}-${randomUUID().slice(0, 6)}@example.com`;
+    await query(`INSERT INTO users (network_id, auth_user_id, email, name, role, status) VALUES ($1, $2, $3, $4, $5, 'active')`,
+      [networkId, who.userId, email, `${role} person`, role]);
+    return { ...who, email };
+  };
   const save = (who: { headers: Record<string, string> }, body: Record<string, unknown>) =>
     request(dash).put('/api/saved-reports/by-name').set(who.headers).send(body);
   const patch = (who: { headers: Record<string, string> }, id: string, body: Record<string, unknown>) =>
@@ -105,19 +116,47 @@ d('saved reports + scheduled delivery (live DB, mock SMTP)', () => {
       expect((await request(dash).get('/api/saved-reports?page=nope').set(admin.headers)).status).toBe(422);
     });
 
-    it("scheduling needs an admin / manager, a valid cron and a recipient; the next run is in the network's time zone", async () => {
-      const viewer = as('read_only');
+    it("every role schedules its own reports; Finance and Read-only only to their own email, whoever edits them", async () => {
+      const viewer = await member('read_only');
       const id = (await save(viewer, { page: 'offer-report', name: `Mine ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
+      const listed = (await request(dash).get('/api/saved-reports?page=offer-report').set(viewer.headers)).body.data as Record<string, unknown>[];
+      expect(listed.find((r) => r['id'] === id)).toMatchObject({ scheduleTo: 'self', owner: { name: 'read_only person', email: viewer.email, disabled: false } });
 
-      // The owner can rename their own report, but scheduling it (emailing data out) needs admin / manager.
-      expect((await patch(viewer, id, { name: 'Renamed' })).status).toBe(200);
-      const denied = await patch(viewer, id, { schedule: '0 8 * * *', recipients: ['ops@example.com'] });
+      // Someone else's address → refused, with the reason (and their own address) for the form.
+      const denied = await patch(viewer, id, { schedule: '0 8 * * *', recipients: ['ops@example.com', viewer.email] });
       expect(denied.status).toBe(403);
-      expect((await patch(viewer, id, { rangePreset: 'last_7_days' })).status).toBe(403);
-      // Someone else's report: only admin / manager may change it.
-      expect((await patch(as('finance'), id, { name: 'Taken' })).status).toBe(403);
+      expect(denied.body.error.details).toEqual({ reason: 'recipients_self_only', email: viewer.email });
+      expect(denied.body.error.message).toMatch(/only to their own email/);
+      // Their own address (any case) → scheduled; the next run in the network's zone.
+      const before = Date.now();
+      const ok = await patch(viewer, id, { schedule: '0 8 * * *', recipients: [viewer.email.toUpperCase()], rangePreset: 'last_7_days' });
+      expect(ok.status).toBe(200);
+      expect(ok.body.data).toMatchObject({ schedule: '0 8 * * *', rangePreset: 'last_7_days', recipients: [viewer.email], scheduleTo: 'self' });
+      const next = new Date(ok.body.data.nextRunAt);
+      expect(formatInZone(next, TZ).slice(11, 19)).toBe('08:00:00'); // 08:00 Kolkata = 02:30 UTC
+      expect(next.getTime()).toBeGreaterThan(before);
+      expect(next.getTime()).toBeLessThanOrEqual(before + 24 * 3600_000);
+      // No recipients given → their own.
+      const fin = await member('finance');
+      const finId = (await save(fin, { page: 'daily-report', name: `F ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
+      const finOk = await patch(fin, finId, { schedule: '30 9 * * 1' });
+      expect(finOk.status).toBe(200);
+      expect(finOk.body.data.recipients).toEqual([fin.email]);
 
-      const manager = as('manager');
+      // Someone else's report: only an admin / manager may change it…
+      expect((await patch(fin, id, { name: 'Taken' })).status).toBe(403);
+      // …and even then it goes only to its owner; they can unschedule it.
+      const manager = await member('manager');
+      const widen = await patch(manager, id, { recipients: ['ops@example.com'] });
+      expect(widen.status).toBe(403);
+      expect(widen.body.error.message).toMatch(/Save your own copy/);
+      const off = await patch(manager, id, { schedule: null });
+      expect(off.body.data).toMatchObject({ schedule: null, nextRunAt: null });
+    });
+
+    it('admin / manager reports go to any address; a schedule needs a valid cron and a recipient, and is audited', async () => {
+      const manager = await member('manager');
+      const id = (await save(manager, { page: 'offer-report', name: `Ops ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
       const noRecipients = await patch(manager, id, { schedule: '0 8 * * *' });
       expect(noRecipients.status).toBe(422);
       expect(noRecipients.body.error.message).toMatch(/at least one recipient/);
@@ -127,22 +166,29 @@ d('saved reports + scheduled delivery (live DB, mock SMTP)', () => {
       expect((await patch(manager, id, { schedule: '0 0 31 2 *', recipients: ['ops@example.com'] })).body.error.message).toBe('schedule: never runs');
       expect((await patch(manager, id, { recipients: ['not-an-email'] })).status).toBe(422);
 
-      const before = Date.now();
       const ok = await patch(manager, id, { schedule: '0 8 * * *', recipients: ['Ops@Example.com', 'ops@example.com', 'cfo@example.com'], rangePreset: 'last_7_days' });
       expect(ok.status).toBe(200);
-      expect(ok.body.data).toMatchObject({ name: 'Renamed', schedule: '0 8 * * *', rangePreset: 'last_7_days', recipients: ['ops@example.com', 'cfo@example.com'] });
-      const next = new Date(ok.body.data.nextRunAt);
-      expect(formatInZone(next, TZ).slice(11, 19)).toBe('08:00:00'); // 08:00 Kolkata = 02:30 UTC
-      expect(next.getTime()).toBeGreaterThan(before);
-      expect(next.getTime()).toBeLessThanOrEqual(before + 24 * 3600_000);
+      expect(ok.body.data).toMatchObject({ scheduleTo: 'anyone', schedule: '0 8 * * *', recipients: ['ops@example.com', 'cfo@example.com'] });
 
       const audit = await query<{ before: Record<string, unknown>; after: Record<string, unknown> }>(
-        `SELECT before, after FROM audit_log WHERE network_id = $1 AND entity_id = $2 AND action = 'saved_report.schedule'`, [fx.networkA, id]);
-      expect(audit.rows[0]).toMatchObject({ before: { schedule: null, recipients: [] }, after: { schedule: '0 8 * * *', recipients: ['ops@example.com', 'cfo@example.com'] } });
+        `SELECT before, after FROM audit_log WHERE network_id = $1 AND entity_id = $2 AND action = 'saved_report.schedule' ORDER BY created_at`, [fx.networkA, id]);
+      expect(audit.rows.at(-1)).toMatchObject({ before: { schedule: null, recipients: [] }, after: { schedule: '0 8 * * *', recipients: ['ops@example.com', 'cfo@example.com'] } });
 
-      // Clearing the schedule stops it.
-      const off = await patch(manager, id, { schedule: null });
-      expect(off.body.data).toMatchObject({ schedule: null, nextRunAt: null });
+      // A disabled owner's report can't be scheduled (it can still be unscheduled).
+      const gone = await member('manager');
+      const goneId = (await save(gone, { page: 'offer-report', name: `Gone ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
+      await query(`UPDATE users SET status = 'disabled' WHERE auth_user_id = $1`, [gone.userId]);
+      expect((await patch(manager, goneId, { schedule: '0 8 * * *', recipients: ['ops@example.com'] })).status).toBe(409);
+      expect((await patch(manager, goneId, { schedule: null })).status).toBe(200);
+    });
+
+    it("only admins and managers list everyone's saved reports", async () => {
+      const viewer = await member('read_only');
+      const id = (await save(viewer, { page: 'hourly-report', name: `H ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
+      expect((await request(dash).get('/api/saved-reports?scope=network').set(viewer.headers)).status).toBe(403);
+      expect((await request(dash).get('/api/saved-reports?scope=network').set((await member('finance')).headers)).status).toBe(403);
+      const all = (await request(dash).get('/api/saved-reports?scope=network').set((await member('manager')).headers)).body.data as Record<string, unknown>[];
+      expect(all.find((r) => r['id'] === id)).toMatchObject({ owner: { name: 'read_only person', email: viewer.email }, scheduleTo: 'self' });
     });
 
     it('delete by id: its owner or an admin / manager', async () => {
@@ -261,10 +307,43 @@ d('saved reports + scheduled delivery (live DB, mock SMTP)', () => {
       expect(row.next_run_at!.getTime()).toBeGreaterThan(now.getTime());
     });
 
-    it('send now: admin / manager only, audited, same email as a scheduled run', async () => {
+    it("a run goes with its owner's permissions as they are NOW: demoted → their own email only; email changed → the new one; disabled → not sent", async () => {
+      const m = await member('manager');
+      const id = (await save(m, { page: 'partner-report', name: `Team ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
+      const team = `team-${randomUUID().slice(0, 6)}@example.com`;
+      expect((await patch(m, id, { schedule: '0 8 * * *', recipients: [team], rangePreset: 'yesterday' })).status).toBe(200);
+
+      // Demoted to Finance after scheduling: the run reaches only them.
+      await query(`UPDATE users SET role = 'finance' WHERE auth_user_id = $1`, [m.userId]);
+      await makeDue(id);
+      await runDueSavedReports(new Date());
+      expect(mailTo(team)).toHaveLength(0);
+      expect(mailTo(m.email)).toHaveLength(1);
+      expect(await rowOf(id)).toMatchObject({ last_run_status: 'sent' });
+      expect((await rowOf(id)).last_run_detail).toMatch(/to 1 recipient\(s\) — its owner's own email only/);
+
+      // Their email changes: the next run follows it.
+      const moved = `moved-${randomUUID().slice(0, 6)}@example.com`;
+      await query('UPDATE users SET email = $2 WHERE auth_user_id = $1', [m.userId, moved]);
+      await makeDue(id);
+      await runDueSavedReports(new Date());
+      expect(mailTo(moved)).toHaveLength(1);
+
+      // Disabled: nothing goes out, the report says why, and it keeps its slot for when they're back.
+      await query(`UPDATE users SET status = 'disabled' WHERE auth_user_id = $1`, [m.userId]);
+      await makeDue(id);
+      const now = new Date();
+      await runDueSavedReports(now);
+      expect(mailTo(moved)).toHaveLength(1);
+      expect(await rowOf(id)).toMatchObject({ last_run_status: 'skipped', last_run_detail: "Not sent: its owner's account is disabled." });
+      expect((await rowOf(id)).next_run_at!.getTime()).toBeGreaterThan(now.getTime());
+      expect((await request(dash).post(`/api/saved-reports/${id}/send`).set(admin.headers)).status).toBe(409);
+    });
+
+    it('send now: its owner or an admin / manager, audited, same email as a scheduled run, 20 an hour per person', async () => {
       const to = `now-${randomUUID().slice(0, 6)}@example.com`;
       const { id, name } = await scheduled(fx.networkA, [to], { filters: { partner: [fx.pubA1] } });
-      expect((await request(dash).post(`/api/saved-reports/${id}/send`).set(as('read_only').headers)).status).toBe(403);
+      expect((await request(dash).post(`/api/saved-reports/${id}/send`).set(as('read_only').headers)).status).toBe(403); // not theirs
       const res = await request(dash).post(`/api/saved-reports/${id}/send`).set(admin.headers);
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual({ sent: true, recipients: [to], rows: 1 });
@@ -276,6 +355,19 @@ d('saved reports + scheduled delivery (live DB, mock SMTP)', () => {
       // No recipients → refused before anything runs.
       const bare = (await save(admin, { page: 'offer-report', name: `Bare ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
       expect((await request(dash).post(`/api/saved-reports/${bare}/send`).set(admin.headers)).status).toBe(422);
+
+      // A Read-only member sends their own — to themselves, scheduled or not.
+      const viewer = await member('read_only');
+      const own = (await save(viewer, { page: 'offer-report', name: `Own ${randomUUID().slice(0, 6)}`, config: {} })).body.data.id as string;
+      const mine = await request(dash).post(`/api/saved-reports/${own}/send`).set(viewer.headers);
+      expect(mine.status).toBe(200);
+      expect(mine.body.data).toMatchObject({ sent: true, recipients: [viewer.email] });
+      expect(mailTo(viewer.email)).toHaveLength(1);
+      // The hourly limit (20 sends per person).
+      await getRedis().set(`srsend:${fx.networkA}:${viewer.userId}`, '20', 'EX', 3600);
+      const limited = await request(dash).post(`/api/saved-reports/${own}/send`).set(viewer.headers);
+      expect(limited.status).toBe(429);
+      expect(mailTo(viewer.email)).toHaveLength(1);
     });
   });
 });

@@ -1,9 +1,11 @@
 /**
  * Schedule a saved report (audit F-24). The scheduled-reports worker emails it — a summary plus the
  * rows as a CSV attachment, for a rolling date range — daily, weekly or monthly at a time of day (or
- * on any cron), in the network's time zone (Settings › General). Scheduling sends report data out,
- * so the API allows it to admins and managers only. "Send now" emails it immediately to the saved
- * recipients; "Remove schedule" stops it (the saved report stays).
+ * on any cron), in the network's time zone (Settings › General). Every role can schedule its own
+ * reports (D4); a report is emailed with its OWNER's permissions — an admin's or manager's to any
+ * address, a Finance or Read-only member's only to their own email (`scheduleTo: 'self'`: the
+ * recipient is shown, not typed), a disabled member's to nobody — which the API checks on save and
+ * at every run. "Send now" emails it immediately; "Remove schedule" stops it (the saved report stays).
  */
 import { useId, useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
@@ -13,6 +15,10 @@ import { RANGE_OPTIONS, WEEKDAYS, fromCron, parseRecipients, sendSummary, toCron
 
 export interface SavedReportDto {
   id: string; page: string; name: string; config: unknown; ownerUserId: string;
+  /** The team member who saved it (null: no team-member record). */
+  owner: { name: string | null; email: string | null; disabled: boolean } | null;
+  /** 'self': it can only be emailed to its owner (Finance / Read-only). */
+  scheduleTo: 'anyone' | 'self';
   schedule: string | null; rangePreset: string; recipients: string[];
   nextRunAt: string | null; lastRunAt: string | null; lastRunStatus: 'sent' | 'skipped' | 'failed' | null; lastRunDetail: string | null;
 }
@@ -25,6 +31,10 @@ export function ScheduleReportModal({ report, onClose, onChanged }: { report: Sa
   const [range, setRange] = useState(report.rangePreset || 'yesterday');
   const [recipients, setRecipients] = useState(report.recipients.join('\n'));
   const [sendNote, setSendNote] = useState<string | null>(null);
+  const selfOnly = report.scheduleTo === 'self';
+  const ownEmail = report.owner?.email ?? null;
+  const ownerDisabled = report.owner?.disabled ?? false;
+  const canSend = !ownerDisabled && (selfOnly ? Boolean(ownEmail) : report.recipients.length > 0);
   const save = useMutation((body: Record<string, unknown>) => api.patch<SavedReportDto>(`/api/saved-reports/${report.id}`, body));
   const send = useMutation(() => api.post<SendResult>(`/api/saved-reports/${report.id}/send`, {}));
   const set = (patch: Partial<ScheduleForm>) => setForm((f) => ({ ...f, ...patch }));
@@ -32,7 +42,8 @@ export function ScheduleReportModal({ report, onClose, onChanged }: { report: Sa
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (await save.run({ schedule: toCron(form), rangePreset: range, recipients: parseRecipients(recipients) })) { onChanged(); onClose(); }
+    const to = selfOnly ? (ownEmail ? [ownEmail] : []) : parseRecipients(recipients);
+    if (await save.run({ schedule: toCron(form), rangePreset: range, recipients: to })) { onChanged(); onClose(); }
   };
   const remove = async () => {
     if (await save.run({ schedule: null })) { onChanged(); onClose(); }
@@ -49,16 +60,21 @@ export function ScheduleReportModal({ report, onClose, onChanged }: { report: Sa
       footer={(
         <>
           {report.schedule && <button type="button" className="btn-ghost mr-auto text-danger-text" onClick={remove} disabled={save.busy}>Remove schedule</button>}
-          <button type="button" className="btn-ghost" onClick={sendNow} disabled={send.busy || !report.recipients.length}
-            title={report.recipients.length ? 'Email it now to the saved recipients' : 'Save recipients first'}>{send.busy ? 'Sending…' : 'Send now'}</button>
+          <button type="button" className="btn-ghost" onClick={sendNow} disabled={send.busy || !canSend}
+            title={canSend ? `Email it now to ${selfOnly ? ownEmail : 'the saved recipients'}` : ownerDisabled ? "Its owner's account is disabled" : 'Save recipients first'}>{send.busy ? 'Sending…' : 'Send now'}</button>
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" form={formId} className="btn-primary" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save schedule'}</button>
+          <button type="submit" form={formId} className="btn-primary" disabled={save.busy || ownerDisabled}>{save.busy ? 'Saving…' : 'Save schedule'}</button>
         </>
       )}
     >
       <form id={formId} onSubmit={submit} className="space-y-3">
         {(save.error || send.error) && <p className="text-small text-danger-text">{save.error ?? send.error}</p>}
         {sendNote && <p className="rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg">{sendNote}</p>}
+        {ownerDisabled && (
+          <p className="rounded-[var(--radius)] bg-danger-bg px-3 py-2 text-small text-danger-text">
+            {report.owner?.name || ownEmail || 'Its owner'}’s account is disabled, so this report isn’t sent. You can remove its schedule.
+          </p>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Repeat">
             <select className="input" value={form.frequency} onChange={(e) => set({ frequency: e.target.value as Frequency })}>
@@ -99,9 +115,18 @@ export function ScheduleReportModal({ report, onClose, onChanged }: { report: Sa
           </Field>
         </div>
         <p className="text-tiny text-fg-muted">Times are in the network’s time zone, {tz} (Settings › General). The email has a summary and the report rows as a CSV file.</p>
-        <Field label="Email to (one per line, up to 20)">
-          <textarea className="input min-h-[80px]" value={recipients} required placeholder="reports@yourcompany.com" onChange={(e) => setRecipients(e.target.value)} />
-        </Field>
+        {selfOnly ? (
+          <Field label="Email to">
+            <input className="input" disabled value={ownEmail ?? 'No email on record'} />
+            <p className="mt-1 text-tiny text-fg-muted">
+              Reports saved by Finance and Read-only users are emailed only to that user’s own address{report.owner?.name ? ` — here, ${report.owner.name}` : ''}.
+            </p>
+          </Field>
+        ) : (
+          <Field label="Email to (one per line, up to 20)">
+            <textarea className="input min-h-[80px]" value={recipients} required placeholder="reports@yourcompany.com" onChange={(e) => setRecipients(e.target.value)} />
+          </Field>
+        )}
         {report.schedule && (
           <div className="grid grid-cols-1 gap-1 rounded-[var(--radius)] border border-border bg-page px-3 py-2 text-tiny text-fg-secondary sm:grid-cols-2">
             <span>Next email: <span className="text-fg">{at(report.nextRunAt)}</span></span>

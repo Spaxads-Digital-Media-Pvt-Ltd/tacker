@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import type { User } from '@supabase/supabase-js';
 import { getSupabaseAdmin, createEphemeralAuthClient } from '../supabase.js';
-import { getRedis } from '../redis.js';
+import { overFixedWindow } from '../fixed-window-limit.js';
 import { logger } from '../logger.js';
 import { appUrl } from '../app-url.js';
 import { AppError } from '../http/errors.js';
@@ -95,25 +95,14 @@ export async function completePasswordReset(token: string, password: string): Pr
 
 const hash = (v: string) => createHash('sha256').update(v, 'utf8').digest('hex');
 
-async function hit(key: string, limit: number, windowSeconds: number): Promise<boolean> {
-  try {
-    const redis = getRedis();
-    await redis.set(key, '0', 'EX', windowSeconds, 'NX');
-    return (await redis.incr(key)) > limit;
-  } catch (err) {
-    logger.warn({ err }, 'password reset rate limiter: Redis unavailable — failing open');
-    return false;
-  }
-}
-
 /** Reset requests: 10 per IP per 15 min, 5 per address per hour. True = refuse. */
 export async function resetRequestLimited(ip: string, email: string): Promise<boolean> {
   const [byIp, byEmail] = await Promise.all([
-    hit(`pr:ip:${hash(ip)}`, 10, 15 * 60),
-    hit(`pr:acct:${hash(email.trim().toLowerCase())}`, 5, 60 * 60),
+    overFixedWindow(`pr:ip:${hash(ip)}`, 10, 15 * 60),
+    overFixedWindow(`pr:acct:${hash(email.trim().toLowerCase())}`, 5, 60 * 60),
   ]);
   return byIp || byEmail;
 }
 
 /** Link redemptions: 20 per IP per 15 min. True = refuse. */
-export const resetRedeemLimited = (ip: string): Promise<boolean> => hit(`pr:redeem:${hash(ip)}`, 20, 15 * 60);
+export const resetRedeemLimited = (ip: string): Promise<boolean> => overFixedWindow(`pr:redeem:${hash(ip)}`, 20, 15 * 60);

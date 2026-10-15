@@ -217,14 +217,20 @@ Usage metering (F-26, usage-meter queue, hourly):
 
 Scheduled reports (F-24):
  Report page Save / Load → PUT /api/saved-reports/by-name (server = source of truth; localStorage cache,
- lib/savedReports.ts) → admin/manager PATCH /api/saved-reports/:id { schedule (cron, network zone),
- recipients, rangePreset } → next_run_at
+ lib/savedReports.ts) → PATCH /api/saved-reports/:id { schedule (cron, network zone), recipients,
+ rangePreset } — any role for its own report, admin/manager for anyone's (D4); recipients follow the
+ OWNER's permissions: admin/manager owner → any address; Finance / Read-only owner → only their own
+ email (403 recipients_self_only otherwise; none given → theirs); disabled owner → 409 → next_run_at
  scheduled-reports queue (every minute, lib/reporting/saved-reports.ts runDueSavedReports):
  due rows claimed FOR UPDATE SKIP LOCKED and next_run_at advanced first (a failed run waits for its
  next slot) → the saved page config → the same report request the page makes, for the rolling range
- (whole local days) → reporting provider (table + totals) → entity labels → summary HTML + CSV
- attachment (formula-safe cells) → sendTransactionalNow('scheduled_report', sent directly) → last_run_status
- sent | skipped (SMTP not configured / refused — the reason is kept) | failed
+ (whole local days) → who it goes to, with its owner's permissions as they are NOW (savedReportDelivery:
+ disabled → not sent, "Not sent: its owner's account is disabled."; Finance / Read-only → their current
+ email only; admin / manager → the saved recipients) → reporting provider (table + totals) → entity
+ labels → summary HTML + CSV attachment (formula-safe cells) → sendTransactionalNow('scheduled_report',
+ sent directly) → last_run_status sent | skipped (SMTP not configured / refused / owner disabled — the
+ reason is kept) | failed. Send now (POST /:id/send — owner or admin/manager, 20 per person per hour)
+ runs the same path.
 
 Transactional email (F-24) through the email queue (O11):
  invite / reset / share offer details / request balances / invoice create / partner notification
