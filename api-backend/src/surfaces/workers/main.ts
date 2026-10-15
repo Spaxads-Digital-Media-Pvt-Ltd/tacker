@@ -24,6 +24,7 @@ import { startOfferFeedSyncWorker, scheduleOfferFeedScan } from './processors/of
 import { startDomainVerifyWorker, scheduleDomainVerify } from './processors/domain-verify.js';
 import { startScheduledActionsWorker, scheduleScheduledActions } from './processors/scheduled-actions.js';
 import { startAlertRulesWorker, scheduleAlertRules } from './processors/alert-rules.js';
+import { startSmartSwitchWorker, scheduleSmartSwitch } from './processors/smartswitch.js';
 import { startAutomationWebhookWorker } from './processors/automation-webhook.js';
 import { startSmartLinkKpiWorker, scheduleSmartLinkKpi } from './processors/smart-link-kpi.js';
 import { startReportingRollupWorker, scheduleReportingRollup } from './processors/reporting-rollup.js';
@@ -50,6 +51,7 @@ const workers = [
  startDomainVerifyWorker(),
  startScheduledActionsWorker(),
  startAlertRulesWorker(),
+ startSmartSwitchWorker(),
  startAutomationWebhookWorker(),
  startSmartLinkKpiWorker(),
  startReportingRollupWorker(),
@@ -63,6 +65,7 @@ void scheduleOfferFeedScan().catch((err) => log.error({ err }, 'failed to schedu
 void scheduleDomainVerify().catch((err) => log.error({ err }, 'failed to schedule tracking domain re-check'));
 void scheduleScheduledActions().catch((err) => log.error({ err }, 'failed to schedule scheduled actions'));
 void scheduleAlertRules().catch((err) => log.error({ err }, 'failed to schedule alert rules'));
+void scheduleSmartSwitch().catch((err) => log.error({ err }, 'failed to schedule smartswitch'));
 void scheduleSmartLinkKpi().catch((err) => log.error({ err }, 'failed to schedule smart link KPI scoring'));
 void scheduleReportingRollup().catch((err) => log.error({ err }, 'failed to schedule reporting rollups'));
 void scheduleScheduledReports().catch((err) => log.error({ err }, 'failed to schedule scheduled reports'));

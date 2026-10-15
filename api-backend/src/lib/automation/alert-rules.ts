@@ -122,12 +122,13 @@ export function clausesHold(clauses: RuleClause[], v: Record<RuleMetric, string 
   });
 }
 
-const fmt = (c: RuleClause, v: Record<RuleMetric, string | number>) => {
+/** "cr 0.21% (< 0.5%)" — a clause with the value it was evaluated on. */
+export const describeClause = (c: RuleClause, v: Record<RuleMetric, string | number>) => {
   const a = v[c.metric];
   const shown = PERCENT.has(c.metric) ? `${Number(a).toFixed(2)}%` : String(a);
   return `${c.metric} ${shown} (${c.op} ${c.value}${PERCENT.has(c.metric) ? '%' : ''})`;
 };
-const windowLabel = (min: number) => (min % 1440 === 0 ? `${min / 1440}d` : min % 60 === 0 ? `${min / 60}h` : `${min}m`);
+export const windowLabel = (min: number) => (min % 1440 === 0 ? `${min / 1440}d` : min % 60 === 0 ? `${min / 60}h` : `${min}m`);
 
 interface RuleRow {
   id: string; network_id: string; ref: string; name: string; conditions: string;
@@ -141,14 +142,16 @@ const NAME_SQL: Record<RuleScope, string> = {
 };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function names(networkId: string, scope: RuleScope, ids: string[]): Promise<Map<string, string>> {
+/** Entity names by id (ids that aren't UUIDs or don't exist are left out). */
+export async function entityNames(networkId: string, scope: RuleScope, ids: string[]): Promise<Map<string, string>> {
   const valid = ids.filter((id) => UUID_RE.test(id));
   if (!valid.length) return new Map();
   const { rows } = await query<{ id: string; name: string }>(NAME_SQL[scope], [networkId, valid]);
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 
-async function adminEmails(networkId: string): Promise<string[]> {
+/** Where automation emails go: the network's active admins and managers. */
+export async function adminEmails(networkId: string): Promise<string[]> {
   const { rows } = await query<{ email: string }>(
     `SELECT email FROM users WHERE network_id = $1 AND status = 'active' AND role IN ('admin', 'manager') ORDER BY email`,
     [networkId]);
@@ -185,7 +188,7 @@ async function evaluateRule(rule: RuleRow, now: Date): Promise<number> {
   }
 
   if (started.length) {
-    const nameOf = parsed.scope ? await names(rule.network_id, parsed.scope, started.map((s) => s.key)) : new Map<string, string>();
+    const nameOf = parsed.scope ? await entityNames(rule.network_id, parsed.scope, started.map((s) => s.key)) : new Map<string, string>();
     const emails = rule.notify_email ? await adminEmails(rule.network_id) : [];
     const label = { offer: 'Offer', publisher: 'Partner', advertiser: 'Advertiser' } as const;
     for (const s of started) {
@@ -194,7 +197,7 @@ async function evaluateRule(rule: RuleRow, now: Date): Promise<number> {
         type: 'automation_rule', severity: 'medium',
         entityType: 'automation_alert_rule', entityId: parsed.scope ? `${rule.id}:${s.key}` : rule.id,
         title: rule.name,
-        description: `${who}${parsed.clauses.map((c) => fmt(c, s.values)).join(', ')} in the last ${windowLabel(parsed.windowMinutes)}.`,
+        description: `${who}${parsed.clauses.map((c) => describeClause(c, s.values)).join(', ')} in the last ${windowLabel(parsed.windowMinutes)}.`,
         metadata: {
           ruleId: rule.id, ruleRef: Number(rule.ref), conditions: rule.conditions,
           ...(parsed.scope ? { scope: parsed.scope, entityId: s.key, entityName: nameOf.get(s.key) ?? null } : {}),

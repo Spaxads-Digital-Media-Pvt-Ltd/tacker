@@ -196,6 +196,13 @@ Automation (F-17a):
  → offer status / cap / partner access changed → system audit → offer cache invalidated → webhook event
  alert-rules queue (every 5 min) → reporting provider over the rule's window → conditions start to hold
  → raiseAlert (In App) + deliverAlert email to admins/managers → alert.raised webhook event
+ smartswitch queue (every 5 min, D8) → each active rule: reporting provider grouped by offer × partner
+ over its window (scope: offers / advertisers / partners) → pairs where the conditions hold → state.holding
+ (first held) → past the Action Delay and not yet acted → (≤ 25 / rule / run, one transaction each)
+ notify | block (offer_publisher_access deny) | redirect (offer_custom_settings landing_pages for that
+ partner) | payout (offer_publisher_access.payout_override) → system audit + smartswitch_history (kind
+ action) → offer cache invalidated → raiseAlert type smartswitch + email admins/managers + alert.raised
+ webhook → state.acted (once per holding period; cleared when the pair stops holding or the rule is edited)
  conversion recorded / approved / rejected, alert raised, action run → emitAutomationEvent
  → automation-webhook queue → safeRequest (retries + backoff) → automation_webhook_deliveries
 

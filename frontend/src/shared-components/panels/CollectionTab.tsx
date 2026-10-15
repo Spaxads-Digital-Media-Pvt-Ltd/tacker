@@ -79,7 +79,7 @@ function toBody(fields: FieldDef[], form: Record<string, string | boolean>, orig
 }
 
 export function CollectionTab({
-  basePath, listPath, fields, columns, addLabel, emptyText, editable = false, searchKeys, searchPlaceholder = 'Search…', prepareBody,
+  basePath, listPath, fields, columns, addLabel, emptyText, editable = false, searchKeys, searchPlaceholder = 'Search…', prepareBody, rowActions,
 }: {
   basePath: string;
   /** GET target, if it needs query params (e.g. a category filter) that mustn't leak into the
@@ -95,6 +95,8 @@ export function CollectionTab({
   searchPlaceholder?: string;
   /** Last word on the request body (add + edit), e.g. to send null where an empty field means "none". */
   prepareBody?: (body: Record<string, unknown>, form: Record<string, string | boolean>) => Record<string, unknown>;
+  /** Extra per-row buttons, shown before Edit / Delete. */
+  rowActions?: (row: Row) => ReactNode;
 }) {
   const { data, loading, error, refetch } = useQuery<Row[]>(listPath ?? basePath);
   const [open, setOpen] = useState(false);
@@ -115,6 +117,7 @@ export function CollectionTab({
       header: '', className: 'text-right',
       cell: (row) => (
         <span className="flex justify-end gap-3">
+          {rowActions?.(row)}
           {editable && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setEditRow(row)}>Edit</button>}
           <button className="text-tiny font-medium text-danger-text hover:underline"
             onClick={() => confirm({
@@ -127,7 +130,7 @@ export function CollectionTab({
         </span>
       ),
     },
-  ], [columns, del, refetch, editable, confirm]);
+  ], [columns, del, refetch, editable, confirm, rowActions]);
 
   return (
     <div className="space-y-4">

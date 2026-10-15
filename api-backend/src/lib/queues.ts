@@ -12,6 +12,7 @@ export const QUEUE = {
  domainVerify: 'domain-verify',
  scheduledActions: 'scheduled-actions',
  alertRules: 'alert-rules',
+ smartSwitch: 'smartswitch',
  automationWebhook: 'automation-webhook',
  smartLinkKpi: 'smart-link-kpi',
  reportingRollup: 'reporting-rollup',

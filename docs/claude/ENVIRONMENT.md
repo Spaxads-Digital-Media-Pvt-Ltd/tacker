@@ -52,7 +52,6 @@
 | Variable | Purpose | Default |
 |---|---|---|
 | `VITE_API_BASE_URL` | Backend API base URL | Empty (relative, uses Vite proxy in dev) |
-| `VITE_FEATURE_SMARTSWITCH` | `true` shows the SmartSwitch module (rules are stored but not evaluated — `src/config/features.ts`) | unset = hidden (nav item inert, route absent) |
 
 No secrets in the frontend. CI enforces no secret patterns in `frontend/` source.
 

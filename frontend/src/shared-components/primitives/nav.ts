@@ -2,7 +2,6 @@ import type React from "react";
 
 import type { Role } from '../../auth/roles';
 import { Icon } from './icons';
-import { FEATURES } from '../../config/features';
 import * as Lucide from 'lucide-react';
 
 export interface NavLeaf { to: string; label: string; icon?: keyof typeof Icon }
@@ -45,8 +44,7 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Creatives', description: 'Manage creative assets', to: '/app/offers-creatives', icon: Lucide.Image },
         { label: 'Traffic Controls', description: 'Block or redirect specific clicks', to: '/app/offers-traffic-controls', icon: Lucide.Shield },
         { label: 'Custom Settings', description: 'Per-offer payout, caps & pages', to: '/app/offers-custom-settings', icon: Lucide.Sliders },
-        // Behind a flag (F-17b): rules are stored but never run, so it must not promise optimization.
-        { label: 'SmartSwitch', description: 'Optimization rules (not running yet)', ...(FEATURES.smartSwitch ? { to: '/app/offers-smartswitch' } : {}), icon: Lucide.ToggleRight },
+        { label: 'SmartSwitch', description: 'Rules that act on partners per offer', to: '/app/offers-smartswitch', icon: Lucide.ToggleRight },
       ],
     },
     {

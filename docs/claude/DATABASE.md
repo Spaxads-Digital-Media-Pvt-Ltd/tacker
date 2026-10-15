@@ -245,6 +245,8 @@ API keys for the Public REST API.
 | `marketplace_connections` | Marketplace connections |
 | `offer_scheduled_actions` | Offer scheduled actions; `params` (cap_change), `executed_at`, `result`, status pending\|executed\|cancelled\|failed (migration 070) |
 | `automation_alert_rules` | Automation alert rules; `state` (what is firing), `last_evaluated_at`, `last_fired_at`, `last_error` (migration 070) |
+| `smartswitch_rules` | SmartSwitch rules (D8, migration 077): `conditions`, `action` notify\|block\|redirect\|payout + `action_params` (`redirectUrl` / `payout`), `action_delay`, scope `offer_ids` / `advertiser_ids` / `partner_ids`, `state` (`holding` / `acted` per offer:partner), `last_evaluated_at`, `last_fired_at`, `last_error`; `variable` / `actionable_variables` are legacy free text |
+| `smartswitch_history` | A rule's log: `kind` change (an edit, `employee` = the login) \| action (`offer_id`, `publisher_id`, `details`: action, outcome, values) |
 | `automation_webhooks` | Outbound webhook config (`events` normalised list or `*`) |
 | `automation_webhook_deliveries` | One row per webhook delivery: event, payload, status, attempts, status_code, error (migration 070) |
 | `control_center_config` | Platform-level configuration |

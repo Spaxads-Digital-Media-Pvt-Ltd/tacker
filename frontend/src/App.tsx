@@ -3,7 +3,6 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { ROLE_HOME } from './auth/roles';
-import { FEATURES } from './config/features';
 import { AppShell } from './shared-components/shell/AppShell';
 import { NetworkListPage } from './pages/admin/NetworkListPage';
 import { CustomFieldsManage } from './pages/admin/CustomFieldsManage';
@@ -196,7 +195,7 @@ export default function App() {
           <Route path="/app/offers-traffic-controls/add" element={<OfferTrafficControlForm />} />
           <Route path="/app/offers-traffic-controls/:id/edit" element={<OfferTrafficControlForm />} />
           <Route path="/app/offers-custom-settings" element={<OfferCustomSettingsGlobal />} />
-          {FEATURES.smartSwitch && <Route path="/app/offers-smartswitch" element={<OfferSmartSwitch />} />}
+          <Route path="/app/offers-smartswitch" element={<OfferSmartSwitch />} />
           {/* Affiliates section pages */}
           <Route path="/app/aff-postbacks" element={<PostbacksManage />} />
           <Route path="/app/aff-postbacks/new" element={<PostbackForm />} />
