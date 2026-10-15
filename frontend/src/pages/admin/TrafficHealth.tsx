@@ -22,7 +22,7 @@ import { api } from '../../lib/api';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column, MenuPopover } from '../../shared-components/primitives/ui';
 import { Accordion } from '../../shared-components/panels/Accordion';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
-import { daysAgo, todayStr, toIso } from '../../shared-components/primitives/ReportPageKit';
+import { useReportZone } from '../../lib/useReportZone';
 import type { TrackingDomain } from '../../types';
 
 const TAB_LIST = ['Overview', 'Uptime Incidents', 'Reputation Flags', 'Tasks', 'Usage', 'Configurations'] as const;
@@ -192,10 +192,11 @@ function UptimeBars({ domain }: { domain: TrackingDomain }) {
 
 function DomainDetailPanel({ domain, onOpenDetail }: { domain: TrackingDomain; onOpenDetail: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const from = daysAgo(90);
-  const to = todayStr();
+  const zone = useReportZone(); // D7: the report zone's days
+  const from = zone.daysAgo(90);
+  const to = zone.today();
   const { data: summary } = useQuery<DomainSummary>(
-    `/api/traffic-health/domains/${domain.id}/summary?from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`,
+    `/api/traffic-health/domains/${domain.id}/summary?${new URLSearchParams(zone.range(from, to)).toString()}`,
   );
   const s = summary;
   const trafficMetrics: { label: string; value: string }[] = [
@@ -399,9 +400,10 @@ function TasksTab() {
 // ── Usage ────────────────────────────────────────────────────────────────
 
 function UsageTab() {
-  const [from, setFrom] = useState(daysAgo(90));
-  const [to, setTo] = useState(todayStr());
-  const qs = `from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`;
+  const zone = useReportZone(); // D7: the report zone's days
+  const [from, setFrom] = useState(() => zone.daysAgo(90));
+  const [to, setTo] = useState(() => zone.today());
+  const qs = new URLSearchParams(zone.range(from, to)).toString();
   const { data, loading } = useQuery<{ rows: UsageRow[] }>(`/api/traffic-health/usage?${qs}`);
   const rows = data?.rows ?? [];
   if (loading) return <StateBlock><Spinner /></StateBlock>;
@@ -429,7 +431,7 @@ function UsageTab() {
         </div>
         <div>
           <label className="label">To</label>
-          <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} />
+          <input type="date" className="input" value={to} min={from} max={zone.today()} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
       <p className="text-tiny text-fg-muted">Traffic is attributed via offers assigned to each domain (clicks are not tagged with serving hostname).</p>

@@ -11,6 +11,7 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { queryDate } from '../../../lib/http/query-params.js';
+import { tzParam, zonedRange } from '../../../lib/reporting/request.js';
 import { notFound } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -21,13 +22,15 @@ import { toDTO } from '../tracking-domains/dto.js';
 
 const DOMAIN_TABLE = 'tracking_domains';
 
-/** Optional from/to range; an empty param means "unbounded" (as before), anything else must be an ISO date. */
+/** Optional from/to range; an empty param means "unbounded" (as before), anything else must be an ISO
+ *  date — a plain date is a whole day of the report zone (`?tz=`, D7; UTC when unset). */
 const optionalDate = z.preprocess((v) => (v === '' ? undefined : v), queryDate.optional());
-const rangeQuery = z.object({ from: optionalDate, to: optionalDate });
+const rangeQuery = z.object({ from: optionalDate, to: optionalDate, tz: tzParam.optional() });
 
 function parseRange(q: unknown): { from: string | null; to: string | null } {
-  const { from, to } = q as z.infer<typeof rangeQuery>;
-  return { from: from ?? null, to: to ?? null };
+  const { from, to, tz } = q as z.infer<typeof rangeQuery>;
+  const range = zonedRange(from, to, tz);
+  return { from: range.from ?? null, to: range.to ?? null };
 }
 
 async function domainRow(networkId: string, id: string): Promise<TrackingDomainRow | null> {

@@ -160,7 +160,7 @@ External system calls /api/v1/advertiser/...
 
 ```
 Admin clicks ReportView
- → useQuery('/api/reports/<type>?from=...&to=...&...[&tz=...]')
+ → useReportZone() (network zone from GET /api/me, or the one picked) → useQuery('/api/reports/<type>?from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<zone>&...')
  → adminReportsRoutes() handler → buildReportRequest (audience policy; tz → day/hour zone + local-day from/to)
  → getReportingProvider().runReport — Postgres provider:
    - fits the rollups (dims ⊆ offer/publisher/advertiser/smartLink/country/device/day/hour, filters on

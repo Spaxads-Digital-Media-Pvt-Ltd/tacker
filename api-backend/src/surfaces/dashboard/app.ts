@@ -73,6 +73,7 @@ import { advertiserInvoicesRoutes } from './advertiser-invoices/routes.js';
 import { tieredCommissionsRoutes } from './tiered-commissions/routes.js';
 import { controlCenterRoutes } from './control-center/routes.js';
 import { signupRoutes } from './signup/routes.js';
+import { networkTimeZone } from '../../lib/reporting/network-zone.js';
 
 export function buildDashboardApp(): Express {
   const app = createBaseApp('dashboard');
@@ -103,7 +104,9 @@ export function buildDashboardApp(): Express {
         account: account.rows[0]?.name ?? null, expiresAt: id.impersonationExpiresAt ?? 0,
       };
     }
-    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation });
+    // D7: the network's report time zone — every report page (staff and portals) defaults to it.
+    const reportTimeZone = req.scope?.networkId ? await networkTimeZone(req.scope.networkId) : 'UTC';
+    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation, reportTimeZone });
   }));
 
   // My Account (Profile) General tab — this user's own real row + metadata profile fields.

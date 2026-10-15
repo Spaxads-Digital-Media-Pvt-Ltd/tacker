@@ -30,7 +30,7 @@ import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, money, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, money, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
@@ -38,6 +38,8 @@ import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
+import { formatMdyDateTime } from '../../lib/datetime';
+import { useReportZone, type ZoneDays } from '../../lib/useReportZone';
 
 interface ConvRow {
   conversion_id: string; created_at: string; offer_id: string;
@@ -49,12 +51,6 @@ interface ConvRow {
 
 const ALL_COLUMNS = ['Partner', 'Offer', 'Advertiser', 'Payload', 'Conversion ID', 'Transaction ID', 'Status', 'CV Method', 'Revenue', 'Payout'] as const;
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const date = `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${d.getUTCFullYear()}`;
-  const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
-  return `${date} ${time}`;
-}
 /** A conversion's money in its own currency (USD when the row has none). */
 function convMoney(v: string | null, currency: string | null): string {
   return v == null ? DASH : money(Number(v), currency || 'USD');
@@ -76,7 +72,7 @@ const URL_FILTER_PARAMS: [category: string, param: string][] = [
 ];
 
 /** Applied report state from the URL (deep links). */
-function readInitialState() {
+function readInitialState(zone: ZoneDays) {
   const sp = new URLSearchParams(window.location.search);
   const filters: FilterValues = {};
   for (const [cat, param] of URL_FILTER_PARAMS) {
@@ -84,11 +80,14 @@ function readInitialState() {
     if (cat === 'method' && !METHOD_OPTIONS.some((o) => o.value === ids[0])) continue; // never 'manual'
     if (ids.length) filters[cat] = ids;
   }
-  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+  return { from: readUrlDate(sp, 'from', zone.daysAgo(7)), to: readUrlDate(sp, 'to', zone.today()), filters };
 }
 
 export default function AdvertiserPostbackReport() {
-  const [init] = useState(readInitialState);
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [init] = useState(() => readInitialState(zone));
   // Dates apply on their own once they form a valid range; filters apply immediately and return to
   // page 1.
   const range = useAutoDateRange(init.from, init.to);
@@ -144,7 +143,7 @@ export default function AdvertiserPostbackReport() {
 
   // Only accepted /api/reports/conversions keys (the endpoint rejects anything else with 422).
   const baseParams = {
-    from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    ...zone.range(appliedFrom, appliedTo),
     offerId: offerIdFilter, publisherId: publisherIdFilter, advertiserId: advertiserIdFilter, source: methodFilter,
     // Manual (admin-entered) conversions aren't advertiser postbacks — excluded server-side so paging stays exact.
     excludeSource: methodFilter ? undefined : 'manual',
@@ -165,11 +164,11 @@ export default function AdvertiserPostbackReport() {
   }), [pageRows, q, offerMap, pubMap, advMap]);
 
   // Reset dates and filters in one render → one request.
-  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
+  const clearAll = () => { range.reset({ from: zone.daysAgo(7), to: zone.today() }); setFilters({}); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: ConvRow) => ({
-    date: formatDate(r.created_at),
+    date: formatMdyDateTime(r.created_at, zone.tz),
     partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     offer: offerMap.get(r.offer_id) ?? r.offer_id,
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
@@ -201,7 +200,7 @@ export default function AdvertiserPostbackReport() {
             )}
           </FiltersButton>
         </>}>
-          <DateRangeField idPrefix="advertiser-postback-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="advertiser-postback-report" from={from} to={to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
@@ -254,7 +253,7 @@ export default function AdvertiserPostbackReport() {
               <table className="premium-table">
                 <thead>
                   <tr>
-                    <th >Date</th>
+                    <th title={zone.tz}>Date <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
                     {shown.has('Partner') && <th >Partner</th>}
                     {shown.has('Offer') && <th >Offer</th>}
                     {shown.has('Advertiser') && <th >Advertiser</th>}
@@ -270,7 +269,7 @@ export default function AdvertiserPostbackReport() {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.conversion_id} className="hover:bg-accent-subtle/40">
-                      <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
+                      <td className="font-medium text-fg">{formatMdyDateTime(r.created_at, zone.tz)}</td>
                       {shown.has('Partner') && <td className="px-4 py-3">{r.publisher_id ? <Link to={`/app/publishers/${r.publisher_id}`} className="text-accent-text hover:underline">{pubMap.get(r.publisher_id) ?? r.publisher_id}</Link> : DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
                       {shown.has('Advertiser') && <td className="px-4 py-3">{r.advertiser_id ? <Link to={`/app/advertisers/${r.advertiser_id}`} className="text-accent-text hover:underline">{advMap.get(r.advertiser_id) ?? r.advertiser_id}</Link> : DASH}</td>}

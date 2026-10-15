@@ -36,7 +36,7 @@ import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-co
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
@@ -61,6 +61,8 @@ import {
 } from '../../../lib/reportCurrency';
 import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
 import { FLEX_COLUMN_SORT, flexExportRow, flexOrderBy, type FlexOrderMetric } from '../../../lib/flexReport';
+import { bucketLabel } from '../../../lib/reportTime';
+import { useReportZone, type ZoneDays } from '../../../lib/useReportZone';
 
 interface SmartLink { id: string; name: string }
 
@@ -95,7 +97,7 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'publisher') { const m = opts.pubMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
-  return uaDimensionLabel(dim, id);
+  return uaDimensionLabel(dim, bucketLabel(dim, id)); // Day / Hour: the bucket's own local day / hour
 }
 
 function linkFor(dim: DimKey, id: string): string | null {
@@ -133,7 +135,7 @@ const DEFAULT_DIMS: DimKey[] = ['offer', 'publisher'];
  * `f.*`/`x.*`, `mf.*`, `ignoreFail`, `orderBy`/`orderDir`) plus the legacy deep-link ids the
  * Offer/Partner/Advertiser/Smart Link/Event report pages send ("Open Flex Report").
  */
-function readFlexUrl() {
+function readFlexUrl(zone: ZoneDays) {
   const sp = new URLSearchParams(window.location.search);
   const filters = readUrlFilters(sp, 'f');
   const deepLinks: [string, string[]][] = [
@@ -144,8 +146,8 @@ function readFlexUrl() {
   ];
   for (const [k, ids] of deepLinks) if (ids.length && !filters[k]?.length) filters[k] = ids;
   const urlDims = (sp.get('dims') ?? '').split(',').filter((d): d is DimKey => DIM_OPTIONS.some((o) => o.key === d));
-  let from = readUrlDate(sp, 'from', daysAgo(7));
-  const to = readUrlDate(sp, 'to', todayStr());
+  let from = readUrlDate(sp, 'from', zone.daysAgo(7));
+  const to = readUrlDate(sp, 'to', zone.today());
   if (from > to) from = to;
   return {
     from, to, filters,
@@ -163,7 +165,10 @@ export default function FlexReport() {
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks?.map((s: { value: string; label: string }) => [s.value, s.label]) ?? []), [opts.smartLinks]);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const [init] = useState(readFlexUrl);
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [init] = useState(() => readFlexUrl(zone));
   // Dates apply on their own once they form a valid range (see useAutoDateRange); columns, Reporting
   // Filters and sort apply immediately and return to page 1. `page` lives with the range, so a new
   // range and the page reset land in one render (one request).
@@ -263,7 +268,7 @@ export default function FlexReport() {
   const currency = settings?.general?.defaultCurrency ?? 'USD';
 
   const groupByStr = dims.join(',');
-  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics('clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics('clicks,unique_clicks,invalid_clicks,conversions,total_conversions,payout,revenue,margin,avg_fraud_score'), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -283,7 +288,7 @@ export default function FlexReport() {
   const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   const chronological = appliedFrom !== appliedTo;
-  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   // Every day in range, 200 per request up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request
   // kept only the oldest 200 active days and silently dropped the newer ones.
   const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null);
@@ -301,7 +306,7 @@ export default function FlexReport() {
 
   const tableQsFor = (limit: number, offset: number) => qs({
     groupBy: groupByStr, metrics: withCurrenciesMetric(METRICS_PARAM),
-    from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
+    ...zone.range(appliedFrom, appliedTo), ...dimParams,
     orderBy, orderDir, limit, offset,
   });
   const tableQs = tableQsFor(pageSize, (page - 1) * pageSize);
@@ -335,7 +340,7 @@ export default function FlexReport() {
   // Reset dates, columns and every Reporting Filter in one render → one request per query. The
   // debounced range catches up to the same values later and is then a no-op.
   const clearAll = () => {
-    range.reset({ from: daysAgo(7), to: todayStr() });
+    range.reset({ from: zone.daysAgo(7), to: zone.today() });
     setDims(DEFAULT_DIMS); setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
   };
   const toggleSort = (m: OrderMetric) => {
@@ -435,7 +440,7 @@ export default function FlexReport() {
             )}
           </div>
         </>}>
-          <DateRangeField idPrefix="flex-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="flex-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
           <ControlField label="Columns" htmlFor="flex-report-columns" className="w-full sm:w-auto">
             <div className="flex flex-wrap items-center gap-2">

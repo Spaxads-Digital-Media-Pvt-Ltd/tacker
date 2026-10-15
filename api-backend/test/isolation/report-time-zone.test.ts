@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { formatInZone, zonedDayStart, inclusiveBefore, localDate, addDays, isValidTimeZone } from '../../src/lib/reporting/time-zone.js';
-import { buildReportRequest, reportQuerySchema } from '../../src/lib/reporting/request.js';
+import { buildReportRequest, reportQuerySchema, zonedRange, withZonedRange } from '../../src/lib/reporting/request.js';
 import { rollupEligible } from '../../src/lib/reporting/postgres.js';
 import type { ReportRequest } from '../../src/lib/reporting/types.js';
 
@@ -66,6 +66,20 @@ describe('buildReportRequest with tz', () => {
 
   it('an unknown zone is refused', () => {
     expect(reportQuerySchema.safeParse({ tz: 'Mars/Olympus' }).success).toBe(false);
+  });
+});
+
+describe('zonedRange — one rule for every report endpoint (D7)', () => {
+  it("a plain date is a whole local day of the zone; UTC when no zone; datetimes as given", () => {
+    expect(zonedRange('2026-10-13', '2026-10-13', 'Asia/Kolkata')).toEqual({ from: '2026-10-12T18:30:00.000Z', to: '2026-10-13T18:29:59.999999Z' });
+    expect(zonedRange('2026-03-08', '2026-03-08', 'America/New_York')).toEqual({ from: '2026-03-08T05:00:00.000Z', to: '2026-03-09T03:59:59.999999Z' }); // a 23-hour day
+    expect(zonedRange('2026-10-13', '2026-10-14', undefined)).toEqual({ from: '2026-10-13T00:00:00.000Z', to: '2026-10-14T23:59:59.999999Z' });
+    expect(zonedRange('2026-10-13', '2026-10-14', 'UTC')).toEqual(zonedRange('2026-10-13', '2026-10-14', undefined));
+    expect(zonedRange('2026-10-13T05:00:00Z', '2026-10-13T06:00:00Z', 'Asia/Kolkata')).toEqual({ from: '2026-10-13T05:00:00Z', to: '2026-10-13T06:00:00Z' });
+    expect(zonedRange(undefined, undefined, 'Asia/Kolkata')).toEqual({});
+  });
+  it('withZonedRange keeps the rest of a parsed query', () => {
+    expect(withZonedRange({ from: '2026-10-13', tz: 'Asia/Kolkata', offerId: 'x' })).toEqual({ from: '2026-10-12T18:30:00.000Z', tz: 'Asia/Kolkata', offerId: 'x' });
   });
 });
 

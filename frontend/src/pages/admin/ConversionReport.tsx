@@ -37,7 +37,7 @@ import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { countryName, countryOptions, regionName, useRegions } from '../../data/geo';
 import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
@@ -45,8 +45,7 @@ import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import { formatDateTime } from '../../lib/datetime';
-import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZone';
-import { useReportTimeZone } from '../../lib/useReportTimeZone';
+import { useReportZone } from '../../lib/useReportZone';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
 import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta } from '../../lib/conversionReport';
@@ -137,18 +136,24 @@ function readInitialState() {
     if (cat === 'status' && !STATUS_OPTIONS.some((o) => o.value === ids[0])) continue;
     if (ids.length) filters[cat] = ids;
   }
-  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+  // '' = the report zone's default range, filled in by the page (it knows the zone).
+  return { from: readUrlDate(sp, 'from', ''), to: readUrlDate(sp, 'to', ''), filters };
 }
 
 export default function ConversionReport() {
   const [init] = useState(readInitialState);
   const [, setSearchParams] = useSearchParams();
+  const [filters, setFilters] = useState<FilterValues>(init.filters);
+  const countryFilter = filters['country']?.[0];
+  // D7: the report's time zone — the network's unless one is picked: its days, "today" and the times
+  // shown (a Country filter adds that country's zones to the picker's suggestions).
+  const zone = useReportZone(countryFilter);
   // Dates apply on their own once they form a valid range (see useAutoDateRange); filters apply
   // immediately and return to page 1.
-  const range = useAutoDateRange(init.from, init.to);
+  const [initRange] = useState(() => ({ from: init.from || zone.daysAgo(7), to: init.to || zone.today() }));
+  const range = useAutoDateRange(initRange.from, initRange.to);
   const { from, to, appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
 
-  const [filters, setFilters] = useState<FilterValues>(init.filters);
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState('');
   const pageSize = 25;
@@ -200,10 +205,7 @@ export default function ConversionReport() {
   const publisherIdFilter = filters['partner']?.[0];
   const statusFilter = filters['status']?.[0];
   const smartLinkIdFilter = filters['smartLink']?.[0];
-  const countryFilter = filters['country']?.[0];
   const deviceFilter = filters['device']?.[0];
-  // Timestamps follow the filtered country's zone (else network/browser) — re-formatting only.
-  const zone = useReportTimeZone(countryFilter);
   const regions = useRegions();
   const formatDate = (iso: string) => formatDateTime(iso, zone.tz);
   const regionLabel = (r: ConvRow) => (r.region ? (regionName(regions, r.region, r.country) ?? r.region) : DASH);
@@ -216,7 +218,7 @@ export default function ConversionReport() {
 
   // Only accepted /api/reports/conversions keys (the endpoint rejects anything else with 422).
   const baseParams = {
-    from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    ...zone.range(appliedFrom, appliedTo),
     offerId: offerIdFilter, publisherId: publisherIdFilter, advertiserId: advertiserIdFilter, status: statusFilter,
     smartLinkId: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
   };
@@ -248,7 +250,7 @@ export default function ConversionReport() {
 
   // Reset dates and filters in one render → one request. The debounced range catches up to the same
   // values later and is then a no-op.
-  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
+  const clearAll = () => { range.reset({ from: zone.daysAgo(7), to: zone.today() }); setFilters({}); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: ConvRow) => ({
@@ -290,13 +292,11 @@ export default function ConversionReport() {
             )}
           </FiltersButton>
         </>}>
-          <DateRangeField idPrefix="conversion-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="conversion-report" from={from} to={to} max={zone.today()} invalid={range.problem !== null} zone={zone}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
         <ResultsBar title="Detailed Report" loading={loading} actions={<>
-          {/* min-w-0 / max-w: the long "Auto — …" option text truncates instead of stretching the bar. */}
-          <div className="min-w-0 max-w-full"><TimeZoneSelect zone={zone} selectClassName={`${CONTROL} min-w-0 max-w-full text-small sm:max-w-[22rem]`} /></div>
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"

@@ -20,19 +20,8 @@ import {
   combineCurrencies, comparePeriods, currenciesOf, mixedTitle, moneyRowComparator, moneyText, parseMoneyByCurrency, resolveCurrency,
   showSortedWithinNote, SORTED_WITHIN_CURRENCY_NOTE, withCurrenciesMetric, type MoneyField, type MoneyText, type RowCurrency,
 } from '../lib/reportCurrency';
+import { useReportZone } from '../lib/useReportZone';
 
-function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 /**
  * Role-aware overview. Admins get the full Everflow-style "Today's Stats" board (KPI cards +
@@ -178,7 +167,10 @@ function CustomizeCards({ visible, onChange }: { visible: Record<SectionId, bool
 
 function AdminDashboard({ name }: { name: string }) {
   const navigate = useNavigate();
-  const { data: raw, loading, error } = withMock(useQuery<DashboardResponse>('/api/reports/dashboard'), import.meta.env.DEV ? MOCK_DASHBOARD : null);
+  // D7: the tiles' today / yesterday / month and the report links are the report zone's days (the
+  // network's unless the viewer picked another on a report page).
+  const zone = useReportZone();
+  const { data: raw, loading, error } = withMock(useQuery<DashboardResponse>(`/api/reports/dashboard?${new URLSearchParams({ tz: zone.tz }).toString()}`), import.meta.env.DEV ? MOCK_DASHBOARD : null);
   const data = useMemo(() => (raw ? plotSeries(raw) : null), [raw]);
   // Money without a currency of its own (no conversions, older API) is in the network's default.
   const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
@@ -186,8 +178,8 @@ function AdminDashboard({ name }: { name: string }) {
   const offers = useQuery<Offer[]>('/api/offers');
   const pubs = useQuery<Publisher[]>('/api/publishers');
   const advs = useQuery<Advertiser[]>('/api/advertisers');
-  const from = daysAgo(7);
-  const to = todayStr();
+  const from = zone.daysAgo(7);
+  const to = zone.today();
 
   const goToReport = (kind: 'revenue' | 'clicks' | 'cr' | 'payout' | 'margin' | 'conversions') => {
     const params = new URLSearchParams({ from, to });

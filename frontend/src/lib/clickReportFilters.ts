@@ -360,13 +360,12 @@ export function untrackedToggleLabel(count: number, open: boolean): string {
 
 // ── Group By mode ──────────────────────────────────────────────────────────────────────────────
 /**
- * Header for the grouped table's dimension column. Day groups are UTC calendar days (the API buckets
- * by `date_trunc('day', created_at, 'UTC')`, and the date range is UTC days too) — the label says so,
- * since the individual-clicks mode re-formats times into the selected display zone.
+ * Header for the grouped table's dimension column. Day groups are calendar days of the report's time
+ * zone (D7 — the API buckets in it, and the date range is its days too); the label names the zone.
  */
-export function groupDimensionHeader(groupBy: string, label: string): { label: string; title?: string } {
+export function groupDimensionHeader(groupBy: string, label: string, zone = 'UTC'): { label: string; title?: string } {
   return groupBy === 'day'
-    ? { label: `${label} (UTC)`, title: 'Each row is one UTC calendar day — the display timezone does not re-bucket groups' }
+    ? { label: `${label} (${zone})`, title: `Each row is one calendar day in the report's time zone (${zone})` }
     : { label };
 }
 

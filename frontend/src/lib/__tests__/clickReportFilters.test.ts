@@ -211,9 +211,10 @@ describe('chips', () => {
 });
 
 describe('Group By mode labels', () => {
-  it('Day groups are labelled as UTC days (the API buckets by UTC day); other dimensions keep their label', () => {
+  it("Day groups are labelled with the report's zone (the API buckets by its days); other dimensions keep their label", () => {
     assert.deepStrictEqual(groupDimensionHeader('day', 'Day').label, 'Day (UTC)');
-    assert.match(groupDimensionHeader('day', 'Day').title ?? '', /UTC calendar day/);
+    assert.deepStrictEqual(groupDimensionHeader('day', 'Day', 'IST').label, 'Day (IST)');
+    assert.match(groupDimensionHeader('day', 'Day', 'IST').title ?? '', /calendar day in the report's time zone \(IST\)/);
     for (const [g, l] of [['offer', 'Offer'], ['publisher', 'Partner'], ['country', 'Country'], ['device', 'Device']] as const) {
       assert.deepStrictEqual(groupDimensionHeader(g, l), { label: l });
     }

@@ -40,6 +40,9 @@ const DIM_POLICY: Record<ReportAudience, Dimension[]> = {
   advertiser: ['offer', 'country', 'device', 'city', 'region', 'isp', 'browser', 'os', 'day', 'hour'], // no publisher (identifying)
 };
 
+/** `?tz=` on report endpoints: an IANA zone name (D7 — the SPA sends the network's, or the one picked). */
+export const tzParam = z.string().max(64).refine(isValidTimeZone, { message: 'must be an IANA time zone, e.g. Asia/Kolkata' });
+
 const MAX_GROUP_BY = 4;
 const MAX_VALUES = 200;
 
@@ -99,7 +102,7 @@ export const reportQuerySchema = z.object({
   orderBy: z.string().max(40).optional(),
   orderDir: z.enum(['asc', 'desc']).optional(),
   // F-20: bucket `day` / `hour` (and read a plain-date from/to) in this IANA zone; default UTC.
-  tz: z.string().max(64).refine(isValidTimeZone, { message: 'must be an IANA time zone, e.g. Asia/Kolkata' }).optional(),
+  tz: tzParam.optional(),
 }).refine((q) => !q.from || !q.to || Date.parse(q.from) <= Date.parse(inclusiveTo(q.to)), { message: '`from` must not be after `to`', path: ['from'] });
 
 type RawQuery = z.infer<typeof reportQuerySchema>;
@@ -122,6 +125,24 @@ export function inclusiveTo(to: string | undefined): string | undefined {
   if (to == null) return to;
   return /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999999Z` : to;
 }
+
+/**
+ * A report's from / to as the bounds queries compare `created_at` with: a plain date (YYYY-MM-DD) is a
+ * whole local day of `tz` — `from` its first instant, `to` its last (inclusive) — UTC when `tz` is
+ * unset; a datetime is taken as given. One rule for every report endpoint (D7).
+ */
+export function zonedRange(from: string | undefined, to: string | undefined, tz: string | undefined): { from?: string; to?: string } {
+  const zone = tz && !isUtcZone(tz) ? tz : undefined;
+  const plainDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  return {
+    ...(from ? { from: zone && plainDate(from) ? zonedDayStart(from, zone).toISOString() : utcDayStart(from)! } : {}),
+    ...(to ? { to: zone && plainDate(to) ? inclusiveBefore(zonedDayStart(addDays(to, 1), zone)) : inclusiveTo(to) } : {}),
+  };
+}
+
+/** Applies `zonedRange` to a parsed query that has from / to / tz (detail-report schemas' transform). */
+export const withZonedRange = <T extends { from?: string | undefined; to?: string | undefined; tz?: string | undefined }>(q: T): T =>
+  ({ ...q, ...zonedRange(q.from, q.to, q.tz) });
 
 function csv<T extends string>(value: string | undefined, allowed: T[]): T[] {
   if (!value) return [];
@@ -172,9 +193,7 @@ export function buildReportRequest(
   // A plain date is a day of the report's time zone (UTC unless `tz` names another); a datetime is
   // taken as given.
   const tz = raw.tz && !isUtcZone(raw.tz) ? raw.tz : undefined;
-  const plainDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
-  const from = raw.from && tz && plainDate(raw.from) ? zonedDayStart(raw.from, tz).toISOString() : utcDayStart(raw.from);
-  const to = raw.to && tz && plainDate(raw.to) ? inclusiveBefore(zonedDayStart(addDays(raw.to, 1), tz)) : inclusiveTo(raw.to);
+  const { from, to } = zonedRange(raw.from, raw.to, tz);
   const user: ReportFilters = {
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),

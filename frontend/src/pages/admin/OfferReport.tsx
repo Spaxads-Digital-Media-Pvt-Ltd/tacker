@@ -29,7 +29,7 @@ import { type FilterCategory, type FilterValues } from '../../shared-components/
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters,
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
@@ -55,6 +55,8 @@ import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import { exactMoney, offerDisplay } from '../../lib/offerReport';
+import { useReportZone } from '../../lib/useReportZone';
+import { zoneRangeParams } from '../../lib/reportZone';
 
 const ALL_COLUMNS = [
   'Clicks', 'Uniq. Clicks', 'Dup. Clicks', 'Invalid Clicks', 'Total CV', 'CV', 'Throttle', 'Events',
@@ -110,7 +112,7 @@ const NO_OFFER = '(No offer)';
 const NO_PARTNER = '(No partner)';
 
 interface PartnerRow { publisherId: string | null; publisherName: string; derived: DerivedRow; rc: RowCurrency }
-function ExpandedPartnerRows({ offerId, colSpanBefore, shown, dimParams, from, to, currency }: { offerId: string; colSpanBefore: number; shown: Set<string>; dimParams: Record<string, string | number | undefined>; from: string; to: string; currency: string }) {
+function ExpandedPartnerRows({ offerId, colSpanBefore, shown, dimParams, from, to, tz, currency }: { offerId: string; colSpanBefore: number; shown: Set<string>; dimParams: Record<string, string | number | undefined>; from: string; to: string; tz: string; currency: string }) {
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   // Same date range + filters as the parent table; the row's own offer is set last so a page-level
   // Offer filter can't override it.
@@ -118,10 +120,11 @@ function ExpandedPartnerRows({ offerId, colSpanBefore, shown, dimParams, from, t
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(dimParams)) if (v !== undefined && v !== '') p.set(k, String(v));
     p.set('groupBy', 'publisher'); p.set('metrics', withCurrenciesMetric(METRICS_PARAM));
-    p.set('from', toIso(from)); p.set('to', toIso(to, true)); p.set('limit', '200');
+    for (const [k, v] of Object.entries(zoneRangeParams(from, to, tz))) p.set(k, v);
+    p.set('limit', '200');
     p.set('offerId', offerId);
     return p.toString();
-  }, [offerId, dimParams, from, to]);
+  }, [offerId, dimParams, from, to, tz]);
   const { data, loading } = useQuery<AggResult>(`/api/reports?${qs}`);
   const rows: PartnerRow[] = useMemo(() => (data?.rows ?? []).map((r) => {
     const id = r.dimensions['publisher'] ?? null;
@@ -277,7 +280,10 @@ export default function OfferReport() {
   // Dates apply on their own once they form a valid range (see useAutoDateRange); everything else
   // applies immediately and returns to page 1. `page` lives with the range, so a new range and the
   // page reset land in one render (one request).
-  const [initRange] = useState(() => ({ from: readUrlDate(searchParams, 'from', daysAgo(30)), to: readUrlDate(searchParams, 'to', todayStr()) }));
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [initRange] = useState(() => ({ from: readUrlDate(searchParams, 'from', zone.daysAgo(30)), to: readUrlDate(searchParams, 'to', zone.today()) }));
   const range = useAutoDateRange(initRange.from, initRange.to);
   const { appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
   // `f.offer` wins; the legacy `offerId` (or `offer`) deep-link param is the fallback.
@@ -402,7 +408,7 @@ export default function OfferReport() {
 
   // Summary tiles: one exact grand-total row (groupBy=none) — summing the top-N grouped rows
   // undercounted as soon as there were more groups than the page limit.
-  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -422,7 +428,7 @@ export default function OfferReport() {
   // …and, when mixed, its per-currency amounts (newer API) for the Payout/Revenue/Profit tiles.
   const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
-  const graphQs = qs({ groupBy: 'day', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const graphQs = qs({ groupBy: 'day', metrics: withCurrenciesMetric('clicks,revenue'), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   // Every day in range, 200 per request up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request
   // kept only the oldest 200 active days and silently dropped the newer ones.
   const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null);
@@ -439,7 +445,7 @@ export default function OfferReport() {
 
   const tableParams = {
     groupBy: 'offer', metrics: withCurrenciesMetric(METRICS_PARAM),
-    from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
+    ...zone.range(appliedFrom, appliedTo), ...dimParams,
     orderBy, orderDir,
   };
   const tableQs = qs({ ...tableParams, limit: pageSize, offset: (page - 1) * pageSize });
@@ -472,7 +478,7 @@ export default function OfferReport() {
   // Reset dates and every Reporting Filter in one render → one request per query. The debounced
   // range catches up to the same values later and is then a no-op.
   const clearAll = () => {
-    range.reset({ from: daysAgo(30), to: todayStr() });
+    range.reset({ from: zone.daysAgo(30), to: zone.today() });
     setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
   };
 
@@ -596,7 +602,7 @@ export default function OfferReport() {
             </div>
           </div>
         </>}>
-          <DateRangeField idPrefix="offer-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="offer-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
@@ -633,7 +639,7 @@ export default function OfferReport() {
       </div>
 
       <ReportCard>
-        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title={`Report times are UTC. Money is shown in each row’s own currency (network default ${currency} for rows without conversions); rows mixing currencies show Mixed.`}>· UTC · row currency</span></>} loading={loading} actions={<>
+        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title={`Days are calendar days in the report's time zone (${zone.label}). Money is shown in each row’s own currency (network default ${currency} for rows without conversions); rows mixing currencies show Mixed.`}>· {zone.short} · row currency</span></>} loading={loading} actions={<>
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
@@ -734,7 +740,7 @@ export default function OfferReport() {
                               flexHref={flexReportPath({ from: appliedFrom, to: appliedTo, reporting, entity: ['offer', id] })} />
                           </td>
                         </tr>
-                        {expanded.has(id) && <ExpandedPartnerRows offerId={id} colSpanBefore={1} shown={shown} dimParams={dimParams} from={appliedFrom} to={appliedTo} currency={currency} />}
+                        {expanded.has(id) && <ExpandedPartnerRows offerId={id} colSpanBefore={1} shown={shown} dimParams={dimParams} from={appliedFrom} to={appliedTo} tz={zone.tz} currency={currency} />}
                       </Fragment>
                     );
                   })}

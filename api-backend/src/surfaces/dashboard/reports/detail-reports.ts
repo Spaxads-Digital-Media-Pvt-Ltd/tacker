@@ -15,20 +15,25 @@ import { summary24h } from '../../../lib/reporting/summary.js';
 import { badRequest } from '../../../lib/http/errors.js';
 import { csvList, queryDate } from '../../../lib/http/query-params.js';
 import { addMoney } from '../../../lib/money.js';
-import { inclusiveTo, utcDayStart } from '../../../lib/reporting/request.js';
+import { inclusiveTo, utcDayStart, tzParam, withZonedRange } from '../../../lib/reporting/request.js';
 import { redactRawParams, redactUrl } from '../../../lib/reporting/redact.js';
 import { mbcJsonSql, mergeMoneyByCurrency } from '../../../lib/reporting/money-by-currency.js';
 import { money4, MONEY_FIELDS, type MoneyByCurrency } from '../../../lib/reporting/types.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
-import { isValidTimeZone, isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore } from '../../../lib/reporting/time-zone.js';
+import { networkTimeZone } from '../../../lib/reporting/network-zone.js';
+import { isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore, formatInZone } from '../../../lib/reporting/time-zone.js';
 
 /** Admin endpoints: every money field per currency (CTE alias `cm` with columns cur / p / r). */
 const MBC_JSON = mbcJsonSql('cm');
 
-// Date bounds: a date-only `from` is the start of that UTC day and a date-only `to` the END of it
-// (inclusive) — as a bare date `to` meant midnight and silently dropped the last day.
-const fromDate = queryDate.transform((s) => utcDayStart(s)!);
-const toDate = queryDate.transform((s) => inclusiveTo(s));
+// Date bounds (D7): `from` / `to` are plain dates or datetimes, and `?tz=` makes a plain date that
+// zone's local day (else UTC); each schema's `.transform(withZonedRange)` turns them into the instants
+// the queries compare with — a date-only `to` is the END of its day, inclusive (as a bare date it
+// meant midnight and silently dropped the last day).
+const rangeKeys = { from: queryDate.optional(), to: queryDate.optional(), tz: tzParam.optional() };
+// Pacing stays on UTC days: that's when caps reset (tracking/caps.ts).
+const utcFromDate = queryDate.transform((s) => utcDayStart(s)!);
+const utcToDate = queryDate.transform((s) => inclusiveTo(s));
 const uuid = z.string().uuid().optional();
 const DETAIL_PAGE_MAX = 500;
 const pageKeys = {
@@ -89,7 +94,7 @@ function conversionStatusSql(s: ConversionStatus, clickId: string, networkId: st
 // turns any other key into a 422 — a filter that's accepted but silently ignored reads as "applied"
 // to the caller while returning unfiltered data.
 const clicksSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid, advertiserId: uuid,
   ...clickAttrKeys,
   isUnique: z.enum(['true', 'false']).optional(),
@@ -99,11 +104,11 @@ const clicksSchema = z.object({
   ip: ipParam,
   ...clickCaptureKeys,
   ...pageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type ClicksFilters = z.infer<typeof clicksSchema>;
 
 const conversionsSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid, advertiserId: uuid,
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
   event: z.string().max(100).optional(),
@@ -114,15 +119,15 @@ const conversionsSchema = z.object({
   // Applied to the originating click (LEFT JOIN clicks k) — a conversion with no click can't match.
   ...clickAttrKeys,
   ...pageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type ConversionsFilters = z.infer<typeof conversionsSchema>;
 
 const postbackLogsSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid,
   success: z.enum(['true', 'false']).optional(),
   ...pageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type PostbackLogsFilters = z.infer<typeof postbackLogsSchema>;
 
 /** Aggregated endpoints page their groups; default = the max so the common case is one request. */
@@ -131,10 +136,10 @@ const groupPageKeys = {
   offset: z.coerce.number().int().min(0).default(0),
 };
 const goalsSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid,
   ...groupPageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 
 /** One filter → SQL column mapping. `op` defaults to '='; `bool` coerces 'true'/'false'. */
 interface FilterSpec<F> { key: keyof F & string; col: string; op?: '=' | '<>' | '>=' | '<='; bool?: boolean }
@@ -164,8 +169,7 @@ function pagedGroups<T>(rows: T[], total: number, f: { offset: number }) {
 // `.strict()` like the row-level schemas: an unknown filter is a 422, never silently ignored.
 const groupedSchema = z.object({
   groupBy: z.enum(['offer', 'publisher', 'advertiser', 'day', 'country', 'device']).default('offer'),
-  from: fromDate.optional(),
-  to: toDate.optional(),
+  ...rangeKeys,
   // Comma lists (or repeated params). `offerId`/`publisherId`/… singular aliases are what the
   // row-level Click report sends, so the same query string works for both modes.
   offerIds: csvList(z.string().uuid()), offerId: csvList(z.string().uuid()),
@@ -180,7 +184,7 @@ const groupedSchema = z.object({
   ip: ipParam,
   isUnique: z.enum(['true', 'false']).optional(),
   ...clickCaptureKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type Grouped = z.infer<typeof groupedSchema>;
 const merge = (...lists: (string[] | undefined)[]) => Array.from(new Set(lists.flatMap((l) => l ?? [])));
 
@@ -224,15 +228,12 @@ function groupedFilters(networkId: string, f: Grouped, isClicks: boolean) {
 }
 
 const dashboardSchema = z.object({
-  tz: z.string().max(64).refine(isValidTimeZone, { message: 'must be an IANA time zone, e.g. Asia/Kolkata' }).optional(),
+  tz: tzParam.optional(),
 });
 
 /** The report time zone: `?tz=` → the network's (Settings › General) → UTC. */
 async function reportTimeZone(networkId: string, param: string | undefined): Promise<string> {
-  if (param) return param;
-  const { rows } = await query<{ tz: string | null }>(`SELECT settings->'general'->>'timezone' AS tz FROM networks WHERE id = $1`, [networkId]);
-  const tz = rows[0]?.tz;
-  return isValidTimeZone(tz) ? tz : 'UTC';
+  return param ?? networkTimeZone(networkId);
 }
 
 /** The first day of the month before `date`'s (YYYY-MM-DD). */
@@ -247,13 +248,15 @@ export function mountDetailReports(r: Router): void {
     const nid = req.scope!.networkId;
     const f = res.locals.query as Grouped;
 
-    // Aggregate clicks + conversions keyed by the group dimension, then merge in SQL.
+    // Aggregate clicks + conversions keyed by the group dimension, then merge in SQL. Days are the
+    // report zone's (`?tz=`, D7), UTC when unset.
+    let dayZone = `'UTC'`;
     const dim = (alias: string): string => {
       switch (f.groupBy) {
         case 'offer': return `COALESCE(${alias}.offer_id::text, '~none~')`;
         case 'publisher': return `COALESCE(${alias}.publisher_id::text, '~none~')`;
         case 'advertiser': return alias === 'c' ? `COALESCE(o.advertiser_id::text, '~none~')` : `COALESCE(v.advertiser_id::text, '~none~')`;
-        case 'day': return `to_char(date_trunc('day', ${alias}.created_at, 'UTC'), 'YYYY-MM-DD')`;
+        case 'day': return `to_char(date_trunc('day', ${alias}.created_at, ${dayZone}), 'YYYY-MM-DD')`;
         case 'country': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.country, '—')`;
         case 'device': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.device, '—')`;
       }
@@ -271,6 +274,7 @@ export function mountDetailReports(r: Router): void {
     const vWhere = vf.where.replace(/\$(\d+)/g, (_, n) => { const k = Number(n); return k === 1 ? '$1' : `$${k + shift - 1}`; });
     const vParams = vf.params.slice(1); // drop duplicate networkId
     const params = [...cf.params, ...vParams];
+    if (f.groupBy === 'day' && !isUtcZone(f.tz)) { params.push(f.tz); dayZone = `$${params.length}::text`; }
 
     const sql = `
       WITH cl AS (
@@ -647,8 +651,8 @@ export function mountDetailReports(r: Router): void {
   // omitted rather than faked). Summary is a network-wide snapshot (today + all-time); Detail is a
   // real per-day, per-entity breakdown for the requested date range and category.
   const pacingSchema = z.object({
-    from: fromDate.optional(),
-    to: toDate.optional(),
+    from: utcFromDate.optional(),
+    to: utcToDate.optional(),
     category: z.enum(['click', 'conversion', 'payout', 'revenue']).default('conversion'),
     // Detail rows for one offer (payout/revenue: the offer groups that contain it).
     offerId: uuid,
@@ -837,8 +841,9 @@ export function mountDetailReports(r: Router): void {
   // nonzero) and a cell renders as "—" (not 0) when day N hasn't happened yet relative to today —
   // e.g., a cohort from yesterday can only ever show a real Day 1 value so far.
   const cohortSchema = z.object({
-    from: fromDate,
-    to: toDate,
+    from: queryDate,
+    to: queryDate,
+    tz: tzParam.optional(),
     topLevelMetric: z.enum(['clicks', 'unique_clicks']).default('clicks'),
     metric: z.enum(['conversions', 'payout', 'revenue']).default('conversions'),
     offerId: z.string().uuid().optional(),
@@ -847,7 +852,7 @@ export function mountDetailReports(r: Router): void {
     smartLinkId: z.string().uuid().optional(),
     country: z.string().max(3).optional(),
     device: z.string().max(30).optional(),
-  });
+  }).transform(withZonedRange);
   r.get('/cohort', validateQuery(cohortSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof cohortSchema>;
@@ -859,9 +864,13 @@ export function mountDetailReports(r: Router): void {
     add(f.smartLinkId, 'cl.smart_link_id'); add(f.country, 'cl.country'); add(f.device, 'cl.device');
     let advertiserJoin = '';
     if (f.advertiserId) { advertiserJoin = 'JOIN offers o ON o.id = cl.offer_id AND o.network_id = cl.network_id'; params.push(f.advertiserId); clickWhere.push(`o.advertiser_id = $${params.length}`); }
+    // Cohort days are the report zone's (`?tz=`, D7), UTC when unset — every query below uses it.
+    const zone = isUtcZone(f.tz) ? 'UTC' : f.tz!;
+    params.push(zone);
+    const tzRef = `$${params.length}::text`;
 
     const { rows: clickRows } = await query<{ cohort_day: string; clicks: number; unique_clicks: number }>(
-      `SELECT date_trunc('day', cl.created_at, 'UTC') AS cohort_day, COUNT(*)::int AS clicks,
+      `SELECT date_trunc('day', cl.created_at, ${tzRef}) AS cohort_day, COUNT(*)::int AS clicks,
               COUNT(*) FILTER (WHERE cl.is_unique)::int AS unique_clicks
          FROM clicks cl ${advertiserJoin}
         WHERE ${clickWhere.join(' AND ')}
@@ -875,7 +884,7 @@ export function mountDetailReports(r: Router): void {
         WHERE c.status = 'approved' AND c.created_at >= k.created_at AND ${clickWhere.join(' AND ').replace(/cl\./g, 'k.')}`;
     const moneyMetric = f.metric === 'payout' || f.metric === 'revenue' ? f.metric : null;
     const [{ rows: convRows }, curRows] = await Promise.all([query<{ cohort_day: string; day_offset: number; value: string; currencies: string[] | null }>(
-      `SELECT date_trunc('day', k.created_at, 'UTC') AS cohort_day,
+      `SELECT date_trunc('day', k.created_at, ${tzRef}) AS cohort_day,
               (floor(EXTRACT(EPOCH FROM (c.created_at - k.created_at)) / 86400)::int + 1) AS day_offset,
               COALESCE(${convCol}, 0)::numeric(14,4) AS value,
               array_agg(DISTINCT c.currency) FILTER (WHERE c.currency IS NOT NULL) AS currencies
@@ -887,7 +896,7 @@ export function mountDetailReports(r: Router): void {
     // money can be read per currency instead of as one mixed sum.
     moneyMetric
       ? query<{ cohort_day: string; day_offset: number; cur: string; amount: string }>(
-        `SELECT date_trunc('day', k.created_at, 'UTC') AS cohort_day,
+        `SELECT date_trunc('day', k.created_at, ${tzRef}) AS cohort_day,
                 (floor(EXTRACT(EPOCH FROM (c.created_at - k.created_at)) / 86400)::int + 1) AS day_offset,
                 c.currency AS cur, COALESCE(SUM(c.${moneyMetric}), 0)::numeric(14,4)::text AS amount
            ${convFrom} AND c.currency IS NOT NULL
@@ -935,7 +944,9 @@ export function mountDetailReports(r: Router): void {
         const m = moneyByDay.get(cohortMs)?.get(n);
         if (elapsed && m) cellMoney.push(m);
       }
-      return { date: new Date(cohortMs).toISOString(), topLevel: f.topLevelMetric === 'unique_clicks' ? r.unique_clicks : r.clicks, days, currencies: [...currencies].sort(), moneyByCurrency: mergeMoneyByCurrency(cellMoney) };
+      // The cohort's day as local wall time with its offset in a non-UTC zone ('2026-10-13T00:00:00+05:30').
+      const date = zone === 'UTC' ? new Date(cohortMs).toISOString() : formatInZone(new Date(cohortMs), zone);
+      return { date, topLevel: f.topLevelMetric === 'unique_clicks' ? r.unique_clicks : r.clicks, days, currencies: [...currencies].sort(), moneyByCurrency: mergeMoneyByCurrency(cellMoney) };
     });
 
     sendOk(res, {
@@ -950,15 +961,14 @@ export function mountDetailReports(r: Router): void {
   // (INNER JOIN on click_id) — an offline/manual conversion has no click to measure a delta from,
   // so it's honestly excluded rather than bucketed as instant.
   const mttiSchema = z.object({
-    from: fromDate.optional(),
-    to: toDate.optional(),
+    ...rangeKeys,
     groupBy: z.enum(['offer', 'publisher']).default('offer'),
     offerId: z.string().uuid().optional(),
     // Conversion status measured; absent = approved (the original behaviour), `all` = every status.
     // No source filter: a manual/offline conversion with a resolvable click is measured like any other.
     status: z.enum(['approved', 'pending', 'rejected', 'all']).optional(),
     ...groupPageKeys,
-  }).strict();
+  }).strict().transform(withZonedRange);
   r.get('/click-to-conversion-time', validateQuery(mttiSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof mttiSchema>;
@@ -1026,14 +1036,14 @@ export function mountDetailReports(r: Router): void {
   const funnelSchema = z.object({
     offerId: z.string().uuid(),
     goalIds: z.string().min(1).refine((v) => v.split(',').map((s) => s.trim()).filter(Boolean).every((s) => z.string().uuid().safeParse(s).success), { message: 'must be comma-separated event UUIDs' }),
-    from: fromDate, to: toDate,
+    from: queryDate, to: queryDate, tz: tzParam.optional(),
     childDim: z.enum(funnelChildDims).optional(),
     publisherId: z.string().uuid().optional(),
     country: z.string().max(3).optional(),
     device: z.string().max(40).optional(),
     sub1: z.string().max(200).optional(), sub2: z.string().max(200).optional(), sub3: z.string().max(200).optional(),
     sub4: z.string().max(200).optional(), sub5: z.string().max(200).optional(),
-  });
+  }).transform(withZonedRange);
   r.get('/funnel', validateQuery(funnelSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof funnelSchema>;

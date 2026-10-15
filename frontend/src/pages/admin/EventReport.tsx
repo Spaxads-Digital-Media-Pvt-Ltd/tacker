@@ -31,7 +31,7 @@ import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, Pagination, RowKebabMenu, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, Pagination, RowKebabMenu, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Offer, Publisher } from '../../types';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
@@ -43,6 +43,7 @@ import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/re
 import { goalRowKey, isUnmatchedGoalRow, UNMATCHED_GOAL_TITLE } from '../../lib/goalRows';
 import { parseMoneyByCurrency, resolveCurrency, withRowCurrency, type MoneyField, type RowCurrency } from '../../lib/reportCurrency';
 import { Money, MixedMoney } from '../../shared-components/primitives/ReportMoney';
+import { useReportZone, type ZoneDays } from '../../lib/useReportZone';
 
 interface GoalRow {
   goal: string; offer_id: string; conversions: number; payout: string; revenue: string; margin: string;
@@ -63,14 +64,14 @@ interface GoalsResult { rows: GoalRow[]; total: number; truncated: boolean }
 const URL_FILTER_PARAMS: [category: string, param: string][] = [['offer', 'offerId'], ['partner', 'publisherId']];
 
 /** Applied report state from the URL (reload / shared link / "Open … Report" deep links). */
-function readInitialState() {
+function readInitialState(zone: ZoneDays) {
   const sp = new URLSearchParams(window.location.search);
   const filters: FilterValues = {};
   for (const [cat, param] of URL_FILTER_PARAMS) {
     const ids = readUrlIds(sp, param).slice(0, 1); // single-select per category
     if (ids.length) filters[cat] = ids;
   }
-  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+  return { from: readUrlDate(sp, 'from', zone.daysAgo(7)), to: readUrlDate(sp, 'to', zone.today()), filters };
 }
 
 const ALL_COLUMNS = [
@@ -93,7 +94,10 @@ function RowActionMenu({ offerId, flexHref }: { offerId: string; flexHref: strin
 }
 
 export default function EventReport() {
-  const [init] = useState(readInitialState);
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [init] = useState(() => readInitialState(zone));
   const [, setSearchParams] = useSearchParams();
   // Dates apply on their own once they form a valid range (see useAutoDateRange); filters apply
   // immediately and return to page 1.
@@ -140,7 +144,7 @@ export default function EventReport() {
     return params.toString();
   };
 
-  const baseParams = { from: toIso(appliedFrom), to: toIso(appliedTo, true), offerId: offerIdFilter, publisherId: publisherIdFilter };
+  const baseParams = { ...zone.range(appliedFrom, appliedTo), offerId: offerIdFilter, publisherId: publisherIdFilter };
   const tableQs = qs({ ...baseParams, limit: pageSize, offset: (page - 1) * pageSize });
   // The applied report lives in the URL (replace, not push) so reload / back keep it and the address
   // bar is the shareable link.
@@ -168,7 +172,7 @@ export default function EventReport() {
 
   // Reset dates and filters in one render → one request. The debounced range catches up to the same
   // values later and is then a no-op.
-  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
+  const clearAll = () => { range.reset({ from: zone.daysAgo(7), to: zone.today() }); setFilters({}); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: GoalRow) => withRowCurrency({
@@ -203,7 +207,7 @@ export default function EventReport() {
             )}
           </FiltersButton>
         </>}>
-          <DateRangeField idPrefix="event-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="event-report" from={from} to={to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 

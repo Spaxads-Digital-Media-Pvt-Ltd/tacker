@@ -17,7 +17,7 @@ import { Calendar, CheckCircle2, ShieldAlert, Lock } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Badge, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
-import { daysAgo, todayStr, toIso } from '../../shared-components/primitives/ReportPageKit';
+import { useReportZone } from '../../lib/useReportZone';
 import type { TrackingDomain } from '../../types';
 
 const TABS = ['All Activity', 'Uptime Incidents', 'Reputation Flags', 'Tasks', 'Usage', 'Assignments', 'Mismatches', 'Configuration'] as const;
@@ -41,15 +41,16 @@ function TabBar({ active, onChange }: { active: string; onChange: (t: string) =>
 }
 
 function DateRangePicker({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
+  const zone = useReportZone(); // D7: the dates are the report zone's days
   return (
     <div className="mb-6 flex flex-wrap items-end gap-3">
       <div>
-        <label className="label flex items-center gap-1.5"><Calendar size={13} /> From</label>
+        <label className="label flex items-center gap-1.5"><Calendar size={13} /> From ({zone.short})</label>
         <input type="date" className="input" value={from} max={to} onChange={(e) => onFrom(e.target.value)} />
       </div>
       <div>
-        <label className="label">To</label>
-        <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => onTo(e.target.value)} />
+        <label className="label">To ({zone.short})</label>
+        <input type="date" className="input" value={to} min={from} max={zone.today()} onChange={(e) => onTo(e.target.value)} />
       </div>
     </div>
   );
@@ -62,9 +63,10 @@ interface DomainSummary {
 }
 
 function AllActivityTab({ domainId }: { domainId: string }) {
-  const [from, setFrom] = useState(daysAgo(90));
-  const [to, setTo] = useState(todayStr());
-  const qs = `from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`;
+  const zone = useReportZone(); // D7: the report zone's days
+  const [from, setFrom] = useState(() => zone.daysAgo(90));
+  const [to, setTo] = useState(() => zone.today());
+  const qs = new URLSearchParams(zone.range(from, to)).toString();
   const { data, loading } = useQuery<ActivityEntry[]>(`/api/traffic-health/domains/${domainId}/activity?${qs}`);
   return (
     <div>
@@ -104,8 +106,9 @@ function AllActivityTab({ domainId }: { domainId: string }) {
 
 const INCIDENT_COLUMNS = ['Incident ID', 'Incident Status', 'Incident Type', 'Diagnosis Details', 'Is Action Required?', 'Detected', 'Last Observation', 'Resolution', 'Time to resolution'];
 function UptimeIncidentsTab() {
-  const [from, setFrom] = useState(daysAgo(90));
-  const [to, setTo] = useState(todayStr());
+  const zone = useReportZone(); // D7: the report zone's days
+  const [from, setFrom] = useState(() => zone.daysAgo(90));
+  const [to, setTo] = useState(() => zone.today());
   return (
     <div>
       <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
@@ -115,8 +118,9 @@ function UptimeIncidentsTab() {
 }
 
 function ReputationFlagsTab() {
-  const [from, setFrom] = useState(daysAgo(90));
-  const [to, setTo] = useState(todayStr());
+  const zone = useReportZone(); // D7: the report zone's days
+  const [from, setFrom] = useState(() => zone.daysAgo(90));
+  const [to, setTo] = useState(() => zone.today());
   return (
     <div>
       <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
@@ -134,8 +138,9 @@ function ReputationFlagsTab() {
 
 const TASK_COLUMNS = ['Task ID', 'Task Status', 'Related Incident', 'Instructions', 'Detected', 'Completed'];
 function TasksTab() {
-  const [from, setFrom] = useState(daysAgo(90));
-  const [to, setTo] = useState(todayStr());
+  const zone = useReportZone(); // D7: the report zone's days
+  const [from, setFrom] = useState(() => zone.daysAgo(90));
+  const [to, setTo] = useState(() => zone.today());
   return (
     <div>
       <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
@@ -151,9 +156,10 @@ const USAGE_COLUMNS = [
 ];
 function UsageTab({ domainId }: { domainId: string }) {
   const [view, setView] = useState<'summary' | 'partner' | 'offer'>('summary');
-  const [from, setFrom] = useState(daysAgo(90));
-  const [to, setTo] = useState(todayStr());
-  const qs = `from=${encodeURIComponent(toIso(from))}&to=${encodeURIComponent(toIso(to, true))}`;
+  const zone = useReportZone(); // D7: the report zone's days
+  const [from, setFrom] = useState(() => zone.daysAgo(90));
+  const [to, setTo] = useState(() => zone.today());
+  const qs = new URLSearchParams(zone.range(from, to)).toString();
   const { data: summary, loading } = useQuery<DomainSummary>(`/api/traffic-health/domains/${domainId}/summary?${qs}`);
   const fmt = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString());
   const money = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`);

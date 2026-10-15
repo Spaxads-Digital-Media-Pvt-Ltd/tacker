@@ -13,10 +13,11 @@
 import { pool, query } from '../db/pool.js';
 import { getReportingProvider } from './index.js';
 import { attachLabels } from './labels.js';
-import { isValidTimeZone, isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore } from './time-zone.js';
+import { isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore } from './time-zone.js';
 import { nextCronTime } from '../scheduling/cron.js';
 import { sendTransactionalNow, escapeHtml, networkName, type TransactionalResult } from '../email/transactional.js';
 import { logger } from '../logger.js';
+import { networkTimeZone } from './network-zone.js';
 import { teamMembersByLogin, type TeamMember } from '../auth/team-members.js';
 import type { Dimension, Metric, ReportFilters, ReportRequest, ReportResult } from './types.js';
 
@@ -88,12 +89,7 @@ export const savedReportDto = (r: SavedReportRow, owner?: SavedReportOwnerView |
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
-/** The network's report time zone (Settings › General), UTC when unset. */
-export async function networkTimeZone(networkId: string): Promise<string> {
-  const { rows } = await query<{ tz: string | null }>(`SELECT settings->'general'->>'timezone' AS tz FROM networks WHERE id = $1`, [networkId]);
-  const tz = rows[0]?.tz;
-  return isValidTimeZone(tz) ? tz : 'UTC';
-}
+export { networkTimeZone } from './network-zone.js';
 
 /** The rolling range a scheduled run covers, as of `now` in `tz` (whole local days). */
 export function presetRange(preset: RangePreset, now: Date, tz: string): { from: string; to?: string; label: string } {

@@ -15,15 +15,18 @@
 import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
-import { daysAgo, todayStr } from '../../shared-components/primitives/ReportPageKit';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
+import { useReportZone } from '../../lib/useReportZone';
 
 const COLUMNS = ['SKU / Partner', 'Total CV', 'CV', 'VT CV', 'Throttle', 'Event', 'Gross Sales'];
 
 export default function ProductsReport() {
   // Nothing to fetch, but the range behaves like every other report's (applies on its own, no Run Report).
-  const range = useAutoDateRange(daysAgo(7), todayStr());
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const range = useAutoDateRange(zone.daysAgo(7), zone.today());
 
   return (
     <>
@@ -40,7 +43,7 @@ export default function ProductsReport() {
             </button>
           </span>
         </>}>
-          <DateRangeField idPrefix="products-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="products-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 

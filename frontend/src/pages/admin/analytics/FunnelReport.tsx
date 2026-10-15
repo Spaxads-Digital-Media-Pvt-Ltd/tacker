@@ -34,7 +34,7 @@ import { PageHeader, Spinner, StateBlock } from '../../../shared-components/prim
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  DASH, DEVICE_OPTIONS, daysAgo, todayStr, toIso,
+  DASH, DEVICE_OPTIONS,
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { useReportOpts, type Opts } from '../Reports';
@@ -44,6 +44,7 @@ import { chipsFromValues, withoutValue } from '../../../lib/filterChips';
 import { useAutoDateRange } from '../reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
+import { useReportZone } from '../../../lib/useReportZone';
 
 interface Goal { id: string; name: string; eventName: string | null; isDefault: boolean; sortOrder: number }
 interface FunnelResult { stages: { goalId: string; count: number }[]; breakdown: { key: string; counts: Record<string, number> }[] }
@@ -173,7 +174,10 @@ export default function FunnelReport() {
   // No "Run Report": dates apply on their own once they form a valid range (debounced, see
   // useAutoDateRange); Target / Child / Events / Filters apply immediately. The funnel is requested
   // only while it can run (a Target and at least 2 Events), and reloads once per change after that.
-  const range = useAutoDateRange(daysAgo(30), todayStr());
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const range = useAutoDateRange(zone.daysAgo(30), zone.today());
   const [offerId, setOfferId] = useState<string | null>(null);
   const [childDim, setChildDim] = useState<ChildDim>('publisher');
   const [selectedGoalIds, setSelectedGoalIds] = useState<string[]>([]);
@@ -200,7 +204,7 @@ export default function FunnelReport() {
   const canRun = !!offerId && selectedGoalIds.length >= 2;
   // Dates, pickers and filters reset in one render → at most one request.
   const clearAll = () => {
-    range.reset({ from: daysAgo(30), to: todayStr() });
+    range.reset({ from: zone.daysAgo(30), to: zone.today() });
     setOfferId(null); setChildDim('publisher'); setSelectedGoalIds([]); setFilters({});
   };
 
@@ -210,7 +214,7 @@ export default function FunnelReport() {
     return params.toString();
   };
   const funnelQs = canRun ? qs({
-    offerId: offerId ?? undefined, goalIds: selectedGoalIds.join(','), from: toIso(range.appliedFrom), to: toIso(range.appliedTo, true), childDim,
+    offerId: offerId ?? undefined, goalIds: selectedGoalIds.join(','), ...zone.range(range.appliedFrom, range.appliedTo), childDim,
     publisherId: filters['partner']?.[0], country: filters['country']?.[0], device: filters['device']?.[0],
   }) : '';
   const { data, loading, error } = useQuery<FunnelResult>(canRun ? `/api/reports/funnel?${funnelQs}` : null);
@@ -246,7 +250,7 @@ export default function FunnelReport() {
             <MoreVertical size={15} />
           </button>
         </>}>
-          <DateRangeField idPrefix="funnel-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="funnel-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
           <div>
             <span className="label">Funnel Type</span>

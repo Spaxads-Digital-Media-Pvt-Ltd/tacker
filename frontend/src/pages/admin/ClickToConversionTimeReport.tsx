@@ -32,7 +32,7 @@ import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { type FilterCategory } from '../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, Pagination, RowKebabMenu, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { Pagination, RowKebabMenu, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Offer, Publisher } from '../../types';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
@@ -41,6 +41,8 @@ import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import { C2C_DEFAULT_STATUS, C2C_STATUS_OPTIONS, C2C_STATUS_PARAM, readStatusParam, statusParamValue } from '../../lib/reportStatusFilters';
+import { useReportZone, type ZoneDays } from '../../lib/useReportZone';
+import { zoneRangeParams } from '../../lib/reportZone';
 
 interface BucketRow { key: string; b0: number; b1: number; b2: number; b3: number; b4: number; b5: number; b6: number; total: number }
 /** `total` = number of groups matching; `truncated` = more groups exist beyond limit+offset. */
@@ -56,10 +58,10 @@ function RowActionMenu({ offerId }: { offerId: string }) {
   return <RowKebabMenu items={[{ label: 'View Offer', onClick: () => nav(`/app/offers/${offerId}`) }]} />;
 }
 
-function ExpandedPartnerRows({ offerId, publishers, from, to, status }: { offerId: string; publishers: Publisher[]; from: string; to: string; status: string | undefined }) {
+function ExpandedPartnerRows({ offerId, publishers, from, to, tz, status }: { offerId: string; publishers: Publisher[]; from: string; to: string; tz: string; status: string | undefined }) {
   // Same date range and Conversion Status as the parent row (it used to be all-time).
   const qs = new URLSearchParams({
-    groupBy: 'publisher', offerId, from: toIso(from), to: toIso(to, true), limit: String(GROUP_LIMIT),
+    groupBy: 'publisher', offerId, ...zoneRangeParams(from, to, tz), limit: String(GROUP_LIMIT),
     ...(status ? { [C2C_STATUS_PARAM]: status } : {}),
   }).toString();
   const { data, loading, error } = useQuery<BucketResult>(`/api/reports/click-to-conversion-time?${qs}`);
@@ -90,17 +92,20 @@ const URL_FILTER_PARAMS: [category: string, param: string][] = [['offer', 'offer
 const STATUS_CATEGORY = 'status';
 
 /** Applied report state from the URL (reload / shared link / deep links): dates + the Offer / Status filters. */
-function readInitialState() {
+function readInitialState(zone: ZoneDays) {
   const sp = new URLSearchParams(window.location.search);
   const offerIds = readUrlIds(sp, 'offerId').slice(0, 1); // single-select
   const filters: Record<string, string[]> = offerIds.length ? { offer: offerIds } : {};
   const status = readStatusParam(sp, C2C_STATUS_PARAM, C2C_STATUS_OPTIONS);
   if (status) filters[STATUS_CATEGORY] = [status];
-  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+  return { from: readUrlDate(sp, 'from', zone.daysAgo(7)), to: readUrlDate(sp, 'to', zone.today()), filters };
 }
 
 export default function ClickToConversionTimeReport() {
-  const [init] = useState(readInitialState);
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [init] = useState(() => readInitialState(zone));
   // Dates apply on their own once they form a valid range; the filter applies immediately and
   // returns to page 1.
   const range = useAutoDateRange(init.from, init.to);
@@ -146,7 +151,7 @@ export default function ClickToConversionTimeReport() {
     for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== '') params.set(k, String(v));
     return params.toString();
   };
-  const baseParams = { from: toIso(appliedFrom), to: toIso(appliedTo, true), groupBy: 'offer', offerId: offerIdFilter, [C2C_STATUS_PARAM]: statusFilter };
+  const baseParams = { ...zone.range(appliedFrom, appliedTo), groupBy: 'offer', offerId: offerIdFilter, [C2C_STATUS_PARAM]: statusFilter };
   const tableQs = qs({ ...baseParams, limit: GROUP_LIMIT });
   // Every offer group matching the applied filters (pages past the 500 the table loads).
   const runExport = (format: 'csv' | 'xlsx') => {
@@ -175,7 +180,7 @@ export default function ClickToConversionTimeReport() {
   const graphMax = Math.max(1, ...graphTotals);
 
   // Reset dates and the filter in one render → one request.
-  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
+  const clearAll = () => { range.reset({ from: zone.daysAgo(7), to: zone.today() }); setFilters({}); };
   const toggleExpand = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
@@ -197,7 +202,7 @@ export default function ClickToConversionTimeReport() {
             <MoreVertical size={15} />
           </button>
         </>}>
-          <DateRangeField idPrefix="click-to-conversion-time-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="click-to-conversion-time-report" from={from} to={to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
       </ReportCard>
@@ -275,7 +280,7 @@ export default function ClickToConversionTimeReport() {
                         {bucketVals(r).map((v, i) => <td key={i} className="px-4 py-3 text-right">{v.toLocaleString()}</td>)}
                         <td className="text-right"><RowActionMenu offerId={r.key} /></td>
                       </tr>
-                      {expanded.has(r.key) && <ExpandedPartnerRows offerId={r.key} publishers={publishers ?? []} from={appliedFrom} to={appliedTo} status={statusFilter} />}
+                      {expanded.has(r.key) && <ExpandedPartnerRows offerId={r.key} publishers={publishers ?? []} from={appliedFrom} to={appliedTo} tz={zone.tz} status={statusFilter} />}
                     </Fragment>
                   ))}
                 </tbody>

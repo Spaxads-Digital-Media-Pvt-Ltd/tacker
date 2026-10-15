@@ -29,7 +29,7 @@ import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Offer, Publisher } from '../../types';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
@@ -37,6 +37,8 @@ import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
+import { formatMdyDateTime } from '../../lib/datetime';
+import { useReportZone, type ZoneDays } from '../../lib/useReportZone';
 
 interface PbRow {
   id: string; created_at: string; conversion_id: string; publisher_id: string | null;
@@ -55,12 +57,6 @@ function pbStatus(r: PbRow): PbStatus {
   return r.error === NOT_CONFIGURED_ERROR ? 'Not configured' : 'Failed';
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  const date = `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${d.getUTCFullYear()}`;
-  const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
-  return `${date} ${time}`;
-}
 
 const STATUS_OPTIONS = [
   { value: 'true', label: 'Success' },
@@ -71,7 +67,7 @@ const STATUS_OPTIONS = [
 const URL_FILTER_PARAMS: [category: string, param: string][] = [['offer', 'offerId'], ['partner', 'publisherId'], ['status', 'success']];
 
 /** Applied report state from the URL ("Open … Report" deep links). */
-function readInitialState() {
+function readInitialState(zone: ZoneDays) {
   const sp = new URLSearchParams(window.location.search);
   const filters: FilterValues = {};
   for (const [cat, param] of URL_FILTER_PARAMS) {
@@ -79,11 +75,14 @@ function readInitialState() {
     if (cat === 'status' && !STATUS_OPTIONS.some((o) => o.value === ids[0])) continue;
     if (ids.length) filters[cat] = ids;
   }
-  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+  return { from: readUrlDate(sp, 'from', zone.daysAgo(7)), to: readUrlDate(sp, 'to', zone.today()), filters };
 }
 
 export default function PartnerPostbackReport() {
-  const [init] = useState(readInitialState);
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [init] = useState(() => readInitialState(zone));
   // Dates apply on their own once they form a valid range; filters apply immediately and return to
   // page 1.
   const range = useAutoDateRange(init.from, init.to);
@@ -134,7 +133,7 @@ export default function PartnerPostbackReport() {
   };
 
   const baseParams = {
-    from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    ...zone.range(appliedFrom, appliedTo),
     offerId: offerIdFilter, publisherId: publisherIdFilter, success: successFilter,
   };
   const tableQs = qs({ ...baseParams, limit: pageSize + 1, offset: (page - 1) * pageSize });
@@ -152,11 +151,11 @@ export default function PartnerPostbackReport() {
   }), [pageRows, q, offerMap, pubMap]);
 
   // Reset dates and filters in one render → one request.
-  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
+  const clearAll = () => { range.reset({ from: zone.daysAgo(7), to: zone.today() }); setFilters({}); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: PbRow) => ({
-    date: formatDate(r.created_at), logId: r.id,
+    date: formatMdyDateTime(r.created_at, zone.tz), logId: r.id,
     partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     offer: r.offer_id ? (offerMap.get(r.offer_id) ?? r.offer_id) : DASH,
     eventName: r.event_name ?? DASH, payload: r.url && r.url !== '(none)' ? r.url : DASH,
@@ -186,7 +185,7 @@ export default function PartnerPostbackReport() {
             )}
           </FiltersButton>
         </>}>
-          <DateRangeField idPrefix="partner-postback-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="partner-postback-report" from={from} to={to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
@@ -239,7 +238,7 @@ export default function PartnerPostbackReport() {
               <table className="premium-table">
                 <thead>
                   <tr>
-                    <th >Date</th>
+                    <th title={zone.tz}>Date <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
                     <th >Log ID</th>
                     {shown.has('Partner') && <th >Partner</th>}
                     {shown.has('Offer') && <th >Offer</th>}
@@ -253,7 +252,7 @@ export default function PartnerPostbackReport() {
                 <tbody>
                   {rows.map((r) => { const status = pbStatus(r); return (
                     <tr key={r.id} className="hover:bg-accent-subtle/40">
-                      <td className="font-medium text-fg">{formatDate(r.created_at)}</td>
+                      <td className="font-medium text-fg">{formatMdyDateTime(r.created_at, zone.tz)}</td>
                       <td className="font-mono text-tiny text-fg-secondary">{r.id.slice(0, 8)}…</td>
                       {shown.has('Partner') && <td className="px-4 py-3">{r.publisher_id ? <Link to={`/app/publishers/${r.publisher_id}`} className="text-accent-text hover:underline">{pubMap.get(r.publisher_id) ?? r.publisher_id}</Link> : DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3">{r.offer_id ? <Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link> : DASH}</td>}

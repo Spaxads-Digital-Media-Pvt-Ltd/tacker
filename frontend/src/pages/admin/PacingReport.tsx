@@ -15,7 +15,8 @@
  * daily usage (plus the offer-level all-time conversion cap as Global), so Weekly/Monthly are left
  * out rather than faked, and Global is "—" for Click/Payout/Revenue. The Summary is always today
  * (UTC) across every capped offer — it ignores the date range and the Offer filter (see the
- * endpoint); only the Detailed Report follows them.
+ * endpoint); only the Detailed Report follows them. Unlike the other reports (D7: the network's time
+ * zone), Pacing stays on UTC days — that's when daily caps reset (api-backend tracking/caps.ts).
  *
  * Payout/Revenue caps are money in the row's currency (the offer group's) when the API sends one,
  * else the network's default currency. The actual is in its conversions' own currency

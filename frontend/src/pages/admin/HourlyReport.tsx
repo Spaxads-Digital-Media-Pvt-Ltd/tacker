@@ -27,7 +27,7 @@ import { type FilterCategory, type FilterValues } from '../../shared-components/
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters,
   reportingFiltersCount, ReportingFiltersFlyout, type ReportingFiltersValue, EMPTY_REPORTING_FILTERS,
@@ -53,6 +53,7 @@ import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/re
 import { countryLabel } from '../../data/geo';
 import { flexReportPath } from '../../lib/flexReportLink';
 import { formatReportHour, reportBucketDay } from '../../lib/reportTime';
+import { useReportZone } from '../../lib/useReportZone';
 
 /** Max hours the Performance Graph pages in (200 per request, ~93 days); past this it shows a "narrow the range" note. */
 const GRAPH_HOUR_CAP = 24 * 93;
@@ -125,7 +126,7 @@ function RowActionMenu({ flexHref }: { flexHref: string }) {
 // `orderBy: ''` = the default chronological order, saved as such (not as a Clicks sort).
 type SavedConfig = SavedReportConfig<OrderMetric | ''>;
 
-/** "MM/DD/YYYY HH:00" (UTC) — Postgres ISO and ClickHouse zone-less bucket strings alike (lib/reportTime). */
+/** "MM/DD/YYYY HH:00" — the bucket's own hour in the report's time zone (lib/reportTime). */
 const formatHour = formatReportHour;
 
 /** API rows → table rows (shared by the table and the all-rows export). */
@@ -140,7 +141,10 @@ export default function HourlyReport() {
 
   // Dates apply on their own once they form a valid range (see useAutoDateRange); filters and sort
   // apply immediately. Page 1 is reset in the same render, so each change is one request.
-  const [initRange] = useState(() => ({ from: readUrlDate(searchParams, 'from', daysAgo(7)), to: readUrlDate(searchParams, 'to', todayStr()) }));
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [initRange] = useState(() => ({ from: readUrlDate(searchParams, 'from', zone.daysAgo(7)), to: readUrlDate(searchParams, 'to', zone.today()) }));
   const range = useAutoDateRange(initRange.from, initRange.to);
   const { appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
   const [filters, setFilters] = useState<FilterValues>(() => initialUrlFilters(searchParams));
@@ -243,7 +247,7 @@ export default function HourlyReport() {
     excludeInvalid: ignoreFailTraffic ? 1 : undefined,
   };
 
-  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -265,7 +269,7 @@ export default function HourlyReport() {
 
   // Graph pages through every hour in range (200 per request, chronological default order) up to
   // GRAPH_HOUR_CAP — a single limit=200 request showed only the oldest ~8 days of a longer range.
-  const graphQs = qs({ groupBy: 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const graphQs = qs({ groupBy: 'hour', metrics: withCurrenciesMetric('clicks,revenue'), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null, GRAPH_HOUR_CAP);
   const graphSeries = useMemo(() => {
     const rows = [...graph.rows].sort((a, b) => (a.dimensions['hour'] ?? '').localeCompare(b.dimensions['hour'] ?? ''));
@@ -280,7 +284,7 @@ export default function HourlyReport() {
 
   const tableParams = {
     groupBy: 'hour', metrics: withCurrenciesMetric(METRICS_PARAM),
-    from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
+    ...zone.range(appliedFrom, appliedTo), ...dimParams,
     orderBy: orderBy || undefined, orderDir,
   };
   const tableQs = qs({ ...tableParams, limit: pageSize, offset: (page - 1) * pageSize });
@@ -298,7 +302,7 @@ export default function HourlyReport() {
   // Reset dates and filters in one render → one request. The debounced range catches up to the same
   // values later and is then a no-op.
   const clearAll = () => {
-    range.reset({ from: daysAgo(7), to: todayStr() });
+    range.reset({ from: zone.daysAgo(7), to: zone.today() });
     setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
   };
 
@@ -411,7 +415,7 @@ export default function HourlyReport() {
             </div>
           </div>
         </>}>
-          <DateRangeField idPrefix="hourly-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="hourly-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
@@ -448,7 +452,7 @@ export default function HourlyReport() {
       </div>
 
       <ReportCard>
-        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title={`Report times are UTC. Money is shown in each row’s own currency (network default ${currency} for rows without conversions); rows mixing currencies show Mixed.`}>· UTC · row currency</span></>} loading={loading} actions={<>
+        <ResultsBar position="top" title={<>Detailed Report <span className="ml-1 font-normal text-fg-muted" title={`Days are calendar days in the report's time zone (${zone.label}). Money is shown in each row’s own currency (network default ${currency} for rows without conversions); rows mixing currencies show Mixed.`}>· {zone.short} · row currency</span></>} loading={loading} actions={<>
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
@@ -529,7 +533,7 @@ export default function HourlyReport() {
                     <tr key={r.hour} className="hover:bg-accent-subtle/40">
                       <td className="font-medium text-fg">{formatHour(r.hour)}</td>
                       {metricCells(shown, r.derived, r.rc)}
-                      {/* Flex reports whole UTC days, so the hour's day is the closest range it can take. */}
+                      {/* Flex reports whole days, so the hour's day is the closest range it can take. */}
                       <td className="text-right"><RowActionMenu flexHref={flexReportPath({ from: reportBucketDay(r.hour), to: reportBucketDay(r.hour), reporting })} /></td>
                     </tr>
                   ))}

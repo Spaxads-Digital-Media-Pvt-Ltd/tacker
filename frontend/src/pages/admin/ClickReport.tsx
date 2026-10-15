@@ -34,7 +34,7 @@ import { useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, deviceLabel, fetchAllPages, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, DEVICE_OPTIONS, deviceLabel, fetchAllPages, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
 import { readUrlDate } from '../../lib/reportFilterState';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
@@ -42,8 +42,7 @@ import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/re
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { countryLabel, countryName, regionName, useRegions } from '../../data/geo';
 import { formatDateTime } from '../../lib/datetime';
-import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZone';
-import { useReportTimeZone } from '../../lib/useReportTimeZone';
+import { useReportZone } from '../../lib/useReportZone';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, type ChipCategory } from '../../lib/filterChips';
 import { CONVERSION_STATUS_OPTIONS } from '../../lib/reportStatusFilters';
@@ -98,8 +97,9 @@ function readInitialState() {
   const sp = new URLSearchParams(window.location.search);
   const gb = sp.get('groupBy') ?? '';
   return {
-    from: readUrlDate(sp, 'from', daysAgo(7)),
-    to: readUrlDate(sp, 'to', todayStr()),
+    // '' = the report zone's default range, filled in by the page (it knows the zone).
+    from: readUrlDate(sp, 'from', ''),
+    to: readUrlDate(sp, 'to', ''),
     groupBy: GROUP_BY_OPTIONS.some((o) => o.value === gb) ? gb : '',
     filters: filtersFromUrl(sp, URL_OPTS),
     fields: fieldsFromUrl(sp) ?? [...DEFAULT_FIELDS],
@@ -112,12 +112,16 @@ const MONO = new Set(['clickId', 'ip', 'smartLinkId', 'userAgent', 'referer', 'f
 export default function ClickReport() {
   const [init] = useState(readInitialState);
   const [, setSearchParams] = useSearchParams();
+  const [filters, setFilters] = useState<ClickFilters>(init.filters);
+  // D7: the report's time zone — the network's unless one is picked: its days, "today" and the times
+  // shown (a Country filter adds that country's zones to the picker's suggestions).
+  const zone = useReportZone(filters.country || null);
   // Dates apply on their own once they form a valid range (see useAutoDateRange); everything else
   // applies on Apply / immediately and returns to page 1.
-  const range = useAutoDateRange(init.from, init.to);
+  const [initRange] = useState(() => ({ from: init.from || zone.daysAgo(7), to: init.to || zone.today() }));
+  const range = useAutoDateRange(initRange.from, initRange.to);
   const { from, to, appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
 
-  const [filters, setFilters] = useState<ClickFilters>(init.filters);
   const [fields, setFields] = useState<string[]>(init.fields);
   const [groupBy, setGroupBy] = useState(init.groupBy);
   const [modal, setModal] = useState<null | 'filters' | 'fields'>(null);
@@ -180,16 +184,6 @@ export default function ClickReport() {
     { key: 'gclid', label: 'Google Click ID' },
   ], [pickerOptions, countryOptions]);
 
-  // Timestamps follow the filtered country's zone (else network/browser) — re-formatting only.
-  const zone = useReportTimeZone(filters.country || null);
-  // A timezone picked in the modal is applied AFTER the filters commit: the zone hook resets its
-  // override whenever the country filter changes, and that reset must not undo the user's choice.
-  const [pendingTz, setPendingTz] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    if (pendingTz === undefined) return;
-    zone.setOverride(pendingTz || null);
-    setPendingTz(undefined);
-  }, [pendingTz, zone]);
   const regions = useRegions();
   const formatDate = (iso: string) => formatDateTime(iso, zone.tz);
   const regionLabel = (r: ClickRow) => (r.region ? (regionName(regions, r.region, r.country) ?? r.region) : DASH);
@@ -201,7 +195,7 @@ export default function ClickReport() {
   };
 
   // Keys shared by /clicks and /grouped (both accept exactly these).
-  const baseParams = { from: toIso(appliedFrom), to: toIso(appliedTo, true), ...toApiParams(filters) };
+  const baseParams = { ...zone.range(appliedFrom, appliedTo), ...toApiParams(filters) };
   const tableQs = groupBy
     ? qs({ groupBy, ...baseParams })
     : qs({ ...baseParams, limit: pageSize + 1, offset: (page - 1) * pageSize });
@@ -258,13 +252,13 @@ export default function ClickReport() {
 
   // Reset dates, filters and grouping in one render → one request. The debounced range catches up to
   // the same values later and is then a no-op. Selected fields are a view preference and stay.
-  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters(EMPTY_CLICK_FILTERS); setGroupBy(''); };
+  const clearAll = () => { range.reset({ from: zone.daysAgo(7), to: zone.today() }); setFilters(EMPTY_CLICK_FILTERS); setGroupBy(''); };
   const changeGroupBy = (g: string) => { setGroupBy(g); toFirstPage(); };
   const showIndividualClicks = () => changeGroupBy('');
   const applyModal = (next: ClickFiltersApply) => {
     setFilters(next.filters);
     setFields(next.fields);
-    if ((next.timezone || null) !== zone.override) setPendingTz(next.timezone);
+    if ((next.timezone || null) !== zone.override) zone.setOverride(next.timezone || null);
     toFirstPage();
     setModal(null);
   };
@@ -362,7 +356,7 @@ export default function ClickReport() {
       void exp.run(format, `click-report-by-${groupBy}`, async () => ({
         // Money in the group's currency — "MIXED" with payout/revenue/profit left empty when it mixes currencies.
         rows: ((await api.get<{ rows: GroupedRow[] }>(`/api/reports/grouped?${qs({ groupBy, ...baseParams })}`))?.rows ?? []).map((r) => withRowCurrency({
-          [groupDimensionHeader(groupBy, groupByLabel(groupBy)).label]: groupedLabel(r), clicks: r.clicks, conversions: r.conversions,
+          [groupDimensionHeader(groupBy, groupByLabel(groupBy), zone.short).label]: groupedLabel(r), clicks: r.clicks, conversions: r.conversions,
           cr: `${r.cr.toFixed(2)}%`, payout: r.payout, revenue: r.revenue, profit: r.profit,
         }, groupedCurrency(r), ['payout', 'revenue', 'profit'])),
       }));
@@ -393,8 +387,8 @@ export default function ClickReport() {
           <ClearButton onClick={clearAll} title="Reset dates, filters and grouping" />
           <FiltersButton count={activeFilterCount} onClick={() => setModal((m) => (m ? null : 'filters'))} />
         </>}>
-          <DateRangeField idPrefix="click-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
-            onFrom={range.setFrom} onTo={range.setTo} />
+          <DateRangeField idPrefix="click-report" from={from} to={to} max={zone.today()} invalid={range.problem !== null}
+            onFrom={range.setFrom} onTo={range.setTo} zone={zone} />
           <ControlField label="Group By" htmlFor="click-report-group-by">
             <select id="click-report-group-by" className={`input ${CONTROL}`} value={groupBy} onChange={(e) => changeGroupBy(e.target.value)}>
               <option value="">None (individual clicks)</option>
@@ -404,8 +398,6 @@ export default function ClickReport() {
         </ReportControls>
 
         <ResultsBar title={groupBy ? `Clicks by ${groupByLabel(groupBy)}` : 'Detailed Report'} loading={isLoading} actions={<>
-          {/* min-w-0 / max-w: the long "Auto — …" option text truncates instead of stretching the bar. */}
-          {!groupBy && <div className="min-w-0 max-w-full"><TimeZoneSelect zone={zone} selectClassName={`${CONTROL} min-w-0 max-w-full text-small sm:max-w-[22rem]`} /></div>}
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             {/* Grouped mode loads every group, so its search covers them all; individual clicks are paged. */}
@@ -467,7 +459,7 @@ export default function ClickReport() {
             <table className="premium-table">
               <thead>
                 <tr>
-                  <th scope="col" title={groupDimensionHeader(groupBy, groupByLabel(groupBy)).title}>{groupDimensionHeader(groupBy, groupByLabel(groupBy)).label}</th>
+                  <th scope="col" title={groupDimensionHeader(groupBy, groupByLabel(groupBy), zone.short).title}>{groupDimensionHeader(groupBy, groupByLabel(groupBy), zone.short).label}</th>
                   <th scope="col" className="font-semibold text-right">Clicks</th>
                   <th scope="col" className="font-semibold text-right" title={GROUPED_CONVERSIONS_NOTE}>Conversions</th>
                   <th scope="col" className="font-semibold text-right" title={`Conversions ÷ clicks — ${GROUPED_CONVERSIONS_NOTE.toLowerCase()}`}>Conv. Rate</th>

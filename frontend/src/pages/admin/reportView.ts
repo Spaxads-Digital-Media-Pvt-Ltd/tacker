@@ -9,18 +9,19 @@
  */
 import { useEffect, useState } from 'react';
 import { isYmd } from '../../lib/reportFilterState';
-import { todayStr } from '../../shared-components/primitives/ReportPageKit';
+import { latestToday } from '../../lib/reportZone';
 import { useDebounced } from './pagedList';
 
-/** A From–To pair a report can run: real calendar days, From ≤ To ≤ today (UTC). */
+/** A From–To pair a report can run: real calendar days, From ≤ To, To not past today in any zone
+ *  (reports are in the network's / picked zone — D7; its today can be ahead of UTC's). */
 export function isValidRange(from: string, to: string): boolean {
-  return isYmd(from) && isYmd(to) && from <= to && to <= todayStr();
+  return isYmd(from) && isYmd(to) && from <= to && to <= latestToday();
 }
 
 function rangeProblem(from: string, to: string): string | null {
   if (!isYmd(from) || !isYmd(to)) return 'Enter complete From and To dates.';
   if (from > to) return 'From must be on or before To.';
-  if (to > todayStr()) return 'To can’t be in the future.';
+  if (to > latestToday()) return 'To can’t be in the future.';
   return null;
 }
 
