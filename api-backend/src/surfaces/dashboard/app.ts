@@ -8,7 +8,7 @@
  *   /api/portal/<kind>/...      — publisher/advertiser portal, owner-scoped self-reads
  *   /api/auth, /api/signup      — unauthenticated: login/refresh/logout, partner sign-up
  */
-import { Router, type Express } from 'express';
+import express, { Router, type Express } from 'express';
 import { z } from 'zod';
 import cookieParser from 'cookie-parser';
 import { createBaseApp, finalizeApp } from '../../lib/http/express-app.js';
@@ -74,6 +74,8 @@ import { tieredCommissionsRoutes } from './tiered-commissions/routes.js';
 import { controlCenterRoutes } from './control-center/routes.js';
 import { signupRoutes } from './signup/routes.js';
 import { networkTimeZone } from '../../lib/reporting/network-zone.js';
+import { IMAGE_MAX_BYTES, IMAGE_UPLOAD_CONTENT_TYPES, assertImageValue, imageTypesFor, imageTypesText, uploadContentType, uploadImage } from '../../lib/storage/images.js';
+import { networkBranding } from './control-center/config.js';
 
 export function buildDashboardApp(): Express {
   const app = createBaseApp('dashboard');
@@ -105,8 +107,12 @@ export function buildDashboardApp(): Express {
       };
     }
     // D7: the network's report time zone — every report page (staff and portals) defaults to it.
-    const reportTimeZone = req.scope?.networkId ? await networkTimeZone(req.scope.networkId) : 'UTC';
-    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation, reportTimeZone });
+    // O12: its branding images (stored URLs) — the shell shows the logo and favicon to everyone.
+    const nid = req.scope?.networkId;
+    const [reportTimeZone, branding] = nid
+      ? await Promise.all([networkTimeZone(nid), networkBranding(nid)])
+      : ['UTC', { logoUrl: null, faviconUrl: null }];
+    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation, reportTimeZone, branding });
   }));
 
   // My Account (Profile) General tab — this user's own real row + metadata profile fields.
@@ -164,13 +170,30 @@ export function buildDashboardApp(): Express {
     sendOk(res, { theme });
   }));
 
+  // Profile photo upload (O12): the raw image (≤ 2 MB; PNG / JPEG / WebP / GIF) → object storage → its
+  // URL, which the profile form then saves as photoUrl.
+  authed.post('/me/photo', notWhileImpersonating(), express.raw({ type: IMAGE_UPLOAD_CONTENT_TYPES, limit: IMAGE_MAX_BYTES }), asyncHandler(async (req, res) => {
+    const type = uploadContentType(req.headers['content-type']);
+    if (!imageTypesFor('photo')[type] || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+      throw badRequest(`Upload a ${imageTypesText('photo')} image up to 2 MB`);
+    }
+    let url: string;
+    try {
+      url = await uploadImage(req.scope!.networkId, 'photo', req.body, type);
+    } catch (e) {
+      throw badRequest(e instanceof Error ? e.message : 'Upload failed');
+    }
+    sendOk(res, { url }, undefined, 201);
+  }));
+
   const profilePatchSchema = z.object({
     name: z.string().min(1).max(120).optional(),
     title: z.string().max(120).optional().nullable(),
     businessUnit: z.string().max(120).optional().nullable(),
     language: z.string().max(40).optional().nullable(),
     timezone: z.string().max(80).optional().nullable(),
-    photoUrl: z.string().max(6_000_000).optional().nullable(),
+    // O12: the URL of a photo uploaded with POST /api/me/photo (checked below) — never the file itself.
+    photoUrl: z.string().max(2000).optional().nullable(),
     phone: z.string().max(40).optional().nullable(),
     address: z.string().max(200).optional().nullable(),
     apartment: z.string().max(120).optional().nullable(),
@@ -196,7 +219,7 @@ export function buildDashboardApp(): Express {
     if (b.businessUnit !== undefined) meta['businessUnit'] = b.businessUnit;
     if (b.language !== undefined) meta['language'] = b.language;
     if (b.timezone !== undefined) meta['timezone'] = b.timezone;
-    if (b.photoUrl !== undefined) meta['photoUrl'] = b.photoUrl;
+    if (b.photoUrl !== undefined) { assertImageValue(b.photoUrl, meta['photoUrl'], 'photoUrl'); meta['photoUrl'] = b.photoUrl; }
     if (b.phone !== undefined) { meta['primaryPhone'] = b.phone; meta['phone'] = b.phone; }
     if (b.address !== undefined) meta['address'] = b.address;
     if (b.apartment !== undefined) meta['apartment'] = b.apartment;

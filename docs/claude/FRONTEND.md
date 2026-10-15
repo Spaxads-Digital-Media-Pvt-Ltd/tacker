@@ -103,7 +103,7 @@ Plus many more sub-routes (offers-templates, offers-groups, postbacks, tiers, co
 - `SearchModal.tsx` — Global search modal (⌘K affordance)
 - `TrackingLinkGeneratorModal.tsx` — Generate tracking link
 - `PostbackTester.tsx` — Test postback UI
-- `Brandmark.tsx` — Logo/brand display
+- `Brandmark.tsx` — Logo/brand display; with `logoUrl` (the network's Control Center logo, `lib/useNetworkBranding.ts` from `GET /api/me` — staff and portals; also sets the tab favicon) that image takes its place, falling back to the default mark if it doesn't load (O12). Logo / favicon / profile photo uploads go to object storage through `lib/imageUpload.ts` (PNG / JPEG / WebP / GIF, favicon also ICO, ≤ 2 MB, no SVG — refused with the reason); forms keep only the returned URL
 - `HelpHint.tsx` — Help tooltip
 
 ### Data Fetching

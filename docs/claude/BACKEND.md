@@ -123,6 +123,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `networks/` | state.ts (`networkState` — active / suspended / deleted, checked by dashboardAuth; `networkStateChanged` drops the cached state + tracking hosts), lifecycle.ts (soft delete, NDJSON export, purge) — F-26 |
 | `usage/` | meter.ts — per-day usage into usage_records, usage vs plan limits, near / reached alerts (policy: flag, never block) — F-26 |
 | `creatives/` | files.ts (creative uploads to object storage, allowed types, list-safe url columns, data: URI parsing), backfill.ts (inline data: files → storage, `npm run creatives:backfill`) — F-27 |
+| `storage/` | supabase-storage.ts (public bucket uploads, backend only); images.ts (O12: branding logo / favicon + profile photo → bucket `network-images`, content-addressed; allowed types, no SVG; `imageUrlSchema` / `assertImageValue` — settings keep only the URL); images-backfill.ts (inline data: images → storage, `npm run images:backfill`) |
 | `email/` | system-emails.ts (Automated System Emails catalog + which are sent), transactional.ts (`sendTransactional`: toggle → recipients → network SMTP, never throws), templates.ts (F-24) |
 | `scheduling/` | cron.ts — 5-field cron parse + next run in a time zone (DST-safe) |
 | `retention/` | Per-network click / postback-log / conversion pruning; conversions any ledger entry references are never pruned (F-21) |

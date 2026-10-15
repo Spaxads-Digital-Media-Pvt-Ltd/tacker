@@ -10,6 +10,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { ROLE_LABELS } from '../../auth/roles';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
+import { imageAccept, imageTypesText, uploadImage } from '../../lib/imageUpload';
 import { loadSession, saveSession } from '../../auth/session';
 import { PageHeader, Badge, Modal, Field, Tabs } from '../../shared-components/primitives/ui';
 import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
@@ -342,22 +343,23 @@ function EditProfileModal({ initial, onClose, onSaved }: {
 }) {
   const [form, setForm] = useState(initial);
   const [editError, setEditError] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const { run, busy, error } = useMutation((body: Record<string, unknown>) =>
     api.patch('/api/me/profile', body));
 
   const set = (key: keyof ProfileForm, value: string | null) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  const onPhoto = (e: ChangeEvent<HTMLInputElement>) => {
+  // O12: the photo goes to object storage now; the form keeps its URL and Save stores that.
+  const onPhoto = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    if (file.size > 2_000_000) {
-      setEditError('Photo must be under 2 MB');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => set('photoUrl', typeof reader.result === 'string' ? reader.result : null);
-    reader.readAsDataURL(file);
+    setEditError(null);
+    setUploadingPhoto(true);
+    try { set('photoUrl', await uploadImage('/api/me/photo', file)); }
+    catch (err) { setEditError(err instanceof Error ? err.message : 'Upload failed.'); }
+    finally { setUploadingPhoto(false); }
   };
 
   const submit = async (e: FormEvent) => {
@@ -370,7 +372,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
       businessUnit: form.businessUnit.trim() || null,
       language: form.language || 'English',
       timezone: form.timezone.trim() || null,
-      photoUrl: form.photoUrl,
+      ...(form.photoUrl !== initial.photoUrl ? { photoUrl: form.photoUrl } : {}),
       phone: form.phone.trim() || null,
       address: form.address.trim() || null,
       apartment: form.apartment.trim() || null,
@@ -403,7 +405,8 @@ function EditProfileModal({ initial, onClose, onSaved }: {
               <div className="grid h-14 w-14 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">—</div>
             )}
             <div className="flex flex-col gap-1">
-              <input type="file" accept="image/*" onChange={onPhoto} className="text-tiny" />
+              <input type="file" accept={imageAccept()} onChange={(e) => void onPhoto(e)} disabled={uploadingPhoto} className="text-tiny" />
+              <span className="text-tiny text-fg-muted">{uploadingPhoto ? 'Uploading…' : `${imageTypesText()}, up to 2 MB.`}</span>
               {form.photoUrl && (
                 <button type="button" className="text-tiny text-accent-text hover:underline text-left" onClick={() => set('photoUrl', null)}>Remove photo</button>
               )}
@@ -428,7 +431,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+          <button type="submit" className="btn-primary" disabled={busy || uploadingPhoto}>{busy ? 'Saving…' : 'Save changes'}</button>
         </div>
       </form>
     </Modal>

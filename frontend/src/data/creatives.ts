@@ -75,20 +75,6 @@ export async function uploadCreativeFile(file: File): Promise<string> {
   return res.url;
 }
 
-/** A file read client-side as a data: URI — still how Control Center branding logos are stored. */
-export function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (file.size > MAX_UPLOAD_BYTES) {
-      reject(new Error(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)}MB.`));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('Could not read file.'));
-    reader.readAsDataURL(file);
-  });
-}
-
 export function fmtDateTime(iso: string) {
   const d = new Date(iso);
   return { date: d.toLocaleDateString(), time: `${d.toLocaleTimeString(undefined, { timeStyle: 'medium' })} ${Intl.DateTimeFormat().resolvedOptions().timeZone}` };

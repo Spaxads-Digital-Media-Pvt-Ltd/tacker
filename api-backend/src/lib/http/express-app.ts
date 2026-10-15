@@ -54,9 +54,10 @@ export function createBaseApp(surface: string, corsOrigin?: CorsOrigin): Express
   app.disable('x-powered-by');
   app.set('trust proxy', (addr: string) => isTrustedProxy(addr));
   app.use(helmet({ crossOriginEmbedderPolicy: false }));
-  // 6mb matches the branding data-URL uploads (Control Center logos). Creatives no longer send file
-  // bytes in JSON — they upload the raw file to object storage (F-27, POST /api/creatives/upload).
-  app.use(express.json({ limit: '6mb' }));
+  // No file travels as JSON any more — creatives (F-27), offer thumbnails, branding images and profile
+  // photos (O12) upload the raw file to object storage. 2mb covers the largest real JSON bodies (a
+  // 1,000-row conversion import, a 3,000-value traffic list); it was 6mb for data: URI logos.
+  app.use(express.json({ limit: '2mb' }));
   app.use(pinoHttp({ logger: surfaceLogger(surface) }));
 
   // CORS: allow configured origins for surfaces that are called from browsers.

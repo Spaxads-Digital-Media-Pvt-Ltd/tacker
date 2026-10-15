@@ -16,7 +16,7 @@ import { Pagination } from '../../../shared-components/primitives/ReportPageKit'
 import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField, type NotifySaved } from './shared';
 import type { TrackingDomain } from '../../../types';
 import { advertiserPostbackUrl } from '../../../lib/trackingLinks';
-import { readFileAsDataUrl } from '../../../data/creatives';
+import { imageAccept, imageTypesText, uploadImage } from '../../../lib/imageUpload';
 import {
   PARTNER_NOTIFS, OFFER_NOTIFS_PLATFORM, OFFER_GROUP_NOTIFS, ADVERTISER_NOTIFS,
   ACTION_NOTIFS, BILLING_NOTIFS, NETWORK_NOTIFS, SECURITY_NOTIFS, TRAFFIC_HEALTH_NOTIFS,
@@ -76,17 +76,13 @@ function YesNoPill({ label, value, onChange }: { label: string; value: boolean; 
   );
 }
 
-const IMAGE_ACCEPT = 'image/png,image/jpeg,image/jpg,image/jfif,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.ico,.jfif';
-
-function isImageFile(file: File): boolean {
-  if (file.type.startsWith('image/')) return true;
-  return /\.(png|jpe?g|jfif|gif|webp|svg|ico)$/i.test(file.name);
-}
-
-function UploadBox({ label, value, error, onFile, onClear }: {
+/** An image box: the file goes to object storage at once (O12) and the form keeps its URL until Save. */
+function UploadBox({ label, value, error, busy, allowIco = false, onFile, onClear }: {
   label: string;
   value: string | null;
   error: string | null;
+  busy: boolean;
+  allowIco?: boolean;
   onFile: (f: File) => void;
   onClear: () => void;
 }) {
@@ -94,9 +90,8 @@ function UploadBox({ label, value, error, onFile, onClear }: {
   const [dragging, setDragging] = useState(false);
 
   const takeFile = (file: File | undefined | null) => {
-    if (!file) return;
-    if (!isImageFile(file)) return;
-    onFile(file);
+    if (!file || busy) return;
+    onFile(file); // type and size are checked by the upload (lib/imageUpload) — a refusal shows as `error`
   };
 
   return (
@@ -126,7 +121,7 @@ function UploadBox({ label, value, error, onFile, onClear }: {
           </div>
         ) : (
           <p className="py-4 text-small text-fg-secondary">
-            {dragging ? 'Drop image here' : (
+            {busy ? 'Uploading…' : dragging ? 'Drop image here' : (
               <>
                 Drag and drop or{' '}
                 <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => inputRef.current?.click()}>Browse</button>
@@ -137,7 +132,7 @@ function UploadBox({ label, value, error, onFile, onClear }: {
         <input
           ref={inputRef}
           type="file"
-          accept={IMAGE_ACCEPT}
+          accept={imageAccept(allowIco)}
           className="hidden"
           onChange={(e) => {
             takeFile(e.target.files?.[0]);
@@ -145,7 +140,8 @@ function UploadBox({ label, value, error, onFile, onClear }: {
           }}
         />
       </div>
-      {error && <p className="mt-1 text-tiny text-danger-text">{error}</p>}
+      {error ? <p className="mt-1 text-tiny text-danger-text">{error}</p>
+        : <p className="mt-1 text-tiny text-fg-muted">{imageTypesText(allowIco)}, up to 2 MB.</p>}
     </div>
   );
 }
@@ -168,6 +164,7 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [faviconError, setFaviconError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<null | 'logo' | 'favicon'>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -180,20 +177,21 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setFallbackUrl(settings.general.fallbackUrl ?? '');
   }, [settings]);
 
+  const savedLogo = branding.logoUrl ?? null;
+  const savedFavicon = branding.faviconUrl ?? null;
   useEffect(() => {
-    setLogoUrl(branding.logoUrl ?? null);
-    setFaviconUrl(branding.faviconUrl ?? null);
-  }, [platformConfig]);
+    setLogoUrl(savedLogo);
+    setFaviconUrl(savedFavicon);
+  }, [savedLogo, savedFavicon]);
 
-  const onLogo = async (f: File) => {
-    setLogoError(null);
-    try { setLogoUrl(await readFileAsDataUrl(f)); }
-    catch (e) { setLogoError(e instanceof Error ? e.message : 'Could not read file.'); }
-  };
-  const onFavicon = async (f: File) => {
-    setFaviconError(null);
-    try { setFaviconUrl(await readFileAsDataUrl(f)); }
-    catch (e) { setFaviconError(e instanceof Error ? e.message : 'Could not read file.'); }
+  // O12: the file goes to object storage now; the form keeps its URL and Save stores that.
+  const upload = async (kind: 'logo' | 'favicon', f: File) => {
+    const [setUrl, setError] = kind === 'logo' ? [setLogoUrl, setLogoError] : [setFaviconUrl, setFaviconError];
+    setError(null);
+    setUploading(kind);
+    try { setUrl(await uploadImage(`/api/control-center/branding/${kind}`, f, kind === 'favicon')); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Upload failed.'); }
+    finally { setUploading(null); }
   };
 
   const save = async () => {
@@ -215,9 +213,11 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
         timezone,
         fallbackUrl: fallbackUrl.trim() || null,
       });
-      await api.put('/api/control-center/config/platform', {
-        branding: { logoUrl: logoUrl || null, faviconUrl: faviconUrl || null },
-      });
+      // Only what changed (branding fields merge server-side).
+      const branding: Record<string, string | null> = {};
+      if ((logoUrl || null) !== savedLogo) branding['logoUrl'] = logoUrl || null;
+      if ((faviconUrl || null) !== savedFavicon) branding['faviconUrl'] = faviconUrl || null;
+      if (Object.keys(branding).length) await api.put('/api/control-center/config/platform', { branding });
       onSaved();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Save failed');
@@ -260,12 +260,12 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
         </div>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <UploadBox label="Logo" value={logoUrl} error={logoError} onFile={onLogo} onClear={() => setLogoUrl(null)} />
-        <UploadBox label="Favicon" value={faviconUrl} error={faviconError} onFile={onFavicon} onClear={() => setFaviconUrl(null)} />
+        <UploadBox label="Logo" value={logoUrl} error={logoError} busy={uploading === 'logo'} onFile={(f) => void upload('logo', f)} onClear={() => setLogoUrl(null)} />
+        <UploadBox label="Favicon" value={faviconUrl} error={faviconError} busy={uploading === 'favicon'} allowIco onFile={(f) => void upload('favicon', f)} onClear={() => setFaviconUrl(null)} />
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
-        <button className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+        <button className="btn-primary" disabled={busy || uploading !== null} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );

@@ -15,10 +15,11 @@
 ### Identity
 | Method | Endpoint | Purpose | Auth | Returns |
 |---|---|---|---|---|
-| GET | `/api/me` | Current identity + scope; `impersonating` + `impersonation: { impersonatedBy, adminEmail, account, expiresAt }` while an admin impersonates this portal account (banner data); `reportTimeZone` = the network's Settings › General timezone, else `UTC` (D7: every report page — staff and portals — defaults to it) | Dashboard JWT | `{ identity, scope, impersonating, impersonation, reportTimeZone }` |
+| GET | `/api/me` | Current identity + scope; `impersonating` + `impersonation: { impersonatedBy, adminEmail, account, expiresAt }` while an admin impersonates this portal account (banner data); `reportTimeZone` = the network's Settings › General timezone, else `UTC` (D7: every report page — staff and portals — defaults to it); `branding: { logoUrl, faviconUrl }` = the network's stored image URLs (O12; inline legacy values come back null) — the shell shows them to staff and portals | Dashboard JWT | `{ identity, scope, impersonating, impersonation, reportTimeZone, branding }` |
 | GET | `/api/me/account` | Own user row + metadata | Dashboard JWT | User object |
 | PATCH | `/api/me/theme` | Set accent theme | Dashboard JWT | `{ theme: 'A'-'F' }` |
-| PATCH | `/api/me/profile` | Update profile fields | Dashboard JWT | `{ ok, ...fields }` |
+| POST | `/api/me/photo` | Profile photo upload (O12): the raw image as the body with its Content-Type — PNG, JPEG, WebP or GIF, ≤ 2 MB, no SVG — goes to the public `network-images` bucket (`<network>/photo/<content hash>`) → `201 { url }` (other type → 400, too large → 413, storage not configured → 400 with that message; 403 while impersonating). Send the `url` as `photoUrl` | Dashboard JWT | `{ url }` |
+| PATCH | `/api/me/profile` | Update profile fields. `photoUrl` = an uploaded photo's http(s) URL (≤ 2000) or null — a new `data:` URI → 422 (an unchanged legacy one passes until `npm run images:backfill` moves it) | Dashboard JWT | `{ ok, ...fields }` |
 | PATCH | `/api/me/password` | Change own password (403 while impersonating); also clears `must_change_password` — the SPA then refreshes its token. Supabase errors → 400 | Dashboard JWT | `{ ok }` |
 | PATCH | `/api/me/email` | Change own email (403 while impersonating) | Dashboard JWT | `{ ok, email }` |
 | GET | `/api/me/logins` | Own login history | Dashboard JWT | Login events array |
@@ -76,7 +77,7 @@
 | GET,POST,PATCH,DELETE | `/api/postback-controls/*` | Postback controls | admin |
 | GET,POST,PATCH,DELETE | `/api/advertiser-invoices/*` | Advertiser invoices. `POST /` returns the invoice plus `email` (F-24: emailed to the advertiser's contact address when `visibleToAdvertiser`, without `notes`; else `null`). Same rules as partner invoices: `currency?` (omitted = the only currency billed in the period, else the advertiser's default; several → 422), `GET /preview?advertiserId&…`, `summary.byCurrency`, never deleted — `POST /:id/void { reason }` for unpaid, paid is final | admin |
 | GET,POST,PATCH,DELETE | `/api/tiered-commissions/*` | Tiered commissions | admin |
-| GET,POST,PATCH,DELETE | `/api/control-center/*` | Control center (incl. the Category / Channel / Business Unit catalogs: `/api/control-center/categories`, `/api/control-center/channels`, `/api/control-center/business-units` — the only business-unit API; delete is a soft delete) | admin |
+| GET,POST,PATCH,DELETE | `/api/control-center/*` | Control center (incl. the Category / Channel / Business Unit catalogs: `/api/control-center/categories`, `/api/control-center/channels`, `/api/control-center/business-units` — the only business-unit API; delete is a soft delete). Branding images (O12): `POST /branding/logo\|favicon` (admin/manager) takes the raw image — PNG, JPEG, WebP or GIF (a favicon also ICO), ≤ 2 MB, no SVG — stores it in the public `network-images` bucket and returns `201 { url }`; `PUT /config/platform { branding: { logoUrl?, faviconUrl? } }` then stores only that URL (or null): fields merge, unknown fields / a new `data:` URI → 422 (an unchanged legacy inline value passes until `npm run images:backfill`). JSON bodies on every Express surface are capped at **2 MB** (was 6 MB for inline logos) | admin |
 
 ### Path ids (Offers, Partners, Advertisers and their sub-resources)
 

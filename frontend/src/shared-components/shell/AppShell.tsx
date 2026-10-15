@@ -14,6 +14,7 @@ import { SectionTabs } from './SectionTabs';
 import { NavFlyout } from './NavFlyout';
 import { SearchModal } from './SearchModal';
 import { ImpersonationBanner } from './ImpersonationBanner';
+import { useNetworkBranding } from '../../lib/useNetworkBranding';
 
 /** Flatten a role's nav (groups + leaves) to {to,label} pairs for route→title resolution. */
 function flattenNav(role: Role): { to: string; label: string }[] {
@@ -42,8 +43,8 @@ function routeTitle(pathname: string, role: Role): string {
  * on the right. Below `md` the persistent rail is a hidden drawer, so the header also carries the
  * menu trigger + brand mark. Search opens the global SearchModal (⌘K is a visual affordance only —
  * no keyboard handler is wired anywhere in the app today). */
-function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSearch }: {
-  role: Role; initials: string; displayName: string; email: string; onSignOut: () => void; onMenu: () => void; onSearch: () => void;
+function TopHeader({ role, initials, displayName, email, logoUrl, onSignOut, onMenu, onSearch }: {
+  role: Role; initials: string; displayName: string; email: string; logoUrl: string | null; onSignOut: () => void; onMenu: () => void; onSearch: () => void;
 }) {
   const loc = useLocation();
   const { title, subtitle } = usePageTitleValue();
@@ -63,7 +64,7 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
         </button>
         {/* Brand chip: skip on the smallest screens so the page title + header search fit; the
             hamburger already carries the nav affordance there. */}
-        <div className="hidden shrink-0 sm:block md:hidden"><Brandmark compact /></div>
+        <div className="hidden shrink-0 sm:block md:hidden"><Brandmark compact logoUrl={logoUrl} /></div>
         <div className="min-w-0">
           <h1 className="truncate text-h2 font-semibold leading-tight text-white">{heading}</h1>
           {subtitle && <p className="truncate text-tiny text-white/60">{subtitle}</p>}
@@ -215,6 +216,8 @@ export function AppShell() {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  // O12: the network's logo / favicon (staff and portals; the Super Admin console has no network).
+  const { logoUrl } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
 
   // Off-canvas drawer (< md): close on navigation and on Escape.
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
@@ -283,7 +286,7 @@ export function AppShell() {
             aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
             className={`text-[rgb(var(--sidebar-fg-strong))] text-left outline-none ${labeled ? 'min-w-0 flex-1' : 'grid h-11 w-11 place-items-center'}`}
           >
-            <Brandmark compact={!labeled} />
+            <Brandmark compact={!labeled} logoUrl={logoUrl} />
           </button>
           {/* mobile: close the drawer */}
           <button
@@ -329,7 +332,7 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col bg-page">
         {session.impersonatedBy && <ImpersonationBanner session={session} />}
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
-          email={session.email} onSignOut={async () => {
+          email={session.email} logoUrl={logoUrl} onSignOut={async () => {
             // Signing out of an impersonation tab only ends the impersonation (see auth/session.ts).
             const impersonating = Boolean(session.impersonatedBy);
             await signOut();

@@ -1,7 +1,19 @@
+import { useState } from 'react';
 import { BRAND } from '../../config/branding';
 
-/** The wordmark. Uses the single branding constant so a rename propagates everywhere (spec §14). */
-export function Brandmark({ compact = false }: { compact?: boolean }) {
+/**
+ * The wordmark. Uses the single branding constant so a rename propagates everywhere (spec §14). With
+ * the network's own logo (O12, Control Center › Platform) that image takes its place — the mark's box
+ * when compact, up to a wordmark's width when not — and the default comes back if it fails to load.
+ */
+export function Brandmark({ compact = false, logoUrl = null }: { compact?: boolean; logoUrl?: string | null }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (logoUrl && failed !== logoUrl) {
+    return (
+      <img src={logoUrl} alt={BRAND.name} onError={() => setFailed(logoUrl)}
+        className={compact ? 'h-9 w-9 rounded-xl object-contain' : 'h-9 max-w-[11rem] object-contain object-left'} />
+    );
+  }
   return (
     <div className="flex items-center gap-2.5">
       <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-sm">

@@ -2,7 +2,7 @@
  * Control Center — unified API for all 8 tabs (Accounts extras, Platform config, Partners,
  * Advertisers, Security lists, Usage, Documents, Segmentations).
  */
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
@@ -17,12 +17,14 @@ import { writeAudit } from '../../../lib/audit.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
+import { IMAGE_MAX_BYTES, IMAGE_UPLOAD_CONTENT_TYPES, imageTypesFor, imageTypesText, uploadContentType, uploadImage } from '../../../lib/storage/images.js';
 import { validIpEntry, invalidateNetworkIpBlacklist, invalidateNetworkApiWhitelist } from '../../../lib/net/ip-lists.js';
 import {
   getControlCenterConfig,
   putControlCenterConfig,
   getFullControlCenterConfig,
   loadNetworkSettings,
+  mergeBranding,
   type ConfigSection,
 } from './config.js';
 
@@ -109,9 +111,39 @@ export function controlCenterRoutes(): Router {
     asyncHandler(async (req, res) => {
       const section = req.params.section as ConfigSection;
       if (!CONFIG_SECTIONS.includes(section as typeof CONFIG_SECTIONS[number])) throw badRequest('Invalid section');
-      const merged = await putControlCenterConfig(req.scope!.networkId, section, req.body as Record<string, unknown>);
+      let body = req.body as Record<string, unknown>;
+      // Branding images are stored files' URLs, never the files (O12) — checked and merged per field.
+      if (section === 'platform' && body['branding'] !== undefined) {
+        const stored = getControlCenterConfig(await loadNetworkSettings(req.scope!.networkId), 'platform')['branding'];
+        body = { ...body, branding: mergeBranding(stored, body['branding']) };
+      }
+      const merged = await putControlCenterConfig(req.scope!.networkId, section, body);
       await writeAudit(req, { action: 'control_center.config.update', entityType: 'network', entityId: req.scope!.networkId, after: { section } });
       sendOk(res, merged);
+    }),
+  );
+
+  // Branding image upload (O12): the raw file (≤ 2 MB; logo PNG / JPEG / WebP / GIF, favicon also ICO —
+  // no SVG) → object storage → its URL, which Save then sends as branding.logoUrl / faviconUrl.
+  r.post(
+    '/branding/:kind',
+    requireRole('admin', 'manager'),
+    express.raw({ type: IMAGE_UPLOAD_CONTENT_TYPES, limit: IMAGE_MAX_BYTES }),
+    asyncHandler(async (req, res) => {
+      const kind = req.params.kind;
+      if (kind !== 'logo' && kind !== 'favicon') throw notFound('Unknown branding image (logo or favicon)');
+      const type = uploadContentType(req.headers['content-type']);
+      if (!imageTypesFor(kind)[type] || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+        throw badRequest(`Upload a ${imageTypesText(kind)} image up to 2 MB`);
+      }
+      let url: string;
+      try {
+        url = await uploadImage(req.scope!.networkId, kind, req.body, type);
+      } catch (e) {
+        throw badRequest(e instanceof Error ? e.message : 'Upload failed');
+      }
+      await writeAudit(req, { action: 'control_center.branding.upload', entityType: 'network', entityId: req.scope!.networkId, after: { kind, url, contentType: type, bytes: req.body.length } });
+      sendOk(res, { url }, undefined, 201);
     }),
   );
 
