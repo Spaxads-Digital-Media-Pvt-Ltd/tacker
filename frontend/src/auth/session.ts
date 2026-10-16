@@ -22,6 +22,8 @@ export interface Session {
   expiresAt: number | null;
   /** Set on an impersonation session: the id of the admin viewing this portal account. */
   impersonatedBy?: string;
+  /** A Super Admin support session in a network's dashboard (impersonatedBy = the platform admin). */
+  supportSession?: true;
   /** Signed in with an invite's temporary password: choose a new one before anything else (O1). */
   mustChangePassword?: boolean;
 }

@@ -7,8 +7,11 @@
  * tombstones with their ledger as CSV.
  */
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useMutation, useQuery } from '../../lib/useApi';
+import { useSupportSession } from '../../lib/impersonation';
+import { useDebounced } from '../admin/pagedList';
 import { useAllNetworks } from './useAllNetworks';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
@@ -23,7 +26,14 @@ const linkBtn = 'text-tiny font-medium text-accent-text hover:underline disabled
 const dangerBtn = 'text-tiny font-medium text-danger-text hover:underline disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline';
 
 export default function Networks() {
-  const { data, loading, error, refetch } = useAllNetworks();
+  const [q, setQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [planFilter, setPlanFilter] = useState('');
+  const search = useDebounced(q.trim(), 300);
+  const filtered = Boolean(search || statusFilter || planFilter);
+  const { data, loading, error, refetch } = useAllNetworks({ q: search || undefined, status: statusFilter || undefined, plan: planFilter || undefined });
+  const plans = useQuery<{ id: string; code: string; name: string }[]>('/platform/plans');
+  const support = useSupportSession();
   const purged = useQuery<PurgedNetworkRow[]>('/platform/purged-networks?limit=200');
   const [open, setOpen] = useState(false);
   const [purging, setPurging] = useState<NetworkRow | null>(null);
@@ -50,7 +60,7 @@ export default function Networks() {
       header: 'Network',
       cell: (n) => (
         <div>
-          <span className="font-medium">{n.name}</span>
+          <Link to={`/admin/networks/${n.id}`} className="font-medium text-fg hover:text-accent-text hover:underline">{n.name}</Link>
           {n.status === 'deleted' && (
             <p className="text-tiny text-danger-text">
               Deleted {day(n.deleted_at)} · {purgeOpen(n) ? 'can be purged now (still restorable until purged)' : `can be restored until ${day(n.purge_after)}`}
@@ -60,6 +70,7 @@ export default function Networks() {
       ),
     },
     { header: 'Slug', cell: (n) => <span className="font-mono text-xs">{n.slug}</span> },
+    { header: 'Owner', cell: (n) => n.owner_email ?? <span className="text-fg-muted">—</span> },
     { header: 'Status', cell: (n) => <Badge value={n.status} /> },
     { header: 'Plan', cell: (n) => n.plan_code ?? <span className="text-fg-muted">—</span> },
     { header: 'Subscription', cell: (n) => (n.subscription_status ? <Badge value={n.subscription_status} /> : <span className="text-fg-muted">none</span>) },
@@ -68,6 +79,8 @@ export default function Networks() {
       header: '', className: 'text-right',
       cell: (n) => (
         <span className="flex justify-end gap-3 whitespace-nowrap">
+          {n.status === 'active' && <button className={linkBtn} disabled={support.busy} onClick={() => void support.start(n.id)}
+            title="Open this network's dashboard as its admin for 30 minutes — every change is recorded under you">Open dashboard</button>}
           {n.status === 'active' && <button className={dangerBtn} onClick={() => setStatus(n, 'suspended', 'Suspend', 'Tracking, the dashboard, the portals and the API stop until you activate it again. Nothing is deleted.')}>Suspend</button>}
           {n.status === 'suspended' && <button className={linkBtn} onClick={() => setStatus(n, 'active', 'Activate', 'Tracking, the dashboard, the portals and the API work again.')}>Activate</button>}
           {n.status !== 'deleted' && <button className={dangerBtn} onClick={() => softDelete(n)}>Delete</button>}
@@ -101,10 +114,24 @@ export default function Networks() {
         subtitle="Create, suspend, delete, restore and purge tenant networks."
         action={<button className="btn-primary" onClick={() => setOpen(true)}>New network</button>}
       />
-      {actionError && <p className="mb-3 text-small text-danger-text">{actionError}</p>}
+      {(actionError || support.error) && <p className="mb-3 text-small text-danger-text">{actionError ?? support.error}</p>}
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <input className="input sm:max-w-xs" placeholder="Search name, slug or a team email…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search networks" />
+        <select className="input sm:max-w-[11rem]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status">
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+          <option value="deleted">Deleted</option>
+        </select>
+        <select className="input sm:max-w-[11rem]" value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} aria-label="Plan">
+          <option value="">All plans</option>
+          <option value="none">No plan</option>
+          {(plans.data ?? []).map((p) => <option key={p.id} value={p.code}>{p.name}</option>)}
+        </select>
+      </div>
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No networks yet.</StateBlock>
+        : !data || data.length === 0 ? <StateBlock>{filtered ? 'No networks match these filters.' : 'No networks yet.'}</StateBlock>
         : <Table columns={columns} rows={data} rowKey={(n) => n.id} />}
       {(purged.data?.length ?? 0) > 0 && (
         <div className="mt-8 space-y-3">

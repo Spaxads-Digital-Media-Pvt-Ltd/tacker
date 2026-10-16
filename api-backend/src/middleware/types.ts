@@ -30,17 +30,22 @@ interface DashboardBase {
   networkId: string;
 }
 
-export interface AdminIdentity extends DashboardBase {
-  kind: 'admin';
-  role: AdminRole;
-}
-
 /** Set when an admin is impersonating this portal account (audit F-10). */
 interface Impersonation {
   /** The impersonating admin's user id — every audited write records it. */
   impersonatedBy?: string;
   /** Unix seconds when the impersonation session ends. */
   impersonationExpiresAt?: number;
+}
+
+/**
+ * A network admin — or a Super Admin support session acting as one (`platformSupport`): then `userId`
+ * and `impersonatedBy` are the platform admin's id, and every write is audited to that platform admin.
+ */
+export interface AdminIdentity extends DashboardBase, Impersonation {
+  kind: 'admin';
+  role: AdminRole;
+  platformSupport?: true;
 }
 
 export interface PublisherPortalIdentity extends DashboardBase, Impersonation {

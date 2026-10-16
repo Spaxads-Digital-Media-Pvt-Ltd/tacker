@@ -8,11 +8,14 @@ import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../lib/http/pagination.js';
-import { badRequest, notFound, unauthorized, forbidden, tooMany } from '../../lib/http/errors.js';
+import { badRequest, notFound, unauthorized, forbidden, tooMany, conflict, serviceUnavailable } from '../../lib/http/errors.js';
+import { containsPattern } from '../../lib/db/like.js';
+import { getSupabaseAdmin } from '../../lib/supabase.js';
+import { impersonationConfigured, signSupportSessionToken } from '../../lib/auth/impersonation-token.js';
 import { query } from '../../lib/db/pool.js';
 import { pool } from '../../lib/db/pool.js';
 import { writePlatformAudit } from '../../lib/audit.js';
-import { provisionAdmin } from '../../lib/provisioning.js';
+import { provisionAdmin, generateTemporaryPassword } from '../../lib/provisioning.js';
 import { generateSecureCode } from '../../lib/security-code.js';
 import { signPlatformAdminToken } from '../../lib/auth/platform-admin-token.js';
 import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
@@ -24,8 +27,8 @@ import {
  resetLoginCounter,
 } from '../../lib/auth/login-rate-limit.js';
 import {
- createNetworkSchema, updateNetworkSchema, createPlanSchema, assignSubscriptionSchema, loginSchema,
- type CreateNetwork, type UpdateNetwork, type CreatePlan, type AssignSubscription, type Login,
+ createNetworkSchema, updateNetworkSchema, createPlanSchema, assignSubscriptionSchema, loginSchema, networkListSchema,
+ type CreateNetwork, type UpdateNetwork, type CreatePlan, type AssignSubscription, type Login, type NetworkListQuery,
  purgeNetworkSchema, type PurgeNetwork,
 } from './schemas.js';
 import { once } from 'node:events';
@@ -33,6 +36,8 @@ import { softDeleteNetwork, exportNetwork, exportLedgerCsv, purgeNetwork, purgeA
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { networkStateChanged } from '../../lib/networks/state.js';
 import { usageVsPlan } from '../../lib/usage/meter.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function clientIp(req: { socket?: { remoteAddress?: string } }): string {
  return req.socket?.remoteAddress ?? 'unknown';
@@ -101,32 +106,157 @@ export function platformRoutes(): Router {
  );
 
  // ---------- Networks ----------
+ // Search (name, slug, a team member's email) and filters (status; plan code, or 'none'). Only the columns
+ // the console shows — never a network's settings (its SMTP / integration credentials) or postback code.
  r.get(
  '/networks',
- validateQuery(paginationSchema),
+ validateQuery(networkListSchema),
  asyncHandler(async (_req, res) => {
- const { limit, offset } = res.locals.query as PaginationQuery;
+ const { limit, offset, q, status, plan } = res.locals.query as NetworkListQuery;
+ const where = `($1::text IS NULL OR n.name ILIKE $1 ESCAPE '\\' OR n.slug ILIKE $1 ESCAPE '\\'
+ OR EXISTS (SELECT 1 FROM users u WHERE u.network_id = n.id AND u.email ILIKE $1 ESCAPE '\\'))
+ AND ($2::text IS NULL OR n.status = $2)
+ AND ($3::text IS NULL OR ($3 = 'none' AND p.code IS NULL) OR p.code = $3)`;
+ const params = [q ? containsPattern(q) : null, status ?? null, plan || null];
  const { rows } = await query(
- `SELECT n.*, s.status AS subscription_status, p.code AS plan_code
+ `SELECT n.id, n.ref, n.name, n.slug, n.status, n.default_currency, n.created_at, n.updated_at, n.deleted_at, n.exported_at,
+ s.status AS subscription_status, p.code AS plan_code, p.name AS plan_name,
+ (SELECT u.email FROM users u WHERE u.network_id = n.id AND u.role = 'admin' ORDER BY u.created_at LIMIT 1) AS owner_email
  FROM networks n
  LEFT JOIN subscriptions s ON s.network_id = n.id
  LEFT JOIN subscription_plans p ON p.id = s.plan_id
- ORDER BY n.created_at DESC LIMIT $1 OFFSET $2`,
- [limit, offset],
+ WHERE ${where}
+ ORDER BY n.created_at DESC LIMIT $4 OFFSET $5`,
+ [...params, limit, offset],
  );
- const { rows: countRows } = await query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM networks`);
+ const { rows: countRows } = await query<{ n: number }>(
+ `SELECT COUNT(*)::int AS n FROM networks n
+ LEFT JOIN subscriptions s ON s.network_id = n.id LEFT JOIN subscription_plans p ON p.id = s.plan_id
+ WHERE ${where}`, params);
  // A deleted network says until when it can be restored (then the purge is possible) — D3.
  sendOk(res, rows.map((n) => ({ ...n, purge_after: n['deleted_at'] ? purgeAfter(new Date(n['deleted_at'] as string)) : null })),
  { limit, offset, total: countRows[0]?.n ?? 0 });
  }),
  );
 
+ // One network, everything the console shows about it: the network, its subscription, its owner (the first
+ // admin) with their last sign-in, how big it is, its tracking domains and its usage against its plan.
  r.get(
  '/networks/:id',
  asyncHandler(async (req, res) => {
- const { rows } = await query(`SELECT * FROM networks WHERE id = $1`, [req.params.id]);
- if (!rows[0]) throw notFound('Network not found');
- sendOk(res, rows[0]);
+ const id = req.params.id!;
+ if (!UUID_RE.test(id)) throw notFound('Network not found');
+ const net = (await query(
+ `SELECT id, ref, name, slug, status, default_currency, created_at, updated_at, deleted_at, exported_at
+ FROM networks WHERE id = $1`, [id])).rows[0];
+ if (!net) throw notFound('Network not found');
+ const [sub, owner, counts, domains, usage] = await Promise.all([
+ query(
+ `SELECT s.id, s.status, s.current_period_start, s.current_period_end, s.renews_at, s.created_at,
+ p.id AS plan_id, p.code AS plan_code, p.name AS plan_name, p.price_cents, p.currency, p.limits
+ FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id WHERE s.network_id = $1`, [id]),
+ query(
+ `SELECT u.id, u.email, u.name, u.status, (u.auth_user_id IS NOT NULL) AS has_login,
+ (SELECT max(le.created_at) FROM login_events le WHERE le.network_id = u.network_id AND le.user_id = u.auth_user_id) AS last_sign_in_at
+ FROM users u WHERE u.network_id = $1 AND u.role = 'admin' ORDER BY u.created_at LIMIT 1`, [id]),
+ query<{ users: number; offers: number; partners: number; advertisers: number }>(
+ `SELECT (SELECT COUNT(*) FROM users WHERE network_id = $1)::int AS users,
+ (SELECT COUNT(*) FROM offers WHERE network_id = $1 AND status <> 'archived')::int AS offers,
+ (SELECT COUNT(*) FROM publishers WHERE network_id = $1)::int AS partners,
+ (SELECT COUNT(*) FROM advertisers WHERE network_id = $1)::int AS advertisers`, [id]),
+ query(`SELECT host, mode, status, is_primary FROM tracking_domains WHERE network_id = $1 ORDER BY is_primary DESC, host`, [id]),
+ usageVsPlan(id),
+ ]);
+ sendOk(res, {
+ ...net,
+ purge_after: net['deleted_at'] ? purgeAfter(new Date(net['deleted_at'] as string)) : null,
+ subscription: sub.rows[0] ?? null,
+ owner: owner.rows[0] ?? null,
+ counts: counts.rows[0],
+ trackingDomains: domains.rows,
+ usage,
+ });
+ }),
+ );
+
+ // The network's team (staff logins): role, status, whether they can sign in, and their last sign-in.
+ r.get(
+ '/networks/:id/users',
+ asyncHandler(async (req, res) => {
+ const id = req.params.id!;
+ if (!UUID_RE.test(id) || !(await query('SELECT 1 FROM networks WHERE id = $1', [id])).rows[0]) throw notFound('Network not found');
+ const { rows } = await query(
+ `SELECT u.id, u.email, u.name, u.role, u.status, u.created_at, (u.auth_user_id IS NOT NULL) AS has_login,
+ (SELECT max(le.created_at) FROM login_events le WHERE le.network_id = u.network_id AND le.user_id = u.auth_user_id) AS last_sign_in_at
+ FROM users u WHERE u.network_id = $1
+ ORDER BY (u.role = 'admin') DESC, u.created_at
+ LIMIT 500`, [id]);
+ sendOk(res, rows);
+ }),
+ );
+
+ // A team member who can't get in (e.g. the owner lost their password): a new temporary password, shown
+ // once here — they must choose their own at their next sign-in, and Supabase signs them out everywhere.
+ r.post(
+ '/networks/:id/users/:userId/temporary-password',
+ asyncHandler(async (req, res) => {
+ const { id, userId } = req.params as { id: string; userId: string };
+ if (!UUID_RE.test(id) || !UUID_RE.test(userId)) throw notFound('User not found');
+ const user = (await query<{ email: string; auth_user_id: string | null }>(
+ 'SELECT email, auth_user_id FROM users WHERE id = $1 AND network_id = $2', [userId, id])).rows[0];
+ if (!user) throw notFound('User not found');
+ if (!user.auth_user_id) throw conflict(`${user.email} has no login yet — invite them from the network's Team page.`);
+ const temporaryPassword = generateTemporaryPassword();
+ const { error } = await getSupabaseAdmin().auth.admin.updateUserById(user.auth_user_id, {
+ password: temporaryPassword,
+ app_metadata: { must_change_password: true },
+ });
+ if (error) throw badRequest(`Could not set the password: ${error.message}`);
+ await writePlatformAudit(req, id, { action: 'network.user_temporary_password', entityType: 'user', entityId: userId, after: { email: user.email } });
+ sendOk(res, { email: user.email, temporaryPassword });
+ }),
+ );
+
+ // Open the network's dashboard as its admin (support): a 30-minute session, every change in it audited to
+ // this Super Admin; passwords, emails and API keys can't be changed in it. Only an active network.
+ r.post(
+ '/networks/:id/support-session',
+ asyncHandler(async (req, res) => {
+ const id = req.params.id!;
+ if (!UUID_RE.test(id)) throw notFound('Network not found');
+ const net = (await query<{ name: string; status: string }>('SELECT name, status FROM networks WHERE id = $1', [id])).rows[0];
+ if (!net) throw notFound('Network not found');
+ if (net.status !== 'active') {
+ throw conflict(`${net.name} is ${net.status} — ${net.status === 'deleted' ? 'restore' : 'activate'} it first to open its dashboard.`);
+ }
+ if (!impersonationConfigured()) {
+ throw serviceUnavailable('Opening a tenant dashboard needs IMPERSONATION_JWT_SECRET on the server (a random string of 32+ characters in api-backend/.env), then restart the backend.');
+ }
+ const platformAdminId = (req.identity as PlatformAdminIdentity).platformAdminId;
+ const { token, expiresAt, jti } = await signSupportSessionToken({ networkId: id, platformAdminId });
+ await writePlatformAudit(req, id, {
+ action: 'network.support_session', entityType: 'network', entityId: id,
+ after: { expiresAt: new Date(expiresAt * 1000).toISOString(), sessionId: jti },
+ });
+ sendOk(res, { token, expiresAt, network: { id, name: net.name } });
+ }),
+ );
+
+ // What Super Admins did to this network — including every change made in a support session.
+ r.get(
+ '/networks/:id/activity',
+ validateQuery(paginationSchema),
+ asyncHandler(async (req, res) => {
+ const id = req.params.id!;
+ if (!UUID_RE.test(id)) throw notFound('Network not found');
+ const { limit, offset } = res.locals.query as PaginationQuery;
+ const { rows } = await query(
+ `SELECT al.id, al.created_at, al.action, al.entity_type, al.entity_id, al.after, (al.impersonated_by IS NOT NULL) AS in_support_session,
+ pa.email AS admin_email
+ FROM audit_log al LEFT JOIN platform_admins pa ON pa.id::text = al.actor_id
+ WHERE al.network_id = $1 AND al.actor_type = 'platform_admin'
+ ORDER BY al.created_at DESC LIMIT $2 OFFSET $3`, [id, limit, offset]);
+ sendOk(res, rows, { limit, offset });
  }),
  );
 

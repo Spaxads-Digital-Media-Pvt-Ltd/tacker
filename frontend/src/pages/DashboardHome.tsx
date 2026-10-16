@@ -552,7 +552,7 @@ const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] 
       { label: 'Networks', hint: 'Active / total', val: (s) => `${int(s['activeNetworks'])} / ${int(s['networks'])}` },
       { label: 'MRR', hint: 'Active subscriptions', val: (s) => money(String(s['mrr'] ?? 0)) },
       { label: 'Clicks (24h)', hint: 'Platform-wide', val: (s) => int(s['clicks24h']) },
-      { label: 'Conversions (24h)', hint: 'Attributed to you', val: (s) => int(s['conversions24h']) },
+      { label: 'Conversions (24h)', hint: 'Platform-wide', val: (s) => int(s['conversions24h']) },
     ],
   },
   publisher: {

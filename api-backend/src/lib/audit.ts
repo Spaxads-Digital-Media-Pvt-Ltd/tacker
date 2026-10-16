@@ -32,9 +32,10 @@ export async function writeAudit(req: Request, entry: AuditEntry): Promise<void>
 
   if (id.surface === 'dashboard') {
     networkId = id.networkId;
-    actorType = 'user';
+    // A Super Admin support session acts as the network's admin: the platform admin is the actor.
+    actorType = id.kind === 'admin' && id.platformSupport ? 'platform_admin' : 'user';
     actorId = id.userId;
-    if (id.kind !== 'admin') impersonatedBy = id.impersonatedBy ?? null;
+    impersonatedBy = id.impersonatedBy ?? null;
   } else if (id.surface === 'public-api') {
     networkId = id.networkId;
     actorType = 'api_key';
@@ -66,14 +67,15 @@ export async function writeAudit(req: Request, entry: AuditEntry): Promise<void>
 }
 
 /**
- * Every successful write made while an admin impersonates a portal account is audited to that admin
- * (F-10) — including routes that don't write an audit row of their own: those get a generic
+ * Every successful write made while an admin impersonates a portal account — or a Super Admin is in a
+ * support session — is audited to that admin (F-10), including routes that don't write an audit row of
+ * their own: those get a generic
  * `impersonation.write` row (method, path, status). Mount after authentication.
  */
 export function auditImpersonatedWrites(req: Request, res: Response, next: NextFunction): void {
   const id = req.identity;
   const write = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
-  if (write && id && id.surface === 'dashboard' && id.kind !== 'admin' && id.impersonatedBy) {
+  if (write && id && id.surface === 'dashboard' && id.impersonatedBy) {
     res.on('finish', () => {
       if (res.statusCode >= 400 || audited.has(req)) return;
       void writeAudit(req, {

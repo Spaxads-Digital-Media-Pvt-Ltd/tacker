@@ -97,15 +97,28 @@ export function buildDashboardApp(): Express {
   // shows a persistent "impersonating" banner from it.
   authed.get('/me', asyncHandler(async (req, res) => {
     const id = req.identity;
-    let impersonation: { impersonatedBy: string; adminEmail: string | null; account: string | null; expiresAt: number } | null = null;
+    let impersonation: { impersonatedBy: string; adminEmail: string | null; account: string | null; expiresAt: number; support?: true } | null = null;
     if (id && id.surface === 'dashboard' && id.kind !== 'admin' && id.impersonatedBy) {
       const [admin, account] = await Promise.all([
-        query<{ email: string }>('SELECT email FROM users WHERE network_id = $1 AND auth_user_id::text = $2 LIMIT 1', [id.networkId, id.impersonatedBy]),
+        // The network admin who started it — or a Super Admin, when started from a support session.
+        query<{ email: string | null }>(
+          `SELECT COALESCE((SELECT email FROM users WHERE network_id = $1 AND auth_user_id::text = $2 LIMIT 1),
+                           (SELECT email FROM platform_admins WHERE id::text = $2)) AS email`, [id.networkId, id.impersonatedBy]),
         query<{ name: string }>(`SELECT name FROM ${id.kind === 'publisher' ? 'publishers' : 'advertisers'} WHERE network_id = $1 AND id = $2`, [id.networkId, id.ownerId]),
       ]);
       impersonation = {
         impersonatedBy: id.impersonatedBy, adminEmail: admin.rows[0]?.email ?? null,
         account: account.rows[0]?.name ?? null, expiresAt: id.impersonationExpiresAt ?? 0,
+      };
+    } else if (id && id.surface === 'dashboard' && id.kind === 'admin' && id.platformSupport) {
+      // A Super Admin support session: whose network this is, and which Super Admin is in it.
+      const [admin, net] = await Promise.all([
+        query<{ email: string }>('SELECT email FROM platform_admins WHERE id::text = $1', [id.userId]),
+        query<{ name: string }>('SELECT name FROM networks WHERE id = $1', [id.networkId]),
+      ]);
+      impersonation = {
+        impersonatedBy: id.userId, adminEmail: admin.rows[0]?.email ?? null,
+        account: net.rows[0]?.name ?? null, expiresAt: id.impersonationExpiresAt ?? 0, support: true,
       };
     }
     // D7: the network's report time zone — every report page (staff and portals) defaults to it.

@@ -17,6 +17,7 @@ import {
  isImpersonationToken, verifyImpersonationToken, signImpersonationToken, impersonationConfigured,
 } from '../../lib/auth/impersonation-token.js';
 import { networkAccessError } from '../../lib/networks/state.js';
+import { query } from '../../lib/db/pool.js';
 import { staffState } from '../../lib/auth/staff-state.js';
 import {
  portalAccountStatus, portalAccessAllowed, inactiveAccountMessage, deletedAccountMessage,
@@ -55,11 +56,20 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  if (isImpersonationToken(token)) {
  try {
  const s = await verifyImpersonationToken(token);
+ if (s.kind === 'admin') {
+ // A Super Admin support session: the network's admin, acted by (and audited to) the platform admin.
+ req.identity = {
+ surface: 'dashboard', kind: 'admin', role: 'admin', userId: s.platformAdminId, networkId: s.networkId,
+ impersonatedBy: s.platformAdminId, impersonationExpiresAt: s.expiresAt, platformSupport: true,
+ };
+ req.scope = { networkId: s.networkId };
+ } else {
  req.identity = {
  surface: 'dashboard', kind: s.kind, userId: s.userId, networkId: s.networkId, ownerId: s.ownerId,
  impersonatedBy: s.impersonatedBy, impersonationExpiresAt: s.expiresAt,
  };
  req.scope = { networkId: s.networkId, ownerId: s.ownerId };
+ }
  } catch {
  return next(unauthorized('Impersonation session is invalid or has expired.'));
  }
@@ -110,10 +120,19 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  req.scope = undefined;
  return next(refused);
  }
+ const id = req.identity!;
+ // A support session lasts only while its Super Admin account is active (disabled → refused at once).
+ if (id.surface === 'dashboard' && id.kind === 'admin' && id.platformSupport) {
+ const { rows } = await query<{ status: string }>('SELECT status FROM platform_admins WHERE id::text = $1', [id.userId]);
+ if (rows[0]?.status !== 'active') {
+ req.identity = undefined;
+ req.scope = undefined;
+ return next(unauthorized('This support session ended: its Super Admin account is no longer active.'));
+ }
+ }
  // Team members: the users row decides — a disabled member is refused, and a role change applies
  // now (the token's role claim is only the fallback for a login with no users row).
- const id = req.identity!;
- if (id.surface === 'dashboard' && id.kind === 'admin') {
+ if (id.surface === 'dashboard' && id.kind === 'admin' && !id.platformSupport) {
  const staff = await staffState(req.scope!.networkId, id.userId);
  if (staff?.status === 'disabled') {
  req.identity = undefined;
@@ -141,10 +160,10 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  return next();
 }
 
-/** Is an admin impersonating this request's portal account? (F-10) */
+/** Is this request an impersonation (F-10) — an admin in a portal account, or a Super Admin support session? */
 export function isImpersonating(req: Request): boolean {
  const id = req.identity;
- return Boolean(id && id.surface === 'dashboard' && id.kind !== 'admin' && id.impersonatedBy);
+ return Boolean(id && id.surface === 'dashboard' && id.impersonatedBy);
 }
 
 /**

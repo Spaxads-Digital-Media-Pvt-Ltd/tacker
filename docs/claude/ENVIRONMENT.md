@@ -22,7 +22,7 @@
 ### Optional
 | Variable | Purpose | Default |
 |---|---|---|
-| `IMPERSONATION_JWT_SECRET` | Signs admin impersonation sessions (30 min). ≥32 chars (`openssl rand -hex 32`). Unset → "Impersonate" answers 503 | — |
+| `IMPERSONATION_JWT_SECRET` | Signs admin impersonation sessions and Super Admin support sessions (30 min). ≥32 chars (`openssl rand -hex 32`). Unset → "Impersonate" and Super Admin "Open dashboard" answer 503 | — |
 | `TRACKING_BASE_DOMAIN` | Base for tenant subdomains | `ourtracking.com` |
 | `TRACKING_RL_CLICK_LIMIT` | `/click`, `/sl`: requests per IP per sliding 5-min window (each request counts once — O3) | `120` |
 | `TRACKING_RL_POSTBACK_LIMIT` | `/postback`: **failed** postbacks (no / wrong security code, unknown click) per IP per 5 min — an authenticated postback is never throttled (O3); also the per-IP limit for `/pixel` and `/iframe` (all requests) | `60` |

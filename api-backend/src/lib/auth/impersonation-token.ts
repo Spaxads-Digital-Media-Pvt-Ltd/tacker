@@ -64,10 +64,54 @@ export async function signImpersonationToken(
   return { token, expiresAt, jti };
 }
 
+/**
+ * A Super Admin support session: the platform admin acts as an admin OF one network's dashboard, for
+ * IMPERSONATION_TTL_S. Same secret, issuer and audience as a portal impersonation; claims kind 'admin',
+ * role 'admin', support 'platform', network_id, impersonated_by = sub = the platform admin's id.
+ */
+export interface SupportSession {
+  kind: 'admin';
+  networkId: string;
+  /** The platform admin's id (also `impersonatedBy`). */
+  platformAdminId: string;
+  /** Unix seconds. */
+  expiresAt: number;
+  jti: string;
+}
+
+export async function signSupportSessionToken(
+  s: { networkId: string; platformAdminId: string }, ttlSeconds = IMPERSONATION_TTL_S,
+): Promise<{ token: string; expiresAt: number; jti: string }> {
+  const jti = randomUUID();
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const token = await new SignJWT({
+    kind: 'admin', role: 'admin', support: 'platform', network_id: s.networkId, impersonated_by: s.platformAdminId, imp_exp: expiresAt,
+  })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setSubject(s.platformAdminId)
+    .setIssuer(IMPERSONATION_ISSUER)
+    .setAudience(AUDIENCE)
+    .setIssuedAt()
+    .setExpirationTime(expiresAt)
+    .setJti(jti)
+    .sign(secret());
+  return { token, expiresAt, jti };
+}
+
 /** Verify signature, issuer, audience and expiry; throws on anything else. */
-export async function verifyImpersonationToken(token: string): Promise<ImpersonationSession> {
+export async function verifyImpersonationToken(token: string): Promise<ImpersonationSession | SupportSession> {
   const { payload: p } = await jwtVerify(token, secret(), { algorithms: ['HS256'], issuer: IMPERSONATION_ISSUER, audience: AUDIENCE });
   const kind = p['kind'];
+  if (kind === 'admin') {
+    // Only a platform support session acts as a network admin — never a portal impersonation.
+    const networkId = p['network_id'];
+    const by = p['impersonated_by'];
+    if (p['support'] !== 'platform' || p['role'] !== 'admin' || typeof networkId !== 'string' || !networkId
+      || typeof by !== 'string' || by !== p.sub || typeof p.exp !== 'number' || !p.jti) {
+      throw new Error('support session token is invalid');
+    }
+    return { kind, networkId, platformAdminId: by, expiresAt: p.exp, jti: p.jti };
+  }
   if (kind !== 'publisher' && kind !== 'advertiser') throw new Error('impersonation token has an invalid kind');
   const str = (k: string): string => {
     const v = p[k];

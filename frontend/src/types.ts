@@ -612,6 +612,47 @@ export interface NetworkRow {
   purge_after?: string | null;
   /** Last full export (Super Admin › Export) — a purge wants one taken since the delete. */
   exported_at?: string | null;
+  plan_name?: string | null;
+  /** The network's first admin (its owner). */
+  owner_email?: string | null;
+}
+
+/** A plan limit this billing period (lib/usage/meter.ts): used vs limit, ok | near (≥ 80 %) | over. */
+export interface PlanLimitStatus { key: string; used: number; limit: number; pct: number; state: 'ok' | 'near' | 'over' }
+
+/** GET /platform/networks/:id — one network as the Super Admin console shows it. */
+export interface NetworkDetail {
+  id: string;
+  ref: string;
+  name: string;
+  slug: string;
+  status: 'active' | 'suspended' | 'deleted';
+  default_currency: string;
+  created_at: string;
+  deleted_at: string | null;
+  exported_at: string | null;
+  purge_after: string | null;
+  subscription: {
+    id: string; status: string; plan_id: string; plan_code: string; plan_name: string; price_cents: number; currency: string;
+    current_period_start: string | null; current_period_end: string | null; renews_at: string | null; created_at: string;
+    limits: Record<string, number | string | boolean>;
+  } | null;
+  owner: { id: string; email: string; name: string | null; status: string; has_login: boolean; last_sign_in_at: string | null } | null;
+  counts: { users: number; offers: number; partners: number; advertisers: number };
+  trackingDomains: { host: string; mode: string; status: string; is_primary: boolean }[];
+  usage: { plan: { code: string; name: string } | null; period: { start: string; end: string }; limits: PlanLimitStatus[] };
+}
+
+/** GET /platform/networks/:id/users — a network's team, as the Super Admin sees it. */
+export interface NetworkTeamMember {
+  id: string; email: string; name: string | null; role: string; status: string; created_at: string;
+  has_login: boolean; last_sign_in_at: string | null;
+}
+
+/** GET /platform/networks/:id/activity — what Super Admins did to a network. */
+export interface PlatformActivityRow {
+  id: string; created_at: string; action: string; entity_type: string | null; entity_id: string | null;
+  after: unknown; in_support_session: boolean; admin_email: string | null;
 }
 
 /** A purged network's tombstone (D3): who it was, when it went — its money ledger is kept. */

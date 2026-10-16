@@ -1,9 +1,10 @@
 /**
- * Admin impersonation, start and end (F-10). "Impersonate" on a partner / advertiser opens this page
- * in a new tab with the 30-minute impersonation token in the URL fragment (never sent to a server,
- * and wiped from the address bar here). It becomes THIS tab's session (sessionStorage — the admin's
- * own sign-in in other tabs is untouched) and the account's portal opens, under a banner.
- * `?ended=…` is where an ended or expired impersonation lands.
+ * Admin impersonation, start and end (F-10). "Impersonate" on a partner / advertiser — or Super Admin ›
+ * Networks › "Open dashboard" (a support session as the network's admin) — opens this page in a new tab
+ * with the 30-minute token in the URL fragment (never sent to a server, and wiped from the address bar
+ * here). It becomes THIS tab's session (sessionStorage — the admin's own sign-in in other tabs is
+ * untouched) and the portal / dashboard opens, under a banner. `?ended=…` is where an ended or expired
+ * session lands.
  */
 import { useEffect, useState } from 'react';
 import { Brandmark } from '../shared-components/primitives/Brandmark';
@@ -12,7 +13,7 @@ import { startImpersonation, type Session } from '../auth/session';
 import { ROLE_HOME } from '../auth/roles';
 import { api } from '../lib/api';
 
-interface Claims { kind?: string; network_id?: string; owner_id?: string; impersonated_by?: string; exp?: number }
+interface Claims { kind?: string; network_id?: string; owner_id?: string; impersonated_by?: string; exp?: number; support?: string }
 interface Me { impersonation: { account: string | null; adminEmail: string | null } | null }
 
 function claimsOf(token: string): Claims | null {
@@ -36,28 +37,32 @@ export default function Impersonate() {
     if (ended) { setState(ended === 'expired' ? 'expired' : 'ended'); return; }
 
     const c = token ? claimsOf(token) : null;
-    const kind = c?.kind === 'publisher' || c?.kind === 'advertiser' ? c.kind : null;
-    if (!token || !c || !kind || !c.network_id || !c.owner_id || !c.exp || c.exp * 1000 <= Date.now()) {
+    const support = c?.kind === 'admin' && c.support === 'platform';
+    const kind = c?.kind === 'publisher' || c?.kind === 'advertiser' ? c.kind : support ? 'admin' as const : null;
+    if (!token || !c || !kind || !c.network_id || (!support && !c.owner_id) || !c.exp || c.exp * 1000 <= Date.now()) {
       setState('invalid');
       return;
     }
     const session: Session = {
-      token, role: kind, displayName: kind === 'publisher' ? 'Partner' : 'Advertiser', email: '',
-      networkId: c.network_id, ownerId: c.owner_id, expiresAt: c.exp, impersonatedBy: c.impersonated_by ?? 'admin',
+      token, role: kind, displayName: support ? 'Network' : kind === 'publisher' ? 'Partner' : 'Advertiser', email: '',
+      networkId: c.network_id, ownerId: support ? null : c.owner_id ?? null, expiresAt: c.exp, impersonatedBy: c.impersonated_by ?? 'admin',
+      ...(support ? { supportSession: true as const } : {}),
     };
     startImpersonation(session);
-    // Name the account in the header (and the banner) before the portal opens.
+    // Name the account (or network) in the header and the banner before it opens.
     void api.get<Me>('/api/me').then((me) => {
       const imp = me.impersonation;
-      if (imp?.account) startImpersonation({ ...session, displayName: imp.account, email: imp.adminEmail ? `Viewed by ${imp.adminEmail}` : '' });
+      if (imp?.account) {
+        startImpersonation({ ...session, displayName: imp.account, email: imp.adminEmail ? `${support ? 'Super Admin' : 'Viewed by'} ${imp.adminEmail}` : '' });
+      }
     }).catch(() => undefined).finally(() => { window.location.replace(ROLE_HOME[kind]); });
   }, []);
 
   const closeTab = () => { window.close(); };
   const message: Record<Exclude<State, 'starting'>, { title: string; body: string }> = {
-    invalid: { title: 'This impersonation link is not valid', body: 'It may have expired (they last 30 minutes) or been copied incompletely. Start it again from the account’s Impersonate menu.' },
+    invalid: { title: 'This impersonation link is not valid', body: 'It may have expired (they last 30 minutes) or been copied incompletely. Start it again — from the account’s Impersonate menu, or Super Admin › Networks › Open dashboard.' },
     ended: { title: 'Impersonation ended', body: 'You can close this tab. Your own sign-in in other tabs was not affected.' },
-    expired: { title: 'The impersonation session has expired', body: 'Impersonation lasts 30 minutes. Start it again from the account’s Impersonate menu if you need more time.' },
+    expired: { title: 'The impersonation session has expired', body: 'It lasts 30 minutes. Start it again — from the account’s Impersonate menu, or Super Admin › Networks › Open dashboard — if you need more time.' },
   };
 
   return (
@@ -66,7 +71,7 @@ export default function Impersonate() {
         <div className="mb-8 flex justify-center"><Brandmark /></div>
         <div className="card !p-8">
           {state === 'starting' ? (
-            <div className="flex items-center gap-3 text-small text-fg-secondary"><Spinner /> Opening the portal…</div>
+            <div className="flex items-center gap-3 text-small text-fg-secondary"><Spinner /> Opening…</div>
           ) : (
             <>
               <h1 className="text-h1 font-bold tracking-tight text-fg">{message[state].title}</h1>

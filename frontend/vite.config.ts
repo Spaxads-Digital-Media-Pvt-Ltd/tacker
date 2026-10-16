@@ -15,7 +15,7 @@ export default defineConfig({
       // Dashboard API (operators + portals) and the auth exchange.
       '/api': { target: process.env.VITE_API_PROXY || 'http://localhost:4001', changeOrigin: true },
       // Platform-admin (Super Admin) surface.
-      '/platform': { target: 'http://localhost:4004', changeOrigin: true },
+      '/platform': { target: process.env.VITE_PLATFORM_PROXY || 'http://localhost:4004', changeOrigin: true },
     },
   },
   build: {

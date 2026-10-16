@@ -14,6 +14,7 @@ Four role-gated surfaces (UX-only gating — backend enforces authorization):
 /forgot-password — "Forgot password?": emails a one-time reset link (O1)
 /reset-password — Where that link lands: choose a new password (token dropped from the address bar)
 /change-password — First sign-in with an invite's temporary password: choose your own first (ProtectedRoute sends every route here while `session.mustChangePassword`)
+/admin/networks/:id — Super Admin › one network: overview, owner, plan & usage, team (temporary password), Super Admin activity, "Open dashboard" (support session in a new tab, `lib/impersonation.ts useSupportSession`)
 /impersonate — Starts an admin impersonation session in this tab (opened by Impersonate)
 /admin/* — Super Admin (role: super_admin)
 /app/* — Network Admin (role: admin)
@@ -154,7 +155,7 @@ User enters credentials → POST /api/auth/login
 ## API Integration
 
 - **Base URL**: `import.meta.env.VITE_API_BASE_URL` (empty in dev → relative)
-- **Dev proxy**: Vite proxies `/api` → `:4001`, `/platform` → `:4004`
+- **Dev proxy**: Vite proxies `/api` → `:4001`, `/platform` → `:4004` (override with `VITE_API_PROXY` / `VITE_PLATFORM_PROXY`)
 - **Auth header**: `Authorization: Bearer <token>`
 - **Credentials**: `credentials: 'include'` (for refresh cookie)
 - **Envelope**: `{ ok: true, data: T }` success, `{ ok: false, error: { code, message } }` error

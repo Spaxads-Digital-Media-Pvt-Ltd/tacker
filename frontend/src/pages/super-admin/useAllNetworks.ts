@@ -4,8 +4,10 @@
  * the newest 50.
  */
 import { useAllPages } from '../../hooks/useAllPages';
+import { withQueryParams } from '../../lib/useApi';
 import type { NetworkRow } from '../../types';
 
-export function useAllNetworks() {
-  return useAllPages<NetworkRow>('/platform/networks');
+/** Optional filters: `q` searches name, slug and team emails; `plan` is a plan code or 'none'. */
+export function useAllNetworks(filters: { q?: string; status?: string; plan?: string } = {}) {
+  return useAllPages<NetworkRow>(withQueryParams('/platform/networks', filters));
 }

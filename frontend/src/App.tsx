@@ -59,6 +59,7 @@ const TrackingDomains = lazy(() => import('./pages/admin/TrackingDomains'));
 const Networks = lazy(() => import('./pages/super-admin/Networks'));
 const Subscriptions = lazy(() => import('./pages/super-admin/Subscriptions'));
 const Usage = lazy(() => import('./pages/super-admin/Usage'));
+const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
 const AdvertiserOffers = lazy(() => import('./pages/portal/AdvertiserOffers'));
 const PublisherOfferDetail = lazy(() => import('./pages/portal/PublisherOfferDetail'));
@@ -157,6 +158,7 @@ export default function App() {
         <Route element={<ProtectedRoute allow="super_admin"><AppShell /></ProtectedRoute>}>
           <Route path="/admin" element={<DashboardHome />} />
           <Route path="/admin/networks" element={<Networks />} />
+          <Route path="/admin/networks/:id" element={<NetworkDetail />} />
           <Route path="/admin/subscriptions" element={<Subscriptions />} />
           <Route path="/admin/usage" element={<Usage />} />
         </Route>

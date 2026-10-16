@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { passwordSchema } from '../../lib/auth/password-policy.js';
+import { paginationSchema } from '../../lib/http/pagination.js';
 
 export const loginSchema = z.object({
  email: z.string().email(),
@@ -20,6 +21,14 @@ export const createNetworkSchema = z.object({
     .optional(),
   provisionSubdomain: z.boolean().default(true),
 });
+
+/** GET /platform/networks — paged; `q` searches name, slug and team emails; `plan` is a plan code or 'none'. */
+export const networkListSchema = paginationSchema.extend({
+  q: z.string().trim().max(100).optional(),
+  status: z.enum(['active', 'suspended', 'deleted']).optional(),
+  plan: z.string().trim().max(50).optional(),
+}).strict();
+export type NetworkListQuery = z.infer<typeof networkListSchema>;
 
 export const updateNetworkSchema = z.object({
   name: z.string().min(1).max(200).optional(),
