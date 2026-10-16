@@ -1,17 +1,34 @@
 /**
- * Super Admin › Settings › Billing — how the platform bills its tenants: invoice numbering, when an invoice
- * is due, how long after that an unpaid one suspends its network (and whether it does), the tax rate, who
- * bills (printed on invoices) and how to pay (no payment gateway yet — shown on invoices and the tenant's
- * Billing page; the Super Admin then marks the invoice paid).
+ * Super Admin › Settings, in tabs (?tab=…). Billing — how the platform bills its tenants: invoice numbering,
+ * when an invoice is due, how long after that an unpaid one suspends its network (and whether it does), the
+ * tax rate, who bills (printed on invoices) and how to pay (no payment gateway yet — shown on invoices and the
+ * tenant's Billing page; the Super Admin then marks the invoice paid). Support — first-reply targets,
+ * auto-assignment and auto-close (support/SupportSettings.tsx).
  */
 import { useEffect, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { PageHeader, Field, Spinner, StateBlock, Tabs } from '../../shared-components/primitives/ui';
 import { usePlatformMe } from '../../lib/platformMe';
 import type { BillingSettings } from '../../lib/platformBilling';
+import { SupportSettings } from './support/SupportSettings';
+
+const TABS = ['Billing', 'Support'];
 
 export default function Settings() {
+  const [params, setParams] = useSearchParams();
+  const tab = TABS.includes(params.get('tab') ?? '') ? params.get('tab')! : 'Billing';
+  return (
+    <>
+      <PageHeader title="Settings" subtitle="How the platform bills its networks and runs its help desk." />
+      <div className="mx-auto max-w-3xl"><Tabs tabs={TABS} active={tab} onChange={(t) => setParams(t === 'Billing' ? {} : { tab: t }, { replace: true })} /></div>
+      {tab === 'Billing' ? <BillingSettingsForm /> : <SupportSettings />}
+    </>
+  );
+}
+
+function BillingSettingsForm() {
   const current = useQuery<BillingSettings>('/platform/settings/billing');
   const [f, setF] = useState<BillingSettings | null>(null);
   const [saved, setSaved] = useState(false);
@@ -32,7 +49,6 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="How the platform bills its tenant networks." />
       <form onSubmit={submit} className="mx-auto max-w-3xl space-y-4">
         <fieldset disabled={!canEdit} className="space-y-4">
         {m.error && <p className="text-small text-danger-text">{m.error}</p>}

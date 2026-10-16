@@ -20,6 +20,7 @@ export const QUEUE = {
  usageMeter: 'usage-meter',
  platformBilling: 'platform-billing',
  platformHealth: 'platform-health',
+ platformSupport: 'platform-support',
  email: 'email',
 } as const;
 

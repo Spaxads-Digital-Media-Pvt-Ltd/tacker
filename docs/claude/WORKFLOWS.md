@@ -338,6 +338,19 @@ Account managers: assigned on the health board or the network's Account tab (als
   converted); the Account Manager role sees only its networks; notes (pin), tags, tasks per network
 ```
 
+## Help Desk (network ↔ platform support)
+
+```
+Network staff: Help › Contact Support → /app/support › New ticket (subject, what's wrong, category, urgency)
+  → ticket 'open', first-reply deadline = now + platform_settings.support hours for its priority
+    (urgent 1 · high 4 · normal 8 · low 24 h), assigned to the Support member with the fewest open tickets
+Support team (/admin/support): reply → first_response_at, status 'pending' (waiting on the customer);
+  an internal note (team only); Send & resolve; change status / priority / assignee / tags (system lines)
+Customer: replies → back to 'open'; "This solved it" → 'resolved'; rates 1–5; reopens a resolved one
+Hourly: resolved + no reply for autoCloseDays (7) → 'closed' (a closed ticket can't be answered — open a new one)
+Overdue = no first reply and past the deadline (queue "Overdue", KPI "First reply overdue"); SLA met % = 30 days
+```
+
 ## Multi-Tenant Data Isolation
 
 Every query is filtered by `network_id`:

@@ -47,6 +47,12 @@ export const NAV: Record<Role, NavEntry[]> = {
       ],
     },
     {
+      label: 'Support', icon: 'lifebuoy', flyout: [
+        { label: 'Tickets', description: 'The help desk queue — answer before the first-reply deadline', to: '/admin/support', icon: Lucide.LifeBuoy, perm: 'support' },
+        { label: 'Saved replies', description: 'Answers the team reuses', to: '/admin/support/macros', icon: Lucide.MessagesSquare, perm: 'support' },
+      ],
+    },
+    {
       group: 'Money', label: 'Billing', icon: 'receipt', flyout: [
         { label: 'Invoices', description: 'Record payments, give more time, void', to: '/admin/billing', icon: Lucide.Receipt, perm: 'billing' },
         { label: 'Plans', description: 'Prices, trials and limits', to: '/admin/plans', icon: Lucide.Layers, perm: 'plans' },

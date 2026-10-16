@@ -32,6 +32,7 @@ import { publishersAdminRoutes, publisherPortalRoutes } from './publishers/route
 import { offersAdminRoutes, offerPortalRoutes } from './offers/routes.js';
 import { trackingDomainsAdminRoutes } from './tracking-domains/routes.js';
 import { subscriptionRoutes } from './subscription/routes.js';
+import { supportTenantRoutes } from './support/routes.js';
 import { financeRoutes } from './finance/routes.js';
 import { adminReportsRoutes } from './reports/routes.js';
 import { alertsRoutes, fraudRulesRoutes } from './alerts/routes.js';
@@ -411,6 +412,7 @@ export function buildDashboardApp(): Express {
 
   // The network's plan and its bill: staff only — never a partner / advertiser portal.
   authed.use('/subscription', requireAdmin, subscriptionRoutes());
+  authed.use('/support', requireAdmin, supportTenantRoutes());
 
   // Admin-only, network-scoped CRUD.
   authed.use('/advertisers', requireAdmin, advertisersAdminRoutes());

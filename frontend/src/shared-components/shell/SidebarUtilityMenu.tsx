@@ -204,9 +204,17 @@ export function NotificationsBell({ expanded }: { expanded: boolean }) {
 export function HelpMenu({ expanded }: { expanded: boolean }) {
   const { open, setOpen, ref, panelRef } = usePopover();
   const supportEmail = `support@${window.location.hostname}`;
+  // Network staff ask the platform's support team in the app (tickets); the Super Admin console has the desk.
+  const { session } = useAuth();
+  const role = session?.role;
+  // Re-read on navigation (cheap), so the badge clears once they answer or resolve.
+  const { pathname } = useLocation();
+  const tickets = useQuery<{ open: number; waiting_on_you: number }>(role === 'admin' ? '/api/support/summary' : null, { at: pathname.startsWith('/app/support') ? pathname : undefined });
+  const waiting = tickets.data?.waiting_on_you ?? 0;
+  const itemCls = 'flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-small font-medium text-fg transition-colors hover:bg-accent-subtle';
   return (
     <div className="relative" ref={ref}>
-      <RailIconButton expanded={expanded} label="Help" onClick={() => setOpen((o) => !o)}><HelpCircle size={18} /></RailIconButton>
+      <RailIconButton expanded={expanded} label="Help" onClick={() => setOpen((o) => !o)} badge={waiting > 0}><HelpCircle size={18} /></RailIconButton>
       {open && (
         <Popover anchorRef={ref} panelRef={panelRef}>
           <div className="border-b border-border px-3.5 py-3">
@@ -219,10 +227,20 @@ export function HelpMenu({ expanded }: { expanded: boolean }) {
             <button type="button" disabled className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-left text-small font-medium text-fg-muted cursor-default opacity-60">
               <Keyboard size={16} className="shrink-0" /> Keyboard Shortcuts
             </button>
-            <a href={`mailto:${supportEmail}`} onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-small font-medium text-fg transition-colors hover:bg-accent-subtle">
-              <Mail size={16} className="shrink-0 text-fg-secondary" /> Contact Support
-            </a>
+            {role === 'admin' ? (
+              <Link to="/app/support" onClick={() => setOpen(false)} className={itemCls}>
+                <Mail size={16} className="shrink-0 text-fg-secondary" /> Contact Support
+                {waiting > 0 && <span className="ml-auto rounded-full bg-warning-bg px-1.5 text-tiny font-semibold text-warning-text">{waiting} awaiting you</span>}
+              </Link>
+            ) : role === 'super_admin' ? (
+              <Link to="/admin/support" onClick={() => setOpen(false)} className={itemCls}>
+                <Mail size={16} className="shrink-0 text-fg-secondary" /> Support desk
+              </Link>
+            ) : (
+              <a href={`mailto:${supportEmail}`} onClick={() => setOpen(false)} className={itemCls}>
+                <Mail size={16} className="shrink-0 text-fg-secondary" /> Contact Support
+              </a>
+            )}
           </div>
         </Popover>
       )}

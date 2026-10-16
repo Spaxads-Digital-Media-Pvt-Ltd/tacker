@@ -74,6 +74,11 @@ const SalesPipeline = lazy(() => import('./pages/super-admin/sales/Pipeline'));
 const LeadDetail = lazy(() => import('./pages/super-admin/sales/LeadDetail'));
 const PlatformTasks = lazy(() => import('./pages/super-admin/Tasks'));
 const HealthBoard = lazy(() => import('./pages/super-admin/success/HealthBoard'));
+const SupportDesk = lazy(() => import('./pages/super-admin/support/SupportDesk'));
+const TicketView = lazy(() => import('./pages/super-admin/support/TicketView'));
+const SupportMacros = lazy(() => import('./pages/super-admin/support/Macros'));
+const TenantSupport = lazy(() => import('./pages/admin/Support'));
+const TenantSupportTicket = lazy(() => import('./pages/admin/SupportTicket'));
 const RequestDemo = lazy(() => import('./pages/RequestDemo'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
@@ -190,6 +195,9 @@ export default function App() {
           <Route path="/admin/sales/pipeline" element={<PlatformGate section="sales"><SalesPipeline /></PlatformGate>} />
           <Route path="/admin/tasks" element={<PlatformTasks />} />
           <Route path="/admin/success" element={<PlatformGate section="success"><HealthBoard /></PlatformGate>} />
+          <Route path="/admin/support" element={<PlatformGate section="support"><SupportDesk /></PlatformGate>} />
+          <Route path="/admin/support/macros" element={<PlatformGate section="support"><SupportMacros /></PlatformGate>} />
+          <Route path="/admin/support/:id" element={<PlatformGate section="support"><TicketView /></PlatformGate>} />
         </Route>
 
         {/* Admin / Network */}
@@ -323,6 +331,8 @@ export default function App() {
           <Route path="/app/control-center" element={<ControlCenter />} />
           <Route path="/app/control-center/:tab" element={<ControlCenter />} />
           <Route path="/app/billing" element={<NetworkBilling />} />
+          <Route path="/app/support" element={<TenantSupport />} />
+          <Route path="/app/support/:id" element={<TenantSupportTicket />} />
           <Route path="/app/billing/invoices/:id" element={<NetworkBillingInvoice />} />
           <Route path="/app/ai" element={<AiOps />} />
           <Route path="/app/profile" element={<ProfilePage />} />
