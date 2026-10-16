@@ -4,12 +4,13 @@
  * the last 24 hours' traffic, and what needs attention — overdue invoices (and the networks they suspend),
  * trials ending this week, plan limits reached — plus what Super Admins did lately.
  */
-import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { Activity as ActivityIcon, AlertTriangle, Building2, CircleDollarSign, Layers, Wallet } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { money, day, type InvoiceSummaryRow } from '../../lib/platformBilling';
 import { activityLabel } from '../../lib/platformActivity';
+import { KpiTile as Tile, Panel, Empty, PerCurrency } from './kit';
 
 interface Summary {
   networks: { total: number; active: number; suspended: number; suspended_for_billing: number; deleted: number; new_this_month: number };
@@ -26,35 +27,6 @@ interface Summary {
 
 const int = (n: number) => n.toLocaleString();
 
-function Tile({ label, children, hint, to }: { label: string; children: ReactNode; hint?: ReactNode; to?: string }) {
-  const body = (
-    <div className="card h-full transition-colors hover:border-slate-400/50">
-      <p className="text-small font-medium text-fg-secondary">{label}</p>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-fg">{children}</div>
-      {hint && <p className="mt-1 text-tiny text-fg-muted">{hint}</p>}
-    </div>
-  );
-  return to ? <Link to={to} className="block">{body}</Link> : body;
-}
-
-function Panel({ title, to, children }: { title: string; to?: string; children: ReactNode }) {
-  return (
-    <div className="card !p-0">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h3 className="text-h3 font-medium text-fg">{title}</h3>
-        {to && <Link to={to} className="text-tiny font-medium text-accent-text hover:underline">View all</Link>}
-      </div>
-      <div className="divide-y divide-border">{children}</div>
-    </div>
-  );
-}
-
-const Empty = ({ children }: { children: ReactNode }) => <p className="px-4 py-3 text-small text-fg-secondary">{children}</p>;
-/** One line per currency — amounts are never summed across currencies. */
-function PerCurrency<T extends { currency: string }>({ rows, render, none = '—' }: { rows: T[]; render: (r: T) => ReactNode; none?: string }) {
-  return rows.length === 0 ? <span>{none}</span> : <div className="space-y-0.5">{rows.map((r) => <div key={r.currency}>{render(r)}</div>)}</div>;
-}
-
 export default function Overview() {
   const { data: s, loading, error } = useQuery<Summary>('/platform/summary');
   if (loading) return <StateBlock><Spinner /></StateBlock>;
@@ -66,28 +38,28 @@ export default function Overview() {
     <>
       <PageHeader title="Overview" subtitle="The platform at a glance." />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <Tile label="Networks" to="/admin/networks"
+        <Tile label="Networks" to="/admin/networks" icon={Building2}
           hint={<>{int(s.networks.suspended)} suspended{s.networks.suspended_for_billing ? ` (${int(s.networks.suspended_for_billing)} for billing)` : ''} · {int(s.networks.new_this_month)} new this month</>}>
           {int(s.networks.active)} <span className="text-base font-normal text-fg-secondary">active of {int(s.networks.total - s.networks.deleted)}</span>
         </Tile>
-        <Tile label="Subscriptions" to="/admin/plans"
+        <Tile label="Subscriptions" to="/admin/plans" icon={Layers} tone="info"
           hint={<>{int(s.subscriptions.trialing)} in trial · {int(s.subscriptions.past_due)} past due · {int(s.subscriptions.without_plan)} without a plan</>}>
           {int(s.subscriptions.active + s.subscriptions.past_due)} <span className="text-base font-normal text-fg-secondary">paying</span>
         </Tile>
         {s.mrr && (
-          <Tile label="MRR" to="/admin/revenue" hint="Monthly recurring revenue — paying plans, a yearly price as a twelfth">
+          <Tile label="MRR" to="/admin/revenue" icon={CircleDollarSign} tone="success" hint="Monthly recurring revenue — paying plans, a yearly price as a twelfth">
             <PerCurrency rows={s.mrr} render={(m) => money(m.amount, m.currency)} none="None yet" />
           </Tile>
         )}
         {s.billing && <>
-          <Tile label="Overdue" to="/admin/billing" hint={`${int(overdueCount)} invoice(s) past their due date`}>
+          <Tile label="Overdue" to="/admin/billing" icon={AlertTriangle} tone={overdueCount ? 'danger' : 'success'} hint={`${int(overdueCount)} invoice(s) past their due date`}>
             <PerCurrency rows={billing.filter((b) => b.overdue_count > 0)} render={(b) => <span className="text-danger-text">{money(b.overdue_total, b.currency)}</span>} none="Nothing overdue" />
           </Tile>
-          <Tile label="Collected this month" to="/admin/billing" hint="Payments recorded this month">
+          <Tile label="Collected this month" to="/admin/billing" icon={Wallet} tone="success" hint="Payments recorded this month">
             <PerCurrency rows={billing.filter((b) => Number(b.collected_this_month) > 0)} render={(b) => money(b.collected_this_month, b.currency)} none="None yet" />
           </Tile>
         </>}
-        <Tile label="Traffic (24h)" hint="Platform-wide clicks and conversions">
+        <Tile label="Traffic (24h)" icon={ActivityIcon} tone="info" hint="Platform-wide clicks and conversions">
           {int(s.traffic.clicks24h)} <span className="text-base font-normal text-fg-secondary">clicks · {int(s.traffic.conversions24h)} conversions</span>
         </Tile>
       </div>

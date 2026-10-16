@@ -32,6 +32,11 @@ interface NetworkRow {
 const DAY_MS = 86_400_000;
 /** Tables that hold a network's rows but have no foreign key to networks (so no cascade). */
 const FKLESS = ['clicks', 'conversions', 'postback_logs', 'ledger_entries'] as const;
+/**
+ * The platform team's own records about a network (sales leads, tasks, account notes…) reference it but
+ * aren't its data: never in its export. (A purge still cascades / nulls them through their foreign keys.)
+ */
+export const PLATFORM_ONLY_TABLES: readonly string[] = ['sales_leads', 'platform_tasks'];
 /** Credentials never leave in an export. */
 const REDACT: Record<string, string[]> = {
   networks: ['postback_security_code'], api_keys: ['key_hash'], offers: ['security_code'],
@@ -79,7 +84,7 @@ async function tenantTables(client: Pick<PoolClient, 'query'>): Promise<{ table:
        FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
       WHERE c.confrelid = 'networks'::regclass AND c.contype = 'f'
       ORDER BY 1`);
-  return [...rows, ...FKLESS.map((table) => ({ table, column: 'network_id' }))];
+  return [...rows.filter((r) => !PLATFORM_ONLY_TABLES.includes(r.table)), ...FKLESS.map((table) => ({ table, column: 'network_id' }))];
 }
 
 const ident = (s: string): string => `"${s.replace(/"/g, '""')}"`;

@@ -149,6 +149,12 @@ export default function Login() {
               {asSuperAdmin ? 'Back to regular sign in' : 'Sign in as Super Admin'}
             </button>
 
+            {!asSuperAdmin && (
+              <p className="mt-4 text-center text-tiny text-fg-secondary">
+                New to {BRAND.name}? <Link to="/request-demo" className="font-medium text-accent-text hover:underline">Request a demo</Link>
+              </p>
+            )}
+
             <p className="mt-5 text-center text-tiny text-fg-muted lg:hidden">
               Authorization is enforced server-side on every request.
             </p>

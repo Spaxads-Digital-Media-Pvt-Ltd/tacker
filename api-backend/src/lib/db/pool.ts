@@ -1,4 +1,4 @@
-import { Pool, type PoolConfig, type QueryResultRow } from 'pg';
+import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from 'pg';
 import { env, isProd } from '../../config/env.js';
 import { logger } from '../logger.js';
 
@@ -32,6 +32,22 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 ): Promise<{ rows: T[]; rowCount: number }> {
  const res = await pool.query<T>(text, params ? [...params] : undefined);
  return { rows: res.rows, rowCount: res.rowCount ?? 0 };
+}
+
+/** Runs `fn` in one transaction on one pooled connection: committed when it resolves, rolled back when it throws. */
+export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+ const client = await pool.connect();
+ try {
+ await client.query('BEGIN');
+ const out = await fn(client);
+ await client.query('COMMIT');
+ return out;
+ } catch (err) {
+ await client.query('ROLLBACK').catch(() => undefined);
+ throw err;
+ } finally {
+ client.release();
+ }
 }
 
 export async function pingDb(): Promise<boolean> {

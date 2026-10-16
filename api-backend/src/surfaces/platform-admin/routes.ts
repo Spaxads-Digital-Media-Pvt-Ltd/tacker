@@ -13,13 +13,10 @@ import { containsPattern } from '../../lib/db/like.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { impersonationConfigured, signSupportSessionToken } from '../../lib/auth/impersonation-token.js';
 import { query } from '../../lib/db/pool.js';
-import { pool } from '../../lib/db/pool.js';
 import { writePlatformAudit } from '../../lib/audit.js';
-import { provisionAdmin, generateTemporaryPassword } from '../../lib/provisioning.js';
-import { generateSecureCode } from '../../lib/security-code.js';
+import { generateTemporaryPassword } from '../../lib/provisioning.js';
 import { signPlatformAdminToken } from '../../lib/auth/platform-admin-token.js';
 import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
-import { env } from '../../config/env.js';
 import {
  checkLoginRateLimit,
  loginRateLimitMessage,
@@ -36,6 +33,7 @@ import { softDeleteNetwork, exportNetwork, exportLedgerCsv, purgeNetwork, purgeA
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { requirePerm, networkScope, assertNetworkInScope } from './auth.js';
 import { networkStateChanged } from '../../lib/networks/state.js';
+import { createNetwork } from '../../lib/networks/create.js';
 import { usageVsPlan } from '../../lib/usage/meter.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -259,53 +257,9 @@ export function platformRoutes(): Router {
  requirePerm('networks', 'full'),
  validateBody(createNetworkSchema),
  asyncHandler(async (req, res) => {
- const b = req.body as CreateNetwork;
- const client = await pool.connect();
- try {
- await client.query('BEGIN');
- // Every network gets a postback secure_code at birth: /postback fails closed without one.
- const net = (await client.query<{ id: string }>(
- `INSERT INTO networks (name, slug, default_currency, postback_security_code) VALUES ($1, $2, $3, $4) RETURNING *`,
- [b.name, b.slug, b.defaultCurrency, generateSecureCode()],
- )).rows[0]!;
-
- if (b.provisionSubdomain) {
- await client.query(
- `INSERT INTO tracking_domains (network_id, host, mode, status, verification_state, ssl_status, is_primary)
- VALUES ($1, $2, 'subdomain', 'active', 'verified', 'issued', true)`,
- [net.id, `${b.slug}.${env.TRACKING_BASE_DOMAIN}`],
- );
- }
-
- let ownerUserId: string | null = null;
- if (b.owner) {
- // Provision the Supabase Auth login first (outside the txn it can't roll back, but a
- // dangling auth user is harmless and re-runnable). Then record the users row.
- const authUserId = await provisionAdmin({
- email: b.owner.email,
- password: b.owner.password,
- networkId: net.id,
- role: 'admin',
- // A password the Super Admin typed: the owner chooses their own at first sign-in (O1).
- mustChangePassword: true,
- });
- ownerUserId = (await client.query<{ id: string }>(
- `INSERT INTO users (network_id, auth_user_id, email, name, role, status)
- VALUES ($1, $2, $3, $4, 'admin', 'active') RETURNING id`,
- [net.id, authUserId, b.owner.email, b.owner.name ?? null],
- )).rows[0]!.id;
- }
-
- await client.query('COMMIT');
- await writePlatformAudit(req, net.id, { action: 'network.create', entityType: 'network', entityId: net.id, after: net });
- sendOk(res, { ...net, ownerUserId }, undefined, 201);
- } catch (err) {
- await client.query('ROLLBACK');
- if (isUnique(err)) throw badRequest('A network with that slug already exists');
- throw err;
- } finally {
- client.release();
- }
+ const { network, ownerUserId } = await createNetwork(req.body as CreateNetwork);
+ await writePlatformAudit(req, network.id, { action: 'network.create', entityType: 'network', entityId: network.id, after: network });
+ sendOk(res, { ...network, ownerUserId }, undefined, 201);
  }),
  );
 
@@ -441,8 +395,4 @@ export function platformRoutes(): Router {
  }));
 
  return r;
-}
-
-function isUnique(err: unknown): boolean {
- return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
 }

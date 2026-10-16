@@ -97,6 +97,15 @@ export const Icon = {
       <path d="M12 4v2M12 18v2M4 12h2M18 12h2" />
     </svg>
   ),
+  target: (p: P) => (
+    <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /></svg>
+  ),
+  lifebuoy: (p: P) => (
+    <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.5" /><path d="m6 6 3.5 3.5M14.5 14.5 18 18M18 6l-3.5 3.5M9.5 14.5 6 18" /></svg>
+  ),
+  checklist: (p: P) => (
+    <svg {...base(p)}><path d="m4 6 1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17" /><path d="M11 6h9M11 12h9M11 18h9" /></svg>
+  ),
   receipt: (p: P) => (
     <svg {...base(p)}><path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21Z" /><path d="M9 8h6M9 12h6M9 16h3" /></svg>
   ),

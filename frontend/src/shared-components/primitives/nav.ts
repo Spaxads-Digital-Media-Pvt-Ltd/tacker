@@ -31,6 +31,14 @@ export const NAV: Record<Role, NavEntry[]> = {
   // The platform team's console — each item shows only for roles that may read its section (lib/platformMe).
   super_admin: [
     { to: '/admin', label: 'Overview', icon: 'dashboard', perm: 'dashboard' },
+    { to: '/admin/tasks', label: 'Tasks', icon: 'checklist' },
+    {
+      group: 'Growth', label: 'Sales', icon: 'target', flyout: [
+        { label: 'Sales dashboard', description: 'Pipeline, forecast, win rate and the leaderboard', to: '/admin/sales', icon: Lucide.Target, perm: 'sales' },
+        { label: 'Leads', description: 'Every prospective network — search, filter, export', to: '/admin/sales/leads', icon: Lucide.Contact, perm: 'sales' },
+        { label: 'Pipeline', description: 'Deals by stage — drag a card to move it', to: '/admin/sales/pipeline', icon: Lucide.SquareKanban, perm: 'sales' },
+      ],
+    },
     {
       group: 'Customers', label: 'Networks', icon: 'building', flyout: [
         { label: 'All networks', description: 'Every tenant network — search, open, manage', to: '/admin/networks', icon: Lucide.Building2, perm: 'networks' },

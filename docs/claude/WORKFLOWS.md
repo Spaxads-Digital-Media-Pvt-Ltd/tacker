@@ -312,6 +312,20 @@ Super Admin › Billing (no payment gateway yet — payments recorded by hand)
   by hand stands until a new deadline passes.
 ```
 
+## Platform Sales (Super Admin › Sales)
+
+```
+Lead in: "Request a demo" (/request-demo → POST /api/signup/demo) → lead (website, new) → owner = the active
+  Sales member with the fewest open leads + a high-priority follow-up task (due in a day); a repeat → a note
+  …or a person adds it (Leads › New lead; the creator owns it; an open lead with the same email → 409)
+Work it: log notes / calls / emails / meetings; move it new → contacted → qualified → demo → trial → negotiation
+  (stage bar or the kanban); next step + date; tasks (due, assignee) — on the Sales dashboard and /admin/tasks
+Lost: needs a reason (lost_at; reopening clears it)
+Won → "Convert to customer": network (+ tracking subdomain) + owner login (temporary password shown once, must
+  change it) + plan with its trial → lead won + linked; network.sales_owner_id = the lead's owner (an
+  'assigned' Sales / Account Manager role then sees that network); a converted lead stays won
+```
+
 ## Multi-Tenant Data Isolation
 
 Every query is filtered by `network_id`:

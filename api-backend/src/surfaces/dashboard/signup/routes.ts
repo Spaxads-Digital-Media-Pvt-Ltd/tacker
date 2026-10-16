@@ -1,6 +1,7 @@
 /**
- * Partner self-serve sign-up (audit F-04) — the one unauthenticated write on the dashboard surface,
- * mounted at /api/signup before the auth gate.
+ * Partner self-serve sign-up (audit F-04) and "Request a demo" (POST /api/signup/demo, a lead for the
+ * platform's sales team) — the unauthenticated writes on the dashboard surface, mounted at /api/signup
+ * before the auth gate.
  *
  * POST /api/signup/partner { network: <network slug>, name, email, ... } creates a partner in that
  * network — status 'pending' (it lands in Partners › Pending for review), or 'active' when the
@@ -28,6 +29,7 @@ import { checkTrackingRateLimit } from '../../../lib/tracking-rate-limit.js';
 import { requireAuthAdmin } from '../../../lib/provisioning.js';
 import { invitePortalUser, inviteAuditView, type PortalInviteResult } from '../../../lib/portal-invite.js';
 import { getControlCenterConfig } from '../control-center/config.js';
+import { createInboundLead } from '../../../lib/platform/sales.js';
 import type { PublisherRow } from '../../../domain/entities.js';
 
 /**
@@ -46,6 +48,18 @@ const signupSchema = z.object({
   country: z.string().trim().max(100).optional(),
 });
 type SignupBody = z.infer<typeof signupSchema>;
+
+const demoSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  email: z.string().trim().email().max(200),
+  company: z.string().trim().min(1).max(200),
+  phone: z.string().trim().max(50).optional(),
+  website: z.string().trim().max(300).optional(),
+  country: z.string().trim().max(100).optional(),
+  monthlyClicks: z.number().int().min(0).max(1e12).optional(),
+  message: z.string().trim().max(3000).optional(),
+  website_url: z.string().max(300).optional(),
+}).strict();
 
 const alreadyRegistered = () => new AppError(
   'conflict', 'This email is already registered. Sign in instead, or ask the network for an invite.', { reason: 'already_registered' },
@@ -132,6 +146,25 @@ export function signupRoutes(): Router {
           : 'Your application was received. The network will send your login details.',
       ...(invite.credentials ? { credentials: invite.credentials } : {}),
     }, undefined, 201);
+  }));
+
+  // "Request a demo" — a prospective network asking the platform's sales team for a call. It becomes a lead in
+  // Super Admin › Sales, routed to a Sales member with a follow-up task (lib/platform/sales.ts). `website_url`
+  // is a honeypot: people never see it, so a filled one is a bot — answered like a success, nothing stored.
+  r.post('/demo', validateBody(demoSchema), asyncHandler(async (req, res) => {
+    const ip = typeof req.ip === 'string' ? req.ip : (req.socket?.remoteAddress ?? 'unknown');
+    if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+      const rl = await checkTrackingRateLimit(ip, 'demo_request', SIGNUP_LIMIT);
+      if (rl.limited) throw tooMany('Too many requests from this network. Try again in a minute.', { retryAfter: rl.retryAfterSeconds });
+    }
+    const b = req.body as z.infer<typeof demoSchema>;
+    const thanks = 'Thanks — our team will contact you within one business day.';
+    if (b.website_url) return sendOk(res, { received: true, message: thanks }, undefined, 201);
+    await createInboundLead({
+      company: b.company, contactName: b.name, email: b.email, phone: b.phone || null, website: b.website || null,
+      country: b.country || null, monthlyClicks: b.monthlyClicks ?? null, message: b.message || null,
+    });
+    return sendOk(res, { received: true, message: thanks }, undefined, 201);
   }));
 
   return r;

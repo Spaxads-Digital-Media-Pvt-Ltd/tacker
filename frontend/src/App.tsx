@@ -68,6 +68,12 @@ const InvoiceView = lazy(() => import('./pages/super-admin/InvoiceView'));
 const NetworkBilling = lazy(() => import('./pages/admin/NetworkBilling'));
 const NetworkBillingInvoice = lazy(() => import('./pages/admin/NetworkBillingInvoice'));
 const Usage = lazy(() => import('./pages/super-admin/Usage'));
+const SalesDashboard = lazy(() => import('./pages/super-admin/sales/SalesDashboard'));
+const SalesLeads = lazy(() => import('./pages/super-admin/sales/Leads'));
+const SalesPipeline = lazy(() => import('./pages/super-admin/sales/Pipeline'));
+const LeadDetail = lazy(() => import('./pages/super-admin/sales/LeadDetail'));
+const PlatformTasks = lazy(() => import('./pages/super-admin/Tasks'));
+const RequestDemo = lazy(() => import('./pages/RequestDemo'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
 const AdvertiserOffers = lazy(() => import('./pages/portal/AdvertiserOffers'));
@@ -159,6 +165,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/request-demo" element={<RequestDemo />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/change-password" element={<ChangePassword />} />
         <Route path="/impersonate" element={<Impersonate />} />
@@ -176,6 +183,11 @@ export default function App() {
           <Route path="/admin/team" element={<PlatformGate section="team"><PlatformTeam /></PlatformGate>} />
           <Route path="/admin/activity" element={<PlatformGate section="activity"><PlatformActivity /></PlatformGate>} />
           <Route path="/admin/usage" element={<PlatformGate section="networks"><Usage /></PlatformGate>} />
+          <Route path="/admin/sales" element={<PlatformGate section="sales"><SalesDashboard /></PlatformGate>} />
+          <Route path="/admin/sales/leads" element={<PlatformGate section="sales"><SalesLeads /></PlatformGate>} />
+          <Route path="/admin/sales/leads/:id" element={<PlatformGate section="sales"><LeadDetail /></PlatformGate>} />
+          <Route path="/admin/sales/pipeline" element={<PlatformGate section="sales"><SalesPipeline /></PlatformGate>} />
+          <Route path="/admin/tasks" element={<PlatformTasks />} />
         </Route>
 
         {/* Admin / Network */}

@@ -76,6 +76,11 @@ async function authPost(path: string, body: unknown): Promise<void> {
   if (!res.ok || json.ok === false) throw authError(json, res);
 }
 
+/** "Request a demo" (signed out): a lead for the platform's sales team. `website_url` is the bots' honeypot. */
+export const requestDemo = (body: {
+  name: string; email: string; company: string; phone?: string; website?: string; country?: string; monthlyClicks?: number; message?: string; website_url?: string;
+}): Promise<void> => authPost('/api/signup/demo', body);
+
 /** "Forgot password?" — the server answers the same for any address (it never says which exist). */
 export const requestPasswordReset = (email: string): Promise<void> => authPost('/api/auth/forgot-password', { email });
 
