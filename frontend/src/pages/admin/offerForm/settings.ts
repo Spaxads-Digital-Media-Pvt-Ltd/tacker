@@ -1,5 +1,5 @@
 /** Defaults for metadata-backed offer settings — identical to the backend's (offer-settings/index.ts). */
-import type { OfferAttributionSettings, OfferEmailSettings, OfferRevenueSettings } from '../../../types';
+import type { DuplicateMode, OfferAttributionSettings, OfferEmailSettings, OfferRevenueSettings } from '../../../types';
 
 export const DEFAULT_ATTRIBUTION: OfferAttributionSettings = {
   tracker24: { enabled: false, trackerId: null },
@@ -15,11 +15,20 @@ export const DEFAULT_REVENUE: OfferRevenueSettings = {
   baseEventName: null,
   manualApproval: false,
   allowDuplicates: true,
+  duplicateMode: 'unique_txn',
+  clickConversionLimit: 10,
   revenueAction: 'conversion',
   revenueType: 'fixed',
   revenuePct: null,
   pricePerProduct: false,
 };
+
+/** Duplicate Conversions — the offer's rule (Revenue tab); an event can override it (Goals tab). */
+export const DUPLICATE_MODE_OPTIONS: { value: DuplicateMode; label: string }[] = [
+  { value: 'unique_txn', label: 'Allow — each with its own transaction ID' },
+  { value: 'every_postback', label: 'Allow — every postback counts' },
+  { value: 'one_per_click', label: 'Don’t allow — one per click per event' },
+];
 
 export const DEFAULT_EMAIL: OfferEmailSettings = {
   suppression: { enabled: false, fileUrl: null },

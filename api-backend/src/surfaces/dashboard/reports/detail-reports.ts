@@ -130,6 +130,22 @@ const postbackLogsSchema = z.object({
 }).strict().transform(withZonedRange);
 type PostbackLogsFilters = z.infer<typeof postbackLogsSchema>;
 
+const INBOUND_SOURCE = z.enum(['postback', 'pixel', 'iframe', 'api']);
+const INBOUND_OUTCOME = z.enum(['approved', 'pending', 'rejected', 'duplicate', 'click_not_found', 'security_failed', 'error']);
+const inboundPostbacksSchema = z.object({
+  ...rangeKeys,
+  offerId: uuid, publisherId: uuid, advertiserId: uuid,
+  outcome: INBOUND_OUTCOME.optional(),
+  // true = became a conversion (approved / pending / rejected); false = recorded nothing (duplicate,
+  // unknown click, wrong security code, error).
+  recorded: z.enum(['true', 'false']).optional(),
+  source: INBOUND_SOURCE.optional(),
+  clickId: z.string().trim().min(1).max(200).optional(),
+  transactionId: z.string().trim().min(1).max(500).optional(),
+  ...pageKeys,
+}).strict().transform(withZonedRange);
+type InboundPostbacksFilters = z.infer<typeof inboundPostbacksSchema>;
+
 /** Aggregated endpoints page their groups; default = the max so the common case is one request. */
 const groupPageKeys = {
   limit: z.coerce.number().int().min(1).max(DETAIL_PAGE_MAX).default(DETAIL_PAGE_MAX),
@@ -549,6 +565,31 @@ export function mountDetailReports(r: Router): void {
     // api key / userinfo. Mask those values (screen + export); the stored log is unchanged. `error`
     // is free text that could quote the URL, so it gets the same key=value masking.
     sendOk(res, rows.map((r) => ({ ...r, url: redactUrl(r.url), error: r.error == null ? r.error : redactUrl(r.error) })), { limit: f.limit, offset: f.offset });
+  }));
+
+  // ── Inbound postback log (Advertiser Postback report) — every conversion request received (postback /
+  // pixel / iframe / API) and what happened to it: recorded, with its conversion, or not — and why.
+  r.get('/inbound-postbacks', validateQuery(inboundPostbacksSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as InboundPostbacksFilters;
+    const { where, params } = buildWhere<InboundPostbacksFilters>(req.scope!.networkId, f, [
+      { key: 'from', col: 'created_at', op: '>=' }, { key: 'to', col: 'created_at', op: '<=' },
+      { key: 'offerId', col: 'offer_id' }, { key: 'publisherId', col: 'publisher_id' }, { key: 'advertiserId', col: 'advertiser_id' },
+      { key: 'outcome', col: 'outcome' }, { key: 'source', col: 'source' },
+      { key: 'clickId', col: 'click_id' }, { key: 'transactionId', col: 'transaction_id' },
+    ]);
+    const recorded = f.recorded ? ` AND outcome ${f.recorded === 'true' ? '' : 'NOT '}IN ('approved', 'pending', 'rejected')` : '';
+    params.push(f.limit, f.offset);
+    const { rows } = await query<{ params: unknown }>(
+      `SELECT id, created_at, source, method, click_id, transaction_id, event_name, offer_id, publisher_id, advertiser_id,
+              outcome, reason, conversion_id, payout, revenue, currency, sale_amount, http_status, host(ip) AS ip,
+              user_agent, params
+         FROM inbound_postback_logs WHERE ${where}${recorded}
+        -- id breaks created_at ties so offset pages (table + paged export) never repeat or skip a row.
+        ORDER BY created_at DESC, id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+    // Stored redacted already; masked again on the way out in case an older row predates a new secret key.
+    sendOk(res, rows.map((r) => ({ ...r, params: redactRawParams(r.params) })), { limit: f.limit, offset: f.offset });
   }));
 
   // ── Goals/Event report — approved conversions aggregated per offer goal, plus each offer's real

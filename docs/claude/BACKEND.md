@@ -140,7 +140,8 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `macros.ts` | Macro token build + substitution (click_id, offer_id, etc.) |
 | `click-job.ts` | Job definition + enqueue for click persistence |
 | `click-store.ts` | Store click in Redis for attribution |
-| `conversions/record.ts` | Conversion recording (normalizes postback/pixel/iframe) |
+| `conversions/record.ts` | Conversion recording (normalizes postback/pixel/iframe/advertiser API); per-event duplicate rules (`dedupeRule`: one per click / unique transaction ids / every postback), unusual-volume hold, a reason on every outcome |
+| `conversions/inbound-log.ts` | Inbound postback log — one `inbound_postback_logs` row per conversion request, recorded or not, and why |
 | `traffic-controls-eval.ts` | Evaluate offer traffic controls |
 | `traffic-blocking-eval.ts` | Evaluate partner traffic blocking |
 | `host-resolver-db.ts` | DB-backed tenant resolution (Redis-cached) |

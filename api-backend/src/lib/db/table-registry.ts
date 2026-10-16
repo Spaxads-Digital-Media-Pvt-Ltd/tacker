@@ -47,6 +47,8 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   conversions: { tenantColumn: 'network_id' },
   publisher_postbacks: { tenantColumn: 'network_id' },
   postback_logs: { tenantColumn: 'network_id' },
+  // Every inbound conversion request (postback / pixel / iframe / API) and what happened to it.
+  inbound_postback_logs: { tenantColumn: 'network_id' },
 
   // Phase 4 (money). ledger_entries is append-only (DB trigger blocks UPDATE/DELETE).
   ledger_entries: { tenantColumn: 'network_id' },

@@ -151,13 +151,13 @@ export function conversionImportsRoutes(): Router {
               `INSERT INTO conversions (conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,
                  event_name, status, payout, revenue, currency, transaction_id, source, raw_params, reason)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'manual','{}'::jsonb,$13)
-               ON CONFLICT (offer_id, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING
+               ON CONFLICT (offer_id, event_name, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING
                RETURNING conversion_id`,
               [conversionId, networkId, conversionId, offer.id, publisherId, offer.advertiserId,
                 row['event'] ?? null, status, payout, revenue, currency, txnId, reason],
             );
             // A duplicate transaction_id is skipped — and must not write money for a row that doesn't exist.
-            if (ins.rows.length === 0) throw new Error(`transaction_id "${txnId}" already exists for this offer — skipped`);
+            if (ins.rows.length === 0) throw new Error(`transaction_id "${txnId}" already exists for this offer and event — skipped`);
             if (status === 'approved') {
               await writeConversionLedger(client, {
                 networkId, conversionId, publisherId, advertiserId: offer.advertiserId, payout, revenue, currency,
@@ -179,9 +179,10 @@ export function conversionImportsRoutes(): Router {
           const newPayout = row['payout'] !== undefined && row['payout'] !== '' ? moneyOrNull(row['payout'], 'payout') : undefined;
           const newRevenue = row['revenue'] !== undefined && row['revenue'] !== '' ? moneyOrNull(row['revenue'], 'revenue') : undefined;
           if (newPayout === undefined && newRevenue === undefined) throw new Error('payout or revenue is required');
-          // transaction_id is only unique per offer — an optional offer column narrows the match.
+          // transaction_id is only unique per offer + event — optional offer and event columns narrow the match.
           const offerRef = cell(row, 'offerRef', 'offer_ref', 'offerId', 'offer_id');
           const offerId = offerRef ? (await resolveOffer(networkId, offerRef)).id : null;
+          const event = b.type === 'update_by_transaction_id' ? (cell(row, 'event', 'event_name', 'eventName') ?? null) : null;
           const client = await pool.connect();
           try {
             await client.query('BEGIN');
@@ -190,13 +191,14 @@ export function conversionImportsRoutes(): Router {
               payout: string | null; revenue: string | null; currency: string | null;
             }>(
               `SELECT conversion_id, status, publisher_id, advertiser_id, payout, revenue, currency
-                 FROM conversions WHERE network_id = $1 AND ${matchCol} = $2 AND ($3::uuid IS NULL OR offer_id = $3) FOR UPDATE`,
-              [networkId, matchVal, offerId],
+                 FROM conversions WHERE network_id = $1 AND ${matchCol} = $2 AND ($3::uuid IS NULL OR offer_id = $3)
+                  AND ($4::text IS NULL OR event_name = $4) FOR UPDATE`,
+              [networkId, matchVal, offerId, event],
             );
             if (!matched.length) throw new Error(`no conversion found for ${matchCol} "${matchVal}"`);
-            // Never update several conversions from one row — a bare transactionId can repeat across offers.
+            // Never update several conversions from one row — a bare transactionId can repeat across offers and events.
             if (matched.length > 1) {
-              throw new Error(`${matchCol} "${matchVal}" matches ${matched.length} conversions on different offers — add an offerRef/offerId column (or use conversionId)`);
+              throw new Error(`${matchCol} "${matchVal}" matches ${matched.length} conversions on different offers or events — add an offerRef/offerId and an event column (or use conversionId)`);
             }
             for (const c of matched) {
               const payout = newPayout !== undefined ? newPayout : c.payout;

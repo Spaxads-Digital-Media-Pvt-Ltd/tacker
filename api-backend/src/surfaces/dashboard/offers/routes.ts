@@ -588,7 +588,7 @@ export function offersAdminRoutes(): Router {
  const created = rows[0]!;
  const copyTable = (table: string, cols: string) => copyOfferRows(client, table, cols, networkId, src.id, created.id);
  // Always copied — base config, not gated by a checkbox in the reference either.
- await copyTable('offer_goals', 'name, event_name, payout_model, payout, revenue, currency, daily_conversion_cap, total_conversion_cap, is_default, status, sort_order');
+ await copyTable('offer_goals', 'name, event_name, payout_model, payout, revenue, currency, daily_conversion_cap, total_conversion_cap, duplicate_mode, is_default, status, sort_order');
  await copyTable('offer_coupons', 'code, publisher_id, description, discount, status, starts_at, ends_at');
  await copyTable('offer_deals', 'name, description, deal_type, value, status, starts_at, ends_at');
  await client.query(

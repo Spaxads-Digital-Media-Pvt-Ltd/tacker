@@ -7,8 +7,9 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Field, Segmented } from '../../../shared-components/primitives/ui';
 import { useQuery } from '../../../lib/useApi';
-import type { OfferAttributionSettings, OfferEmailSettings, OfferRevenueSettings } from '../../../types';
+import type { DuplicateMode, OfferAttributionSettings, OfferEmailSettings, OfferRevenueSettings } from '../../../types';
 import { YesNoToggle } from './controls';
+import { DUPLICATE_MODE_OPTIONS } from './settings';
 
 interface CatalogCard { id: string; connected: boolean }
 type Catalog = Record<string, { connected: CatalogCard[]; notConnected: CatalogCard[] }>;
@@ -141,11 +142,20 @@ export function RevenueSettingsPanel({ value, onChange, firePartnerPostback, onF
             <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={value.manualApproval} onChange={(e) => set('manualApproval', e.target.checked)} />
             <span><strong>Manually Approve Conversions</strong> — conversions that would auto-approve are held as Pending (no payout, no partner postback) until approved in Reporting › Conversion.</span>
           </label>
-          <label className="flex items-start gap-2 text-small text-fg">
-            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={value.allowDuplicates} onChange={(e) => set('allowDuplicates', e.target.checked)} />
-            <span><strong>Allow Duplicate Conversions</strong> — allow more than one conversion (different transaction IDs) from the same click ID.</span>
-          </label>
         </div>
+        <Field label="Duplicate Conversions" hint="Upsells, renewals and rev-share sales can bring several conversions from one click. A transaction ID repeated for the same event is always a duplicate, and an identical postback repeated within 60 seconds counts once. An event can override this on the Goals tab.">
+          <select className="input" value={value.duplicateMode}
+            onChange={(e) => { const mode = e.target.value as DuplicateMode; onChange({ ...value, duplicateMode: mode, allowDuplicates: mode !== 'one_per_click' }); }}>
+            {DUPLICATE_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Hold Unusual Volume" hint="When one click sends more conversions than this within 10 minutes, the next ones are held as Pending for review — recorded, never dropped. 0 = no limit.">
+          <div className="flex items-center gap-1.5">
+            <input type="number" min={0} step={1} className="input !w-32" value={value.clickConversionLimit ?? 0}
+              onChange={(e) => set('clickConversionLimit', e.target.value === '' ? null : Math.max(0, Math.floor(Number(e.target.value))))} />
+            <span className="text-small text-fg-secondary">conversions from one click in 10 minutes</span>
+          </div>
+        </Field>
       </div>
 
       <div className="space-y-4 border-t border-border pt-4">

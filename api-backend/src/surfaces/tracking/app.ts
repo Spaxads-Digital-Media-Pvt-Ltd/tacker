@@ -39,6 +39,7 @@ import { buildMacros, substituteMacros } from './macros.js';
 import { enqueueClick, type ClickJob } from './click-job.js';
 import { storeClickForAttribution } from './click-store.js';
 import { recordConversion, SALE_AMOUNT_PARAMS, type RecordConversionResult } from './conversions/record.js';
+import { logInbound, type InboundPostback } from './conversions/inbound-log.js';
 import { clicksTotal, redirectLatency, metricsText, metricsContentType } from '../../lib/metrics.js';
 import { captureError } from '../../lib/observability/sentry.js';
 import { isRedirectUrlSafe, getRedirectUrlRejectReason } from '../../lib/url-security.js';
@@ -496,6 +497,10 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  return null;
  }
 
+ /** The HTTP status /postback answers an outcome with (pixel / iframe always answer 200). */
+ const postbackHttpStatus = (outcome: RecordConversionResult['outcome']): number =>
+ outcome === 'click_not_found' ? 404 : outcome === 'security_failed' ? 403 : 200;
+
  async function handleConversion(
  req: FastifyRequest,
  source: 'postback' | 'pixel' | 'iframe',
@@ -515,22 +520,37 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  };
 
  const clickId = clickIdOf(req);
- if (!clickId) return { outcome: 'click_not_found', networkResolved: true };
+ const txnId = pick('txn_id', 'transaction_id', 'tid');
+ const event = pick('event', 'event_name', 'goal');
+ const saleAmount = pick(...SALE_AMOUNT_PARAMS);
+ const rawParams = { ...q, ...b };
+ // Every processed request goes to the inbound postback log — recorded or not, and why.
+ const log = (result: InboundPostback['result'], httpStatus: number) => logInbound({
+ networkId: tenant.networkId, source, method: req.method, clickId, transactionId: txnId, event, saleAmount, httpStatus,
+ ip: (req.ip as string | undefined) ?? null, userAgent: firstStr(req.headers['user-agent']), params: rawParams, result,
+ });
+ if (!clickId) {
+ const missing: RecordConversionResult = { outcome: 'click_not_found', reason: 'missing_click_id' };
+ await log(missing, source === 'postback' ? 404 : 200);
+ return { ...missing, networkResolved: true };
+ }
 
- const result = await recordConversion({
+ let result: RecordConversionResult;
+ try {
+ result = await recordConversion({
  networkId: tenant.networkId,
  clickId,
- txnId: pick('txn_id', 'transaction_id', 'tid'),
- event: pick('event', 'event_name', 'goal'),
+ txnId,
+ event,
  statusHint: pick('status'),
  // `payout` is the only payout override (F-02). `amount` is the sale / order value across the
  // industry, so it joins sale_amount / order_amount as the Percentage-revenue base — never payout.
  payoutParam: pick('payout'),
  revenueParam: pick('revenue'),
- saleAmount: pick(...SALE_AMOUNT_PARAMS),
+ saleAmount,
  secureCode: pick('secure_code', 'security_code'),
  source,
- rawParams: { ...q, ...b },
+ rawParams,
  // Pixel / iframe are browser-fired: record.ts binds them to the offer's site via these headers.
  requestOrigin: source === 'postback' ? undefined : {
  referer: firstStr(req.headers['referer']),
@@ -538,6 +558,11 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  host,
  },
  });
+ } catch (err) {
+ await log({ outcome: 'error', reason: 'internal_error' }, 500);
+ throw err;
+ }
+ await log(result, source === 'postback' ? postbackHttpStatus(result.outcome) : 200);
  return { ...result, networkResolved: true };
  }
 

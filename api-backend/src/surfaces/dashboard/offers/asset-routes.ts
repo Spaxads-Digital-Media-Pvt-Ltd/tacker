@@ -155,6 +155,7 @@ export const goalDTO = (r: Row) => ({
   id: r.id, name: r.name, eventName: r.event_name, payoutModel: r.payout_model,
   payout: r.payout, revenue: r.revenue, currency: r.currency,
   dailyConversionCap: r.daily_conversion_cap, totalConversionCap: r.total_conversion_cap,
+  duplicateMode: r.duplicate_mode ?? null,
   isDefault: r.is_default, status: r.status, sortOrder: r.sort_order,
 });
 
@@ -166,7 +167,8 @@ export const GOAL_ASSET: AssetSpec = {
   colMap: {
     name: 'name', eventName: 'event_name', payoutModel: 'payout_model', payout: 'payout',
     revenue: 'revenue', currency: 'currency', dailyConversionCap: 'daily_conversion_cap',
-    totalConversionCap: 'total_conversion_cap', isDefault: 'is_default', status: 'status', sortOrder: 'sort_order',
+    totalConversionCap: 'total_conversion_cap', duplicateMode: 'duplicate_mode',
+    isDefault: 'is_default', status: 'status', sortOrder: 'sort_order',
   },
   dto: goalDTO, auditKind: 'goal', invalidateCache: true,
   uniqueMessage: 'This offer already has a goal/event with that event name.',

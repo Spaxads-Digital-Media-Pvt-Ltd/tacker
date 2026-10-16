@@ -1,7 +1,8 @@
 /**
  * Data retention / pruning (spec §7 storage, §11 data lifecycle). Raw clicks are the highest-volume
- * table and carry PII (IP, UA) — they get the shortest window. postback_logs are operational and
- * pruned with the click window. Conversions are FINANCIAL records referenced by the append-only
+ * table and carry PII (IP, UA) — they get the shortest window. postback_logs (outbound) and
+ * inbound_postback_logs (every conversion request received) are operational and pruned with the
+ * click window. Conversions are FINANCIAL records referenced by the append-only
  * ledger, so they get a much longer default window and are pruned last; the ledger itself is NEVER
  * touched here (spec: append-only, no UPDATE/DELETE).
  *
@@ -40,6 +41,8 @@ export const EMAIL_LOG_RETENTION_DAYS = 90;
 export interface RetentionResult {
  clicksDeleted: number;
  postbackLogsDeleted: number;
+ /** Inbound postback log rows (every conversion request received), on the click window. */
+ inboundPostbackLogsDeleted: number;
  conversionsDeleted: number;
  /** Names of partitions dropped (e.g. ["clicks_2024_01", "conversions_2024_01"]). */
  partitionsDropped: string[];
@@ -149,7 +152,7 @@ const NOT_LEDGERED = `NOT EXISTS (SELECT 1 FROM ledger_entries le
  * through the (network_id, created_at) index. `extra` narrows what may go (the ledger rule).
  */
 async function pruneNetwork(
- table: 'clicks' | 'postback_logs' | 'conversions',
+ table: 'clicks' | 'postback_logs' | 'inbound_postback_logs' | 'conversions',
  networkId: string,
  cutoff: Date,
  extra?: string,
@@ -174,7 +177,7 @@ function cutoff(days: number, now: Date): Date {
 }
 
 export interface RetentionWindows {
- /** Clicks and postback logs, in days; 0 = keep forever. */
+ /** Clicks and postback logs (outbound and inbound), in days; 0 = keep forever. */
  clickDays: number;
  /** Conversions that never touched the ledger, in days; 0 = keep forever. */
  conversionDays: number;
@@ -194,6 +197,7 @@ export async function runRetention(now: Date = new Date()): Promise<RetentionRes
  const result: RetentionResult = {
  clicksDeleted: 0,
  postbackLogsDeleted: 0,
+ inboundPostbackLogsDeleted: 0,
  conversionsDeleted: 0,
  partitionsDropped: [],
  };
@@ -222,6 +226,7 @@ export async function runRetention(now: Date = new Date()): Promise<RetentionRes
  const c = cutoff(n.clickDays, now);
  result.clicksDeleted += await pruneNetwork('clicks', n.id, c);
  result.postbackLogsDeleted += await pruneNetwork('postback_logs', n.id, c);
+ result.inboundPostbackLogsDeleted += await pruneNetwork('inbound_postback_logs', n.id, c);
  }
  if (n.conversionDays > 0) {
  result.conversionsDeleted += await pruneNetwork('conversions', n.id, cutoff(n.conversionDays, now), NOT_LEDGERED);

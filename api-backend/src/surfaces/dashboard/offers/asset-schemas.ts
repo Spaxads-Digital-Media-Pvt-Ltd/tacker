@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { moneySchema } from '../../../lib/money.js';
 import { isRedirectUrlSafe } from '../../../lib/url-security.js';
 import { postbackUrl } from '../../../lib/url-schemas.js';
+import { DUPLICATE_MODES } from '../../../lib/offer-settings/index.js';
 
 export const createGoalSchema = z.object({
   name: z.string().min(1).max(200),
@@ -16,6 +17,8 @@ export const createGoalSchema = z.object({
   currency: z.string().length(3).default('USD'),
   dailyConversionCap: z.number().int().min(0).nullable().optional(),
   totalConversionCap: z.number().int().min(0).nullable().optional(),
+  // This event's own duplicate rule (lib/offer-settings DuplicateMode); null = the offer's.
+  duplicateMode: z.enum(DUPLICATE_MODES).nullable().optional(),
   isDefault: z.boolean().default(false),
   status: z.enum(['active', 'paused']).default('active'),
   sortOrder: z.number().int().min(0).default(0),

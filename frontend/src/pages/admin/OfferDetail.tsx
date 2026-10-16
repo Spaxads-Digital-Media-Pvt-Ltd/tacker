@@ -9,6 +9,7 @@ import { GeneralTab } from './offerDetail/GeneralTab';
 import { CustomSettingsTab } from './offerDetail/CustomSettingsTab';
 import { ForwardingRulesTab, ScheduledActionsTab, HistoryTab, PostbacksTab } from './offerDetail/ShellTabs';
 import { TrackingLinksModal } from './offerDetail/TrackingLinksModal';
+import { DUPLICATE_MODE_OPTIONS } from './offerForm/settings';
 import type { Offer, Publisher, Advertiser, TrackingDomain } from '../../types';
 
 type Row = { id: string; [k: string]: unknown };
@@ -67,7 +68,8 @@ export default function OfferDetail() {
           <p className="text-small text-fg-secondary">
             A postback's <span className="font-mono">event</span> picks the goal with that event name and its payout/revenue. Without a match
             the default goal applies — but a partner's or country's own rate frozen on the click still wins over the default goal.
-            Goal caps reject conversions beyond the cap (UTC day for daily caps).
+            Goal caps reject conversions beyond the cap (UTC day for daily caps). Each event can have its own duplicate rule — blank
+            follows the offer’s (Edit Offer › Revenue).
           </p>
           <CollectionTab basePath={`${base}/goals`} addLabel="Add goal" editable emptyText="No goals — every conversion uses the offer's own payout and revenue."
             fields={[
@@ -79,6 +81,7 @@ export default function OfferDetail() {
               { key: 'currency', label: 'Currency', default: offer.currency },
               { key: 'dailyConversionCap', label: 'Daily conversion cap', type: 'number', placeholder: 'Unlimited' },
               { key: 'totalConversionCap', label: 'Total conversion cap', type: 'number', placeholder: 'Unlimited' },
+              { key: 'duplicateMode', label: 'Duplicate conversions (blank = the offer’s rule)', type: 'select', options: DUPLICATE_MODE_OPTIONS },
               { key: 'isDefault', label: 'Default goal', type: 'checkbox' },
               { key: 'status', label: 'Status', type: 'select', options: ['active', 'paused'], default: 'active' },
             ] as FieldDef[]}
@@ -88,6 +91,7 @@ export default function OfferDetail() {
               col('Payout', (r) => `${r.currency ?? offer.currency} ${r.payout ?? '0'}`),
               col('Revenue', (r) => `${r.currency ?? offer.currency} ${r.revenue ?? '0'}`),
               col('Caps', (r) => [r.dailyConversionCap ? `${r.dailyConversionCap}/day` : null, r.totalConversionCap ? `${r.totalConversionCap} total` : null].filter(Boolean).join(' · ') || '—'),
+              col('Duplicates', (r) => DUPLICATE_MODE_OPTIONS.find((o) => o.value === r.duplicateMode)?.label ?? 'Offer’s rule'),
               col('Default', (r) => (r.isDefault ? 'Yes' : '')),
               col('Status', (r) => String(r.status)),
             ]} />

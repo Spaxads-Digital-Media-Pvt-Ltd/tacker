@@ -16,6 +16,7 @@ import { buildTrackingApp } from '../../src/surfaces/tracking/app.js';
 import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import { DbHostResolver } from '../../src/surfaces/tracking/host-resolver-db.js';
 import { getRedis } from '../../src/lib/redis.js';
+import { dedupeRule } from '../../src/surfaces/tracking/conversions/record.js';
 import { getQueue, QUEUE } from '../../src/surfaces/workers/queues.js';
 import { query } from '../../src/lib/db/pool.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
@@ -85,7 +86,7 @@ d('money flow: click → postback → conversion → ledger (live DB + Redis)', 
 
     // Duplicate with the same txn_id — first via the Redis guard, then with it expired (DB unique key).
     expect((await postback(`click_id=${c.clickId}&txn_id=T1&status=approved`)).body.status).toBe('duplicate');
-    await getRedis().del(`convidem:${c.clickId}:T1`);
+    await getRedis().del(dedupeRule({ networkId: fx.networkA, offerId: fx.offerA, clickId: c.clickId!, event: null, txnId: 'T1', mode: 'unique_txn' }).key);
     expect((await postback(`click_id=${c.clickId}&txn_id=T1&status=approved`)).body.status).toBe('duplicate');
     const n = (await query<{ n: number }>(`SELECT COUNT(*)::int n FROM conversions WHERE click_id = $1`, [c.clickId])).rows[0]!.n;
     expect(n).toBe(1);

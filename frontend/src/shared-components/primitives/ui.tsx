@@ -52,12 +52,15 @@ const BADGE_TONES: Record<string, string> = {
   active: SUCCESS, approved: SUCCESS, verified: SUCCESS, issued: SUCCESS, completed: SUCCESS,
   pending: WARNING, trialing: WARNING, hold: WARNING,
   suspended: DANGER, rejected: DANGER, blocked: DANGER, failed: DANGER,
-  draft: NEUTRAL, paused: NEUTRAL, inactive: NEUTRAL, disabled: NEUTRAL, archived: NEUTRAL,
+  // Inbound postbacks that recorded nothing (Advertiser Postback report).
+  click_not_found: DANGER, security_failed: DANGER, error: DANGER,
+  draft: NEUTRAL, paused: NEUTRAL, inactive: NEUTRAL, disabled: NEUTRAL, archived: NEUTRAL, duplicate: NEUTRAL,
 };
 
-export function Badge({ value }: { value: string }) {
+/** `value` picks the tone (and is the text unless `label` is given). */
+export function Badge({ value, label }: { value: string; label?: string }) {
   const tone = BADGE_TONES[value] ?? 'bg-accent-subtle text-accent-text';
-  return <span className={`inline-flex rounded-full px-2.5 py-0.5 text-tiny font-semibold capitalize ${tone}`}>{value}</span>;
+  return <span className={`inline-flex rounded-full px-2.5 py-0.5 text-tiny font-semibold capitalize ${tone}`}>{label ?? value}</span>;
 }
 
 export function Spinner() {

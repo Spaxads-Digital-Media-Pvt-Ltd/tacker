@@ -48,7 +48,7 @@ import { formatDateTime } from '../../lib/datetime';
 import { useReportZone } from '../../lib/useReportZone';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
-import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta } from '../../lib/conversionReport';
+import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta, reasonLabel } from '../../lib/conversionReport';
 
 /**
  * Approve a pending conversion (writes publisher earning + advertiser billing and fires the partner
@@ -255,7 +255,7 @@ export default function ConversionReport() {
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: ConvRow) => ({
     date: formatDate(r.created_at), conversionId: r.conversion_id, clickId: r.click_id ?? DASH,
-    status: r.status, reason: r.reason ?? DASH,
+    status: r.status, reason: reasonLabel(r.reason) ?? DASH,
     offer: offerMap.get(r.offer_id) ?? r.offer_id, partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
     eventName: r.event_name ?? DASH, goal: r.goal_name ?? DASH, source: r.source,
@@ -386,7 +386,7 @@ export default function ConversionReport() {
                       {shown.has('Conversion ID') && <td className="font-mono text-tiny">{r.conversion_id}</td>}
                       {shown.has('Click ID') && <td className="font-mono text-tiny">{r.click_id ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3"><Badge value={r.status} /></td>}
-                      {shown.has('Reason') && <td className="px-4 py-3">{r.reason ?? DASH}</td>}
+                      {shown.has('Reason') && <td className="px-4 py-3" title={r.reason ?? undefined}>{reasonLabel(r.reason) ?? DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
                       {shown.has('Partner') && <td className="px-4 py-3">{r.publisher_id ? <Link to={`/app/publishers/${r.publisher_id}`} className="text-accent-text hover:underline">{pubMap.get(r.publisher_id) ?? r.publisher_id}</Link> : DASH}</td>}
                       {shown.has('Advertiser') && <td className="px-4 py-3">{r.advertiser_id ? <Link to={`/app/advertisers/${r.advertiser_id}`} className="text-accent-text hover:underline">{advMap.get(r.advertiser_id) ?? r.advertiser_id}</Link> : DASH}</td>}

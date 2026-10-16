@@ -140,10 +140,17 @@ export interface OfferAttributionSettings {
   serverSideClick: boolean;
 }
 
+/** How many conversions one click may produce for an event (backend lib/offer-settings DuplicateMode). */
+export type DuplicateMode = 'one_per_click' | 'unique_txn' | 'every_postback';
+
 export interface OfferRevenueSettings {
   baseEventName: string | null;
   manualApproval: boolean;
+  /** Kept in step with duplicateMode (false ⇔ 'one_per_click') for older API clients. */
   allowDuplicates: boolean;
+  duplicateMode: DuplicateMode;
+  /** More conversions than this from one click within 10 minutes are held as pending for review; null / 0 = no limit. */
+  clickConversionLimit: number | null;
   revenueAction: 'impression' | 'click' | 'conversion';
   revenueType: 'fixed' | 'percentage' | 'mixed';
   revenuePct: number | null;

@@ -1,18 +1,27 @@
 /**
- * recordConversion() — the ONE attribution path shared by S2S postback, pixel, and iframe
- * (spec §6). Guarantees identical behavior regardless of method: match click_id, enforce the
- * attribution window, dedup idempotently (Redis + DB unique), resolve payout/revenue (frozen from
- * the click, incl. geo overrides), write the conversion, and — when approved — enqueue the
- * outbound postback to the publisher.
+ * recordConversion() — the ONE attribution path shared by S2S postback, pixel, iframe and the
+ * advertiser API (spec §6). Guarantees identical behavior regardless of method: match click_id,
+ * authenticate, enforce the attribution window, dedup idempotently (Redis + DB guards), resolve
+ * payout/revenue (frozen from the click, incl. geo overrides), write the conversion, and — when
+ * approved — enqueue the outbound postback to the publisher.
  *
- * Dedup policy: a conversion WITH a transaction id is unique per (offer, transaction id) — DB index.
- * A conversion WITHOUT one is unique per (network, click, event): once any conversion exists for
- * that click + event name (any status), the same click + event without a transaction id can never
- * convert again — not only within the 48h Redis window. Distinct events still convert separately.
+ * Several conversions per click (Everflow model): each event follows its duplicate rule — its goal's,
+ * else the offer's (lib/offer-settings DuplicateMode):
+ *  - a transaction id is unique per (offer, event) — DB index conversions_offer_event_txn_key — so
+ *    a repeat of one is a duplicate, while a lead and its later sale may share the advertiser's id;
+ *  - `one_per_click`: one conversion per (network, click, event), whatever the transaction id;
+ *  - `unique_txn` (default): many per click with distinct transaction ids; without one, one per
+ *    (network, click, event);
+ *  - `every_postback`: without a transaction id every postback counts, except an identical repeat
+ *    within RETRY_WINDOW_S (the advertiser's retry).
+ * The (click, event) checks run inside the insert transaction under an advisory lock, so they hold
+ * permanently and under concurrency; the Redis key in front of them is only the fast path. Any status
+ * counts: a rejected conversion can't be replaced by a later approved repeat.
  *
- * Ledger dual-entry (spec §8) plugs in at Phase 4 where marked.
+ * Every result carries a reason — why the conversion was held / rejected, or why nothing was recorded
+ * — for the inbound postback log (./inbound-log.ts).
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { pool, query } from '../../../lib/db/pool.js';
 import type { PoolClient } from 'pg';
 import { getRedis } from '../../../lib/redis.js';
@@ -23,6 +32,7 @@ import {
  applicableSettings, customPricing, capLimits, capWindowStart,
  type ClickAttrs, type CustomSettingConfig,
 } from '../../../lib/offer-settings/custom-settings.js';
+import { duplicateModeOf, type DuplicateMode } from '../../../lib/offer-settings/index.js';
 import { getStoredClick, type StoredClick } from '../click-store.js';
 import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
 import { getFraudConfig } from '../../../lib/fraud/rules.js';
@@ -37,7 +47,7 @@ import { loadIntegrations } from '../../../lib/integrations/settings.js';
 import { allowedConversionHosts, conversionOriginAllowed, type RequestOrigin } from './origin.js';
 import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 import { timingSafeCompare } from '../../../lib/secure-code-compare.js';
-import { checkConversionAbuse } from '../../../lib/conversion-abuse.js';
+import { checkConversionAbuse, CONV_ABUSE_LIMIT } from '../../../lib/conversion-abuse.js';
 import { logger } from '../../../lib/logger.js';
 
 /** Request params that carry the sale / order value — explicit names first, so an older integration
@@ -68,9 +78,25 @@ export interface RecordConversionInput {
  requestOrigin?: RequestOrigin;
 }
 
+/** Why a request recorded nothing (outcome duplicate / click_not_found / security_failed). */
+export type NotRecordedReason =
+ | 'missing_click_id' | 'unknown_click' | 'click_not_owned'
+ | 'missing_security_code' | 'wrong_security_code' | 'no_security_code_configured' | 'browser_origin_not_allowed'
+ | 'duplicate_transaction_id' | 'duplicate_click_event' | 'repeat_within_60s';
+
 export interface RecordConversionResult {
  outcome: ConversionOutcome;
  conversionId?: string;
+ /** The conversion's reason (held / rejected / capped …, null when none), or why nothing was recorded. */
+ reason?: string | null;
+ offerId?: string;
+ publisherId?: string | null;
+ advertiserId?: string | null;
+ /** The event as recorded: the request's, else the offer's base event name. */
+ event?: string | null;
+ payout?: string | null;
+ revenue?: string | null;
+ currency?: string | null;
 }
 
 type ClickRow = StoredClick;
@@ -115,6 +141,8 @@ function safeMoney(v: string | null): string | null {
 interface GoalPricing {
  id: string; payout: string | null; revenue: string | null; currency: string | null; event_name: string | null; is_default: boolean;
  daily_conversion_cap: number | null; total_conversion_cap: number | null;
+ /** The event's own duplicate rule; null = the offer's. */
+ duplicate_mode: DuplicateMode | null;
 }
 
 /**
@@ -181,7 +209,7 @@ async function conversionCapReached(
 
 async function resolveGoal(networkId: string, offerId: string, event: string | null): Promise<GoalPricing | null> {
  const { rows } = await query<GoalPricing>(
- `SELECT id, payout, revenue, currency, event_name, is_default, daily_conversion_cap, total_conversion_cap FROM offer_goals
+ `SELECT id, payout, revenue, currency, event_name, is_default, daily_conversion_cap, total_conversion_cap, duplicate_mode FROM offer_goals
  WHERE network_id = $1 AND offer_id = $2 AND status = 'active'
  AND (lower(event_name) = lower($3) OR is_default = true)
  ORDER BY (lower(event_name) = lower($3)) DESC NULLS LAST, is_default DESC
@@ -207,39 +235,59 @@ async function releaseIdemKey(redis: ReturnType<typeof getRedis>, key: string, t
  }
 }
 
-export async function recordConversion(input: RecordConversionInput): Promise<RecordConversionResult> {
- const redis = getRedis();
+/** How long the Redis fast-path key of a transaction id / (click, event) lives. */
+const IDEM_TTL_S = 172_800;
+/** every_postback without a transaction id: an identical request within this many seconds is a retry. */
+export const RETRY_WINDOW_S = 60;
 
- // Fast idempotency pre-check (authoritative guards are in the DB: the (offer, transaction_id)
- // unique index, and the per-(network, click, event) check for conversions without a transaction id).
- // The value is a per-attempt token so only this attempt can release the key after a failure.
- const idemKey = `convidem:${input.clickId}:${input.txnId ?? input.event ?? 'default'}`;
- const idemToken = randomUUID();
- const acquired = await redis.set(idemKey, idemToken, 'EX', 172800, 'NX');
- if (acquired !== 'OK') return { outcome: 'duplicate' };
-
- const state = { committed: false };
- try {
- return await recordWithIdemKey(input, redis, idemKey, state);
- } catch (err) {
- // Nothing was recorded → let a retry through. Once the insert transaction has committed the key
- // stays (a later error, e.g. enqueueing the partner postback, must not reopen a recorded conversion).
- if (!state.committed) await releaseIdemKey(redis, idemKey, idemToken);
- throw err;
- }
+export interface DedupeRule {
+ /** The Redis fast-path key (SET NX). */
+ key: string;
+ ttlS: number;
+ /** Why a repeat is turned away. */
+ reason: Extract<NotRecordedReason, 'duplicate_transaction_id' | 'duplicate_click_event' | 'repeat_within_60s'>;
+ /** The check inside the insert transaction: any earlier conversion for this click + event
+  * ('click_event'), one without a transaction id ('click_event_no_txn'), or none — the transaction-id
+  * index covers the rest. */
+ dbCheck: 'click_event' | 'click_event_no_txn' | null;
 }
 
-async function recordWithIdemKey(
- input: RecordConversionInput, redis: ReturnType<typeof getRedis>, idemKey: string, state: { committed: boolean },
-): Promise<RecordConversionResult> {
+/** JSON with object keys sorted, so the same params in another order fingerprint alike. */
+const stableJson = (v: unknown): string => JSON.stringify(v, (_k, x: unknown) =>
+ x && typeof x === 'object' && !Array.isArray(x)
+ ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+ : x);
+
+/** How a conversion request is deduplicated under its event's duplicate rule (see the header). */
+export function dedupeRule(k: {
+ networkId: string; offerId: string; clickId: string; event: string | null; txnId: string | null;
+ mode: DuplicateMode; rawParams?: Record<string, unknown>;
+}): DedupeRule {
+ const key = (...parts: unknown[]) => `convidem:${JSON.stringify(parts)}`;
+ if (k.mode === 'one_per_click') {
+ return { key: key('click', k.networkId, k.clickId, k.event), ttlS: IDEM_TTL_S, reason: 'duplicate_click_event', dbCheck: 'click_event' };
+ }
+ if (k.txnId != null) {
+ return { key: key('txn', k.networkId, k.offerId, k.event, k.txnId), ttlS: IDEM_TTL_S, reason: 'duplicate_transaction_id', dbCheck: null };
+ }
+ if (k.mode === 'unique_txn') {
+ return { key: key('click', k.networkId, k.clickId, k.event), ttlS: IDEM_TTL_S, reason: 'duplicate_click_event', dbCheck: 'click_event_no_txn' };
+ }
+ const fingerprint = createHash('sha256').update(stableJson(k.rawParams ?? {})).digest('base64url');
+ return { key: key('retry', k.networkId, k.clickId, k.event, fingerprint), ttlS: RETRY_WINDOW_S, reason: 'repeat_within_60s', dbCheck: null };
+}
+
+export async function recordConversion(rawInput: RecordConversionInput): Promise<RecordConversionResult> {
+ const redis = getRedis();
+ // A blank transaction id is no transaction id (it would otherwise make every blank one a duplicate).
+ const input = { ...rawInput, txnId: rawInput.txnId != null && rawInput.txnId.trim() !== '' ? rawInput.txnId : null };
+
  // Match the originating click (Redis fast path -> DB fallback).
  const click = await findClick(input.networkId, input.clickId);
- if (!click) {
- await redis.del(idemKey);
- return { outcome: 'click_not_found' };
- }
+ if (!click) return { outcome: 'click_not_found', reason: 'unknown_click' };
 
  const offer = await getOfferConfig(input.networkId, click.offer_id);
+ const who = { offerId: click.offer_id, publisherId: click.publisher_id, advertiserId: offer?.advertiserId ?? null };
 
  // Postback secure_code (S2S authentication). T-1: timing-safe comparison. Fails CLOSED: every
  // network gets a code at creation (migration 1700000067000 backfills and defaults it), so a
@@ -248,8 +296,8 @@ async function recordWithIdemKey(
  if (input.source === 'postback' && !input.skipSecureCode) {
  const required = offer?.securityCode || offer?.networkSecurityCode || null;
  if (!required || !timingSafeCompare(input.secureCode, required).ok) {
- await redis.del(idemKey);
- return { outcome: 'security_failed' };
+ const reason: NotRecordedReason = !required ? 'no_security_code_configured' : input.secureCode ? 'wrong_security_code' : 'missing_security_code';
+ return { outcome: 'security_failed', reason, ...who };
  }
  }
 
@@ -258,37 +306,56 @@ async function recordWithIdemKey(
  // and (below) never let them set the price.
  const browserFired = input.source === 'pixel' || input.source === 'iframe';
  if (browserFired && !conversionOriginAllowed(input.requestOrigin, allowedConversionHosts(offer, input.requestOrigin?.host ?? null))) {
- await redis.del(idemKey);
- return { outcome: 'security_failed' };
+ return { outcome: 'security_failed', reason: 'browser_origin_not_allowed', ...who };
  }
 
- // T-2: per-click conversion abuse guard — limit distinct txnId variation per click. Only AFTER the
- // request is authenticated: run before the security check, unauthenticated attempts with a leaked
- // click id used up the click's allowance and the advertiser's real conversions were then refused.
- // Fail open on Redis errors.
- if (input.txnId && input.txnId.trim().length > 0) {
- const abuse = await checkConversionAbuse(redis, input.clickId, input.txnId, input.networkId);
- if (abuse.limited) return { outcome: 'rejected' };
- }
+ // The event's duplicate rule — its goal's, else the offer's — decides how this request is deduped.
+ const eventName = input.event ?? offer?.revenue?.baseEventName ?? null;
+ const goal = await resolveGoal(input.networkId, click.offer_id, input.event);
+ const rule = dedupeRule({
+ networkId: input.networkId, offerId: click.offer_id, clickId: input.clickId, event: eventName, txnId: input.txnId,
+ mode: goal?.duplicate_mode ?? duplicateModeOf(offer?.revenue), rawParams: input.rawParams,
+ });
 
+ // Fast idempotency pre-check, only once the request is authenticated (the authoritative guards are in
+ // the DB). The value is a per-attempt token so only this attempt can release the key after a failure.
+ const idemToken = randomUUID();
+ const acquired = await redis.set(rule.key, idemToken, 'EX', rule.ttlS, 'NX');
+ if (acquired !== 'OK') return { outcome: 'duplicate', reason: rule.reason, ...who, event: eventName };
+
+ const state = { committed: false };
+ try {
+ return await recordAttributed({ input, redis, click, offer, goal, eventName, rule, browserFired }, state);
+ } catch (err) {
+ // Nothing was recorded → let a retry through. Once the insert transaction has committed the key
+ // stays (a later error, e.g. enqueueing the partner postback, must not reopen a recorded conversion).
+ if (!state.committed) await releaseIdemKey(redis, rule.key, idemToken);
+ throw err;
+ }
+}
+
+interface Attributed {
+ input: RecordConversionInput & { txnId: string | null };
+ redis: ReturnType<typeof getRedis>;
+ click: ClickRow;
+ offer: Awaited<ReturnType<typeof getOfferConfig>>;
+ goal: GoalPricing | null;
+ eventName: string | null;
+ rule: DedupeRule;
+ browserFired: boolean;
+}
+
+async function recordAttributed(
+ { input, redis, click, offer, goal, eventName, rule, browserFired }: Attributed, state: { committed: boolean },
+): Promise<RecordConversionResult> {
  const revCfg = offer?.revenue;
  const attrCfg = offer?.attribution;
+ const who = { offerId: click.offer_id, publisherId: click.publisher_id, advertiserId: offer?.advertiserId ?? null };
 
- // "Allow Duplicate Conversions" off → at most one conversion per click, whatever the txn_id.
- // Redis NX guards concurrent postbacks; the DB check covers conversions older than the lock.
- let clickLockKey: string | null = null;
- if (revCfg && revCfg.allowDuplicates === false) {
- clickLockKey = `convclick:${input.networkId}:${input.clickId}`;
- const locked = await redis.set(clickLockKey, '1', 'EX', 172800, 'NX');
- const existing = locked === 'OK'
- ? (await query(`SELECT 1 FROM conversions WHERE network_id = $1 AND click_id = $2 LIMIT 1`, [input.networkId, input.clickId])).rows.length > 0
- : true;
- if (existing) {
- if (locked === 'OK') await redis.del(clickLockKey);
- return { outcome: 'duplicate' };
- }
- }
- const releaseClickLock = async () => { if (clickLockKey) await redis.del(clickLockKey); };
+ // T-2: per-click conversion volume — counted only for authenticated, non-duplicate attempts. Past the
+ // offer's limit the conversion is still recorded, but held for review (below). Fail open on Redis errors.
+ const volume = await checkConversionAbuse(redis, input.clickId, input.networkId,
+ revCfg?.clickConversionLimit === undefined ? CONV_ABUSE_LIMIT : revCfg.clickConversionLimit);
 
  // Attribution window (spec §6).
  const ageS = (Date.now() - new Date(click.created_at).getTime()) / 1000;
@@ -308,7 +375,6 @@ async function recordWithIdemKey(
  fraudScore += 50;
  }
 
- const goal = await resolveGoal(input.networkId, click.offer_id, input.event);
  // Pricing precedence: explicit postback param → goal matched BY EVENT NAME → a click-time override
  // (partner / country rate frozen on the click) → the default goal → the click / offer default.
  // A default-goal fallback must not wipe out a partner- or country-specific rate.
@@ -356,7 +422,6 @@ async function recordWithIdemKey(
  || (click.publisher_id != null && offer?.partnerPayouts?.[click.publisher_id] != null);
  const tierRate = !ownRate && click.publisher_id ? tierPayout(revenue, offer?.tierMargins?.[click.publisher_id]) : null;
  if (tierRate != null) payout = tierRate;
- const eventName = input.event ?? revCfg?.baseEventName ?? null;
  const currency = click.currency ?? goal?.currency ?? offer?.currency ?? null;
  const goalId = goal?.id ?? null;
  const conversionId = randomUUID().replace(/-/g, '');
@@ -387,6 +452,12 @@ async function recordWithIdemKey(
  if (status === 'approved' && click.publisher_id && !(await isActivePartner(input.networkId, click.publisher_id))) {
  status = 'pending';
  reason = 'partner_not_active';
+ }
+ // Unusual volume from one click (T-2, above): held for review — recorded, never dropped. Beats an
+ // "accept" postback control; a hold or rejection with its own reason keeps it.
+ if (volume.limited && (status === 'approved' || (status === 'pending' && reason == null))) {
+ status = 'pending';
+ reason = 'held_unusual_volume';
  }
  // "Manually Approve Conversions" → anything that would auto-approve waits in pending.
  if (revCfg?.manualApproval && status === 'approved') {
@@ -444,42 +515,43 @@ async function recordWithIdemKey(
 
  const client = await pool.connect();
  let insertedOk = false;
+ let duplicateReason: DedupeRule['reason'] | null = null;
  try {
  await client.query('BEGIN');
- // No transaction id → at most one conversion per (network, click, event name), permanently (the
- // DB index only covers non-null transaction ids; the Redis key above expires after 48h). The
+ // The (click, event) rule, permanently (the Redis key above expires): one conversion per click +
+ // event — any, or (unique_txn without a transaction id) one without a transaction id. The
  // transaction-scoped advisory lock serialises concurrent attempts for the same click + event, and
  // the check runs after it, so the second attempt sees the first's committed row. Taken before the
  // cap lock, always in that order.
- let noTxnDuplicate = false;
- if (input.txnId == null) {
+ if (rule.dbCheck) {
  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
- [JSON.stringify(['convnotxn', input.networkId, input.clickId, eventName])]);
+ [JSON.stringify(['convclickevent', input.networkId, input.clickId, eventName])]);
  const prior = await client.query(
  `SELECT 1 FROM conversions
- WHERE network_id = $1 AND click_id = $2 AND transaction_id IS NULL AND event_name IS NOT DISTINCT FROM $3
+ WHERE network_id = $1 AND click_id = $2 AND event_name IS NOT DISTINCT FROM $3
+ ${rule.dbCheck === 'click_event_no_txn' ? 'AND transaction_id IS NULL' : ''}
  LIMIT 1`,
  [input.networkId, input.clickId, eventName],
  );
- noTxnDuplicate = prior.rows.length > 0;
+ if (prior.rows.length > 0) duplicateReason = 'duplicate_click_event';
  }
- if (!noTxnDuplicate && status !== 'rejected') {
+ if (!duplicateReason && status !== 'rejected') {
  const capReason = await conversionCapReached(client, input.networkId, click.offer_id,
  { daily: offer?.dailyConversionCap ?? null, total: offer?.totalConversionCap ?? null }, goal);
  if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
  }
- if (!noTxnDuplicate && status !== 'rejected' && click.publisher_id) {
+ if (!duplicateReason && status !== 'rejected' && click.publisher_id) {
  const capReason = await customCapReached(client, input.networkId, click.offer_id, click.publisher_id,
  applicableSettings(offer?.customSettings, 'caps', click.publisher_id, clickAttrs, new Date()), payout, revenue);
  if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
  }
- const ins = noTxnDuplicate ? { rows: [] as { conversion_id: string }[] } : await client.query<{ conversion_id: string }>(
+ const ins = duplicateReason ? { rows: [] as { conversion_id: string }[] } : await client.query<{ conversion_id: string }>(
  `INSERT INTO conversions (
  conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,
  event_name, status, reason, payout, revenue, currency, transaction_id, source, raw_params,
  fraud_score, fraud_flags, goal_id
  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
- ON CONFLICT (offer_id, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING
+ ON CONFLICT (offer_id, event_name, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING
  RETURNING conversion_id`,
  [
  conversionId, input.networkId, input.clickId, click.offer_id, click.publisher_id,
@@ -489,6 +561,9 @@ async function recordWithIdemKey(
  ],
  );
  insertedOk = ins.rows.length > 0;
+ // Not inserted without a (click, event) duplicate = the transaction id was already used for this
+ // offer + event (the unique index).
+ if (!insertedOk && !duplicateReason) duplicateReason = 'duplicate_transaction_id';
  if (insertedOk && status === 'approved') {
  await writeConversionLedger(client, {
  networkId: input.networkId, conversionId,
@@ -507,16 +582,12 @@ async function recordWithIdemKey(
  state.committed = true;
  } catch (err) {
  await client.query('ROLLBACK');
- await releaseClickLock();
  throw err;
  } finally {
  client.release();
  }
 
- if (!insertedOk) {
- await releaseClickLock();
- return { outcome: 'duplicate' };
- }
+ if (!insertedOk) return { outcome: 'duplicate', reason: duplicateReason, ...who, event: eventName };
 
  await getAnalyticsWriter().writeConversions([
  {
@@ -594,5 +665,5 @@ async function recordWithIdemKey(
  status, reason, event: eventName, payout, revenue, currency,
  });
 
- return { outcome: status, conversionId };
+ return { outcome: status, conversionId, reason, ...who, event: eventName, payout, revenue, currency };
 }
