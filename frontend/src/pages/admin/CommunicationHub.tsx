@@ -325,8 +325,8 @@ function EmailsTab() {
   const { data, loading, refetch } = useQuery<EmailMsg[]>(`/api/communication-hub/emails?status=${status}`);
   const { data: audiencesData } = useQuery<AudienceRow[]>('/api/communication-hub/audiences');
   const { data: templatesData } = useQuery<TemplateRow[]>('/api/communication-hub/templates');
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/communication-hub/emails/${id}`));
-  const { run: runSend } = useMutation((id: string) => api.post(`/api/communication-hub/emails/${id}/send`));
+  const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/emails/${id}`));
+  const { run: runSend, error: sendError } = useMutation((id: string) => api.post(`/api/communication-hub/emails/${id}/send`));
 
   const rows = data ?? [];
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -338,6 +338,7 @@ function EmailsTab() {
         <span />
         <button className="btn-primary inline-flex items-center gap-1.5" onClick={() => setComposing('new')}><Plus size={14} /> Create Message</button>
       </Toolbar>
+      {(deleteError || sendError) && <p className="mb-2 text-small text-danger-text">{deleteError ?? sendError}</p>}
       {loading ? <StateBlock><Spinner /></StateBlock> : rows.length === 0 ? (
         <StateBlock>No Record Found</StateBlock>
       ) : (
@@ -479,7 +480,7 @@ function BannersTab() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<BannerRow | null | 'new'>(null);
   const { data, loading, refetch } = useQuery<BannerRow[]>('/api/communication-hub/banners');
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/communication-hub/banners/${id}`));
+  const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/banners/${id}`));
 
   const filterKey = sub === 'Published' ? 'published' : sub === 'Scheduled' ? 'scheduled' : sub === 'Expired' ? 'expired' : 'draft';
   const rows = useMemo(() => (data ?? []).filter((b) => b.status === filterKey), [data, filterKey]);
@@ -492,6 +493,7 @@ function BannersTab() {
         <span />
         <button className="btn-primary inline-flex items-center gap-1.5" onClick={() => setEditing('new')}><Plus size={14} /> Create Partner Banner</button>
       </Toolbar>
+      {deleteError && <p className="mb-2 text-small text-danger-text">{deleteError}</p>}
       {loading ? <StateBlock><Spinner /></StateBlock> : rows.length === 0 ? (
         <StateBlock>No Record Found</StateBlock>
       ) : (
@@ -608,7 +610,7 @@ function AudiencesTab() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<AudienceRow | null | 'new'>(null);
   const { data, loading, refetch } = useQuery<AudienceRow[]>('/api/communication-hub/audiences');
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/communication-hub/audiences/${id}`));
+  const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/audiences/${id}`));
   const rows = data ?? [];
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -618,6 +620,7 @@ function AudiencesTab() {
         <span />
         <button className="btn-primary inline-flex items-center gap-1.5" onClick={() => setEditing('new')}><Plus size={14} /> Create Audience</button>
       </Toolbar>
+      {deleteError && <p className="mb-2 text-small text-danger-text">{deleteError}</p>}
       {loading ? <StateBlock><Spinner /></StateBlock> : rows.length === 0 ? (
         <StateBlock>No Record Found</StateBlock>
       ) : (
@@ -708,7 +711,7 @@ function TemplatesTab() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<TemplateRow | null | 'new'>(null);
   const { data, loading, refetch } = useQuery<TemplateRow[]>('/api/communication-hub/templates');
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/communication-hub/templates/${id}`));
+  const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/templates/${id}`));
   const rows = data ?? [];
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -718,6 +721,7 @@ function TemplatesTab() {
         <span />
         <button className="btn-primary inline-flex items-center gap-1.5" onClick={() => setEditing('new')}><Plus size={14} /> Create Template</button>
       </Toolbar>
+      {deleteError && <p className="mb-2 text-small text-danger-text">{deleteError}</p>}
       {loading ? <StateBlock><Spinner /></StateBlock> : rows.length === 0 ? (
         <StateBlock>No Record Found</StateBlock>
       ) : (
@@ -761,11 +765,12 @@ function TemplatesTab() {
 
 // ---------------- Settings (Automated System Emails) ----------------
 function SystemEmailRow({ e, onToggled }: { e: SystemEmail; onToggled: () => void }) {
-  const { run, busy } = useMutation((enabled: boolean) => api.put(`/api/communication-hub/system-emails/${e.key}`, { enabled }));
+  const { run, busy, error } = useMutation((enabled: boolean) => api.put(`/api/communication-hub/system-emails/${e.key}`, { enabled }));
   return (
     <div className="flex items-start justify-between gap-4 px-4 py-4">
       <div className="min-w-0 flex-1">
         <p className="font-medium text-fg">{e.label}</p>
+        {error && <p className="mt-1 text-small text-danger-text">{error}</p>}
       </div>
       <div className="flex flex-col items-center gap-1">
         <span className="text-tiny font-medium text-fg-secondary">{e.enabled ? 'Enabled' : 'Disabled'}</span>

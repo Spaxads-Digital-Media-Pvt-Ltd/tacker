@@ -104,14 +104,17 @@ function RowActionMenu({ tier, onChanged }: { tier: PartnerTier; onChanged: () =
   };
 
   return (
-    <TableRowMenu>
-      {(api) => (
-        <>
-          <MenuItem icon={Pencil} onSelect={() => { api.close(); nav(`/app/aff-tiers/${tier.id}/edit`); }}>Edit</MenuItem>
-          {!tier.isDefault && <MenuItem icon={Star} onSelect={() => doSetDefault(api)}>Set Default</MenuItem>}
-        </>
-      )}
-    </TableRowMenu>
+    <>
+      <TableRowMenu>
+        {(api) => (
+          <>
+            <MenuItem icon={Pencil} onSelect={() => { api.close(); nav(`/app/aff-tiers/${tier.id}/edit`); }}>Edit</MenuItem>
+            {!tier.isDefault && <MenuItem icon={Star} onSelect={() => doSetDefault(api)}>Set Default</MenuItem>}
+          </>
+        )}
+      </TableRowMenu>
+      {setDefault.error && <p role="alert" className="mt-1 text-tiny text-danger-text">{setDefault.error}</p>}
+    </>
   );
 }
 

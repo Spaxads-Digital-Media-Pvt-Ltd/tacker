@@ -78,9 +78,13 @@ export function TableActionsMenu({
 
   const doRequestBalances = async () => {
     setOpen(false);
-    const res = await requestBalances.run(selectedIds);
-    // Totals per currency (exact decimals) — never one number across currencies.
-    if (res) onBalancesRequested(requestedBalancesMessage(res.requested, partnerName));
+    try {
+      const res = await requestBalances.runOrThrow(selectedIds);
+      // Totals per currency (exact decimals) — never one number across currencies.
+      onBalancesRequested(requestedBalancesMessage(res.requested, partnerName));
+    } catch (e) {
+      onBalancesRequested(`Could not request balances: ${e instanceof Error ? e.message : 'please try again.'}`);
+    }
   };
 
   return (

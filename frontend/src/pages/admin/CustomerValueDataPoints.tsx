@@ -101,7 +101,7 @@ function DataPointForm({ initial, onSaved, onCancel }: { initial?: DataPoint; on
 export default function CustomerValueDataPoints() {
   const { data, loading, refetch } = useQuery<DataPoint[]>('/api/customer-value/data-points');
   const [editing, setEditing] = useState<DataPoint | null | 'new'>(null);
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/customer-value/data-points/${id}`));
+  const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/customer-value/data-points/${id}`));
   const confirm = useConfirm();
 
   const [q, setQ] = useState('');
@@ -186,7 +186,7 @@ export default function CustomerValueDataPoints() {
                     <div className="flex justify-end gap-1">
                       <button title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setEditing(d)}><Pencil size={14} /></button>
                       <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text"
-                        onClick={() => confirm({ title: 'Delete data point?', message: `Are you sure you want to delete data point "${d.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await runDelete(d.id)) refetch(); } })}>
+                        onClick={() => confirm({ title: 'Delete data point?', message: `Are you sure you want to delete data point "${d.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await runDelete(d.id); refetch(); } })}>
                         <Trash2 size={14} />
                       </button>
                     </div>

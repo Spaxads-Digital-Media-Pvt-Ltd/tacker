@@ -126,7 +126,7 @@ function ScheduledActionsPanel() {
   );
   const { data: offers } = useQuery<Offer[]>('/api/offers?limit=200');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
-  const { run: runDelete } = useMutation((id: string) =>
+  const { runOrThrow: runDelete } = useMutation((id: string) =>
     api.del(`/api/automation/scheduled-actions/${id}`));
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
@@ -185,7 +185,7 @@ function ScheduledActionsPanel() {
         refetch();
         return true;
       }}
-      onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
+      onDelete={async (id) => { await runDelete(id); refetch(); }}
     />
   );
 }
@@ -195,7 +195,7 @@ function AlertsPanel() {
   const { data, loading, refetch } = useQuery<AlertRule[]>(
     `/api/automation/alert-rules?status=${ruleStatusParam(statusFilter)}`,
   );
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/automation/alert-rules/${id}`));
+  const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/automation/alert-rules/${id}`));
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
     id: r.id,
@@ -241,7 +241,7 @@ function AlertsPanel() {
           refetch();
           return true;
         }}
-        onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
+        onDelete={async (id) => { await runDelete(id); refetch(); }}
       />
     </>
   );
@@ -252,7 +252,7 @@ function WebhooksPanel() {
   const { data, loading, error, refetch } = useQuery<Webhook[]>(
     `/api/automation/webhooks?status=${ruleStatusParam(statusFilter)}`,
   );
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/automation/webhooks/${id}`));
+  const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/automation/webhooks/${id}`));
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
     id: r.id,
@@ -295,7 +295,7 @@ function WebhooksPanel() {
           refetch();
           return true;
         }}
-        onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
+        onDelete={async (id) => { await runDelete(id); refetch(); }}
       />
     </>
   );

@@ -107,7 +107,7 @@ Plus many more sub-routes (offers-templates, offers-groups, postbacks, tiers, co
 - `HelpHint.tsx` — Help tooltip
 
 ### Data Fetching
-- **`useApi.ts`** — `useQuery<T>(path)` + `useMutation(fn)` hooks
+- **`useApi.ts`** (`lib/useApi.ts`) — `useQuery<T>(path)` + `useMutation(fn)` hooks. A mutation's `run` never throws (a failure → `null` + `error`), so a caller using `run` must render `error`; `runOrThrow` also throws — use it in a confirm dialog's `onConfirm` (the dialog shows the message and stays open) or a try/catch. (`hooks/useApi.ts` is an older copy, used only by `constants/offerTemplateFields.ts`.)
 - **`api.ts`** — `Api` class with `get/post/patch/put/del` methods
  - Auto-attaches Bearer token
  - Transparent 401 → refresh token → retry (deduped)

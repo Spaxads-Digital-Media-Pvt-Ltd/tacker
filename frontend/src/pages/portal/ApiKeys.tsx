@@ -41,6 +41,7 @@ export default function ApiKeys({
         subtitle={subtitle}
         action={<button className="btn-primary" onClick={() => setOpen(true)}>New key</button>}
       />
+      {revoke.error && <p role="alert" className="mb-3 text-small text-danger-text">{revoke.error}</p>}
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
         : !data || data.length === 0 ? <StateBlock>No API keys yet.</StateBlock>

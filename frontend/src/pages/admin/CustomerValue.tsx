@@ -92,7 +92,7 @@ export default function CustomerValue() {
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const { data: dataPoints } = useQuery<DataPoint[]>('/api/customer-value/data-points');
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/customer-value/rules/${id}`));
+  const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/customer-value/rules/${id}`));
   const confirm = useConfirm();
 
   const [status, setStatus] = useState('active');
@@ -340,7 +340,7 @@ export default function CustomerValue() {
                     <div className="flex justify-end gap-1">
                       <Link to={`/app/customer-value/${r.id}/edit`} title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Pencil size={14} /></Link>
                       <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text"
-                        onClick={() => confirm({ title: 'Delete rule?', message: `Are you sure you want to delete rule "${r.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await runDelete(r.id)) refetch(); } })}>
+                        onClick={() => confirm({ title: 'Delete rule?', message: `Are you sure you want to delete rule "${r.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await runDelete(r.id); refetch(); } })}>
                         <Trash2 size={14} />
                       </button>
                     </div>

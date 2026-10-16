@@ -97,7 +97,7 @@ export default function MarketplaceConnections() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const { run: patchStatus } = useMutation((args: { id: string; status: 'active' | 'inactive' }) =>
+  const { runOrThrow: patchStatus } = useMutation((args: { id: string; status: 'active' | 'inactive' }) =>
     api.patch(`/api/advertisers/${args.id}`, { status: args.status }));
 
   const connected = useMemo(() => (data ?? []).filter((a) => a.status === 'active'), [data]);
@@ -126,14 +126,10 @@ export default function MarketplaceConnections() {
   const decide = async (id: string, status: 'active' | 'inactive', name: string) => {
     setApplyingId(id);
     try {
-      const r = await patchStatus({ id, status });
-      if (r) {
-        setToast(status === 'active' ? `Approved ${name}. Moved to Connected Advertisers.` : `Rejected ${name}.`);
-      } else {
-        setToast(`Could not update ${name}. Try again.`);
-      }
-    } catch {
-      setToast(`Could not update ${name}. Try again.`);
+      await patchStatus({ id, status });
+      setToast(status === 'active' ? `Approved ${name}. Moved to Connected Advertisers.` : `Rejected ${name}.`);
+    } catch (e) {
+      setToast(`Could not update ${name}: ${e instanceof Error ? e.message : 'please try again.'}`);
     } finally {
       setApplyingId(null);
       refetch();

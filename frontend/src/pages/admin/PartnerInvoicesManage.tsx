@@ -223,8 +223,8 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
   const doToggleVisible = async (menu: { close: () => void }) => {
     menu.close();
     setRowErr(null);
-    try { const ok = await toggleVisible.run({ visibleToPartner: !invoice.visibleToPartner }); if (ok) onChanged(); }
-    catch { setRowErr('Failed to update visibility.'); }
+    try { await toggleVisible.runOrThrow({ visibleToPartner: !invoice.visibleToPartner }); onChanged(); }
+    catch (e) { setRowErr(e instanceof Error ? e.message : 'Failed to update visibility.'); }
   };
 
   return (
@@ -232,10 +232,9 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
       <TableRowMenu>
         {(menu) => (
           <>
-            {rowErr && <p className="px-3 py-1.5 text-small text-danger-text">{rowErr}</p>}
             <MenuItem icon={Pencil} disabled={closed} onSelect={() => { menu.close(); nav(`/app/aff-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
             <MenuItem icon={invoice.visibleToPartner ? EyeOff : Eye} disabled={closed} onSelect={() => doToggleVisible(menu)}>{invoice.visibleToPartner ? 'Hide from Partner' : 'Show to Partner'}</MenuItem>
-            <MenuItem icon={CheckCircle2} disabled={invoice.status !== 'unpaid'} onSelect={async () => { menu.close(); try { await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); } catch { setRowErr('Failed to mark as paid.'); } }}>Mark Invoice as Paid</MenuItem>
+            <MenuItem icon={CheckCircle2} disabled={invoice.status !== 'unpaid'} onSelect={async () => { menu.close(); setRowErr(null); try { await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); } catch (e) { setRowErr(e instanceof Error ? e.message : 'Failed to mark as paid.'); } }}>Mark Invoice as Paid</MenuItem>
             {/* Invoices are never deleted (O8): unpaid ones are voided; paid ones are final. */}
             <MenuItem icon={Ban} tone="danger" disabled={invoice.status !== 'unpaid'} onSelect={() => { menu.close(); setVoiding(true); }}>
               {invoice.status === 'paid' ? 'Paid — final' : 'Void Invoice'}
@@ -256,6 +255,7 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
           </>
         )}
       </TableRowMenu>
+      {rowErr && <p role="alert" className="mt-1 text-tiny text-danger-text">{rowErr}</p>}
       {voiding && <VoidInvoiceModal invoiceRef={invoice.ref} endpoint={`/api/partner-invoices/${invoice.id}/void`} onClose={() => setVoiding(false)} onVoided={onChanged} />}
       {historyOpen && <HistoryModal invoiceId={invoice.id} onClose={() => setHistoryOpen(false)} />}
     </>

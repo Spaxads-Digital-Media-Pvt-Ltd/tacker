@@ -57,6 +57,7 @@ export function LabelsEditor({ base }: { base: string }) {
         ))}
         <AddInput onAdd={async (n) => { await add.run(n); refetch(); }} />
       </ChipBox>
+      {(add.error || remove.error) && <p className="mt-1 text-small text-danger-text">{add.error ?? remove.error}</p>}
     </Field>
   );
 }

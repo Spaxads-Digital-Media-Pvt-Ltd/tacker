@@ -30,9 +30,11 @@ export default function AdvertiserInvoiceDetail() {
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   if (error || !invoice) return <StateBlock>{error ?? 'Invoice not found'}</StateBlock>;
 
+  // The dialog stays open on a failure so its reason (pay.error, shown in the dialog) can be read.
   const doPay = async () => {
+    try { await pay.runOrThrow(undefined); } catch { return; }
     setConfirming(false);
-    if (await pay.run(undefined)) refetch();
+    refetch();
   };
 
   const ledgerColumns: Column<AdvertiserInvoiceLedgerEntry>[] = [
@@ -89,6 +91,7 @@ export default function AdvertiserInvoiceDetail() {
           <div className="w-full max-w-md rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-2 text-h3 font-semibold text-fg">Pay Invoice</h2>
             <p className="mb-4 text-small text-fg-secondary">Mark Invoice ID: {invoice.ref} as paid in full for {money(invoice.billedAmount, invoice.currency)}?</p>
+            {pay.error && <p className="mb-3 text-small text-danger-text">{pay.error}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>Cancel</button>
               <button type="button" className="btn-primary" disabled={pay.busy} onClick={doPay}>{pay.busy ? 'Processing…' : 'Pay'}</button>

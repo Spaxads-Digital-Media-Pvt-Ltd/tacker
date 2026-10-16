@@ -70,7 +70,7 @@ function OffersPanel({ tierId }: { tierId: string }) {
     void confirm({
       title: 'Remove offer from tier?', message: `Are you sure you want to remove "${o.offerName}" from this tier?`,
       confirmLabel: 'Remove', destructive: true,
-      onConfirm: async () => { if (await del.run(o.offerId)) refetch(); },
+      onConfirm: async () => { await del.runOrThrow(o.offerId); refetch(); },
     });
   };
 

@@ -258,6 +258,7 @@ export function EmptyShellTable({
 }) {
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [visibleColumns, setVisibleColumns] = useState(columns);
   const shown = visibleColumns.length ? visibleColumns : columns;
   const wired = Boolean(onAddSubmit || rows);
@@ -309,6 +310,7 @@ export function EmptyShellTable({
           </div>
         )}
       </div>
+      {deleteError && <p role="alert" className="mb-2 text-small text-danger-text">{deleteError}</p>}
       <TableScroll>
         {tableError ? (
           <p className="text-small text-danger-text">{tableError}</p>
@@ -330,7 +332,7 @@ export function EmptyShellTable({
                   {onDelete && (
                     <td className="text-right">
                       <button type="button" className="text-tiny text-danger-text hover:underline"
-                        onClick={() => onDelete(row.id)}>Delete</button>
+                        onClick={() => { setDeleteError(null); onDelete(row.id).catch((e: unknown) => setDeleteError(e instanceof Error ? e.message : 'Delete failed')); }}>Delete</button>
                     </td>
                   )}
                 </tr>

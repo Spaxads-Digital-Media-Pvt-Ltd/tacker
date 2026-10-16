@@ -113,6 +113,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
                     {offerCode && <button className="btn-ghost !px-3 !py-1 text-tiny text-danger-text hover:bg-danger-bg" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
                   </div>
                 </div>
+                {(regenCode.error || clearCode.error) && <p className="mt-2 text-small text-danger-text">{regenCode.error ?? clearCode.error}</p>}
               </>
             )}
           </div>
@@ -121,6 +122,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
         <Card title="Notes">
           <textarea className="input min-h-[70px]" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note…" />
           <button className="btn-primary mt-2 !py-1.5 !px-3 text-tiny" disabled={saveNotes.busy || !note.trim()} onClick={addNote}>+ Add Note</button>
+          {saveNotes.error && <p className="mt-2 text-small text-danger-text">{saveNotes.error}</p>}
           <div className="mt-3 space-y-2">
             {notes.length === 0 ? <p className="text-tiny text-fg-muted">No notes added yet.</p> : notes.map((n, i) => (
               <div key={i} className="flex items-start justify-between gap-2 rounded-[var(--radius)] border border-border p-2 text-small">

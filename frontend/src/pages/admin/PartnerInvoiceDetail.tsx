@@ -33,11 +33,11 @@ export default function PartnerInvoiceDetail() {
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   if (error || !invoice) return <StateBlock>{error ?? 'Invoice not found'}</StateBlock>;
 
+  // The dialog stays open on a failure so its reason (shown in the dialog) can be read.
   const doApprovePay = async () => {
-    setConfirming(false);
     setApproveErr(null);
-    try { const ok = await approvePay.run(undefined); if (ok) refetch(); }
-    catch { setApproveErr('Failed to approve & pay.'); }
+    try { await approvePay.runOrThrow(undefined); setConfirming(false); refetch(); }
+    catch (e) { setApproveErr(e instanceof Error ? e.message : 'Failed to approve & pay.'); }
   };
 
   const ledgerColumns: Column<PartnerInvoiceLedgerEntry>[] = [

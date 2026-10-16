@@ -20,7 +20,8 @@ function classifyError(e: unknown): { message: string; code: string } {
   if (e instanceof NetworkError) {
     return { message: e.message, code: e.kind === 'timeout' ? 'timeout' : 'network' };
   }
-  return { message: 'Request failed', code: 'unknown' };
+  // Anything else thrown on the way (a mutation's own check, a bug) keeps its own words.
+  return { message: e instanceof Error && e.message ? e.message : 'Request failed', code: 'unknown' };
 }
 
 export type QueryParams = Record<string, string | number | boolean | null | undefined>;
@@ -76,14 +77,18 @@ export function useQuery<T>(rawPath: string | null, params?: QueryParams): Query
   return { data, loading, error, errorCode, refetch };
 }
 
-/** Imperative mutation helper with busy/error state for forms. */
+/**
+ * Imperative mutation helper with busy/error state for forms. `run` never throws: a failure resolves
+ * to null and lands in `error` — so a caller using `run` must show `error`. `runOrThrow` also throws
+ * the failure, for a caller that shows it itself (a confirm dialog's onConfirm, a try/catch).
+ */
 export function useMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
 
-  const run = useCallback(
-    async (args: TArgs): Promise<TResult | null> => {
+  const runOrThrow = useCallback(
+    async (args: TArgs): Promise<TResult> => {
       setBusy(true);
       setError(null);
       setErrorCode(null);
@@ -93,7 +98,7 @@ export function useMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult
         const { message, code } = classifyError(e);
         setError(message);
         setErrorCode(code);
-        return null;
+        throw e;
       } finally {
         setBusy(false);
       }
@@ -101,5 +106,7 @@ export function useMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult
     [fn],
   );
 
-  return { run, busy, error, errorCode };
+  const run = useCallback((args: TArgs): Promise<TResult | null> => runOrThrow(args).catch(() => null), [runOrThrow]);
+
+  return { run, runOrThrow, busy, error, errorCode };
 }

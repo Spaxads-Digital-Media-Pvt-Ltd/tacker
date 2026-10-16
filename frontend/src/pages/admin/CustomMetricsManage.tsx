@@ -141,7 +141,7 @@ function RowMenu({ metric, onEdit, onDeleted }: { metric: CustomMetric; onEdit: 
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-36 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setOpen(false)}>
           <button onClick={() => { setOpen(false); onEdit(); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Edit</button>
-          <button onClick={() => { setOpen(false); void confirm({ title: 'Delete metric?', message: `Are you sure you want to delete metric "${metric.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await del.run(metric.id)) onDeleted(); } }); }}
+          <button onClick={() => { setOpen(false); void confirm({ title: 'Delete metric?', message: `Are you sure you want to delete metric "${metric.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await del.runOrThrow(metric.id); onDeleted(); } }); }}
             className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Delete</button>
         </div>
       )}

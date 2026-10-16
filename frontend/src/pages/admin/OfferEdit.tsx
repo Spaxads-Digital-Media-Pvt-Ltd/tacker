@@ -415,6 +415,7 @@ export default function OfferEdit() {
                   {offer.securityCode && <button type="button" className="btn-ghost !py-2 text-danger-text" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
                 </div>
               )}
+              {(regenCode.error || clearCode.error) && <p className="text-small text-danger-text">{regenCode.error ?? clearCode.error}</p>}
             </div>
 
             <div className="space-y-4 border-t border-border pt-4">

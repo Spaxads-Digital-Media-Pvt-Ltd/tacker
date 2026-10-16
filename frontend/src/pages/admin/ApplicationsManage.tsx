@@ -258,7 +258,7 @@ function QuestionnairesTab() {
     void confirm({
       title: 'Delete questionnaire?', message: `Are you sure you want to delete questionnaire "${item.name}"?`,
       confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(item.id)) refetch(); },
+      onConfirm: async () => { await del.runOrThrow(item.id); refetch(); },
     });
   };
 

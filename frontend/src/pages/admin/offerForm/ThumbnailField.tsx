@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { ImageIcon, X } from 'lucide-react';
-import { api, ApiError } from '../../../lib/api';
+import { api } from '../../../lib/api';
 import type { Offer } from '../../../types';
 
 const TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -48,7 +48,7 @@ export function ThumbnailField({ offerId, url, onUrlChange, onPendingFile }: {
       const updated = await api.upload<Offer>(`/api/offers/${offerId}/thumbnail`, file);
       onUrlChange(updated.thumbnailUrl ?? '');
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Upload failed');
+      setErr(e instanceof Error ? e.message : 'Upload failed');
     } finally {
       setBusy(false);
     }
