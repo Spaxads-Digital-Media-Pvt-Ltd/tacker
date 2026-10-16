@@ -11,3 +11,11 @@ export async function networkTimeZone(networkId: string): Promise<string> {
   const tz = rows[0]?.tz;
   return isValidTimeZone(tz) ? tz : 'UTC';
 }
+
+/** The network's cap time zone — Settings › General "Daily caps reset at midnight in [zone]"; UTC when
+ * unset or invalid. An offer's own Cap time zone overrides it (capTimeZoneOf). */
+export async function networkCapTimeZone(networkId: string): Promise<string> {
+  const { rows } = await query<{ tz: string | null }>(`SELECT settings->'general'->>'capTimezone' AS tz FROM networks WHERE id = $1`, [networkId]);
+  const tz = rows[0]?.tz;
+  return isValidTimeZone(tz) ? tz : 'UTC';
+}

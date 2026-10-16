@@ -10,7 +10,7 @@
 - Driver: `pg` (raw, no ORM)
 - Max connections: 10 (dev), 20 (prod)
 
-## Schema (82 Migrations)
+## Schema (83 Migrations)
 
 ### Core Tables
 
@@ -94,6 +94,7 @@ The central entity — what partners promote and advertisers run.
 | `daily_click_cap` | int | Max clicks/day (null = unlimited) |
 | `daily_conversion_cap` | int | Max conversions/day |
 | `total_conversion_cap` | int | Max conversions total |
+| `cap_timezone` | text | When this offer's daily caps reset (IANA zone); NULL = the network's (settings.general.capTimezone), else UTC (migration 081) |
 | `allowed_traffic_types` | text[] | Allowed traffic types |
 | `fallback_url` | text | Diversion URL when blocked |
 | `tracking_domain_id` | uuid | FK to tracking_domains |
@@ -288,7 +289,7 @@ Indexes are defined within migration SQL files. Key indexes cover:
 
 ## Migrations
 - Tool: `node-pg-migrate` (SQL-based)
-- 82 migration files, timestamped `1700000000000_*.sql`
+- 83 migration files, timestamped `1700000000000_*.sql`
 - `1700000062000_partition-retention` is an intentional no-op: the original partitioned `clicks`/`conversions`/`postback_logs` without creating partitions and dropped the global unique keys (`click_id`, `conversion_id`, `(offer_id, transaction_id)`) that idempotency depends on. `1700000064000_unpartition-tracking-tables` converts any DB that ran the original back to regular tables (rows preserved). These three tables must stay non-partitioned; retention prunes them with bounded ctid deletes.
 - `1700000079000_multi-conversion` swaps the transaction-id key to `(offer_id, event_name, transaction_id)` and adds `offer_goals.duplicate_mode`; its down migration fails if two conversions share an offer + transaction id under different events (resolve those first).
 - Run: `npm run migrate` (up), `npm run migrate:down`

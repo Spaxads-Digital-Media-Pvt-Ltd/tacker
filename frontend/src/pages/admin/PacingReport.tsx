@@ -14,9 +14,11 @@
  * weekly/monthly/global caps too (`offer_groups.caps`), but this report's endpoint only measures
  * daily usage (plus the offer-level all-time conversion cap as Global), so Weekly/Monthly are left
  * out rather than faked, and Global is "—" for Click/Payout/Revenue. The Summary is always today
- * (UTC) across every capped offer — it ignores the date range and the Offer filter (see the
- * endpoint); only the Detailed Report follows them. Unlike the other reports (D7: the network's time
- * zone), Pacing stays on UTC days — that's when daily caps reset (api-backend tracking/caps.ts).
+ * across every capped offer — it ignores the date range and the Offer filter (see the endpoint);
+ * only the Detailed Report follows them. Unlike the other reports (D7: the network's report time
+ * zone), Pacing counts days in the CAP time zone — when daily caps reset: each offer's own (Edit Offer
+ * › Caps), else the network's (Settings › General), else UTC; plain dates in the range are days of the
+ * network's cap zone, and each detail row's date is its offer's local day (YYYY-MM-DD).
  *
  * Payout/Revenue caps are money in the row's currency (the offer group's) when the API sends one,
  * else the network's default currency. The actual is in its conversions' own currency
@@ -61,7 +63,7 @@ interface SummaryRow { category: Category; dailyUsedPct: number | null; globalUs
 /** `currencies`: Payout/Revenue rows' conversions' own currencies (newer API) — see lib/reportCurrency. */
 /** `moneyByCurrency`: the actual's per-currency amounts (newer API) — listed in a mixed actual's tooltip. */
 interface DetailRow { date: string; entity: string; entityId: string; cap: number | string; actual: number | string; usedPct: number; currency?: string; currencies?: string[]; moneyByCurrency?: unknown }
-interface PacingResult { summary: SummaryRow[]; category: Category; rows: DetailRow[] }
+interface PacingResult { summary: SummaryRow[]; category: Category; rows: DetailRow[]; capTimeZone?: string }
 
 const CATEGORY_LABELS: Record<Category, string> = {
   click: 'Click', conversion: 'Conversion', payout: 'Payout', revenue: 'Revenue',
@@ -223,7 +225,7 @@ export default function PacingReport() {
         <div className="border-t border-border px-5 py-4 sm:px-6">
           {/* The endpoint computes the Summary for today across every capped offer, whatever the range/Offer. */}
           <h3 className="mb-3 text-small font-medium text-fg">
-            Summary <span className="ml-1 font-normal text-fg-muted" title="Ignores the date range and the Offer filter">· Today (UTC) · all capped offers</span>
+            Summary <span className="ml-1 font-normal text-fg-muted" title="Ignores the date range and the Offer filter. Each offer's day is its cap time zone's (Edit Offer › Caps), else the network's.">· Today (cap time zone{result?.capTimeZone ? `: ${result.capTimeZone}` : ''}) · all capped offers</span>
           </h3>
           {error ? <p className="text-small text-danger-text">{error}</p>
             : !result ? (loading ? <div className="pt-2"><Spinner /></div> : null) : (

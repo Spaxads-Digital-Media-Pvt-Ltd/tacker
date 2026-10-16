@@ -182,14 +182,16 @@ describe('/grouped rejects unknown params', () => {
 describe('/pacing', () => {
   const pacingCall = (fragment: RegExp) => calls().find((x) => fragment.test(x.sql));
 
-  it('counts conversion-cap usage like enforcement: non-rejected, UTC day, network-scoped subqueries', async () => {
+  it('counts conversion-cap usage like enforcement: non-rejected, the cap time zone\'s day, network-scoped subqueries', async () => {
     const res = await request(reportsApp()).get('/pacing?category=conversion');
     expect(res.status).toBe(200);
     const conv = pacingCall(/AS conversions_total/)!;
     expect(conv.sql).not.toMatch(/status = 'approved'/);
     expect(conv.sql.match(/c\.status <> 'rejected'/g)).toHaveLength(2);
     expect(conv.sql.match(/c\.network_id = o\.network_id AND c\.offer_id = o\.id/g)).toHaveLength(2);
-    expect(conv.sql).toContain(`date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`);
+    // Each offer's cap time zone, else the network's ($2 — UTC when the network has none).
+    expect(conv.sql).toContain(`date_trunc('day', now(), COALESCE(o.cap_timezone, $2))`);
+    expect(conv.params?.[1]).toBe('UTC');
     const click = pacingCall(/clicks_today/)!;
     expect(click.sql).toMatch(/cl\.network_id = o\.network_id AND cl\.offer_id = o\.id/);
     const detail = pacingCall(/GROUP BY 1, 2 ORDER BY 1 DESC/)!;
@@ -215,7 +217,7 @@ describe('/pacing', () => {
   it('/caps subqueries are tenant-scoped and count non-rejected conversions', async () => {
     const res = await request(reportsApp()).get('/caps');
     expect(res.status).toBe(200);
-    const { sql } = calls()[0]!;
+    const { sql } = calls().find((x) => /AS clicks_today/.test(x.sql))!;
     expect(sql.match(/c\.network_id = o\.network_id/g)).toHaveLength(2);
     expect(sql).toMatch(/cl\.network_id = o\.network_id/);
     expect(sql).not.toMatch(/status = 'approved'/);
@@ -255,7 +257,7 @@ describe('/pacing and /caps never cast an unvalidated cap', () => {
 
   it('/caps reads non-positive offer caps as NULL and lists only offers with a positive cap', async () => {
     await request(reportsApp()).get('/caps');
-    const { sql } = calls()[0]!;
+    const { sql } = calls().find((x) => /AS clicks_today/.test(x.sql))!;
     expect(sql).toContain('CASE WHEN o.daily_click_cap > 0 THEN o.daily_click_cap END AS daily_click_cap');
     expect(sql).toMatch(/\(o\.daily_conversion_cap > 0 OR o\.total_conversion_cap > 0 OR o\.daily_click_cap > 0\)/);
   });
@@ -986,7 +988,7 @@ describe('offer-group stats split money by currency', () => {
     const q = calls().find((x) => x.sql.includes('WITH j AS'))!;
     expect(q.sql).toContain('cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[])');
     expect(q.sql).toContain("jsonb_object_agg(cm.cur, jsonb_build_object('payout'");
-    expect(q.params).toEqual([NET, [A]]);
+    expect(q.params).toEqual([NET, [A], 'UTC']); // today = the network's cap time zone's day (UTC by default)
   });
 
   it('list rows: today keeps clicks/payout/revenue and adds currencies + moneyByCurrency', async () => {

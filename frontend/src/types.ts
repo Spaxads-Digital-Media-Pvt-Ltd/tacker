@@ -77,6 +77,8 @@ export interface Offer {
   dailyConversionCap?: number | null;
   totalConversionCap?: number | null;
   dailyClickCap?: number | null;
+  /** When this offer's daily caps reset (IANA zone); null = the network's cap time zone. */
+  capTimezone?: string | null;
   allowedTrafficTypes?: string[];
   fallbackUrl?: string | null;
   description?: string | null;

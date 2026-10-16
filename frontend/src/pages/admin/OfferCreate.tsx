@@ -28,6 +28,7 @@ import { targetingErrors } from './offerForm/targetingValidation';
 import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
 import { ThumbnailField } from './offerForm/ThumbnailField';
 import { SearchablePicker } from '../../shared-components/primitives/SearchablePicker';
+import { CapTimeZoneSelect } from '../../shared-components/primitives/CapTimeZoneSelect';
 import { DEFAULT_ATTRIBUTION, DEFAULT_EMAIL, DEFAULT_REVENUE, settingsErrors } from './offerForm/settings';
 import type { Advertiser, Offer, OfferTargeting, TrackingDomain } from '../../types';
 
@@ -99,6 +100,8 @@ export default function OfferCreate() {
   const [labels, setLabels] = useState<string[]>([]);
   const [capsEnabled, setCapsEnabled] = useState(false);
   const [caps, setCaps] = useState({ dailyClickCap: '', dailyConversionCap: '', totalConversionCap: '' });
+  const [capTimezone, setCapTimezone] = useState(''); // '' = the network's cap time zone
+  const { data: netSettings } = useQuery<{ general: { capTimezone?: string } }>('/api/settings');
   const [failTrafficEnabled, setFailTrafficEnabled] = useState(false);
   const [linkingType, setLinkingType] = useState('redirect');
   const [deepLinkEnabled, setDeepLinkEnabled] = useState(false);
@@ -151,6 +154,7 @@ export default function OfferCreate() {
       dailyClickCap: capOrNull(caps.dailyClickCap),
       dailyConversionCap: capOrNull(caps.dailyConversionCap),
       totalConversionCap: capOrNull(caps.totalConversionCap),
+      capTimezone: capTimezone || null,
       appIdentifier: orNull(form.appIdentifier),
       internalNotes: orNull(form.internalNotes),
       productId: orNull(form.productId),
@@ -352,6 +356,9 @@ export default function OfferCreate() {
                   <Field label="Total Conversion Cap"><input type="number" min={0} className="input" value={caps.totalConversionCap} onChange={(e) => setCaps((c) => ({ ...c, totalConversionCap: e.target.value }))} placeholder="Unlimited" /></Field>
                 </div>
               )}
+              <Field label="Cap Time Zone" hint="When this offer's daily caps — and its partners' caps (Custom Settings) — start over: midnight in this zone.">
+                <CapTimeZoneSelect value={capTimezone} onChange={setCapTimezone} inheritLabel={`Network default — ${netSettings?.general.capTimezone ?? 'UTC'}`} />
+              </Field>
             </div>
           </div>
         )}

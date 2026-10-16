@@ -15,14 +15,14 @@ import { summary24h } from '../../../lib/reporting/summary.js';
 import { badRequest } from '../../../lib/http/errors.js';
 import { csvList, queryDate } from '../../../lib/http/query-params.js';
 import { addMoney } from '../../../lib/money.js';
-import { inclusiveTo, utcDayStart, tzParam, withZonedRange } from '../../../lib/reporting/request.js';
+import { tzParam, withZonedRange, zonedRange } from '../../../lib/reporting/request.js';
 import { redactRawParams, redactUrl } from '../../../lib/reporting/redact.js';
 import { capCountedSql, heldOverCapSql } from '../../../lib/conversion-caps.js';
 import { rejectedClickSql } from '../../../lib/click-rejections.js';
 import { mbcJsonSql, mergeMoneyByCurrency } from '../../../lib/reporting/money-by-currency.js';
 import { money4, MONEY_FIELDS, type MoneyByCurrency } from '../../../lib/reporting/types.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
-import { networkTimeZone } from '../../../lib/reporting/network-zone.js';
+import { networkCapTimeZone, networkTimeZone } from '../../../lib/reporting/network-zone.js';
 import { isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore, formatInZone } from '../../../lib/reporting/time-zone.js';
 
 /** Admin endpoints: every money field per currency (CTE alias `cm` with columns cur / p / r). */
@@ -33,9 +33,6 @@ const MBC_JSON = mbcJsonSql('cm');
 // the queries compare with — a date-only `to` is the END of its day, inclusive (as a bare date it
 // meant midnight and silently dropped the last day).
 const rangeKeys = { from: queryDate.optional(), to: queryDate.optional(), tz: tzParam.optional() };
-// Pacing stays on UTC days: that's when caps reset (tracking/caps.ts).
-const utcFromDate = queryDate.transform((s) => utcDayStart(s)!);
-const utcToDate = queryDate.transform((s) => inclusiveTo(s));
 const uuid = z.string().uuid().optional();
 const DETAIL_PAGE_MAX = 500;
 const pageKeys = {
@@ -698,22 +695,25 @@ export function mountDetailReports(r: Router): void {
   // omitted rather than faked). Summary is a network-wide snapshot (today + all-time); Detail is a
   // real per-day, per-entity breakdown for the requested date range and category.
   const pacingSchema = z.object({
-    from: utcFromDate.optional(),
-    to: utcToDate.optional(),
+    // Plain dates are days of the network's cap time zone (the handler turns them into instants).
+    from: queryDate.optional(),
+    to: queryDate.optional(),
     category: z.enum(['click', 'conversion', 'payout', 'revenue']).default('conversion'),
     // Detail rows for one offer (payout/revenue: the offer groups that contain it).
     offerId: uuid,
   }).strict();
   // Conversion-cap USAGE mirrors enforcement (surfaces/tracking/conversions/record.ts →
   // conversionCapReached, lib/conversion-caps): every conversion that isn't rejected counts (pending ones
-  // consume the cap too) except those held over caps, and "today" starts at the UTC day boundary.
+  // consume the cap too) except those held over caps, and "today" / a day is the CAP TIME ZONE's — each
+  // offer's (`offers.cap_timezone`), else the network's (Settings › General; $2 below), else UTC.
   // Payout/revenue cap usage stays APPROVED-only — that's money actually earned. Money (caps + actuals)
   // is returned as numeric(14,4) text; percentages are numbers.
   const CAP_COUNTED = capCountedSql('c');
   // Click-cap usage: clicks sent to the offer. Rejected clicks (recorded with the reason — cap
   // exceeded, geo, …) never reached it and never used up its cap (lib/click-rejections).
   const REJECTED_CLICK = rejectedClickSql('cl');
-  const UTC_TODAY = `date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`;
+  // An offer's cap time zone, with the network's as $2.
+  const OFFER_TZ = `COALESCE(o.cap_timezone, $2)`;
   // A cap only counts when it is POSITIVE: enforcement treats null and <= 0 as unlimited
   // (tracking/caps.ts isClickCapped, conversions/record.ts conversionCapReached), so a zero/negative
   // cap is "no cap" here too — excluded exactly like a NULL one, never shown as a 0 denominator.
@@ -730,43 +730,45 @@ export function mountDetailReports(r: Router): void {
   r.get('/pacing', validateQuery(pacingSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof pacingSchema>;
+    const capTz = await networkCapTimeZone(nid);
+    const range = zonedRange(f.from, f.to, capTz);
 
     const [clickCap, convCap, groupCap] = await Promise.all([
       query<{ id: string; name: string; daily_click_cap: number; clicks_today: number }>(
         `SELECT o.id, o.name, o.daily_click_cap,
                 (SELECT COUNT(*) FROM clicks cl WHERE cl.network_id = o.network_id AND cl.offer_id = o.id
-                   AND cl.created_at >= date_trunc('day', now(), 'UTC') AND NOT ${REJECTED_CLICK})::int AS clicks_today
+                   AND cl.created_at >= date_trunc('day', now(), ${OFFER_TZ}) AND NOT ${REJECTED_CLICK})::int AS clicks_today
            FROM offers o WHERE o.network_id = $1 AND o.daily_click_cap > 0`,
-        [nid],
+        [nid, capTz],
       ),
       query<{ id: string; name: string; daily_conversion_cap: number | null; total_conversion_cap: number | null; conversions_today: number; conversions_total: number }>(
         `SELECT o.id, o.name, ${offerCap('daily_conversion_cap')} AS daily_conversion_cap,
                 ${offerCap('total_conversion_cap')} AS total_conversion_cap,
                 (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id
-                   AND ${CAP_COUNTED} AND c.created_at >= ${UTC_TODAY})::int AS conversions_today,
+                   AND ${CAP_COUNTED} AND c.created_at >= date_trunc('day', now(), ${OFFER_TZ}))::int AS conversions_today,
                 (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id
                    AND ${CAP_COUNTED})::int AS conversions_total
            FROM offers o WHERE o.network_id = $1 AND (o.daily_conversion_cap > 0 OR o.total_conversion_cap > 0)`,
-        [nid],
+        [nid, capTz],
       ),
       query<{ id: string; name: string; daily_payout_cap: string | null; daily_revenue_cap: string | null; payout_today: string; revenue_today: string; cap_currency: string | null; currencies_today: string[] | null }>(
         // Approved-only: payout/revenue caps track money actually earned.
         `SELECT og.id, og.name, gc.daily_payout_cap, gc.daily_revenue_cap,
                 COALESCE((SELECT SUM(c.payout) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS payout_today,
+                   AND c.created_at >= date_trunc('day', now(), $2) AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS payout_today,
                 COALESCE((SELECT SUM(c.revenue) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS revenue_today,
+                   AND c.created_at >= date_trunc('day', now(), $2) AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS revenue_today,
                 -- Currency check for the pooled summary: the cap's currency + the currencies of the
                 -- conversions summed above (same rows).
                 COALESCE(NULLIF(og.currency, ''), (SELECT n.default_currency FROM networks n WHERE n.id = $1)) AS cap_currency,
                 (SELECT array_agg(DISTINCT c.currency) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text AND c.currency IS NOT NULL) AS currencies_today
+                   AND c.created_at >= date_trunc('day', now(), $2) AND og.offer_ids ? c.offer_id::text AND c.currency IS NOT NULL) AS currencies_today
            FROM offer_groups og
            CROSS JOIN LATERAL (SELECT ${groupDailyCap('payout')}::text AS daily_payout_cap,
                                       ${groupDailyCap('revenue')}::text AS daily_revenue_cap) gc
           WHERE og.network_id = $1 AND og.caps_enabled
             AND (gc.daily_payout_cap IS NOT NULL OR gc.daily_revenue_cap IS NOT NULL)`,
-        [nid],
+        [nid, capTz],
       ),
     ]);
 
@@ -798,9 +800,9 @@ export function mountDetailReports(r: Router): void {
 
     const dateWhereFor = (alias: string) => {
       const where: string[] = ['1=1'];
-      const params: unknown[] = [nid];
-      if (f.from) { params.push(f.from); where.push(`${alias}.created_at >= $${params.length}`); }
-      if (f.to) { params.push(f.to); where.push(`${alias}.created_at <= $${params.length}`); }
+      const params: unknown[] = [nid, capTz];
+      if (range.from) { params.push(range.from); where.push(`${alias}.created_at >= $${params.length}`); }
+      if (range.to) { params.push(range.to); where.push(`${alias}.created_at <= $${params.length}`); }
       if (f.offerId) {
         params.push(f.offerId);
         where.push(f.category === 'payout' || f.category === 'revenue'
@@ -815,7 +817,7 @@ export function mountDetailReports(r: Router): void {
     if (f.category === 'click') {
       const { where, params } = dateWhereFor('cl');
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
-        `SELECT date_trunc('day', cl.created_at, 'UTC') AS day, cl.offer_id, COUNT(*)::int AS actual
+        `SELECT to_char((cl.created_at AT TIME ZONE ${OFFER_TZ})::date, 'YYYY-MM-DD') AS day, cl.offer_id, COUNT(*)::int AS actual
            FROM clicks cl JOIN offers o ON o.id = cl.offer_id AND o.network_id = cl.network_id
           WHERE cl.network_id = $1 AND o.daily_click_cap > 0 AND NOT ${REJECTED_CLICK} AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
@@ -829,7 +831,7 @@ export function mountDetailReports(r: Router): void {
     } else if (f.category === 'conversion') {
       const { where, params } = dateWhereFor('c');
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
-        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, c.offer_id, COUNT(*)::int AS actual
+        `SELECT to_char((c.created_at AT TIME ZONE ${OFFER_TZ})::date, 'YYYY-MM-DD') AS day, c.offer_id, COUNT(*)::int AS actual
            FROM conversions c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
           WHERE c.network_id = $1 AND ${CAP_COUNTED} AND o.daily_conversion_cap > 0 AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
@@ -845,7 +847,7 @@ export function mountDetailReports(r: Router): void {
       const { where, params } = dateWhereFor('c');
       // Groups whose cap isn't a valid positive decimal are dropped by the join (see groupDailyCap).
       const [{ rows }, byCur] = await Promise.all([query<{ day: string; group_id: string; group_name: string; cap: string; actual: string; currency: string; currencies: string[] }>(
-        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, og.id AS group_id, og.name AS group_name,
+        `SELECT to_char((c.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day, og.id AS group_id, og.name AS group_name,
                 ${groupDailyCap(col)}::text AS cap,
                 COALESCE(SUM(c.${col}),0)::numeric(14,4)::text AS actual,
                 -- cap/actual are in the group's currency (network default when unset) — the UI formats with it.
@@ -861,7 +863,7 @@ export function mountDetailReports(r: Router): void {
       ),
       // The same rows' `actual` split per conversion currency (NULL currency excluded).
       query<{ day: string; group_id: string; cur: string; amount: string }>(
-        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, og.id AS group_id, c.currency AS cur,
+        `SELECT to_char((c.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day, og.id AS group_id, c.currency AS cur,
                 COALESCE(SUM(c.${col}),0)::numeric(14,4)::text AS amount
            FROM conversions c
            JOIN offer_groups og ON og.network_id = c.network_id AND og.offer_ids ? c.offer_id::text
@@ -883,7 +885,8 @@ export function mountDetailReports(r: Router): void {
       }));
     }
 
-    sendOk(res, { summary, category: f.category, rows: detailRows });
+    // Days are local dates (YYYY-MM-DD) of each offer's cap time zone (offer groups: the network's).
+    sendOk(res, { summary, category: f.category, capTimeZone: capTz, rows: detailRows });
   }));
 
   // ── Cohort report — real per-day-of-click "aging" breakdown: for each cohort day (the day a click
@@ -1137,21 +1140,22 @@ export function mountDetailReports(r: Router): void {
   // ── Cap report — offers with caps and their current usage (counted like enforcement — see /pacing;
   // a zero/negative cap is unlimited there, so it reads as NULL and an offer with no positive cap is left out) ──
   r.get('/caps', asyncHandler(async (req, res) => {
+    const capTz = await networkCapTimeZone(req.scope!.networkId);
     const { rows } = await query(
-      `SELECT o.id, o.name, o.status, o.currency,
+      `SELECT o.id, o.name, o.status, o.currency, ${OFFER_TZ} AS cap_timezone,
               ${offerCap('daily_conversion_cap')} AS daily_conversion_cap,
               ${offerCap('total_conversion_cap')} AS total_conversion_cap,
               ${offerCap('daily_click_cap')} AS daily_click_cap,
               (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND ${CAP_COUNTED}
-                 AND c.created_at >= ${UTC_TODAY})::int AS conversions_today,
+                 AND c.created_at >= date_trunc('day', now(), ${OFFER_TZ}))::int AS conversions_today,
               (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND ${CAP_COUNTED})::int AS conversions_total,
               (SELECT COUNT(*) FROM clicks cl WHERE cl.network_id = o.network_id AND cl.offer_id = o.id
-                 AND cl.created_at >= date_trunc('day', now(), 'UTC') AND NOT ${REJECTED_CLICK})::int AS clicks_today
+                 AND cl.created_at >= date_trunc('day', now(), ${OFFER_TZ}) AND NOT ${REJECTED_CLICK})::int AS clicks_today
          FROM offers o
         WHERE o.network_id = $1
           AND (o.daily_conversion_cap > 0 OR o.total_conversion_cap > 0 OR o.daily_click_cap > 0)
         ORDER BY o.name`,
-      [req.scope!.networkId],
+      [req.scope!.networkId, capTz],
     );
     sendOk(res, rows);
   }));

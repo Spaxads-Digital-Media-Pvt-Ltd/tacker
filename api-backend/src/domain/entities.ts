@@ -65,6 +65,8 @@ export interface OfferRow {
   daily_conversion_cap: number | null;
   total_conversion_cap: number | null;
   daily_click_cap: number | null;
+  /** When this offer's daily caps reset (IANA zone); null = the network's cap time zone. */
+  cap_timezone?: string | null;
   attribution_window_s: number;
   dedup_window_s: number;
   allowed_traffic_types: string[];

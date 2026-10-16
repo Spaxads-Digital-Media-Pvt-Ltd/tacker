@@ -11,6 +11,7 @@ import {
   type OfferTargeting, type AttributionSettings, type RevenueSettings,
 } from '../../lib/offer-settings/index.js';
 import type { CustomSettingConfig, CustomCategory, CapsMatrix, CustomTargeting } from '../../lib/offer-settings/custom-settings.js';
+import { capTimeZoneOf } from '../../lib/offer-settings/custom-settings.js';
 
 export interface GeoRuleConfig {
   country: string;
@@ -54,6 +55,9 @@ export interface OfferConfig {
   dailyConversionCap: number | null;
   totalConversionCap: number | null;
   dailyClickCap: number | null;
+  /** When daily (weekly, monthly) caps reset: the offer's Cap time zone, else the network's, else UTC
+   * (capTimeZoneOf). Undefined on a config cached before it existed (≤ cache TTL) = UTC. */
+  capTimeZone?: string;
   attributionWindowS: number;
   dedupWindowS: number;
   allowedTrafficTypes: string[];
@@ -144,6 +148,8 @@ interface Row {
   security_code: string | null;
   network_security_code: string | null;
   network_fallback_url: string | null;
+  cap_timezone: string | null;
+  network_cap_timezone: string | null;
   metadata: Record<string, unknown> | null;
 }
 
@@ -151,6 +157,7 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
   const { rows } = await query<Row>(
     `SELECT o.*, n.postback_security_code AS network_security_code,
             (SELECT nn.settings->'general'->>'fallbackUrl' FROM networks nn WHERE nn.id = o.network_id) AS network_fallback_url,
+            (SELECT nn.settings->'general'->>'capTimezone' FROM networks nn WHERE nn.id = o.network_id) AS network_cap_timezone,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'country', g.country, 'region', g.region, 'action', g.action,
               'payoutOverride', g.payout_override, 'revenueOverride', g.revenue_override,
@@ -236,6 +243,7 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     defaultPayout: r.default_payout, defaultRevenue: r.default_revenue, currency: r.currency,
     dailyConversionCap: r.daily_conversion_cap, totalConversionCap: r.total_conversion_cap,
     dailyClickCap: r.daily_click_cap, attributionWindowS: r.attribution_window_s,
+    capTimeZone: capTimeZoneOf(r.cap_timezone, r.network_cap_timezone),
     dedupWindowS: r.dedup_window_s, allowedTrafficTypes: r.allowed_traffic_types,
     geoRules: r.geo_rules ?? [],
     deniedPublishers: r.denied_publishers ?? [],

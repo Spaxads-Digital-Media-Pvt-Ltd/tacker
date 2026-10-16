@@ -27,6 +27,7 @@ import { targetingErrors } from './offerForm/targetingValidation';
 import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
 import { ThumbnailField } from './offerForm/ThumbnailField';
 import { SearchablePicker } from '../../shared-components/primitives/SearchablePicker';
+import { CapTimeZoneSelect } from '../../shared-components/primitives/CapTimeZoneSelect';
 import { DEFAULT_ATTRIBUTION, DEFAULT_EMAIL, DEFAULT_REVENUE, settingsErrors, withDefaults } from './offerForm/settings';
 import type {
   Offer, Advertiser, TrackingDomain, OfferTargeting,
@@ -52,6 +53,8 @@ interface FormState {
   name: string; status: string; advertiserId: string; category: string; currency: string;
   visibility: string; destinationUrl: string; previewUrl: string; description: string;
   dailyClickCap: string; dailyConversionCap: string; totalConversionCap: string;
+  /** '' = the network's cap time zone. */
+  capTimezone: string;
   payoutModel: string; defaultPayout: string; defaultRevenue: string;
   attributionWindowS: string; dedupWindowS: string; fallbackUrl: string; allowedTrafficTypes: string[];
   trackingDomainId: string;
@@ -71,6 +74,8 @@ export default function OfferEdit() {
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: groups, refetch: refetchGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
   const { data: allOffers } = useQuery<Offer[]>('/api/offers');
+  // The network's cap time zone — what "Network default" means for this offer's caps.
+  const { data: netSettings } = useQuery<{ general: { capTimezone?: string } }>('/api/settings');
   const { data: networkSecurity } = useQuery<{ securityCode: string | null }>('/api/settings/security');
   // Category options = Control Center › Categories catalog ∪ names already on offers.
   const { options: categoryOptions, ensureCategory } = useOfferCategories((allOffers ?? []).map((o) => o.category));
@@ -97,6 +102,7 @@ export default function OfferEdit() {
       dailyClickCap: offer.dailyClickCap != null ? String(offer.dailyClickCap) : '',
       dailyConversionCap: offer.dailyConversionCap != null ? String(offer.dailyConversionCap) : '',
       totalConversionCap: offer.totalConversionCap != null ? String(offer.totalConversionCap) : '',
+      capTimezone: offer.capTimezone ?? '',
       payoutModel: offer.payoutModel, defaultPayout: String(offer.defaultPayout), defaultRevenue: String(offer.defaultRevenue),
       attributionWindowS: offer.attributionWindowS != null ? String(offer.attributionWindowS) : '',
       dedupWindowS: offer.dedupWindowS != null ? String(offer.dedupWindowS) : '',
@@ -174,6 +180,7 @@ export default function OfferEdit() {
       dailyClickCap: capOrNull(form.dailyClickCap),
       dailyConversionCap: capOrNull(form.dailyConversionCap),
       totalConversionCap: capOrNull(form.totalConversionCap),
+      capTimezone: form.capTimezone || null,
       appIdentifier: orNull(form.appIdentifier),
       internalNotes: orNull(form.internalNotes),
       productId: orNull(form.productId),
@@ -364,6 +371,10 @@ export default function OfferEdit() {
                 </div>
               )}
               {!capsEnabled && <p className="text-tiny text-fg-muted">Caps off — saving removes any existing caps on this offer.</p>}
+              <Field label="Cap Time Zone" hint="When this offer's daily caps — and its partners' caps (Custom Settings) — start over: midnight in this zone. The advertiser who says “500 a day” may count the day in their own zone.">
+                <CapTimeZoneSelect value={form.capTimezone} onChange={(tz) => set('capTimezone', tz)}
+                  inheritLabel={`Network default — ${netSettings?.general.capTimezone ?? 'UTC'}`} />
+              </Field>
             </div>
           </div>
         )}

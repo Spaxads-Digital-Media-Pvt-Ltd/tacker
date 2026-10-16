@@ -149,13 +149,13 @@ interface GoalPricing {
 
 /**
  * Offer Custom Settings › Caps for this partner on this offer (F-12): conversions / payout / revenue
- * per day / week / month (UTC) or all time, over the partner's conversions on the offer that use up a
- * cap (lib/conversion-caps). Runs inside the insert transaction, serialized per offer + partner (same
- * pattern as the offer caps). Returns the over-cap reason, or null.
+ * per day / week / month (in the cap time zone `tz`) or all time, over the partner's conversions on the
+ * offer that use up a cap (lib/conversion-caps). Runs inside the insert transaction, serialized per
+ * offer + partner (same pattern as the offer caps). Returns the over-cap reason, or null.
  */
 async function customCapReached(
  client: PoolClient, networkId: string, offerId: string, publisherId: string,
- settings: CustomSettingConfig[], payout: string | null, revenue: string | null,
+ settings: CustomSettingConfig[], payout: string | null, revenue: string | null, tz: string,
 ): Promise<string | null> {
  const checks = settings.flatMap((s) => (['conversions', 'payout', 'revenue'] as const)
  .flatMap((kind) => capLimits(s.caps, kind).map(([interval, limit]) => ({ kind, interval, limit }))));
@@ -169,7 +169,7 @@ async function customCapReached(
  FROM conversions
  WHERE network_id = $1 AND offer_id = $2 AND publisher_id = $3 AND ${capCountedSql()}
  AND ($4::timestamptz IS NULL OR created_at >= $4)`,
- [networkId, offerId, publisherId, capWindowStart(c.interval)],
+ [networkId, offerId, publisherId, capWindowStart(c.interval, new Date(), tz)],
  );
  const r = rows[0]!;
  if (c.kind === 'conversions' && Number(r.n) >= c.limit) return 'custom_conversion_cap_reached';
@@ -181,14 +181,14 @@ async function customCapReached(
 
 /**
  * Offer / goal conversion caps (Edit Offer › Caps, goal caps). Counts this offer's conversions that use
- * up a cap (lib/conversion-caps: not rejected, not already held over caps) — today in UTC (same day
- * boundary as the click cap) or all-time — inside the insert transaction, serialized per offer with a
- * transaction-scoped advisory lock so concurrent postbacks can't overshoot. The lock is only taken
- * when a cap is actually configured. Returns the over-cap reason, or null when under every cap.
+ * up a cap (lib/conversion-caps: not rejected, not already held over caps) — today in the cap time zone
+ * `tz` (same day boundary as the click cap) or all-time — inside the insert transaction, serialized per
+ * offer with a transaction-scoped advisory lock so concurrent postbacks can't overshoot. The lock is
+ * only taken when a cap is actually configured. Returns the over-cap reason, or null when under every cap.
  */
 async function conversionCapReached(
  client: PoolClient, networkId: string, offerId: string,
- offerCaps: { daily: number | null; total: number | null }, goal: GoalPricing | null,
+ offerCaps: { daily: number | null; total: number | null }, goal: GoalPricing | null, tz: string,
 ): Promise<string | null> {
  const checks: { reason: string; cap: number | null | undefined; goalId: string | null; daily: boolean }[] = [
  { reason: 'daily_conversion_cap_reached', cap: offerCaps.daily, goalId: null, daily: true },
@@ -202,7 +202,7 @@ async function conversionCapReached(
  const params: unknown[] = [networkId, offerId];
  let where = `network_id = $1 AND offer_id = $2 AND ${capCountedSql()}`;
  if (c.goalId) { params.push(c.goalId); where += ` AND goal_id = $${params.length}`; }
- if (c.daily) where += ` AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`;
+ if (c.daily) { params.push(capWindowStart('daily', new Date(), tz)); where += ` AND created_at >= $${params.length}`; }
  const { rows } = await client.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM conversions WHERE ${where}`, params);
  if ((rows[0]?.n ?? 0) >= c.cap!) return c.reason;
  }
@@ -541,11 +541,12 @@ async function recordAttributed(
  // recorded, never dropped (they used to be rejected). No ledger and no partner postback until approved.
  let overCap: string | null = null;
  if (!duplicateReason && status !== 'rejected') {
+ const capTz = offer?.capTimeZone ?? 'UTC';
  overCap = await conversionCapReached(client, input.networkId, click.offer_id,
- { daily: offer?.dailyConversionCap ?? null, total: offer?.totalConversionCap ?? null }, goal);
+ { daily: offer?.dailyConversionCap ?? null, total: offer?.totalConversionCap ?? null }, goal, capTz);
  if (!overCap && click.publisher_id) {
  overCap = await customCapReached(client, input.networkId, click.offer_id, click.publisher_id,
- applicableSettings(offer?.customSettings, 'caps', click.publisher_id, clickAttrs, new Date()), payout, revenue);
+ applicableSettings(offer?.customSettings, 'caps', click.publisher_id, clickAttrs, new Date()), payout, revenue, capTz);
  }
  }
  if (overCap) { status = 'pending'; reason = overCap; throttled = false; }

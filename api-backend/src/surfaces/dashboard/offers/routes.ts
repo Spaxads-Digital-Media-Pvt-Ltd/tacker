@@ -423,6 +423,7 @@ export function offersAdminRoutes(): Router {
  daily_conversion_cap: b.dailyConversionCap ?? null,
  total_conversion_cap: b.totalConversionCap ?? null,
  daily_click_cap: b.dailyClickCap ?? null,
+ cap_timezone: b.capTimezone ?? null,
  ...(b.attributionWindowS !== undefined ? { attribution_window_s: b.attributionWindowS } : {}),
  ...(b.dedupWindowS !== undefined ? { dedup_window_s: b.dedupWindowS } : {}),
  ...(b.allowedTrafficTypes !== undefined ? { allowed_traffic_types: b.allowedTrafficTypes } : {}),
@@ -472,7 +473,7 @@ export function offersAdminRoutes(): Router {
  destinationUrl: 'destination_url', payoutModel: 'payout_model',
  defaultPayout: 'default_payout', defaultRevenue: 'default_revenue', currency: 'currency',
  dailyConversionCap: 'daily_conversion_cap', totalConversionCap: 'total_conversion_cap',
- dailyClickCap: 'daily_click_cap', attributionWindowS: 'attribution_window_s',
+ dailyClickCap: 'daily_click_cap', capTimezone: 'cap_timezone', attributionWindowS: 'attribution_window_s',
  dedupWindowS: 'dedup_window_s', allowedTrafficTypes: 'allowed_traffic_types',
  fallbackUrl: 'fallback_url', objective: 'objective', visibility: 'visibility',
  category: 'category', previewUrl: 'preview_url', trackingDomainId: 'tracking_domain_id',
@@ -571,11 +572,11 @@ export function offersAdminRoutes(): Router {
  const copy = await inTransaction(async (client) => {
  const { rows } = await client.query<OfferRow>(
  `INSERT INTO offers (network_id, advertiser_id, name, status, destination_url, payout_model, default_payout,
- default_revenue, currency, daily_conversion_cap, total_conversion_cap, daily_click_cap, attribution_window_s,
+ default_revenue, currency, daily_conversion_cap, total_conversion_cap, daily_click_cap, cap_timezone, attribution_window_s,
  dedup_window_s, allowed_traffic_types, fallback_url, objective, visibility, category, preview_url,
  tracking_domain_id, metadata)
  SELECT network_id, advertiser_id, name || ' (copy)', 'draft', destination_url, payout_model, default_payout,
- default_revenue, currency, daily_conversion_cap, total_conversion_cap, daily_click_cap, attribution_window_s,
+ default_revenue, currency, daily_conversion_cap, total_conversion_cap, daily_click_cap, cap_timezone, attribution_window_s,
  dedup_window_s, allowed_traffic_types, fallback_url, objective, visibility, category, preview_url,
  tracking_domain_id,
  -- The copy is its own offer (O7): it keeps every setting but not the offer-feed link, or the next

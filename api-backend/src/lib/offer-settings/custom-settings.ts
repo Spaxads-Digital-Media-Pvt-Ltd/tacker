@@ -20,6 +20,7 @@
  * second amount, impressions, …) — they are stored but not applied.
  */
 import { percentOfMoney } from '../money.js';
+import { addDays, isValidTimeZone, localDate, zonedDayStart } from '../reporting/time-zone.js';
 
 export type CustomCategory = 'revenue_payout' | 'caps' | 'throttle_rates' | 'landing_pages' | 'creatives';
 export const CAP_KINDS = ['clicks', 'conversions', 'payout', 'revenue'] as const;
@@ -125,22 +126,40 @@ export function customPricing(
   return ids.length ? { payout, revenue, firePartnerPostback, settingIds: ids } : null;
 }
 
-/** Start of the current cap window (UTC: day, ISO week from Monday, month); null = all time. */
-export function capWindowStart(interval: CapInterval, now = new Date()): Date | null {
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  if (interval === 'daily') return d;
-  if (interval === 'weekly') { d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d; }
-  if (interval === 'monthly') return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+/**
+ * The time zone a cap's "day" (week, month) is counted in: the offer's Cap time zone, else the
+ * network's (Settings › General — "Daily caps reset at midnight in [zone]"), else UTC. A stored value
+ * that isn't a valid IANA zone is skipped, never thrown on.
+ */
+export function capTimeZoneOf(offerZone: string | null | undefined, networkZone?: string | null): string {
+  if (isValidTimeZone(offerZone)) return offerZone;
+  if (isValidTimeZone(networkZone)) return networkZone;
+  return 'UTC';
+}
+
+/** The local date (YYYY-MM-DD) the current cap window starts on in `tz`; null = all time. */
+function capWindowStartDate(interval: CapInterval, now: Date, tz: string): string | null {
+  const today = localDate(now, tz);
+  if (interval === 'daily') return today;
+  if (interval === 'weekly') return addDays(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
+  if (interval === 'monthly') return `${today.slice(0, 8)}01`;
   return null;
 }
 
-/** Redis key suffix for the current cap window + how long that bucket must live (seconds; 0 = forever). */
-export function capBucket(interval: CapInterval, now = new Date()): { bucket: string; ttl: number } {
-  const start = capWindowStart(interval, now);
-  if (!start) return { bucket: 'all', ttl: 0 };
-  const stamp = start.toISOString().slice(0, 10).replace(/-/g, '');
+/** Start of the current cap window in the cap time zone (day, ISO week from Monday, month — local
+ * midnight in `tz`, UTC by default); null = all time. */
+export function capWindowStart(interval: CapInterval, now = new Date(), tz = 'UTC'): Date | null {
+  const date = capWindowStartDate(interval, now, tz);
+  return date ? zonedDayStart(date, tz) : null;
+}
+
+/** Redis key suffix for the current cap window (its local start date in `tz`) + how long that bucket
+ * must live (seconds; 0 = forever). */
+export function capBucket(interval: CapInterval, now = new Date(), tz = 'UTC'): { bucket: string; ttl: number } {
+  const date = capWindowStartDate(interval, now, tz);
+  if (!date) return { bucket: 'all', ttl: 0 };
   const days = interval === 'daily' ? 2 : interval === 'weekly' ? 8 : 32;
-  return { bucket: `${interval}:${stamp}`, ttl: days * 24 * 60 * 60 };
+  return { bucket: `${interval}:${date.replace(/-/g, '')}`, ttl: days * 24 * 60 * 60 };
 }
 
 /** The positive limits of one cap kind, by interval. */

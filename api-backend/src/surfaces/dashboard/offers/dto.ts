@@ -25,6 +25,8 @@ export interface OfferAdminDTO {
   dailyConversionCap: number | null;
   totalConversionCap: number | null;
   dailyClickCap: number | null;
+  /** When the daily caps reset; null = the network's cap time zone (Settings › General). */
+  capTimezone: string | null;
   attributionWindowS: number;
   dedupWindowS: number;
   allowedTrafficTypes: string[];
@@ -72,6 +74,7 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     dailyConversionCap: row.daily_conversion_cap,
     totalConversionCap: row.total_conversion_cap,
     dailyClickCap: row.daily_click_cap,
+    capTimezone: row.cap_timezone ?? null,
     attributionWindowS: row.attribution_window_s,
     dedupWindowS: row.dedup_window_s,
     allowedTrafficTypes: row.allowed_traffic_types,

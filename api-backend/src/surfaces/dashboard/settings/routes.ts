@@ -25,6 +25,7 @@ import { invalidateNetworkOfferConfigs } from '../../tracking/offer-cache.js';
 import { maskIntegrations, mergeIntegrationsPatch } from '../../../lib/integrations/settings.js';
 import { encryptSecret } from '../../../lib/crypto/secret-box.js';
 import { retentionWindows } from '../../../lib/retention/retention.js';
+import { tzParam } from '../../../lib/reporting/request.js';
 import { env } from '../../../config/env.js';
 import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 
@@ -48,6 +49,9 @@ const generalSchema = z.object({
   supportEmail: z.string().email().optional(),
   // Where rejected clicks go when their offer has no fallback of its own (D1); null clears it.
   fallbackUrl: redirectUrlWithMax(2000).nullable().optional(),
+  // "Daily caps reset at midnight in [zone]" — the network's cap time zone (an offer can override it);
+  // null clears it back to UTC.
+  capTimezone: tzParam.nullable().optional(),
 });
 
 const smtpSchema = z.object({
@@ -134,9 +138,11 @@ export function settingsRoutes(): Router {
     if (b.timezone !== undefined) general['timezone'] = b.timezone;
     if (b.supportEmail !== undefined) general['supportEmail'] = b.supportEmail;
     if (b.fallbackUrl !== undefined) { if (b.fallbackUrl === null) delete general['fallbackUrl']; else general['fallbackUrl'] = b.fallbackUrl; }
+    if (b.capTimezone !== undefined) { if (b.capTimezone === null) delete general['capTimezone']; else general['capTimezone'] = b.capTimezone; }
     await saveSettings(networkId, { ...net.settings, general });
-    // Every offer's cached click config carries the network fallback — apply it on the next click.
-    if (b.fallbackUrl !== undefined) await invalidateNetworkOfferConfigs(networkId);
+    // Every offer's cached click config carries the network fallback and cap time zone — apply them on
+    // the next click.
+    if (b.fallbackUrl !== undefined || b.capTimezone !== undefined) await invalidateNetworkOfferConfigs(networkId);
     await writeAudit(req, { action: 'settings.general.update', entityType: 'network', entityId: networkId });
     sendOk(res, { ok: true });
   }));

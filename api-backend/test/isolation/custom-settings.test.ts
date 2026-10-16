@@ -4,9 +4,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  applicableSettings, customPricing, priceFor, targetingMatches, capWindowStart, capBucket, capLimits,
+  applicableSettings, customPricing, priceFor, targetingMatches, capWindowStart, capBucket, capLimits, capTimeZoneOf,
   type CustomSettingConfig,
 } from '../../src/lib/offer-settings/custom-settings.js';
+import { dayStamp } from '../../src/surfaces/tracking/caps.js';
 
 const PUB = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -78,6 +79,32 @@ describe('cap windows (UTC)', () => {
     expect(capWindowStart('global', at)).toBeNull();
     expect(capBucket('weekly', at)).toEqual({ bucket: 'weekly:20261012', ttl: 8 * 86400 });
     expect(capBucket('global', at)).toEqual({ bucket: 'all', ttl: 0 });
+  });
+
+  it('in a cap time zone: local midnight, the local ISO week and month (DST-safe); the bucket is the local start date', () => {
+    // 2026-10-14T20:00Z = 15 Oct 01:30 in Kolkata (UTC+05:30) → its day began 14 Oct 18:30Z.
+    const late = new Date('2026-10-14T20:00:00Z');
+    expect(capWindowStart('daily', late, 'Asia/Kolkata')?.toISOString()).toBe('2026-10-14T18:30:00.000Z');
+    expect(capBucket('daily', late, 'Asia/Kolkata')).toEqual({ bucket: 'daily:20261015', ttl: 2 * 86400 });
+    expect(capBucket('daily', late)).toEqual({ bucket: 'daily:20261014', ttl: 2 * 86400 }); // UTC: still the 14th
+    // Sunday 18 Oct 23:00 in New York is Monday 19 Oct 03:00Z — still the week of Mon 12 Oct there.
+    expect(capWindowStart('weekly', new Date('2026-10-19T03:00:00Z'), 'America/New_York')?.toISOString()).toBe('2026-10-12T04:00:00.000Z');
+    expect(capWindowStart('monthly', new Date('2026-11-01T02:00:00Z'), 'America/Los_Angeles')?.toISOString()).toBe('2026-10-01T07:00:00.000Z');
+    // A day that starts after a DST change: New York left DST on 1 Nov 2026, so 2 Nov starts at 05:00Z.
+    expect(capWindowStart('daily', new Date('2026-11-02T12:00:00Z'), 'America/New_York')?.toISOString()).toBe('2026-11-02T05:00:00.000Z');
+    expect(capWindowStart('global', late, 'Asia/Kolkata')).toBeNull();
+  });
+
+  it('the cap time zone: the offer’s, else the network’s, else UTC — an invalid value is skipped', () => {
+    expect(capTimeZoneOf('America/New_York', 'Asia/Kolkata')).toBe('America/New_York');
+    expect(capTimeZoneOf(null, 'Asia/Kolkata')).toBe('Asia/Kolkata');
+    expect(capTimeZoneOf(undefined, undefined)).toBe('UTC');
+    expect(capTimeZoneOf('Mars/Olympus', 'Not/AZone')).toBe('UTC');
+  });
+
+  it('the click cap key is stamped with the local day', () => {
+    expect(dayStamp(new Date('2026-10-14T20:00:00Z'))).toBe('20261014');
+    expect(dayStamp(new Date('2026-10-14T20:00:00Z'), 'Asia/Kolkata')).toBe('20261015');
   });
 
   it('only positive limits count', () => {

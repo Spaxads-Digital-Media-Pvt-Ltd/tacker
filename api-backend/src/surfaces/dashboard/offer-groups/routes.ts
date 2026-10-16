@@ -20,6 +20,7 @@ import { requireRole } from '../auth.js';
 import { mbcJsonSql } from '../../../lib/reporting/money-by-currency.js';
 import type { MoneyByCurrency } from '../../../lib/reporting/types.js';
 import { rejectedClickSql } from '../../../lib/click-rejections.js';
+import { networkCapTimeZone } from '../../../lib/reporting/network-zone.js';
 
 const TABLE = 'offer_groups';
 
@@ -81,12 +82,14 @@ interface TodayStats {
 }
 async function todayStatsForOffers(networkId: string, offerIds: string[]): Promise<TodayStats> {
   if (offerIds.length === 0) return { clicks: 0, cv: 0, payout: '0.0000', revenue: '0.0000', margin: '0.0000', currencies: [], moneyByCurrency: {} };
+  // "Today" is the network's cap time zone's day (Settings › General — when daily caps reset).
+  const capTz = await networkCapTimeZone(networkId);
   const { rows } = await query<{ clicks: string; cv: string; payout: string; revenue: string; margin: string; money_by_currency: MoneyByCurrency | null }>(
     `WITH j AS (
        SELECT cl.id AS click_row, c.id AS conv_row, c.status, c.payout, c.revenue, c.currency
          FROM clicks cl
          LEFT JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
-        WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at::date = CURRENT_DATE
+        WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at >= date_trunc('day', now(), $3)
           AND NOT ${rejectedClickSql('cl')}
      ), cm AS (
        SELECT currency AS cur, COALESCE(SUM(payout), 0) AS p, COALESCE(SUM(revenue), 0) AS r
@@ -103,7 +106,7 @@ async function todayStatsForOffers(networkId: string, offerIds: string[]): Promi
         - COALESCE(SUM(j.payout) FILTER (WHERE j.status = 'approved'), 0), 4)::text AS margin,
        (SELECT ${mbcJsonSql('cm')} FROM cm) AS money_by_currency
      FROM j`,
-    [networkId, offerIds],
+    [networkId, offerIds, capTz],
   );
   const r = rows[0];
   const moneyByCurrency = r?.money_by_currency ?? {};

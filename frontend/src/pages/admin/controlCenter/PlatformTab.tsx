@@ -17,6 +17,7 @@ import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIc
 import type { TrackingDomain } from '../../../types';
 import { advertiserPostbackUrl } from '../../../lib/trackingLinks';
 import { imageAccept, imageTypesText, uploadImage } from '../../../lib/imageUpload';
+import { CapTimeZoneSelect } from '../../../shared-components/primitives/CapTimeZoneSelect';
 import {
   PARTNER_NOTIFS, OFFER_NOTIFS_PLATFORM, OFFER_GROUP_NOTIFS, ADVERTISER_NOTIFS,
   ACTION_NOTIFS, BILLING_NOTIFS, NETWORK_NOTIFS, SECURITY_NOTIFS, TRAFFIC_HEALTH_NOTIFS,
@@ -146,7 +147,7 @@ function UploadBox({ label, value, error, busy, allowIco = false, onFile, onClea
   );
 }
 
-interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string; fallbackUrl?: string } }
+interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string; fallbackUrl?: string; capTimezone?: string } }
 interface PlatformBranding { logoUrl?: string | null; faviconUrl?: string | null }
 
 /** "Edit General" — Network Displayed Name, Support Email, Currency, and Timezone persist via
@@ -160,6 +161,7 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
   const [currency, setCurrency] = useState('USD');
   const [timezone, setTimezone] = useState('UTC');
   const [fallbackUrl, setFallbackUrl] = useState('');
+  const [capTimezone, setCapTimezone] = useState(''); // '' = UTC (the default)
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -175,6 +177,7 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setCurrency(settings.general.defaultCurrency ?? 'USD');
     setTimezone(settings.general.timezone ?? 'UTC');
     setFallbackUrl(settings.general.fallbackUrl ?? '');
+    setCapTimezone(settings.general.capTimezone ?? '');
   }, [settings]);
 
   const savedLogo = branding.logoUrl ?? null;
@@ -212,6 +215,7 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
         defaultCurrency: currency,
         timezone,
         fallbackUrl: fallbackUrl.trim() || null,
+        capTimezone: capTimezone || null,
       });
       // Only what changed (branding fields merge server-side).
       const branding: Record<string, string | null> = {};
@@ -245,6 +249,10 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
       <Field label="Fallback URL for rejected clicks">
         <input className="input" value={fallbackUrl} onChange={(e) => setFallbackUrl(e.target.value)} placeholder="https://yourdomain.com/offer-unavailable" />
         <p className="mt-1 text-tiny text-fg-secondary">Where a click goes when it can't run — the partner isn't active, or a geo / cap / fraud / traffic rule stops it — and its offer has no fallback URL of its own. Empty = a blank page.</p>
+      </Field>
+      <Field label="Daily caps reset at midnight in">
+        <CapTimeZoneSelect value={capTimezone} onChange={setCapTimezone} inheritLabel="UTC (default)" />
+        <p className="mt-1 text-tiny text-fg-secondary">When every offer's daily caps (clicks, conversions, partner caps) start over — weekly and monthly caps count in this zone too. An offer can use its own (Edit Offer › Caps › Cap Time Zone).</p>
       </Field>
       <Checkbox label="Show Partner Sign Up link (Login page)" defaultChecked />
       <Checkbox label="Show Advertiser Sign Up link (Login page)" defaultChecked />
@@ -533,6 +541,7 @@ function GeneralSub() {
             <ColorSwatchRow label="Secondary Color" color={null} />
             <InfoRow label="Timezone" value={settings?.general.timezone} />
             <InfoRow label="Fallback URL (rejected clicks)" value={settings?.general.fallbackUrl} help="Used when the offer has no fallback URL of its own." />
+            <InfoRow label="Daily caps reset at midnight in" value={settings?.general.capTimezone ?? 'UTC'} help="An offer can use its own cap time zone." />
             <InfoRow label="HTML Custom Footer (Left menu)" />
             <InfoRow label="Currency" value={settings?.general.defaultCurrency} />
             <InfoRow label="Show Name" />

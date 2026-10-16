@@ -336,14 +336,14 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  }
 
  // 5. Cap check (atomic). Over the cap: rejected — "Cap has been exceeded".
- if (await isClickCapped(offer.id, offer.dailyClickCap)) return reject('cap_exceeded');
+ if (await isClickCapped(offer.id, offer.dailyClickCap, offer.capTimeZone)) return reject('cap_exceeded');
 
  // 5b. Offer Custom Settings for this partner (F-12): their click caps, and (step 11) landing page.
  const clickAttrs = { country, device: ua.device, os: ua.os, browser: ua.browser };
  const customFor = (category: 'caps' | 'landing_pages') =>
  (publisherId && offer.customSettings?.length ? applicableSettings(offer.customSettings, category, publisherId, clickAttrs, new Date()) : []);
  const customCaps = customFor('caps');
- if (customCaps.length && await isCustomClickCapped(customCaps, publisherId!)) return reject('partner_cap_exceeded');
+ if (customCaps.length && await isCustomClickCapped(customCaps, publisherId!, offer.capTimeZone)) return reject('partner_cap_exceeded');
 
  // 6. Unique / dedup.
  const isUnique = ip ? await markUnique(offer.id, ip, offer.dedupWindowS) : true;
@@ -470,7 +470,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const requestedPub = pub ? await resolveEntityId('publisher', tenant.networkId, pub) : null;
  const partner = requestedPub && (await getPartnerStatus(tenant.networkId, requestedPub)) === 'active' ? requestedPub : null;
  const offers = await Promise.all(targeted.map((i) => getOfferConfig(tenant.networkId, i.offerId)));
- const capped = await Promise.all(offers.map((o) => (o ? clickCapReached(o.id, o.dailyClickCap) : true)));
+ const capped = await Promise.all(offers.map((o) => (o ? clickCapReached(o.id, o.dailyClickCap, o.capTimeZone) : true)));
  const eligible = targeted.filter((_, k) => {
  const o = offers[k];
  if (!o || o.status !== 'active' || capped[k]) return false;

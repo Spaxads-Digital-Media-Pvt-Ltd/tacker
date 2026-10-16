@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { moneySchema } from '../../../lib/money.js';
 import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 import { offerSettingsFields } from '../../../lib/offer-settings/index.js';
+import { tzParam } from '../../../lib/reporting/request.js';
 
 export const createOfferSchema = z.object({
   advertiserId: z.string().uuid(),
@@ -15,6 +16,8 @@ export const createOfferSchema = z.object({
   dailyConversionCap: z.number().int().min(0).nullable().optional(),
   totalConversionCap: z.number().int().min(0).nullable().optional(),
   dailyClickCap: z.number().int().min(0).nullable().optional(),
+  // Cap time zone: when this offer's daily caps reset; null = the network's (Settings › General).
+  capTimezone: tzParam.nullable().optional(),
   attributionWindowS: z.number().int().min(0).max(31_536_000).optional(),
   dedupWindowS: z.number().int().min(0).max(31_536_000).optional(),
   allowedTrafficTypes: z.array(z.string().max(50)).max(50).optional(),
