@@ -68,8 +68,8 @@ export default function OfferDetail() {
           <p className="text-small text-fg-secondary">
             A postback's <span className="font-mono">event</span> picks the goal with that event name and its payout/revenue. Without a match
             the default goal applies — but a partner's or country's own rate frozen on the click still wins over the default goal.
-            Goal caps reject conversions beyond the cap (UTC day for daily caps). Each event can have its own duplicate rule — blank
-            follows the offer’s (Edit Offer › Revenue).
+            Conversions over a goal cap are held as Pending (“Over caps”) for you to approve or reject in Reporting › Conversion (UTC
+            day for daily caps). Each event can have its own duplicate rule — blank follows the offer’s (Edit Offer › Revenue).
           </p>
           <CollectionTab basePath={`${base}/goals`} addLabel="Add goal" editable emptyText="No goals — every conversion uses the offer's own payout and revenue."
             fields={[

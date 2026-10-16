@@ -27,6 +27,9 @@ const METRIC_POLICY: Record<ReportAudience, Metric[]> = {
   advertiser: ['clicks', 'unique_clicks', 'conversions', 'cr', 'revenue', 'currencies', 'money_by_currency'],      // NO payout/margin/epc
 };
 
+/** Portal audiences see only clicks that reached the offer (ReportFilters.excludeRejected). */
+export const excludesRejected = (audience: ReportAudience): boolean => audience === 'publisher' || audience === 'advertiser';
+
 /** The money fields an audience may see — what `money_by_currency` carries for it. */
 export function audienceMoneyFields(audience: ReportAudience): MoneyField[] {
   const allowed = METRIC_POLICY[audience] as string[];
@@ -234,6 +237,9 @@ export function buildReportRequest(
   }
   // Forced owner-scope filters win (cannot be overridden by the caller).
   Object.assign(filters, forceFilters);
+  // Partners and advertisers see only the traffic that reached the offer — the clicks /click rejected
+  // (cap exceeded, geo, …) are recorded for the admin's reports only (lib/click-rejections).
+  if (excludesRejected(audience)) filters.excludeRejected = true;
 
   return {
     networkId,

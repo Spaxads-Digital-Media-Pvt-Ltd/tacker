@@ -17,6 +17,8 @@ import { csvList, queryDate } from '../../../lib/http/query-params.js';
 import { addMoney } from '../../../lib/money.js';
 import { inclusiveTo, utcDayStart, tzParam, withZonedRange } from '../../../lib/reporting/request.js';
 import { redactRawParams, redactUrl } from '../../../lib/reporting/redact.js';
+import { capCountedSql, heldOverCapSql } from '../../../lib/conversion-caps.js';
+import { rejectedClickSql } from '../../../lib/click-rejections.js';
 import { mbcJsonSql, mergeMoneyByCurrency } from '../../../lib/reporting/money-by-currency.js';
 import { money4, MONEY_FIELDS, type MoneyByCurrency } from '../../../lib/reporting/types.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
@@ -115,6 +117,8 @@ const conversionsSchema = z.object({
   source: CONV_SOURCE.optional(),
   // e.g. the Advertiser Postback report = every source except admin-entered 'manual' conversions.
   excludeSource: CONV_SOURCE.optional(),
+  // true = only the conversions held over caps (pending, a cap as the reason) — to approve or reject.
+  overCaps: z.enum(['true']).optional(),
   currency: z.string().max(3).optional(),
   // Applied to the originating click (LEFT JOIN clicks k) — a conversion with no click can't match.
   ...clickAttrKeys,
@@ -507,6 +511,7 @@ export function mountDetailReports(r: Router): void {
       { key: 'event', col: 'event_name' }, { key: 'source', col: 'source' }, { key: 'currency', col: 'currency' },
       { key: 'excludeSource', col: 'source', op: '<>' },
     ]);
+    const convWhere = f.overCaps ? `${where} AND ${heldOverCapSql()}` : where;
     // Click-side filters run on the joined originating click (same numbering as `params`).
     const { where: clickWhere } = buildWhere<ConversionsFilters>(req.scope!.networkId, f, [
       { key: 'smartLinkId', col: 'k.smart_link_id' },
@@ -526,7 +531,7 @@ export function mountDetailReports(r: Router): void {
          FROM (SELECT conversion_id, network_id, created_at, click_id, offer_id, publisher_id, advertiser_id,
                       event_name, goal_id, status, reason, payout, revenue, currency, transaction_id, source,
                       fraud_score, raw_params
-                 FROM conversions WHERE ${where}) v
+                 FROM conversions WHERE ${convWhere}) v
          LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id
          LEFT JOIN offer_goals og ON og.id = v.goal_id AND og.network_id = v.network_id
         ${clickWhere ? `WHERE ${clickWhere}` : ''}
@@ -652,7 +657,7 @@ export function mountDetailReports(r: Router): void {
       // Real group count, so a page that stops at `limit` is reported as such (never a silent cap).
       query<{ total: number }>(`SELECT COUNT(*)::int AS total FROM (${groupsSql}) g`, params),
       query<{ offer_id: string; clicks: number }>(
-        `SELECT offer_id, COUNT(*)::int AS clicks FROM clicks WHERE ${clickWhere.join(' AND ')} GROUP BY 1`,
+        `SELECT offer_id, COUNT(*)::int AS clicks FROM clicks WHERE ${clickWhere.join(' AND ')} AND NOT ${rejectedClickSql()} GROUP BY 1`,
         clickParams,
       ),
     ]);
@@ -674,7 +679,8 @@ export function mountDetailReports(r: Router): void {
   r.get('/smart-links', asyncHandler(async (req, res) => {
     const { rows } = await query(
       `SELECT sl.id, sl.name, sl.status,
-              (SELECT COUNT(*) FROM clicks c WHERE c.network_id = sl.network_id AND c.smart_link_id = sl.id)::int AS clicks,
+              (SELECT COUNT(*) FROM clicks c WHERE c.network_id = sl.network_id AND c.smart_link_id = sl.id
+                 AND NOT ${rejectedClickSql('c')})::int AS clicks,
               (SELECT COUNT(*) FROM conversions cv WHERE cv.network_id = sl.network_id AND cv.click_id IN
                  (SELECT click_id FROM clicks c2 WHERE c2.network_id = sl.network_id AND c2.smart_link_id = sl.id)
                  AND cv.status = 'approved')::int AS conversions
@@ -699,10 +705,14 @@ export function mountDetailReports(r: Router): void {
     offerId: uuid,
   }).strict();
   // Conversion-cap USAGE mirrors enforcement (surfaces/tracking/conversions/record.ts →
-  // conversionCapReached): every NON-REJECTED conversion counts (pending ones consume the cap too),
-  // and "today" starts at the UTC day boundary. Payout/revenue cap usage stays APPROVED-only — that's
-  // money actually earned. Money (caps + actuals) is returned as numeric(14,4) text; percentages are numbers.
-  const CAP_COUNTED = `status <> 'rejected'`;
+  // conversionCapReached, lib/conversion-caps): every conversion that isn't rejected counts (pending ones
+  // consume the cap too) except those held over caps, and "today" starts at the UTC day boundary.
+  // Payout/revenue cap usage stays APPROVED-only — that's money actually earned. Money (caps + actuals)
+  // is returned as numeric(14,4) text; percentages are numbers.
+  const CAP_COUNTED = capCountedSql('c');
+  // Click-cap usage: clicks sent to the offer. Rejected clicks (recorded with the reason — cap
+  // exceeded, geo, …) never reached it and never used up its cap (lib/click-rejections).
+  const REJECTED_CLICK = rejectedClickSql('cl');
   const UTC_TODAY = `date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`;
   // A cap only counts when it is POSITIVE: enforcement treats null and <= 0 as unlimited
   // (tracking/caps.ts isClickCapped, conversions/record.ts conversionCapReached), so a zero/negative
@@ -725,7 +735,7 @@ export function mountDetailReports(r: Router): void {
       query<{ id: string; name: string; daily_click_cap: number; clicks_today: number }>(
         `SELECT o.id, o.name, o.daily_click_cap,
                 (SELECT COUNT(*) FROM clicks cl WHERE cl.network_id = o.network_id AND cl.offer_id = o.id
-                   AND cl.created_at >= date_trunc('day', now(), 'UTC'))::int AS clicks_today
+                   AND cl.created_at >= date_trunc('day', now(), 'UTC') AND NOT ${REJECTED_CLICK})::int AS clicks_today
            FROM offers o WHERE o.network_id = $1 AND o.daily_click_cap > 0`,
         [nid],
       ),
@@ -733,9 +743,9 @@ export function mountDetailReports(r: Router): void {
         `SELECT o.id, o.name, ${offerCap('daily_conversion_cap')} AS daily_conversion_cap,
                 ${offerCap('total_conversion_cap')} AS total_conversion_cap,
                 (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id
-                   AND c.${CAP_COUNTED} AND c.created_at >= ${UTC_TODAY})::int AS conversions_today,
+                   AND ${CAP_COUNTED} AND c.created_at >= ${UTC_TODAY})::int AS conversions_today,
                 (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id
-                   AND c.${CAP_COUNTED})::int AS conversions_total
+                   AND ${CAP_COUNTED})::int AS conversions_total
            FROM offers o WHERE o.network_id = $1 AND (o.daily_conversion_cap > 0 OR o.total_conversion_cap > 0)`,
         [nid],
       ),
@@ -807,7 +817,7 @@ export function mountDetailReports(r: Router): void {
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
         `SELECT date_trunc('day', cl.created_at, 'UTC') AS day, cl.offer_id, COUNT(*)::int AS actual
            FROM clicks cl JOIN offers o ON o.id = cl.offer_id AND o.network_id = cl.network_id
-          WHERE cl.network_id = $1 AND o.daily_click_cap > 0 AND ${where}
+          WHERE cl.network_id = $1 AND o.daily_click_cap > 0 AND NOT ${REJECTED_CLICK} AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
         params,
       );
@@ -821,7 +831,7 @@ export function mountDetailReports(r: Router): void {
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
         `SELECT date_trunc('day', c.created_at, 'UTC') AS day, c.offer_id, COUNT(*)::int AS actual
            FROM conversions c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
-          WHERE c.network_id = $1 AND c.${CAP_COUNTED} AND o.daily_conversion_cap > 0 AND ${where}
+          WHERE c.network_id = $1 AND ${CAP_COUNTED} AND o.daily_conversion_cap > 0 AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
         params,
       );
@@ -1132,11 +1142,11 @@ export function mountDetailReports(r: Router): void {
               ${offerCap('daily_conversion_cap')} AS daily_conversion_cap,
               ${offerCap('total_conversion_cap')} AS total_conversion_cap,
               ${offerCap('daily_click_cap')} AS daily_click_cap,
-              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND c.${CAP_COUNTED}
+              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND ${CAP_COUNTED}
                  AND c.created_at >= ${UTC_TODAY})::int AS conversions_today,
-              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND c.${CAP_COUNTED})::int AS conversions_total,
+              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND ${CAP_COUNTED})::int AS conversions_total,
               (SELECT COUNT(*) FROM clicks cl WHERE cl.network_id = o.network_id AND cl.offer_id = o.id
-                 AND cl.created_at >= date_trunc('day', now(), 'UTC'))::int AS clicks_today
+                 AND cl.created_at >= date_trunc('day', now(), 'UTC') AND NOT ${REJECTED_CLICK})::int AS clicks_today
          FROM offers o
         WHERE o.network_id = $1
           AND (o.daily_conversion_cap > 0 OR o.total_conversion_cap > 0 OR o.daily_click_cap > 0)

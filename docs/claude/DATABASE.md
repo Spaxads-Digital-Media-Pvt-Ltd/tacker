@@ -10,7 +10,7 @@
 - Driver: `pg` (raw, no ORM)
 - Max connections: 10 (dev), 20 (prod)
 
-## Schema (81 Migrations)
+## Schema (82 Migrations)
 
 ### Core Tables
 
@@ -231,7 +231,7 @@ API keys for the Public REST API.
 | `investigations` | Fraud investigations |
 | `login_events` | Login audit trail |
 | `audit_log` | Audit trail (`impersonated_by` = the admin behind writes made while impersonating a portal account — migration 1700000069000) |
-| `stats_clicks_15m` | Click rollups per 15-min UTC bucket × network/offer/publisher/smart link/country/device: clicks, unique, invalid, fraud_score_sum (migration 072, F-20) |
+| `stats_clicks_15m` | Click rollups per 15-min UTC bucket × network/offer/publisher/smart link/country/device: clicks, unique, invalid, fraud_score_sum (migration 072, F-20), `rejected_clicks` — clicks /click rejected (migration 080; portal / automation views subtract them) |
 | `stats_conversions_15m` | Conversion rollups per bucket × network/offer/publisher/advertiser/smart link/country/device (click's)/currency: total + approved count, approved payout/revenue (unbounded numeric) |
 | `stats_rollup_state` | Rollup window (`low_mark`, `high_mark`) + `backfill_floor` |
 | `stats_dirty_buckets` | (network, bucket) to re-roll — written by the `clicks_stats_dirty` / `conversions_stats_dirty` triggers (`stats_mark_dirty()`) for rows landing/changing in buckets > 2h old |
@@ -288,7 +288,7 @@ Indexes are defined within migration SQL files. Key indexes cover:
 
 ## Migrations
 - Tool: `node-pg-migrate` (SQL-based)
-- 81 migration files, timestamped `1700000000000_*.sql`
+- 82 migration files, timestamped `1700000000000_*.sql`
 - `1700000062000_partition-retention` is an intentional no-op: the original partitioned `clicks`/`conversions`/`postback_logs` without creating partitions and dropped the global unique keys (`click_id`, `conversion_id`, `(offer_id, transaction_id)`) that idempotency depends on. `1700000064000_unpartition-tracking-tables` converts any DB that ran the original back to regular tables (rows preserved). These three tables must stay non-partitioned; retention prunes them with bounded ctid deletes.
 - `1700000079000_multi-conversion` swaps the transaction-id key to `(offer_id, event_name, transaction_id)` and adds `offer_goals.duplicate_mode`; its down migration fails if two conversions share an offer + transaction id under different events (resolve those first).
 - Run: `npm run migrate` (up), `npm run migrate:down`

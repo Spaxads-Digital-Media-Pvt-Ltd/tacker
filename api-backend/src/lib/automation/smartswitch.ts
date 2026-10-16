@@ -183,6 +183,9 @@ async function matchingPairs(
     from: new Date(now.getTime() - parsed.windowMinutes * 60_000).toISOString(), to: now.toISOString(),
     ...(scope.offers.length ? { offerId: scope.offers } : {}), ...(scope.advertisers.length ? { advertiserId: scope.advertisers } : {}),
     ...(scope.partners.length ? { publisherId: scope.partners } : {}),
+    // Traffic that reached the offer: the clicks /click rejected (cap exceeded, geo, …) never converted
+    // and must not make a capped partner read as a bad converter (lib/click-rejections).
+    excludeRejected: true,
   };
   const report = await getReportingProvider().runReport({ networkId, groupBy: ['offer', 'publisher'], metrics: METRICS, filters, limit: 5000, offset: 0 });
   const out: Omit<Due, 'key'>[] = [];

@@ -16,6 +16,7 @@
 import { query } from '../db/pool.js';
 import { raiseAlert } from '../fraud/alerts.js';
 import { logger } from '../logger.js';
+import { rejectedClickSql } from '../click-rejections.js';
 
 export const METERED = ['clicks', 'conversions', 'events'] as const;
 export type MeteredMetric = (typeof METERED)[number];
@@ -31,7 +32,8 @@ export async function meterDay(networkId: string, day: string): Promise<Record<M
   const start = `${day}T00:00:00Z`;
   const end = `${utcDate(new Date(Date.parse(start) + DAY_MS))}T00:00:00Z`;
   const [clicks, convs] = await Promise.all([
-    query<{ n: string }>('SELECT COUNT(*)::text AS n FROM clicks WHERE network_id = $1 AND created_at >= $2 AND created_at < $3', [networkId, start, end]),
+    // Clicks sent to an offer — the ones /click rejected (recorded for reports) were never metered.
+    query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM clicks WHERE network_id = $1 AND created_at >= $2 AND created_at < $3 AND NOT ${rejectedClickSql()}`, [networkId, start, end]),
     query<{ n: string; e: string }>(
       `SELECT COUNT(*)::text AS n, COUNT(*) FILTER (WHERE event_name IS NOT NULL AND event_name <> '')::text AS e
          FROM conversions WHERE network_id = $1 AND created_at >= $2 AND created_at < $3`, [networkId, start, end]),

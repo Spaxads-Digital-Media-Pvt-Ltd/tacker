@@ -44,6 +44,7 @@ import type {
 } from './types.js';
 import { MONEY_SORT_METRICS, moneyFieldsOf, money4 } from './types.js';
 import { isUtcZone } from './time-zone.js';
+import { rejectedClickChSql } from '../click-rejections.js';
 
 /** Metrics computed by the per-side aggregates (`money_by_currency` is assembled separately below). */
 type SideMetric = Exclude<Metric, 'money_by_currency'>;
@@ -258,6 +259,8 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  clickWhere.push('length(c.fraud_flags) = 0');
  convWhere.push('k.click_id NOT IN (SELECT ic.click_id FROM tracker.clicks ic WHERE ic.network_id = {p1:String} AND length(ic.fraud_flags) > 0)');
  }
+ // Partner / advertiser views and the automation: only clicks that reached the offer (lib/click-rejections).
+ if (f.excludeRejected) clickWhere.push(`NOT ${rejectedClickChSql('c')}`);
 
  // Click-side advertiser grouping: map offer → advertiser via the Postgres mapping (NULL when the
  // offer has none, matching the Postgres provider's LEFT JOIN offers).

@@ -171,7 +171,9 @@ async function evaluateRule(rule: RuleRow, now: Date): Promise<number> {
   const groupBy: Dimension[] = parsed.scope ? [parsed.scope] : [];
   const report = await getReportingProvider().runReport({
     networkId: rule.network_id, groupBy, metrics: METRICS,
-    filters: { from: new Date(now.getTime() - parsed.windowMinutes * 60_000).toISOString(), to: now.toISOString() },
+    // Traffic that reached the offer: rejected clicks (cap exceeded, geo, …) are left out, as before
+    // they were recorded (lib/click-rejections) — a capped partner mustn't read as a bad converter.
+    filters: { from: new Date(now.getTime() - parsed.windowMinutes * 60_000).toISOString(), to: now.toISOString(), excludeRejected: true },
     limit: 1000, offset: 0,
   });
 

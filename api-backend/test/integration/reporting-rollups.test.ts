@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Express } from 'express';
 import { buildDashboardApp } from '../../src/surfaces/dashboard/app.js';
-import { PostgresReportingProvider } from '../../src/lib/reporting/postgres.js';
+import { PostgresReportingProvider, rollupEligible } from '../../src/lib/reporting/postgres.js';
 import { setReportingProvider } from '../../src/lib/reporting/index.js';
 import { runRollup, rollupWindow } from '../../src/lib/reporting/rollups.js';
 import { localDate, zonedDayStart, addDays } from '../../src/lib/reporting/time-zone.js';
@@ -157,6 +157,30 @@ d('reporting rollups + report time zones (live DB)', () => {
     await query('DELETE FROM clicks WHERE click_id = $1', [`${run}-k5`]);
     const [h, w] = await Promise.all([hybrid.runReport(req({})), raw.runReport(req({}))]);
     expect(Number(h.rows[0]!.metrics['clicks'])).toBe(Number(w.rows[0]!.metrics['clicks']) + 1);
+  });
+
+  it('rejected clicks: the rollups count them, so partner / automation views (excludeRejected) read the same through them as raw', async () => {
+    const rj = await seedFixture(`rollup-rj-${run}`);
+    const kinds: [string, string[], number][] = [
+      ['ok', [], 0], ['flagged', ['datacenter_ip'], 30], ['cap', ['cap_exceeded'], 0], ['geo', ['geo_not_allowed'], 0], ['fraud', ['fraud_blocked', 'datacenter_ip'], 90],
+    ];
+    for (const [i, [tag, flags, score]] of kinds.entries()) {
+      await query(
+        `INSERT INTO clicks (click_id, network_id, offer_id, publisher_id, country, is_unique, fraud_score, fraud_flags, created_at)
+         VALUES ($1, $2, $3, $4, 'US', $5, $6, $7, $8)`,
+        [`${run}-rj-${tag}`, rj.networkA, rj.offerA, rj.pubA1, tag === 'ok', score, flags, at(30 + i * 20)]);
+    }
+    await rollUntilClean();
+    expect((await query('SELECT COALESCE(SUM(clicks), 0)::int AS c, COALESCE(SUM(rejected_clicks), 0)::int AS r FROM stats_clicks_15m WHERE network_id = $1', [rj.networkA])).rows[0])
+      .toEqual({ c: 5, r: 3 });
+    const metrics: Metric[] = ['clicks', 'unique_clicks', 'invalid_clicks', 'conversions', 'cr'];
+    const at_ = (over: Partial<ReportRequest>) => req({ networkId: rj.networkA, metrics, ...over });
+    expect((await same(at_({}))).rows[0]!.metrics).toMatchObject({ clicks: 5, invalid_clicks: 4 }); // admin: rejected are invalid
+    expect((await same(at_({ filters: { excludeRejected: true } }))).rows[0]!.metrics).toMatchObject({ clicks: 2, unique_clicks: 1, invalid_clicks: 1 });
+    await same(at_({ groupBy: ['publisher', 'day'], filters: { excludeRejected: true } }));
+    // The rollups hold no fraud scores per rejected click: that average is read raw.
+    expect(rollupEligible(at_({ metrics: ['clicks', 'avg_fraud_score'], filters: { excludeRejected: true } }))).toBe(false);
+    expect(rollupEligible(at_({ filters: { excludeRejected: true } }))).toBe(true);
   });
 
   describe('time zones', () => {

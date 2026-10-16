@@ -203,6 +203,32 @@ export function withoutChip(f: ClickFilters, key: string, value: string): ClickF
   return f;
 }
 
+// ── Rejected clicks ────────────────────────────────────────────────────────────────────────────
+/** Why /click didn't send a click to the offer — its first fraud flag (backend lib/click-rejections.ts). */
+const CLICK_REJECTION_LABELS: Record<string, string> = {
+  offer_not_active: 'Offer not active',
+  unknown_partner: 'Unknown partner',
+  partner_pending: 'Partner pending approval',
+  partner_inactive: 'Partner inactive',
+  partner_blocked: 'Partner blocked on the offer',
+  partner_not_approved: 'Partner not approved for the offer',
+  ip_blacklisted: 'IP blacklisted',
+  geo_not_allowed: 'Geo not allowed',
+  device_not_allowed: 'Device not allowed',
+  targeting_not_matched: 'Targeting not matched',
+  traffic_control_blocked: 'Blocked by a traffic control',
+  traffic_blocked: 'Blocked by traffic blocking',
+  fraud_blocked: 'Blocked as fraud',
+  cap_exceeded: 'Cap has been exceeded',
+  partner_cap_exceeded: 'Partner cap has been exceeded',
+};
+
+/** The rejection reason in words, or null for a click that was sent to the offer. */
+export function clickRejection(fraudFlags: readonly string[] | null | undefined): string | null {
+  const first = fraudFlags?.[0];
+  return first != null ? CLICK_REJECTION_LABELS[first] ?? null : null;
+}
+
 // ── Click Report Fields ────────────────────────────────────────────────────────────────────────
 /**
  * `stored`  — a column of `clicks`, returned by /api/reports/clicks.
@@ -255,7 +281,7 @@ export const CLICK_FIELDS: readonly ClickField[] = [
   { key: 'creativeName', label: 'Creative Name', support: 'unavailable', hint: NO_PARAM('creative') },
   { key: 'payout', label: 'Payout', support: 'stored', hint: 'Payout rate frozen on the click (paid only when it converts)' },
   { key: 'revenue', label: 'Revenue', support: 'stored', hint: 'Revenue rate frozen on the click (earned only when it converts)' },
-  { key: 'isRejected', label: 'Is Rejected', support: 'unavailable', hint: 'Rejected (diverted) clicks are not stored' },
+  { key: 'isRejected', label: 'Is Rejected', support: 'stored', hint: 'Not sent to the offer (cap exceeded, geo, partner blocked, …) — recorded as an invalid click with the reason' },
   { key: 'connectionType', label: 'Connection Type', support: 'unavailable', hint: 'Not tracked — needs a connection-type database (e.g. MaxMind GeoIP2 Connection-Type), which is not loaded' },
   { key: 'proxy', label: 'Proxy', support: 'unavailable', hint: 'Not tracked — only offers with IPQualityScore are checked and whether a check ran is not stored, so "no flag" cannot be shown as "not a proxy"' },
   { key: 'proxyCountry', label: 'Proxy Country', support: 'unavailable', hint: 'Not tracked — no connected provider returns it' },
@@ -270,6 +296,7 @@ export const CLICK_FIELDS: readonly ClickField[] = [
   // This report's existing columns the reference list doesn't have.
   { key: 'converted', label: 'Converted', support: 'stored', hint: 'Has any conversion (approved, pending or rejected)' },
   { key: 'fraudScore', label: 'Fraud Score', support: 'stored' },
+  { key: 'rejectionReason', label: 'Rejection Reason', support: 'stored', hint: 'Why /click did not send the click to the offer' },
   ...(['1', '2', '3', '4', '5'] as const).map((n) => ({ key: `sub${n}`, label: `Sub${n}`, support: 'stored' as const })),
 ];
 

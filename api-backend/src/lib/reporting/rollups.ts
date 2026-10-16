@@ -18,6 +18,7 @@
  */
 import type { PoolClient } from 'pg';
 import { pool, query } from '../db/pool.js';
+import { rejectedClickSql } from '../click-rejections.js';
 
 export const BUCKET_MS = 15 * 60_000;
 /** Buckets older than this are frozen into the rollups; newer ones are always read raw. */
@@ -46,10 +47,10 @@ async function rollRange(db: Db, networkId: string, from: Date, to: Date): Promi
   await db.query('DELETE FROM stats_conversions_15m WHERE network_id = $1 AND bucket >= $2 AND bucket < $3', p);
   await db.query(
     `INSERT INTO stats_clicks_15m (network_id, bucket, offer_id, publisher_id, smart_link_id, country, device,
-                                   clicks, unique_clicks, invalid_clicks, fraud_score_sum)
+                                   clicks, unique_clicks, invalid_clicks, fraud_score_sum, rejected_clicks)
      SELECT network_id, ${binSql('created_at')}, offer_id, publisher_id, smart_link_id, country, device,
             COUNT(*), COUNT(*) FILTER (WHERE is_unique), COUNT(*) FILTER (WHERE array_length(fraud_flags, 1) > 0),
-            COALESCE(SUM(fraud_score), 0)
+            COALESCE(SUM(fraud_score), 0), COUNT(*) FILTER (WHERE ${rejectedClickSql()})
        FROM clicks
       WHERE network_id = $1 AND created_at >= $2 AND created_at < $3
       GROUP BY 1, 2, 3, 4, 5, 6, 7`, p);

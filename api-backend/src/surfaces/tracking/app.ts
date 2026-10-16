@@ -33,6 +33,7 @@ import {
 import { isClickCapped, isCustomClickCapped, clickCapReached } from './caps.js';
 import { getSmartLinkConfig } from './smart-link-cache.js';
 import { applicableSettings } from '../../lib/offer-settings/custom-settings.js';
+import type { ClickRejectionReason } from '../../lib/click-rejections.js';
 import { markUnique } from './dedup.js';
 import { fraudPreSignals } from './fraud-presignals.js';
 import { buildMacros, substituteMacros } from './macros.js';
@@ -222,9 +223,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  getNetworkIpBlacklist(tenant.networkId),
  getFraudConfigCached(tenant.networkId),
  ]);
- if (!offer || offer.status !== 'active') {
- return divert(reply, offer?.fallbackUrl ?? null, offer?.id);
- }
+ if (!offer) return divert(reply, null);
 
  // 2a. Who the visitor is (D2). A server-to-server click (format=json on an offer that allows it)
  // comes from the partner's server, so the connection's IP and user agent describe that server. When
@@ -238,69 +237,73 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const userAgent = visitorUa ?? (req.headers['user-agent'] as string | undefined) ?? null;
  const geo = ip ? lookupGeo(ip) : null;
  const ua = parseUA(userAgent ?? undefined);
+ // A `geo=XX` query param forces the country (dev/testing when no MaxMind db, or to simulate a
+ // country) — geo is then treated as known so allow-list rules actually apply.
+ const forcedGeo = resolveForcedGeo(env.NODE_ENV, firstStr(q['geo']), firstStr(q['test_geo']));
+ const country = forcedGeo ?? geo?.country ?? null;
 
- // 2b. Only an active partner of this network can run traffic (F-08, D1). A pending, inactive or
- // unknown pub_id makes an INVALID click: it is recorded with the reason (reports show the rejected
- // traffic — on the partner when it's one of this network's), and the visitor goes to the fallback —
- // the offer's, else the network's, else a neutral 204 — never to the advertiser. Nobody is credited:
- // the click carries no payout and is never stored for attribution.
- if (requestedPublisherId && partnerStatus !== 'active') {
- const reason = partnerStatus === null ? 'unknown_partner' : `partner_${partnerStatus}`;
+ // A click that isn't sent to the offer is still recorded — as an INVALID click whose first fraud flag
+ // is the reason (Everflow standard; lib/click-rejections.ts) — so reports show the rejected traffic
+ // and why, on the partner when they're one of this network's (D1). Nobody is credited: no payout,
+ // never stored for attribution, and its id never leaves — the visitor goes to the fallback (the
+ // offer's, else the network's, else a neutral 204), never to the advertiser.
+ const reject = async (reason: ClickRejectionReason, fraud?: { score: number; flags: string[] }) => {
  await enqueueClick({
  clickId: randomUUID().replace(/-/g, ''), networkId: tenant.networkId, offerId: offer.id,
- publisherId: partnerStatus === null ? null : requestedPublisherId,
+ publisherId: requestedPublisherId && partnerStatus !== null ? requestedPublisherId : null,
  ts: new Date().toISOString(), ip,
- country: geo?.country ?? null, region: geo?.region ?? null, city: geo?.city ?? null, isp: geo?.isp ?? null,
+ country, region: geo?.region ?? null, city: geo?.city ?? null, isp: geo?.isp ?? null,
  device: ua.device, os: ua.os, browser: ua.browser,
  referrer: firstStr(req.headers['referer']) ?? null, userAgent,
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
- isUnique: false, fraudScore: 0, fraudFlags: [reason],
+ isUnique: false, fraudScore: fraud?.score ?? 0, fraudFlags: [reason, ...(fraud?.flags ?? [])],
  resolvedPayout: '0.0000', resolvedRevenue: '0.0000', currency: offer.currency, smartLinkId,
  sourceId, fbclid: firstNonBlank(q, ['fbclid']), gclid: firstNonBlank(q, ['gclid']),
  });
  req.log.info({ offerId: offer.id, pubId: requestedPublisherId, reason }, 'click_rejected');
  return divert(reply, offer.fallbackUrl, offer.id);
+ };
+
+ if (offer.status !== 'active') return reject('offer_not_active');
+
+ // 2b. Only an active partner of this network can run traffic (F-08, D1): a pending, inactive or
+ // unknown pub_id is rejected.
+ if (requestedPublisherId && partnerStatus !== 'active') {
+ return reject(partnerStatus === null ? 'unknown_partner' : partnerStatus === 'pending' ? 'partner_pending' : 'partner_inactive');
  }
  const publisherId = requestedPublisherId;
 
- // 2b. Affiliate blocking — a publisher explicitly denied on this offer never gets traffic.
- if (publisherId && offer.deniedPublishers.includes(publisherId)) {
- return divert(reply, offer.fallbackUrl, offer.id);
- }
- // 2c. Private / Request-access offers only run for partners an admin approved (allow + approved).
+ // 2c. Affiliate blocking — a publisher explicitly denied on this offer never gets traffic.
+ if (publisherId && offer.deniedPublishers.includes(publisherId)) return reject('partner_blocked');
+ // 2d. Private / Request-access offers only run for partners an admin approved (allow + approved).
  // `visibility` is undefined only on a config cached before this check existed (≤ cache TTL).
  if (offer.visibility && offer.visibility !== 'public'
  && !(publisherId && (offer.approvedPublishers ?? []).includes(publisherId))) {
- return divert(reply, offer.fallbackUrl, offer.id);
+ return reject('partner_not_approved');
  }
 
- // 3. Network IP blacklist (Control Center › Security, F-16): a listed address is diverted, the same
+ // 3. Network IP blacklist (Control Center › Security, F-16): a listed address is rejected, the same
  // outcome as a blocking traffic control. req.ip is the real client (trusted-proxy aware, above).
- if (ip && ipBlacklist?.check(ip)) return divert(reply, offer.fallbackUrl, offer.id);
+ if (ip && ipBlacklist?.check(ip)) return reject('ip_blacklisted');
 
- // 4. Geo targeting. A `geo=XX` query param forces the country (dev/testing when no MaxMind db,
- // or to simulate a country) — geo is then treated as known so allow-list rules actually apply.
- const forcedGeo = resolveForcedGeo(env.NODE_ENV, firstStr(q['geo']), firstStr(q['test_geo']));
- const country = forcedGeo ?? geo?.country ?? null;
+ // 4. Geo targeting.
  const geoKnown = geoAvailable() || forcedGeo != null;
  const geoDecision = evaluateGeoRules(offer.geoRules, country, geoKnown);
- if (!geoDecision.allowed) return divert(reply, offer.fallbackUrl, offer.id);
+ if (!geoDecision.allowed) return reject('geo_not_allowed');
 
  // 4a. Offer targeting (Edit Offer › Targeting). Device Type is the offer's allowed traffic types.
  const allowedTypes = offer.allowedTrafficTypes ?? [];
- if (allowedTypes.length > 0 && !(ua.device && allowedTypes.includes(ua.device))) {
- return divert(reply, offer.fallbackUrl, offer.id);
- }
+ if (allowedTypes.length > 0 && !(ua.device && allowedTypes.includes(ua.device))) return reject('device_not_allowed');
  const targetingDecision = evaluateTargeting(offer.targeting, {
  platform: ua.osName, browser: ua.browserName, deviceBrand: ua.deviceBrand, osVersion: ua.osVersion,
  language: primaryLanguage(firstStr(req.headers['accept-language'])),
  country, region: geo?.region ?? null, city: geo?.city ?? null, dma: geo?.dma ?? null,
  mobileCarrier: geo?.carrier ?? null, isp: geo?.isp ?? null, zip: geo?.postal ?? null, ip,
  }, { geo: geoAvailable(), country: geoKnown, carrier: carrierAvailable() });
- if (!targetingDecision.allowed) return divert(reply, offer.fallbackUrl, offer.id);
+ if (!targetingDecision.allowed) return reject('targeting_not_matched');
 
  // 4b. Traffic Controls — real Blacklist/Whitelist rules on sub-values, geo, device, etc.
- // (Offers › Traffic Controls). "Block" diverts like any other rule; "Fail Traffic" lets the
+ // (Offers › Traffic Controls). "Block" rejects like any other rule; "Fail Traffic" lets the
  // click through but flags it, so it already shows up as invalid in existing fraud reporting.
  const tcFields = {
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
@@ -308,18 +311,18 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  device: ua.device, os: ua.os, browser: ua.browser, userAgent,
  };
  const tcMatch = evaluateTrafficControls(offer.trafficControls, tcFields, publisherId);
- if (tcMatch?.action === 'block') return divert(reply, offer.fallbackUrl, offer.id);
+ if (tcMatch?.action === 'block') return reject('traffic_control_blocked');
 
  // 4c. Traffic Blocking — per Partner+Offer rules on sub placements / Source ID (Partners ›
  // Traffic Blocking). A matching rule rejects the click, same outcome as a blacklist control.
  if (isTrafficBlocked(offer.trafficBlockings ?? [], publisherId, {
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
  sourceId,
- })) return divert(reply, offer.fallbackUrl, offer.id);
+ })) return reject('traffic_blocked');
 
  // 4d. Cheap fraud pre-signals (datacenter, velocity, bot user agent, the IP's cached IPQS verdict),
  // weighted by the network's fraud rules. DECISION (F-23): at or over the network's block score the
- // click is diverted — not attributed, not counted — instead of only flagged. It's opt-in (no block
+ // click is rejected — not attributed, not sent on — instead of only flagged. It's opt-in (no block
  // score = flag only, as before) and runs ahead of the caps and dedup, so blocked traffic can't use up
  // a cap. A server-side click (format=json on an offer that allows it) comes from the partner's
  // server, so its IP and user agent describe that server, not the visitor: it's scored, never blocked.
@@ -329,18 +332,18 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  }, fraudCfg);
  if (fraudCfg.enabled && fraudCfg.blockScore != null && fraud.score >= fraudCfg.blockScore && !(serverSideClick && !visitorIp)) {
  req.log.info({ offerId: offer.id, fraud: fraud.score, flags: fraud.flags }, 'click_blocked');
- return divert(reply, offer.fallbackUrl, offer.id);
+ return reject('fraud_blocked', fraud);
  }
 
- // 5. Cap check (atomic).
- if (await isClickCapped(offer.id, offer.dailyClickCap)) return divert(reply, offer.fallbackUrl, offer.id);
+ // 5. Cap check (atomic). Over the cap: rejected — "Cap has been exceeded".
+ if (await isClickCapped(offer.id, offer.dailyClickCap)) return reject('cap_exceeded');
 
  // 5b. Offer Custom Settings for this partner (F-12): their click caps, and (step 11) landing page.
  const clickAttrs = { country, device: ua.device, os: ua.os, browser: ua.browser };
  const customFor = (category: 'caps' | 'landing_pages') =>
  (publisherId && offer.customSettings?.length ? applicableSettings(offer.customSettings, category, publisherId, clickAttrs, new Date()) : []);
  const customCaps = customFor('caps');
- if (customCaps.length && await isCustomClickCapped(customCaps, publisherId!)) return divert(reply, offer.fallbackUrl, offer.id);
+ if (customCaps.length && await isCustomClickCapped(customCaps, publisherId!)) return reject('partner_cap_exceeded');
 
  // 6. Unique / dedup.
  const isUnique = ip ? await markUnique(offer.id, ip, offer.dedupWindowS) : true;

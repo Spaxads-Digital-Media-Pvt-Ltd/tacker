@@ -48,7 +48,9 @@ import { allowedConversionHosts, conversionOriginAllowed, type RequestOrigin } f
 import { getAnalyticsWriter } from '../../../lib/analytics/writer.js';
 import { timingSafeCompare } from '../../../lib/secure-code-compare.js';
 import { checkConversionAbuse, CONV_ABUSE_LIMIT } from '../../../lib/conversion-abuse.js';
+import { capCountedSql } from '../../../lib/conversion-caps.js';
 import { logger } from '../../../lib/logger.js';
+import { rejectedClickSql } from '../../../lib/click-rejections.js';
 
 /** Request params that carry the sale / order value — explicit names first, so an older integration
  * sending `amount=<payout>&sale_amount=<order>` keeps its revenue base. Only ever the base for
@@ -107,7 +109,7 @@ async function findClick(networkId: string, clickId: string): Promise<ClickRow |
  const { rows } = await query<ClickRow>(
  `SELECT offer_id, publisher_id, created_at, resolved_payout, resolved_revenue, currency,
  sub1, sub2, sub3, sub4, sub5, country, device, os, browser
- FROM clicks WHERE click_id = $1 AND network_id = $2 LIMIT 1`,
+ FROM clicks WHERE click_id = $1 AND network_id = $2 AND NOT ${rejectedClickSql()} LIMIT 1`,
  [clickId, networkId],
  );
  return rows[0] ?? null;
@@ -146,17 +148,10 @@ interface GoalPricing {
 }
 
 /**
- * Offer / goal conversion caps (Edit Offer › Caps, goal caps). Counts this offer's non-rejected
- * conversions (today in UTC — same day boundary as the click cap — or all-time) inside the insert
- * transaction, serialized per offer with a transaction-scoped advisory lock so concurrent postbacks
- * can't overshoot. The lock is only taken when a cap is actually configured. Returns the reject
- * reason, or null when under every cap.
- */
-/**
  * Offer Custom Settings › Caps for this partner on this offer (F-12): conversions / payout / revenue
- * per day / week / month (UTC) or all time, over the partner's non-rejected conversions on the offer.
- * Runs inside the insert transaction, serialized per offer + partner (same pattern as the offer caps).
- * Returns the reject reason, or null.
+ * per day / week / month (UTC) or all time, over the partner's conversions on the offer that use up a
+ * cap (lib/conversion-caps). Runs inside the insert transaction, serialized per offer + partner (same
+ * pattern as the offer caps). Returns the over-cap reason, or null.
  */
 async function customCapReached(
  client: PoolClient, networkId: string, offerId: string, publisherId: string,
@@ -172,7 +167,7 @@ async function customCapReached(
  const { rows } = await client.query<{ n: string; payout: string; revenue: string }>(
  `SELECT COUNT(*)::text AS n, COALESCE(SUM(payout), 0)::text AS payout, COALESCE(SUM(revenue), 0)::text AS revenue
  FROM conversions
- WHERE network_id = $1 AND offer_id = $2 AND publisher_id = $3 AND status <> 'rejected'
+ WHERE network_id = $1 AND offer_id = $2 AND publisher_id = $3 AND ${capCountedSql()}
  AND ($4::timestamptz IS NULL OR created_at >= $4)`,
  [networkId, offerId, publisherId, capWindowStart(c.interval)],
  );
@@ -184,6 +179,13 @@ async function customCapReached(
  return null;
 }
 
+/**
+ * Offer / goal conversion caps (Edit Offer › Caps, goal caps). Counts this offer's conversions that use
+ * up a cap (lib/conversion-caps: not rejected, not already held over caps) — today in UTC (same day
+ * boundary as the click cap) or all-time — inside the insert transaction, serialized per offer with a
+ * transaction-scoped advisory lock so concurrent postbacks can't overshoot. The lock is only taken
+ * when a cap is actually configured. Returns the over-cap reason, or null when under every cap.
+ */
 async function conversionCapReached(
  client: PoolClient, networkId: string, offerId: string,
  offerCaps: { daily: number | null; total: number | null }, goal: GoalPricing | null,
@@ -198,7 +200,7 @@ async function conversionCapReached(
  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`convcap:${offerId}`]);
  for (const c of checks) {
  const params: unknown[] = [networkId, offerId];
- let where = `network_id = $1 AND offer_id = $2 AND status <> 'rejected'`;
+ let where = `network_id = $1 AND offer_id = $2 AND ${capCountedSql()}`;
  if (c.goalId) { params.push(c.goalId); where += ` AND goal_id = $${params.length}`; }
  if (c.daily) where += ` AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`;
  const { rows } = await client.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM conversions WHERE ${where}`, params);
@@ -535,16 +537,18 @@ async function recordAttributed(
  );
  if (prior.rows.length > 0) duplicateReason = 'duplicate_click_event';
  }
+ // Over caps (Everflow): held as pending, the cap as its reason, for an admin to approve or reject —
+ // recorded, never dropped (they used to be rejected). No ledger and no partner postback until approved.
+ let overCap: string | null = null;
  if (!duplicateReason && status !== 'rejected') {
- const capReason = await conversionCapReached(client, input.networkId, click.offer_id,
+ overCap = await conversionCapReached(client, input.networkId, click.offer_id,
  { daily: offer?.dailyConversionCap ?? null, total: offer?.totalConversionCap ?? null }, goal);
- if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
- }
- if (!duplicateReason && status !== 'rejected' && click.publisher_id) {
- const capReason = await customCapReached(client, input.networkId, click.offer_id, click.publisher_id,
+ if (!overCap && click.publisher_id) {
+ overCap = await customCapReached(client, input.networkId, click.offer_id, click.publisher_id,
  applicableSettings(offer?.customSettings, 'caps', click.publisher_id, clickAttrs, new Date()), payout, revenue);
- if (capReason) { status = 'rejected'; reason = capReason; throttled = false; }
  }
+ }
+ if (overCap) { status = 'pending'; reason = overCap; throttled = false; }
  const ins = duplicateReason ? { rows: [] as { conversion_id: string }[] } : await client.query<{ conversion_id: string }>(
  `INSERT INTO conversions (
  conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,

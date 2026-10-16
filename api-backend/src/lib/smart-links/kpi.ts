@@ -13,6 +13,7 @@
 import { query } from '../db/pool.js';
 import { invalidateSmartLinkConfig } from '../../surfaces/tracking/smart-link-cache.js';
 import { logger } from '../logger.js';
+import { rejectedClickSql } from '../click-rejections.js';
 
 export type KpiMetric = 'CVR' | 'EPC' | 'Revenue';
 export interface KpiItemStats { id: string; clicks: number; conversions: number; payout: string; revenue: string }
@@ -60,7 +61,7 @@ async function scoreLink(link: LinkRow, now: Date): Promise<void> {
   const { rows } = await query<{ id: string; clicks: number; conversions: number; payout: string; revenue: string }>(
     `WITH k AS (
        SELECT offer_id, COUNT(*)::int AS clicks FROM clicks
-        WHERE network_id = $1 AND smart_link_id = $2 AND created_at >= $3 AND created_at <= $4
+        WHERE network_id = $1 AND smart_link_id = $2 AND created_at >= $3 AND created_at <= $4 AND NOT ${rejectedClickSql()}
         GROUP BY offer_id
      ), c AS (
        SELECT cl.offer_id, COUNT(*)::int AS conversions,

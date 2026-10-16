@@ -115,6 +115,8 @@ const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending' },
   { value: 'rejected', label: 'Rejected' },
 ];
+/** Conversions past a cap are held as Pending for review (Everflow's "Over Caps"). */
+const OVER_CAPS_OPTIONS = [{ value: 'true', label: 'Held over caps — to approve or reject' }];
 
 interface SmartLink { id: string; name: string }
 
@@ -124,7 +126,7 @@ interface SmartLink { id: string; name: string }
  */
 const URL_FILTER_PARAMS: [category: string, param: string][] = [
   ['offer', 'offerId'], ['advertiser', 'advertiserId'], ['partner', 'publisherId'], ['status', 'status'],
-  ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
+  ['overCaps', 'overCaps'], ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
 ];
 
 /** Applied report state from the URL (reload / shared link / legacy deep links). */
@@ -134,6 +136,7 @@ function readInitialState() {
   for (const [cat, param] of URL_FILTER_PARAMS) {
     const ids = readUrlIds(sp, param).slice(0, 1); // single-select per category
     if (cat === 'status' && !STATUS_OPTIONS.some((o) => o.value === ids[0])) continue;
+    if (cat === 'overCaps' && ids[0] !== 'true') continue;
     if (ids.length) filters[cat] = ids;
   }
   // '' = the report zone's default range, filled in by the page (it knows the zone).
@@ -194,6 +197,7 @@ export default function ConversionReport() {
     { key: 'advertiser', label: 'Advertiser', options: (advertisers ?? []).map((a) => ({ value: a.id, label: a.name })) },
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'status', label: 'Status', options: STATUS_OPTIONS },
+    { key: 'overCaps', label: 'Over Caps', options: OVER_CAPS_OPTIONS },
     // Click-side filters — applied server-side via the conversion's originating click.
     { key: 'smartLink', label: 'Smart Link', options: (smartLinks ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: allCountryOptions },
@@ -204,6 +208,7 @@ export default function ConversionReport() {
   const advertiserIdFilter = filters['advertiser']?.[0];
   const publisherIdFilter = filters['partner']?.[0];
   const statusFilter = filters['status']?.[0];
+  const overCapsFilter = filters['overCaps']?.[0];
   const smartLinkIdFilter = filters['smartLink']?.[0];
   const deviceFilter = filters['device']?.[0];
   const regions = useRegions();
@@ -220,7 +225,7 @@ export default function ConversionReport() {
   const baseParams = {
     ...zone.range(appliedFrom, appliedTo),
     offerId: offerIdFilter, publisherId: publisherIdFilter, advertiserId: advertiserIdFilter, status: statusFilter,
-    smartLinkId: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
+    overCaps: overCapsFilter, smartLinkId: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
   };
   const tableQs = qs({ ...baseParams, limit: pageSize + 1, offset: (page - 1) * pageSize });
   // The applied report lives in the URL (replace, not push) so reload / back keep it.
@@ -442,7 +447,7 @@ export default function ConversionReport() {
       {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/conversions?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, status: statusFilter,
-        smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
+        overCaps: overCapsFilter, smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
       }} />}
     </>
   );

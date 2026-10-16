@@ -61,6 +61,7 @@ export async function offerAudience(networkId: string, offerId: string): Promise
     `WITH recent AS (
        SELECT DISTINCT publisher_id FROM stats_clicks_15m
         WHERE network_id = $1 AND offer_id = $2 AND publisher_id IS NOT NULL AND bucket >= now() - interval '30 days'
+          AND clicks > rejected_clicks -- traffic that reached the offer, not clicks /click rejected
      ), access AS (
        SELECT publisher_id, access, approval_status FROM offer_publisher_access WHERE network_id = $1 AND offer_id = $2
      )
@@ -190,7 +191,8 @@ export function offerAccessChanged(
 async function recentClickers(networkId: string, offerId: string, publisherIds: string[]): Promise<string[]> {
   const { rows } = await query<{ publisher_id: string }>(
     `SELECT DISTINCT publisher_id FROM stats_clicks_15m
-      WHERE network_id = $1 AND offer_id = $2 AND publisher_id = ANY($3::uuid[]) AND bucket >= now() - interval '30 days'`,
+      WHERE network_id = $1 AND offer_id = $2 AND publisher_id = ANY($3::uuid[]) AND bucket >= now() - interval '30 days'
+        AND clicks > rejected_clicks`,
     [networkId, offerId, publisherIds]);
   return rows.map((r) => r.publisher_id);
 }

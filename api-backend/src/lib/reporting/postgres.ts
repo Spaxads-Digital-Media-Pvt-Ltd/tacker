@@ -20,6 +20,7 @@ import { mbcJsonSql } from './money-by-currency.js';
 import { rollupWindow, binSql, type RollupWindow } from './rollups.js';
 import { formatInZone, isUtcZone } from './time-zone.js';
 import type { Dimension, Metric, MetricValue, MoneyByCurrency, ReportRequest, ReportResult, ReportRow, ReportingProvider, SortOnlyKey } from './types.js';
+import { rejectedClickSql } from '../click-rejections.js';
 
 type DimMap = Record<Dimension, { click: string; conv: string }>;
 
@@ -61,11 +62,14 @@ const ROLLUP_DIMS = new Set<Dimension>(['offer', 'publisher', 'advertiser', 'sma
 const ROLLUP_FILTERS = new Set<string>([
   'from', 'to', 'offerId', 'publisherId', 'advertiserId', 'smartLinkId', 'country', 'device',
   'excludeOfferId', 'excludePublisherId', 'excludeAdvertiserId', 'excludeSmartLinkId', 'excludeCountry', 'excludeDevice',
+  'excludeRejected',
 ]);
 
 /** Can the rollups answer this report? (Everything else — city, ISP, subs, "ignore fail traffic" — is raw.) */
 export function rollupEligible(req: ReportRequest): boolean {
   if (!req.groupBy.every((d) => ROLLUP_DIMS.has(d))) return false;
+  // The rollups count rejected clicks but not their fraud scores: without them, the average is raw.
+  if (req.filters.excludeRejected && req.metrics.includes('avg_fraud_score')) return false;
   return Object.entries(req.filters).every(([k, v]) =>
     v == null || v === '' || v === false || (Array.isArray(v) && v.length === 0) || ROLLUP_FILTERS.has(k));
 }
@@ -180,6 +184,10 @@ export class PostgresReportingProvider implements ReportingProvider {
       clickWhere.push('array_length(clicks.fraud_flags, 1) IS NULL');
       convWhere.push('array_length(k.fraud_flags, 1) IS NULL');
     }
+    // Partner / advertiser views and the automation: only clicks that reached the offer (the ones /click
+    // rejected are recorded for the admin's reports — lib/click-rejections). They never convert, so
+    // the conversion side is unchanged.
+    if (f.excludeRejected) clickWhere.push(`NOT ${rejectedClickSql('clicks')}`);
 
     // Hybrid read: whole buckets in [rs, re) that aren't dirty come from the rollups; every raw row
     // outside them from the raw tables. rs/re clip the rollup window to the requested range (only
@@ -228,7 +236,9 @@ export class PostgresReportingProvider implements ReportingProvider {
             WHERE ${clickWhere.join(' AND ')} AND ${outsideRollup('clicks.created_at')}
             ${groupSql}
            UNION ALL
-           SELECT ${rollClickDims}${comma} r.clicks, r.unique_clicks, r.invalid_clicks, r.fraud_score_sum
+           SELECT ${rollClickDims}${comma} ${f.excludeRejected
+               ? 'r.clicks - r.rejected_clicks, r.unique_clicks, r.invalid_clicks - r.rejected_clicks'
+               : 'r.clicks, r.unique_clicks, r.invalid_clicks'}, r.fraud_score_sum
              FROM stats_clicks_15m r ${needsOffers ? 'LEFT JOIN offers o ON o.id = r.offer_id AND o.network_id = r.network_id' : ''}
             WHERE ${rollClickWhere.join(' AND ')} AND ${inRollup('r.bucket')}
          ) u

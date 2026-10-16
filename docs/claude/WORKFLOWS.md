@@ -63,7 +63,8 @@ End user clicks tracking link
  - isTrafficBlocked(offer.trafficBlockings, publisherId, fields)
  - fraudPreSignals({ ip, isDatacenter, userAgent, ipqs }, fraudCfg) — datacenter, velocity, bot/headless UA,
    the IP's cached IPQS verdict; weights from the network's fraud rules (Redis-cached config)
- - score ≥ fraudCfg.blockScore → divert (not enqueued); opt-in; a server-side format=json click only when it passes the visitor's ip (D2)
+ - score ≥ fraudCfg.blockScore → rejected (recorded as an invalid click `fraud_blocked`, not sent on); opt-in; a server-side format=json click only when it passes the visitor's ip (D2)
+ - every check that fails REJECTS the click: recorded as an invalid click with the reason (lib/click-rejections.ts), visitor to the fallback
  - isClickCapped(offerId, dailyClickCap) — Redis atomic
  - markUnique(offerId, ip, dedupWindowS) — Redis atomic
  → Resolve payout/revenue (geo overrides)

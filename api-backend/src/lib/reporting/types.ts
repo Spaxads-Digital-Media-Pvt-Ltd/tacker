@@ -80,6 +80,11 @@ export interface ReportFilters {
   // "Others › Ignore Fail Traffic" — drop fraud-flagged clicks from click-side metrics entirely,
   // rather than just counting them separately (which invalid_clicks already does).
   excludeInvalid?: boolean;
+  /** Leave out the clicks /click rejected (never sent to the offer — lib/click-rejections): partner /
+   * advertiser reports and the automation see only traffic that reached the offer. Admin reports keep
+   * them, as invalid clicks. Set by the server (buildReportRequest for the portal audiences), never a
+   * query param. */
+  excludeRejected?: boolean;
 }
 
 export interface ReportRequest {

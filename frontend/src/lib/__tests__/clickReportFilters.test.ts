@@ -2,6 +2,7 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import {
+  clickRejection,
   CLICK_FIELDS, DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, GROUPED_CONVERSIONS_NOTE, MAX_CLICK_IDS, groupDimensionHeader, partitionFields, untrackedToggleLabel, TABLE_ORDER, appliedFilterCount, chipValues,
   clickIdsError, draftErrors, draftFromApplied, exportRecord, fieldByKey, fieldsFromUrl, filtersFromDraft,
   filtersFromUrl, ipError, isIpAddress, isSelectable, parseClickIds, searchFields, selectAllState, setAllFields,
@@ -262,5 +263,18 @@ describe('fields list layout — untracked fields behind a collapsed toggle (dis
     const sp = new URLSearchParams(); writeFieldsToUrl(sp, prefs);
     assert.deepStrictEqual(fieldsFromUrl(sp), visibleColumns(prefs));
     assert.deepStrictEqual(fieldsFromUrl(new URLSearchParams({ cols: 'gaid,clickId' })), ['clickId']); // old links: untracked keys dropped as before
+  });
+});
+
+describe('rejected clicks (recorded with the reason, never sent to the offer)', () => {
+  it('Is Rejected and Rejection Reason are real fields now', () => {
+    for (const k of ['isRejected', 'rejectionReason']) assert.strictEqual(isSelectable(k), true, k);
+  });
+  it('reads the reason from the first fraud flag; a click sent to the offer has none', () => {
+    assert.strictEqual(clickRejection(['cap_exceeded']), 'Cap has been exceeded');
+    assert.strictEqual(clickRejection(['fraud_blocked', 'datacenter_ip']), 'Blocked as fraud');
+    assert.strictEqual(clickRejection(['partner_inactive']), 'Partner inactive');
+    // A fraud-FLAGGED click was still sent on: not rejected.
+    for (const flags of [['datacenter_ip'], ['traffic_control'], [], null]) assert.strictEqual(clickRejection(flags), null);
   });
 });

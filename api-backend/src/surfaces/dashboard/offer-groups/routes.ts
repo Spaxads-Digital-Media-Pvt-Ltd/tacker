@@ -19,6 +19,7 @@ import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { mbcJsonSql } from '../../../lib/reporting/money-by-currency.js';
 import type { MoneyByCurrency } from '../../../lib/reporting/types.js';
+import { rejectedClickSql } from '../../../lib/click-rejections.js';
 
 const TABLE = 'offer_groups';
 
@@ -86,6 +87,7 @@ async function todayStatsForOffers(networkId: string, offerIds: string[]): Promi
          FROM clicks cl
          LEFT JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
         WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at::date = CURRENT_DATE
+          AND NOT ${rejectedClickSql('cl')}
      ), cm AS (
        SELECT currency AS cur, COALESCE(SUM(payout), 0) AS p, COALESCE(SUM(revenue), 0) AS r
          FROM j WHERE conv_row IS NOT NULL AND status = 'approved' AND currency IS NOT NULL GROUP BY currency

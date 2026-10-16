@@ -128,7 +128,7 @@ d('Offer Custom Settings: saved as v2 and enforced (live DB + Redis)', () => {
       expect((await click(id, fx.pubA2)).headers.location).toMatch(/^https:\/\/shop\.example\.com\/lp/);
     });
 
-    it('per-partner click caps divert past the cap; conversion caps reject past the cap', async () => {
+    it('per-partner click caps divert past the cap; conversion caps hold past the cap (pending, Over caps)', async () => {
       const id = await offer();
       await save({ category: 'caps', offerId: id, partnerId: fx.pubA1, capType: 'clicks', capInterval: 'daily', capValue: 2 });
       expect((await click(id, fx.pubA1)).statusCode).toBe(302);
@@ -139,7 +139,7 @@ d('Offer Custom Settings: saved as v2 and enforced (live DB + Redis)', () => {
       const id2 = await offer();
       await save({ category: 'caps', offerId: id2, partnerId: fx.pubA1, capType: 'conversions', capInterval: 'daily', capValue: 1 });
       expect(await convert(id2, fx.pubA1)).toMatchObject({ status: 'approved' });
-      expect(await convert(id2, fx.pubA1)).toMatchObject({ status: 'rejected', reason: 'custom_conversion_cap_reached' });
+      expect(await convert(id2, fx.pubA1)).toMatchObject({ status: 'pending', reason: 'custom_conversion_cap_reached' });
       expect(await convert(id2, fx.pubA2)).toMatchObject({ status: 'approved' });
     });
 

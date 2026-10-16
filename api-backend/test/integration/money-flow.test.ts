@@ -17,6 +17,7 @@ import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import { DbHostResolver } from '../../src/surfaces/tracking/host-resolver-db.js';
 import { getRedis } from '../../src/lib/redis.js';
 import { dedupeRule } from '../../src/surfaces/tracking/conversions/record.js';
+import { capCountedSql } from '../../src/lib/conversion-caps.js';
 import { getQueue, QUEUE } from '../../src/surfaces/workers/queues.js';
 import { query } from '../../src/lib/db/pool.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
@@ -137,12 +138,12 @@ d('money flow: click → postback → conversion → ledger (live DB + Redis)', 
     expect((await click(`offer_id=${fx.offerA}&pub_id=${fx.pubA2}`)).status).toBe(302);
   });
 
-  it('total conversion cap: conversions beyond the cap are rejected and never reach the ledger', async () => {
-    const counted = (await query<{ n: number }>(`SELECT COUNT(*)::int n FROM conversions WHERE offer_id = $1 AND status <> 'rejected'`, [fx.offerA])).rows[0]!.n;
+  it('total conversion cap: conversions beyond the cap are held as pending (Over caps) and never reach the ledger', async () => {
+    const counted = (await query<{ n: number }>(`SELECT COUNT(*)::int n FROM conversions WHERE offer_id = $1 AND ${capCountedSql()}`, [fx.offerA])).rows[0]!.n;
     await request(dash).patch(`/api/offers/${fx.offerA}`).set(auth).send({ totalConversionCap: counted + 1 }).expect(200);
     expect((await convert(fx.pubA1, 'CAP1')).body.status).toBe('approved');
     const over = await convert(fx.pubA1, 'CAP2');
-    expect(over.body.status).toBe('rejected');
+    expect(over.body.status).toBe('pending');
     const reason = (await query<{ reason: string }>(`SELECT reason FROM conversions WHERE conversion_id = $1`, [over.body.conversion_id])).rows[0]!.reason;
     expect(reason).toBe('total_conversion_cap_reached');
     expect(await ledger(over.body.conversion_id!)).toHaveLength(0);

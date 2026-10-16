@@ -51,7 +51,7 @@ import { money } from '../../lib/reportMath';
 import { displayBrowser, displayOs } from '../../lib/userAgentDisplay';
 import { Money } from '../../shared-components/primitives/ReportMoney';
 import {
-  DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, GROUPED_CONVERSIONS_NOTE, VISIBILITY_OPTIONS, appliedFilterCount, chipValues,
+  DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, GROUPED_CONVERSIONS_NOTE, VISIBILITY_OPTIONS, appliedFilterCount, chipValues, clickRejection,
   exportRecord, fieldByKey, fieldsFromUrl, filtersFromUrl, groupDimensionHeader, toApiParams, visibleColumns, withoutChip,
   writeFieldsToUrl, writeFiltersToUrl, type ClickFilters,
 } from '../../lib/clickReportFilters';
@@ -307,6 +307,8 @@ export default function ClickReport() {
       case 'payout': return amt(r.resolved_payout);
       case 'revenue': return amt(r.resolved_revenue);
       case 'fraudScore': return r.fraud_score;
+      case 'isRejected': return clickRejection(r.fraud_flags) ? 'Y' : 'N';
+      case 'rejectionReason': return clickRejection(r.fraud_flags) ?? DASH;
       case 'sub1': return r.sub1 ?? DASH;
       case 'sub2': return r.sub2 ?? DASH;
       case 'sub3': return r.sub3 ?? DASH;

@@ -5,7 +5,7 @@
  * Owner scope is pinned via forceFilters (a publisher summary is always their own publisher_id).
  */
 import { getReportingProvider } from './index.js';
-import { audienceMoneyFields, type ReportAudience } from './request.js';
+import { audienceMoneyFields, excludesRejected, type ReportAudience } from './request.js';
 import type { Metric, MoneyByCurrency, ReportFilters } from './types.js';
 
 const METRICS_BY_AUDIENCE: Record<ReportAudience, Metric[]> = {
@@ -35,7 +35,8 @@ export async function summary24h(
   const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const metrics = METRICS_BY_AUDIENCE[audience];
   const result = await getReportingProvider().runReport({
-    networkId, groupBy: [], metrics, filters: { from, ...forceFilters }, limit: 1, offset: 0,
+    networkId, groupBy: [], metrics, limit: 1, offset: 0,
+    filters: { from, ...forceFilters, ...(excludesRejected(audience) ? { excludeRejected: true } : {}) },
     moneyFields: audienceMoneyFields(audience),
   });
   const m = result.rows[0]?.metrics ?? {};

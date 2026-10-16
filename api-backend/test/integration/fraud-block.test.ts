@@ -2,8 +2,9 @@
  * Fraud scoring is actionable at /click — on a real Postgres + Redis (INTEGRATION_DB=1, as in CI) —
  * audit F-23.
  *
- * Below the network's block score a click is flagged as before; at or over it the click is diverted
- * (fallback / 204) and never enqueued or attributed. Blocking is opt-in, honours "enabled", applies
+ * Below the network's block score a click is flagged as before; at or over it the click is rejected —
+ * diverted (fallback / 204), never attributed, and recorded as an invalid click with reason
+ * `fraud_blocked` plus its fraud flags and score (round 3: rejected clicks are kept for reports). Blocking is opt-in, honours "enabled", applies
  * at once after the rules change (cache busted), and never hits a server-side click. The IPQS verdict
  * the click worker caches per network + IP raises the score of that IP's later clicks.
  */
@@ -32,7 +33,7 @@ const d = process.env.INTEGRATION_DB === '1' ? describe : describe.skip;
 const CHROME = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36';
 const CURL = 'curl/8.7.1';
 
-interface JobData { clickId: string; fraudScore: number; fraudFlags: string[] }
+interface JobData { clickId: string; fraudScore: number; fraudFlags: string[]; resolvedPayout: string; isUnique: boolean }
 
 d('fraud blocking at /click (live DB + Redis)', () => {
   let track: FastifyInstance;
@@ -80,7 +81,7 @@ d('fraud blocking at /click (live DB + Redis)', () => {
   });
   afterAll(async () => { await worker?.close(); await track?.close(); });
 
-  it('below the block score a click is only flagged (as before); at or over it the click is diverted and never enqueued', async () => {
+  it('below the block score a click is only flagged (as before); at or over it the click is rejected — recorded as fraud_blocked, never attributed', async () => {
     await rules({ blockScore: 60 });
     const flagged = await click(CURL);
     expect(flagged.statusCode).toBe(302);
@@ -88,11 +89,16 @@ d('fraud blocking at /click (live DB + Redis)', () => {
     expect(await jobFor(clickIdOf(flagged.headers.location as string))).toMatchObject({ fraudScore: 50, fraudFlags: ['bot_user_agent'] });
 
     await rules({ blockScore: 50 }); // takes effect on the very next click (cached config is busted)
-    const before = (await jobs()).length;
+    const before = new Set((await jobs()).map((j) => j.clickId));
     const blocked = await click(CURL);
     expect(blocked.statusCode).toBe(302);
     expect(blocked.headers.location).toBe('https://fallback.example.com/');
-    expect((await jobs()).length).toBe(before); // not queued → never persisted, never attributable
+    // Recorded for the reports as a rejected click: the reason first, then the signals; no payout. Its id
+    // never left the tracker (the fallback carries no macros), and it isn't stored for attribution.
+    const added = (await jobs()).filter((j) => !before.has(j.clickId));
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({ fraudScore: 50, fraudFlags: ['fraud_blocked', 'bot_user_agent'], resolvedPayout: '0.0000', isUnique: false });
+    expect(await getRedis().exists(`click:${fx.networkA}:${added[0]!.clickId}`)).toBe(0);
 
     // A real browser still goes through.
     const ok = await click(CHROME);
