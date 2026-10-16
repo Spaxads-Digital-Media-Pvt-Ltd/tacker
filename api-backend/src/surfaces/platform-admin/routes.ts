@@ -19,6 +19,7 @@ import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import { env } from '../../config/env.js';
 import {
  checkLoginRateLimit,
+ loginRateLimitMessage,
  recordLoginFailure,
  resetLoginCounter,
 } from '../../lib/auth/login-rate-limit.js';
@@ -47,13 +48,7 @@ export function publicPlatformRoutes(): Router {
  const ip = clientIp(req);
 
  const preCheck = await checkLoginRateLimit(ip, normalizedEmail);
- if (preCheck.limited) {
- const reason =
- preCheck.reason === 'account'
- ? 'Too many failed attempts for this account.'
- : 'Too many login attempts from this network.';
- throw tooMany(reason, { retryAfter: preCheck.retryAfterSeconds });
- }
+ if (preCheck.limited) throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
 
  const { rows } = await query<{ id: string; email: string; status: string; password_hash: string; auth_provider: string }>(
  `SELECT id, email, status, password_hash, auth_provider FROM platform_admins WHERE lower(email) = lower($1) LIMIT 1`,

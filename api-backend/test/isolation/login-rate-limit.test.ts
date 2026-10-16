@@ -14,7 +14,7 @@ vi.mock('../../src/lib/redis.js', () => ({
  getRedis: () => { if (down) throw new Error('ECONNREFUSED'); return redis; },
 }));
 
-import { checkLoginRateLimit, recordLoginFailure, resetLoginCounter } from '../../src/lib/auth/login-rate-limit.js';
+import { checkLoginRateLimit, loginRateLimitMessage, recordLoginFailure, resetLoginCounter } from '../../src/lib/auth/login-rate-limit.js';
 
 describe('login rate limiter (unit, in-memory Redis)', () => {
  beforeEach(() => { redis = memoryRedis(); down = false; vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-15T10:01:00Z')); });
@@ -32,9 +32,26 @@ describe('login rate limiter (unit, in-memory Redis)', () => {
  await fail(4);
  expect((await checkLoginRateLimit('10.0.0.1', 'user@example.com')).limited).toBe(false);
  await fail(1);
- expect(await checkLoginRateLimit('10.0.0.1', 'user@example.com')).toMatchObject({ limited: true, reason: 'account', retryAfterSeconds: 300 });
+ // All five at 10:01 count until their bucket (10:00–10:05) leaves the window at 10:15 — 14 minutes, not 5.
+ expect(await checkLoginRateLimit('10.0.0.1', 'user@example.com')).toMatchObject({ limited: true, reason: 'account', retryAfterSeconds: 840 });
  // …from any IP.
  expect((await checkLoginRateLimit('203.0.113.5', 'user@example.com')).reason).toBe('account');
+ });
+
+ it('2b. the wait it quotes is exact — locked until that second, and the message says so', async () => {
+ await fail(3); // 10:01 — bucket 10:00–10:05
+ vi.setSystemTime(new Date('2026-10-15T10:06:00Z'));
+ await fail(2); // bucket 10:05–10:10 → 5 in the window
+ vi.setSystemTime(new Date('2026-10-15T10:07:00Z'));
+ const locked = await checkLoginRateLimit('10.0.0.1', 'user@example.com');
+ expect(locked).toMatchObject({ limited: true, reason: 'account', retryAfterSeconds: 480 }); // the three leave at 10:15
+ expect(loginRateLimitMessage(locked)).toBe('Too many failed attempts for this account — try again in 8 minutes.');
+ vi.setSystemTime(new Date('2026-10-15T10:14:59Z'));
+ expect(await checkLoginRateLimit('10.0.0.1', 'user@example.com')).toMatchObject({ limited: true, retryAfterSeconds: 1 });
+ vi.setSystemTime(new Date('2026-10-15T10:15:00Z'));
+ expect((await checkLoginRateLimit('10.0.0.1', 'user@example.com')).limited).toBe(false);
+ expect(loginRateLimitMessage({ limited: true, reason: 'ip', retryAfterSeconds: 1, ipCount: 10, accountCount: 0 }))
+ .toBe('Too many login attempts from this network — try again in 1 minute.');
  });
 
  it('3. ten failures from one IP lock the IP — across accounts', async () => {

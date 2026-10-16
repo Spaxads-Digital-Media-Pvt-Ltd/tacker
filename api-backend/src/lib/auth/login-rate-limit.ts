@@ -66,6 +66,31 @@ function acctKeys(acctHash: string, idx: number): string[] {
 	return Array.from({ length: BUCKET_COUNT }, (_, i) => `lr:acct:${acctHash}:${idx - i}`);
 }
 
+/**
+ * Seconds until the window total drops under `limit`: the oldest buckets leave the window one per
+ * bucket start (counts[0] is the current bucket, counts[i] the one i buckets back). Five failures
+ * in one bucket keep counting until that bucket leaves — up to 15 minutes, not 5.
+ */
+function secondsUntilUnder(counts: number[], limit: number, now: Date): number {
+	const bucketMs = BUCKET_MINUTES * 60_000;
+	const nextBucketStart = (bucketIndex(now) + 1) * bucketMs;
+	for (let k = 1; k < BUCKET_COUNT; k++) {
+		// Once k more buckets have begun, only counts[0 .. BUCKET_COUNT-1-k] are still in the window.
+		const remaining = counts.slice(0, BUCKET_COUNT - k).reduce((a, b) => a + b, 0);
+		if (remaining < limit) return Math.ceil((nextBucketStart + (k - 1) * bucketMs - now.getTime()) / 1000);
+	}
+	return Math.ceil((nextBucketStart + (BUCKET_COUNT - 1) * bucketMs - now.getTime()) / 1000);
+}
+
+/** What a refused sign-in says: which limit, and when to try again ("in 14 minutes"). */
+export function loginRateLimitMessage(result: RateLimitResult): string {
+	const minutes = Math.max(1, Math.ceil(result.retryAfterSeconds / 60));
+	const wait = `try again in ${minutes} minute${minutes === 1 ? '' : 's'}`;
+	return result.reason === 'account'
+		? `Too many failed attempts for this account — ${wait}.`
+		: `Too many login attempts from this network — ${wait}.`;
+}
+
 // ---------------------------------------------------------------------------
 // Result type
 // ---------------------------------------------------------------------------
@@ -125,10 +150,10 @@ export async function checkLoginRateLimit(
 		const acctTotal = acctCounts.reduce((a, b) => a + b, 0);
 
 		if (ipTotal >= IP_LIMIT) {
-			return { limited: true, reason: 'ip', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
+			return { limited: true, reason: 'ip', retryAfterSeconds: secondsUntilUnder(ipCounts, IP_LIMIT, now), ipCount: ipTotal, accountCount: acctTotal };
 		}
 		if (acctTotal >= ACCOUNT_LIMIT) {
-			return { limited: true, reason: 'account', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
+			return { limited: true, reason: 'account', retryAfterSeconds: secondsUntilUnder(acctCounts, ACCOUNT_LIMIT, now), ipCount: ipTotal, accountCount: acctTotal };
 		}
 
 		return { limited: false, ipCount: ipTotal, accountCount: acctTotal, retryAfterSeconds: 0 };

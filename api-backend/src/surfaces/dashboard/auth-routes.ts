@@ -24,6 +24,7 @@ import { isProd } from '../../config/env.js';
 import { recordLoginEvent } from './control-center/routes.js';
 import {
  checkLoginRateLimit,
+ loginRateLimitMessage,
  recordLoginFailure,
  resetLoginCounter,
 } from '../../lib/auth/login-rate-limit.js';
@@ -102,13 +103,7 @@ export function authRoutes(): Router {
  const ip = clientIp(req);
 
  const preCheck = await checkLoginRateLimit(ip, normalizedEmail);
- if (preCheck.limited) {
- const reason =
- preCheck.reason === 'account'
- ? 'Too many failed attempts for this account.'
- : 'Too many login attempts from this network.';
- throw tooMany(reason, { retryAfter: preCheck.retryAfterSeconds });
- }
+ if (preCheck.limited) throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
 
  // Cap the wait on Supabase Auth so a hung upstream can't leave the login request (and the
  // user) spinning indefinitely. A timeout is the auth service's fault, not a wrong password, so
