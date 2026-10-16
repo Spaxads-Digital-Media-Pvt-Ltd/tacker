@@ -11,6 +11,7 @@ import { billingRoutes } from './billing-routes.js';
 import { opsRoutes } from './ops-routes.js';
 import { salesRoutes } from './sales-routes.js';
 import { taskRoutes } from './task-routes.js';
+import { successRoutes } from './success-routes.js';
 
 export function buildPlatformAdminApp(): Express {
  const app = createBaseApp('platform-admin');
@@ -26,6 +27,7 @@ export function buildPlatformAdminApp(): Express {
  authed.use('/', opsRoutes());
  authed.use('/', salesRoutes());
  authed.use('/', taskRoutes());
+ authed.use('/', successRoutes());
 
  app.use('/platform', authed);
 

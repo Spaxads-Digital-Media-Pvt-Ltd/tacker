@@ -1,16 +1,17 @@
 /**
- * Super Admin › Networks › one network: who it is and who owns it, its plan and this period's usage
- * against it, its team (a temporary password for a member who can't get in), its tracking domains and
- * what Super Admins did to it — and "Open dashboard": a 30-minute support session as its admin, in a
- * new tab, every change recorded under the Super Admin.
+ * Super Admin › Networks › one network, in tabs (?tab=…): Overview — who it is and who owns it, its plan and
+ * this period's usage against it, its tracking domains; Account — its health, onboarding, account manager,
+ * tags, notes and tasks (success/NetworkAccount.tsx); Billing — its invoices; Team — a temporary password for
+ * a member who can't get in; Activity — what Super Admins did to it. "Open dashboard": a 30-minute support
+ * session as its admin, in a new tab, every change recorded under the Super Admin.
  */
 import { useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { useSupportSession } from '../../lib/impersonation';
 import { useConfirm } from '../../shared-components/primitives/confirm';
-import { PageHeader, Table, Badge, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Badge, Modal, Spinner, StateBlock, Tabs, type Column } from '../../shared-components/primitives/ui';
 import { PlanLimitBars } from '../../shared-components/panels/PlanLimitBars';
 import { activityLabel } from '../../lib/platformActivity';
 import { usePlatformMe } from '../../lib/platformMe';
@@ -20,6 +21,7 @@ import { NewInvoice } from './Billing';
 import { AssignPlanModal, ExtendTrialModal } from './subscriptionActions';
 import { money as amountMoney, planPrice, billingBadge, invoiceState, type PlatformInvoice } from '../../lib/platformBilling';
 import type { NetworkDetail as Detail, NetworkTeamMember, PlatformActivityRow } from '../../types';
+import { NetworkAccount } from './success/NetworkAccount';
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString() : '—');
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : '—');
@@ -63,6 +65,7 @@ export default function NetworkDetail() {
   const [newInvoice, setNewInvoice] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const { can } = usePlatformMe();
+  const [params, setParams] = useSearchParams();
   const canManage = can('networks', 'full');
   const canAccess = can('access', 'full');
   const canPlans = can('plans', 'full');
@@ -106,6 +109,9 @@ export default function NetworkDetail() {
         : m.has_login ? null : <span className="text-tiny text-fg-muted">no login yet</span>),
     },
   ];
+  const tabs = ['Overview', ...(can('success') ? ['Account'] : []), ...(can('billing') ? ['Billing'] : []), 'Team', 'Activity'];
+  const tab = tabs.includes(params.get('tab') ?? '') ? params.get('tab')! : 'Overview';
+  const setTab = (t: string) => setParams(t === 'Overview' ? {} : { tab: t }, { replace: true });
   const activityCols: Column<PlatformActivityRow>[] = [
     { header: 'When', cell: (a) => when(a.created_at) },
     { header: 'What', cell: (a) => <span>{actionLabel(a)}{a.in_support_session && <span className="ml-2 text-tiny text-fg-muted">in a support session</span>}</span> },
@@ -147,7 +153,10 @@ export default function NetworkDetail() {
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {notice && <p className="mb-4 rounded-[var(--radius)] bg-page px-4 py-3 text-small text-fg-secondary ring-1 ring-inset ring-border">{notice}</p>}
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+
+      {tab === 'Overview' && <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card title="Overview">
           <dl>
             <InfoRow label="Status"><Badge value={n.status} /></InfoRow>
@@ -180,7 +189,6 @@ export default function NetworkDetail() {
         <Card title="Plan & usage" action={n.status !== 'deleted' && canPlans && (
           <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => { setNotice(null); setPlanModal(true); }}>{live ? 'Change plan' : 'Assign plan'}</button>
         )}>
-          {notice && <p className="mb-3 rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg-secondary">{notice}</p>}
           {sub ? (
             <dl className="mb-3">
               <InfoRow label="Plan">{sub.plan_name} <span className="text-tiny font-normal text-fg-muted">{planPrice(sub)}</span></InfoRow>
@@ -208,10 +216,12 @@ export default function NetworkDetail() {
             ? <p className="mt-2 text-small text-fg-secondary">{n.usage.plan ? 'Its plan sets no limits.' : 'Usage is compared with a plan’s limits once one is assigned.'}</p>
             : <PlanLimitBars limits={n.usage.limits} />}
         </Card>
-      </div>
+      </div>}
 
-      <div className="mt-4 space-y-4">
-        {can('billing') && <Card title="Invoices" action={n.status !== 'deleted' && canBilling && (
+      {tab === 'Account' && <NetworkAccount networkId={n.id} networkName={n.name} />}
+
+      <div className="space-y-4">
+        {tab === 'Billing' && <Card title="Invoices" action={n.status !== 'deleted' && canBilling && (
           <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setNewInvoice(true)}>New invoice</button>
         )}>
           {invoiceActions.notice && <p className="mb-2 text-small text-fg-secondary">{invoiceActions.notice}</p>}
@@ -227,17 +237,17 @@ export default function NetworkDetail() {
               { header: '', className: 'text-right', cell: (i: PlatformInvoice) => invoiceActions.buttons(i) },
             ]} rows={invoices.data ?? []} rowKey={(i) => i.id} />}
         </Card>}
-        <Card title="Team">
+        {tab === 'Team' && <Card title="Team">
           {tempPassword.error && <p className="mb-2 text-small text-danger-text">{tempPassword.error}</p>}
           {team.loading ? <Spinner /> : team.error ? <p className="text-small text-danger-text">{team.error}</p>
             : (team.data ?? []).length === 0 ? <p className="text-small text-fg-secondary">No team members.</p>
             : <Table columns={teamCols} rows={team.data ?? []} rowKey={(m) => m.id} />}
-        </Card>
-        <Card title="Super Admin activity">
+        </Card>}
+        {tab === 'Activity' && <Card title="Super Admin activity">
           {activity.loading ? <Spinner /> : activity.error ? <p className="text-small text-danger-text">{activity.error}</p>
             : (activity.data ?? []).length === 0 ? <p className="text-small text-fg-secondary">Nothing yet.</p>
             : <Table columns={activityCols} rows={activity.data ?? []} rowKey={(a) => a.id} />}
-        </Card>
+        </Card>}
       </div>
 
       {invoiceActions.modal}

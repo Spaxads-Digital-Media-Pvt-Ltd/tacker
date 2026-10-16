@@ -101,10 +101,13 @@ export function platformRoutes(): Router {
  const { rows } = await query(
  `SELECT n.id, n.ref, n.name, n.slug, n.status, n.suspended_reason, n.default_currency, n.created_at, n.updated_at, n.deleted_at, n.exported_at,
  s.status AS subscription_status, p.code AS plan_code, p.name AS plan_name,
- (SELECT u.email FROM users u WHERE u.network_id = n.id AND u.role = 'admin' ORDER BY u.created_at LIMIT 1) AS owner_email
+ (SELECT u.email FROM users u WHERE u.network_id = n.id AND u.role = 'admin' ORDER BY u.created_at LIMIT 1) AS owner_email,
+ n.account_manager_id, COALESCE(am.name, am.email) AS account_manager_name, na.health_score, na.health_status
  FROM networks n
  LEFT JOIN subscriptions s ON s.network_id = n.id
  LEFT JOIN subscription_plans p ON p.id = s.plan_id
+ LEFT JOIN network_accounts na ON na.network_id = n.id
+ LEFT JOIN platform_admins am ON am.id = n.account_manager_id
  WHERE ${where}
  ORDER BY n.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
  [...params, limit, offset],

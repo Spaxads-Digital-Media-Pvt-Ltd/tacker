@@ -326,6 +326,18 @@ Won → "Convert to customer": network (+ tracking subdomain) + owner login (tem
   'assigned' Sales / Account Manager role then sees that network); a converted lead stays won
 ```
 
+## Customer Success (Super Admin › Customer health)
+
+```
+Workers every 6 h (or "Recalculate"): per network — usage (clicks / conversions 7 days), trend (last 7 complete
+  days vs the 7 before), sign-ins (days since the last), billing (subscription, overdue invoices, billing
+  suspension), onboarding (owner signed in, domain, offer, advertiser, partner, first click, first conversion,
+  partner postback, team, plan) → score 0–100 → healthy / needs attention / at risk; one row per day of history
+Fell to at risk (from better) → a high-priority check-in task for the account manager (once per fall)
+Account managers: assigned on the health board or the network's Account tab (also set when a lead is
+  converted); the Account Manager role sees only its networks; notes (pin), tags, tasks per network
+```
+
 ## Multi-Tenant Data Isolation
 
 Every query is filtered by `network_id`:

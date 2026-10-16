@@ -617,6 +617,11 @@ export interface NetworkRow {
   owner_email?: string | null;
   /** Why it is suspended: an unpaid invoice ('billing') or a Super Admin ('manual'). */
   suspended_reason?: 'manual' | 'billing' | null;
+  /** Customer success: who looks after it, and its health (null until first computed). */
+  account_manager_id?: string | null;
+  account_manager_name?: string | null;
+  health_score?: number | null;
+  health_status?: 'healthy' | 'attention' | 'at_risk' | null;
 }
 
 /** A plan limit this billing period (lib/usage/meter.ts): used vs limit, ok | near (≥ 80 %) | over. */

@@ -73,6 +73,7 @@ const SalesLeads = lazy(() => import('./pages/super-admin/sales/Leads'));
 const SalesPipeline = lazy(() => import('./pages/super-admin/sales/Pipeline'));
 const LeadDetail = lazy(() => import('./pages/super-admin/sales/LeadDetail'));
 const PlatformTasks = lazy(() => import('./pages/super-admin/Tasks'));
+const HealthBoard = lazy(() => import('./pages/super-admin/success/HealthBoard'));
 const RequestDemo = lazy(() => import('./pages/RequestDemo'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
@@ -188,6 +189,7 @@ export default function App() {
           <Route path="/admin/sales/leads/:id" element={<PlatformGate section="sales"><LeadDetail /></PlatformGate>} />
           <Route path="/admin/sales/pipeline" element={<PlatformGate section="sales"><SalesPipeline /></PlatformGate>} />
           <Route path="/admin/tasks" element={<PlatformTasks />} />
+          <Route path="/admin/success" element={<PlatformGate section="success"><HealthBoard /></PlatformGate>} />
         </Route>
 
         {/* Admin / Network */}

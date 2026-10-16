@@ -42,6 +42,7 @@ export const NAV: Record<Role, NavEntry[]> = {
     {
       group: 'Customers', label: 'Networks', icon: 'building', flyout: [
         { label: 'All networks', description: 'Every tenant network — search, open, manage', to: '/admin/networks', icon: Lucide.Building2, perm: 'networks' },
+        { label: 'Customer health', description: 'Health scores, at-risk accounts, onboarding, account managers', to: '/admin/success', icon: Lucide.HeartPulse, perm: 'success' },
         { label: 'Usage', description: 'Each network against its plan limits', to: '/admin/usage', icon: Lucide.Gauge, perm: 'networks' },
       ],
     },
