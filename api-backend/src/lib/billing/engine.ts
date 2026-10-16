@@ -20,6 +20,7 @@ import { networkStateChanged } from '../networks/state.js';
 import { billingSettings, type BillingSettings } from './settings.js';
 import { issueInvoice } from './invoices.js';
 import { subscriptionLines, useDiscount } from './charges.js';
+import { notifyInvoiceIssued, notifyInvoiceOverdue, notifyNetworkSuspended } from '../platform/notify.js';
 import { PLUS_INTERVAL, periodDescription, type PlanRow, type SubscriptionRow } from './subscriptions.js';
 
 export interface BillingRunResult {
@@ -34,7 +35,7 @@ export interface BillingRunResult {
 /** Most periods one subscription is caught up by in one run (a run every 15 minutes finishes the rest). */
 const MAX_CATCH_UP = 24;
 
-type Step = { kind: 'trial_ended' | 'renewed' | 'canceled'; invoiced: boolean };
+type Step = { kind: 'trial_ended' | 'renewed' | 'canceled'; invoiced: boolean; invoiceId?: string | null };
 
 /** Advance one subscription by one step, if it is still due — in its own transaction. */
 async function advance(subscriptionId: string, now: Date, settings: BillingSettings): Promise<Step | null> {
@@ -64,6 +65,7 @@ async function advance(subscriptionId: string, now: Date, settings: BillingSetti
                 current_period_start = ${from}, current_period_end = ${PLUS_INTERVAL(from, '$2::text')}, renews_at = ${PLUS_INTERVAL(from, '$2::text')}
           WHERE id = $1 RETURNING *`, [row.id, plan.billing_interval])).rows[0]!;
       let invoiced = false;
+      let invoiceId: string | null = null;
       if (plan.price_cents > 0) {
         // The next period in advance; overage for the period that just ended (not after a trial).
         const period = { start: new Date(next.current_period_start!), end: new Date(next.current_period_end!) };
@@ -77,9 +79,10 @@ async function advance(subscriptionId: string, now: Date, settings: BillingSetti
           periodStart: next.current_period_start, periodEnd: next.current_period_end, createdBy: 'system', issuedAt: now,
         }, settings);
         invoiced = invoice !== null;
+        invoiceId = invoice?.id ?? null;
         if (invoice && discount) await useDiscount(client, discount);
       }
-      step = { kind: trialOver ? 'trial_ended' : 'renewed', invoiced };
+      step = { kind: trialOver ? 'trial_ended' : 'renewed', invoiced, invoiceId };
     }
     await writeSystemAudit(row.network_id, {
       action: `subscription.${step.kind}`, entityType: 'subscription', entityId: row.id,
@@ -117,6 +120,7 @@ export async function runBilling(now: Date = new Date()): Promise<BillingRunResu
       else if (step.kind === 'renewed') r.renewed++;
       else r.canceled++;
       if (step.invoiced) r.invoicesIssued++;
+      if (step.invoiceId) await notifyInvoiceIssued(step.invoiceId); // after its commit
     }
     if (!progressed) break; // the rest are another run's (locked) — it finishes them
   }
@@ -129,6 +133,7 @@ export async function runBilling(now: Date = new Date()): Promise<BillingRunResu
       RETURNING s.network_id`, [now]);
   for (const { network_id } of pastDue.rows) {
     await writeSystemAudit(network_id, { action: 'subscription.past_due', entityType: 'network', entityId: network_id });
+    await notifyInvoiceOverdue(network_id);
   }
   r.pastDue = pastDue.rowCount ?? 0;
 
@@ -146,6 +151,7 @@ export async function runBilling(now: Date = new Date()): Promise<BillingRunResu
     for (const { id, numbers } of suspended.rows) {
       await networkStateChanged(id);
       await writeSystemAudit(id, { action: 'network.suspended_billing', entityType: 'network', entityId: id, after: { invoices: numbers } });
+      await notifyNetworkSuspended(id, numbers);
     }
     r.suspended = suspended.rowCount ?? 0;
   }

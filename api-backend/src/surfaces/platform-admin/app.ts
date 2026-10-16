@@ -14,6 +14,9 @@ import { taskRoutes } from './task-routes.js';
 import { successRoutes } from './success-routes.js';
 import { supportRoutes } from './support-routes.js';
 import { revenueRoutes } from './revenue-routes.js';
+import { flagsRoutes } from './flags-routes.js';
+import { systemRoutes } from './system-routes.js';
+import { emailRoutes } from './email-routes.js';
 
 export function buildPlatformAdminApp(): Express {
  const app = createBaseApp('platform-admin');
@@ -32,6 +35,9 @@ export function buildPlatformAdminApp(): Express {
  authed.use('/', successRoutes());
  authed.use('/', supportRoutes());
  authed.use('/', revenueRoutes());
+ authed.use('/', flagsRoutes());
+ authed.use('/', systemRoutes());
+ authed.use('/', emailRoutes());
 
  app.use('/platform', authed);
 

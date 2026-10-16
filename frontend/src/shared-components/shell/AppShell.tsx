@@ -13,8 +13,10 @@ import { NotificationsBell, AccountLink, HelpMenu } from './SidebarUtilityMenu';
 import { SectionTabs } from './SectionTabs';
 import { NavFlyout } from './NavFlyout';
 import { SearchModal } from './SearchModal';
+import { PlatformSearchModal } from './PlatformSearchModal';
 import { ImpersonationBanner } from './ImpersonationBanner';
 import { OverdueInvoiceBanner } from './OverdueInvoiceBanner';
+import { AnnouncementBanner } from './AnnouncementBanner';
 import { useNetworkBranding } from '../../lib/useNetworkBranding';
 import { usePlatformMe } from '../../lib/platformMe';
 
@@ -24,6 +26,16 @@ function permittedNav(entries: NavEntry[], can: (section: string) => boolean): N
     if (e.perm && !can(e.perm)) return [];
     if (!e.flyout) return [e];
     const flyout = e.flyout.filter((f) => !f.perm || can(f.perm));
+    return flyout.length ? [{ ...e, flyout }] : [];
+  });
+}
+
+/** Network staff: drop what the platform turned off for the network (a flag answered false; no flag = on). */
+function featuredNav(entries: NavEntry[], features: Record<string, boolean>): NavEntry[] {
+  return entries.flatMap((e) => {
+    if (e.feature && features[e.feature] === false) return [];
+    if (!e.flyout) return [e];
+    const flyout = e.flyout.filter((f) => !f.feature || features[f.feature] !== false);
     return flyout.length ? [{ ...e, flyout }] : [];
   });
 }
@@ -53,8 +65,8 @@ function routeTitle(pathname: string, role: Role): string {
 
 /** Slim top header (Section 1) — page title on the left (Section 2), global search + profile menu
  * on the right. Below `md` the persistent rail is a hidden drawer, so the header also carries the
- * menu trigger + brand mark. Search opens the global SearchModal (⌘K is a visual affordance only —
- * no keyboard handler is wired anywhere in the app today). */
+ * menu trigger + brand mark. Search (or ⌘K / Ctrl+K) opens the global SearchModal — the Super Admin
+ * console's PlatformSearchModal. */
 function TopHeader({ role, initials, displayName, email, logoUrl, onSignOut, onMenu, onSearch }: {
   role: Role; initials: string; displayName: string; email: string; logoUrl: string | null; onSignOut: () => void; onMenu: () => void; onSearch: () => void;
 }) {
@@ -229,8 +241,15 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   // O12: the network's logo / favicon (staff and portals; the Super Admin console has no network).
-  const { logoUrl, overdueInvoice } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
+  const { logoUrl, overdueInvoice, features, announcements } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
   const platform = usePlatformMe();
+
+  // ⌘K / Ctrl+K opens the search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Off-canvas drawer (< md): close on navigation and on Escape.
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
@@ -248,7 +267,7 @@ export function AppShell() {
   if (!session) return null;
 
   // Super Admin: only what the member's role may read (an item's / flyout item's `perm`).
-  const items = session.role === 'super_admin' ? permittedNav(NAV.super_admin, platform.can) : NAV[session.role];
+  const items = session.role === 'super_admin' ? permittedNav(NAV.super_admin, platform.can) : featuredNav(NAV[session.role], features);
   const initials = session.displayName
     .split(' ')
     .map((w) => w[0])
@@ -346,6 +365,7 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col bg-page">
         {session.impersonatedBy && <ImpersonationBanner session={session} />}
         {session.role === 'admin' && overdueInvoice && <OverdueInvoiceBanner invoice={overdueInvoice} />}
+        {session.role !== 'super_admin' && <AnnouncementBanner announcements={announcements} />}
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
           email={session.email} logoUrl={logoUrl} onSignOut={async () => {
             // Signing out of an impersonation tab only ends the impersonation (see auth/session.ts).
@@ -362,7 +382,9 @@ export function AppShell() {
         </main>
       </div>
     </div>
-    {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} />}
+    {searchOpen && (session.role === 'super_admin'
+      ? <PlatformSearchModal onClose={() => setSearchOpen(false)} />
+      : <SearchModal onClose={() => setSearchOpen(false)} />)}
     </PageTitleProvider>
   );
 }

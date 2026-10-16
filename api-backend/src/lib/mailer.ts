@@ -51,15 +51,44 @@ export async function sendNetworkEmail(
   html: string,
   opts: { attachments?: MailAttachment[] } = {},
 ): Promise<{ sent: number; results: SendResult[]; configError?: string }> {
-  const smtp = await loadSmtp(networkId);
+  return sendWith(await loadSmtp(networkId), recipients, subject, html, opts, NOT_CONFIGURED, UNREADABLE);
+}
+
+// ---- The platform's own email (Super Admin › Settings › Email) ---------------------------------------
+
+const PLATFORM_NOT_CONFIGURED = 'The platform’s email isn’t set up — Super Admin › Settings › Email (host, username, password, from address).';
+const PLATFORM_UNREADABLE = "The platform's SMTP password can't be decrypted — re-enter it in Super Admin › Settings › Email.";
+
+async function loadPlatformSmtp(): Promise<SmtpSettings> {
+  const { rows } = await query<{ value: SmtpSettings }>(`SELECT value FROM platform_settings WHERE key = 'email'`);
+  return rows[0]?.value ?? {};
+}
+
+/** Why the platform can't send email right now, or null. */
+export async function platformSmtpConfigError(): Promise<string | null> {
+  const smtp = await loadPlatformSmtp();
+  if (!smtp.host || !smtp.username || !smtp.password || !smtp.fromEmail) return PLATFORM_NOT_CONFIGURED;
+  try { decryptSecret(smtp.password); } catch { return PLATFORM_UNREADABLE; }
+  return null;
+}
+
+/** Sends through the platform's SMTP (platform_settings 'email'). */
+export async function sendPlatformEmail(recipients: string[], subject: string, html: string): Promise<{ sent: number; results: SendResult[]; configError?: string }> {
+  return sendWith(await loadPlatformSmtp(), recipients, subject, html, {}, PLATFORM_NOT_CONFIGURED, PLATFORM_UNREADABLE);
+}
+
+async function sendWith(
+  smtp: SmtpSettings, recipients: string[], subject: string, html: string, opts: { attachments?: MailAttachment[] },
+  notConfigured: string, unreadable: string,
+): Promise<{ sent: number; results: SendResult[]; configError?: string }> {
   if (!smtp.host || !smtp.username || !smtp.password || !smtp.fromEmail) {
-    return { sent: 0, results: [], configError: NOT_CONFIGURED };
+    return { sent: 0, results: [], configError: notConfigured };
   }
   let pass: string;
   try {
     pass = decryptSecret(smtp.password); // stored encrypted (F-07); legacy plaintext passes through
   } catch {
-    return { sent: 0, results: [], configError: UNREADABLE };
+    return { sent: 0, results: [], configError: unreadable };
   }
 
   const transport = nodemailer.createTransport({

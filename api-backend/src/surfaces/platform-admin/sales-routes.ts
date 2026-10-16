@@ -27,6 +27,7 @@ import { writePlatformAudit } from '../../lib/audit.js';
 import { createNetwork } from '../../lib/networks/create.js';
 import { assignPlan } from '../../lib/billing/subscriptions.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
+import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
 import { STAGES, OPEN_STAGES, SOURCES, LOGGED_ACTIVITIES, probabilitySql, logLeadActivity } from '../../lib/platform/sales.js';
 import { requirePerm, can, isAssignedScope, networkScope } from './auth.js';
 import { UUID_RE, optText, optEmail, optMoney, optDateTime, meId } from './fields.js';
@@ -423,6 +424,7 @@ export function salesRoutes(): Router {
       try {
         const out = await assignPlan(network.id, b.planId, { trialDays: b.trialDays ?? null }, meId(req));
         subscription = out.subscription; invoice = out.invoice;
+        if (out.invoice) void notifyInvoiceIssued(out.invoice.id);
         await writePlatformAudit(req, network.id, {
           action: 'subscription.assign', entityType: 'subscription', entityId: out.subscription.id, after: { ...out.subscription, invoice: out.invoice?.number ?? null },
         });

@@ -3,7 +3,8 @@
  * when an invoice is due, how long after that an unpaid one suspends its network (and whether it does), the
  * tax rate, who bills (printed on invoices) and how to pay (no payment gateway yet — shown on invoices and the
  * tenant's Billing page; the Super Admin then marks the invoice paid). Support — first-reply targets,
- * auto-assignment and auto-close (support/SupportSettings.tsx).
+ * auto-assignment and auto-close (support/SupportSettings.tsx). Email — the platform's SMTP, notifications
+ * and its email log (platform/EmailSettings.tsx).
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -13,17 +14,18 @@ import { PageHeader, Field, Spinner, StateBlock, Tabs } from '../../shared-compo
 import { usePlatformMe } from '../../lib/platformMe';
 import type { BillingSettings } from '../../lib/platformBilling';
 import { SupportSettings } from './support/SupportSettings';
+import { EmailSettings } from './platform/EmailSettings';
 
-const TABS = ['Billing', 'Support'];
+const TABS = ['Billing', 'Support', 'Email'];
 
 export default function Settings() {
   const [params, setParams] = useSearchParams();
   const tab = TABS.includes(params.get('tab') ?? '') ? params.get('tab')! : 'Billing';
   return (
     <>
-      <PageHeader title="Settings" subtitle="How the platform bills its networks and runs its help desk." />
+      <PageHeader title="Settings" subtitle="How the platform bills its networks, runs its help desk and sends email." />
       <div className="mx-auto max-w-3xl"><Tabs tabs={TABS} active={tab} onChange={(t) => setParams(t === 'Billing' ? {} : { tab: t }, { replace: true })} /></div>
-      {tab === 'Billing' ? <BillingSettingsForm /> : <SupportSettings />}
+      {tab === 'Billing' ? <BillingSettingsForm /> : tab === 'Support' ? <SupportSettings /> : <EmailSettings />}
     </>
   );
 }

@@ -358,6 +358,21 @@ Hourly: resolved + no reply for autoCloseDays (7) → 'closed' (a closed ticket 
 Overdue = no first reply and past the deadline (queue "Overdue", KPI "First reply overdue"); SLA met % = 30 days
 ```
 
+## Platform Operations (Super Admin › Platform)
+
+```
+Feature flag (/admin/flags): a tenant feature on / off per network — kill switch › never-on list › always-on
+  list › plan › everyone › rollout % (stable hash); no flag = on. Off → the tenant's nav hides it and its API
+  answers 403 feature_off (gateable features); every process sees a change within 10 s
+Announcement (/admin/announcements): draft → publish → shown as a banner to the chosen networks (all / plans /
+  listed) and people (staff / partner / advertiser portals) from → until; maintenance shows its window;
+  a person dismisses it once (remembered); archive removes it
+Platform email: Settings › Email SMTP (password encrypted) → notifications through the email queue: new ticket →
+  agent, customer reply → agent, support reply → customer, demo request → salesperson, task → assignee,
+  invoice / overdue / suspension → the network owner. Off or not set up → nothing is sent
+System health (/admin/system): Postgres, Redis, every queue (failed jobs: reason, retry, clear); ⌘K search
+```
+
 ## Multi-Tenant Data Isolation
 
 Every query is filtered by `network_id`:

@@ -20,6 +20,7 @@ import {
   INVOICE_SELECT, issueInvoice, invoiceLines, markInvoicePaid, extendInvoiceDeadline, voidInvoice, type PlatformInvoice,
 } from '../../lib/billing/invoices.js';
 import { assignPlan, cancelSubscription, resumeSubscription, extendTrial } from '../../lib/billing/subscriptions.js';
+import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
 import { runBilling } from '../../lib/billing/engine.js';
 import {
   createPlanSchema, updatePlanSchema, assignSubscriptionSchema, cancelSubscriptionSchema, extendTrialSchema,
@@ -112,6 +113,7 @@ export function billingRoutes(): Router {
     await assertNetworkInScope(req, id);
     const b = req.body as AssignSubscription;
     const out = await assignPlan(id, b.planId, { trialDays: b.trialDays }, adminId(req));
+    if (out.invoice) void notifyInvoiceIssued(out.invoice.id);
     await writePlatformAudit(req, id, {
       action: out.changed ? 'subscription.change_plan' : 'subscription.assign', entityType: 'subscription', entityId: out.subscription.id,
       before: out.before, after: { ...out.subscription, invoice: out.invoice?.number ?? null },
@@ -208,6 +210,7 @@ export function billingRoutes(): Router {
       dueDays: b.dueDays, notes: b.notes ?? null, createdBy: adminId(req),
     }, settings));
     await writePlatformAudit(req, id, { action: 'invoice.create', entityType: 'platform_invoice', entityId: invoice!.id, after: invoice });
+    void notifyInvoiceIssued(invoice!.id);
     sendOk(res, invoice, undefined, 201);
   }));
 

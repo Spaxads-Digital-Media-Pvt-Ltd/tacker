@@ -11,7 +11,7 @@ import { UnrecoverableError } from 'bullmq';
 import { query } from '../db/pool.js';
 import { getQueue, QUEUE } from '../queues.js';
 import { encryptSecret, decryptSecret } from '../crypto/secret-box.js';
-import { sendNetworkEmail, type MailAttachment } from '../mailer.js';
+import { sendNetworkEmail, sendPlatformEmail, type MailAttachment } from '../mailer.js';
 import { logger } from '../logger.js';
 
 /** Attempts per email — the gaps grow: 30 s, 1, 2, 4, 8 min (about a quarter of an hour in all). */
@@ -21,7 +21,8 @@ const BACKOFF_MS = 30_000;
 export interface EmailJob { outboxId: string }
 
 interface OutboxRow {
-  id: string; network_id: string; recipient: string; subject: string; html: string;
+  /** null = the platform's own email (its SMTP — Super Admin › Settings › Email). */
+  id: string; network_id: string | null; recipient: string; subject: string; html: string;
   sensitive: boolean; attachments: MailAttachment[] | null; status: 'queued' | 'sent' | 'failed';
 }
 
@@ -70,6 +71,31 @@ export async function enqueueEmails(
 }
 
 /**
+ * Record and queue the platform's own emails (no network_id; `aboutNetworkId` for its log). Same queue,
+ * retries and log as the networks' emails; sent through the platform's SMTP.
+ */
+export async function enqueuePlatformEmails(
+  event: string, recipients: string[], mail: { subject: string; html: string }, opts: { aboutNetworkId?: string | null } = {},
+): Promise<{ ids: string[]; error?: string }> {
+  const ids: string[] = [];
+  for (const recipient of [...new Set(recipients.map((r) => r.trim().toLowerCase()).filter(Boolean))]) {
+    const { rows } = await query<{ id: string }>(
+      `INSERT INTO email_outbox (network_id, about_network_id, event, recipient, subject, html) VALUES (NULL, $1, $2, $3, $4, $5) RETURNING id`,
+      [opts.aboutNetworkId ?? null, event, recipient, mail.subject, mail.html]);
+    ids.push(rows[0]!.id);
+  }
+  try {
+    for (const id of ids) await queueOutboxRow(id);
+    return { ids };
+  } catch (err) {
+    const error = `The email couldn't be queued: ${err instanceof Error ? err.message : 'queue unavailable'}`;
+    logger.warn({ err, event }, 'platform email queue unavailable');
+    await query(`UPDATE email_outbox SET status = 'failed', last_error = $2 WHERE id = ANY($1::uuid[]) AND status = 'queued'`, [ids, error]);
+    return { ids, error };
+  }
+}
+
+/**
  * One send attempt for an outbox row (`attempt` is 1-based; the worker says whether it's the last).
  * Throws so BullMQ retries a mail-server failure; SMTP that isn't set up, or a body that can't be
  * decrypted, is final (retrying can't help) — UnrecoverableError stops the retries.
@@ -93,7 +119,9 @@ export async function deliverOutboxEmail(outboxId: string, attempt: number, last
       throw new UnrecoverableError('undecryptable email body');
     }
   }
-  const result = await sendNetworkEmail(row.network_id, [row.recipient], row.subject, html, { attachments: row.attachments ?? undefined });
+  const result = row.network_id
+    ? await sendNetworkEmail(row.network_id, [row.recipient], row.subject, html, { attachments: row.attachments ?? undefined })
+    : await sendPlatformEmail([row.recipient], row.subject, html);
   if (result.configError) {
     await fail(result.configError, true);
     throw new UnrecoverableError(result.configError);

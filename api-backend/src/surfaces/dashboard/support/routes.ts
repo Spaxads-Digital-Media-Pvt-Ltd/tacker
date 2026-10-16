@@ -23,6 +23,7 @@ import { conflict, forbidden, notFound } from '../../../lib/http/errors.js';
 import { paginationSchema } from '../../../lib/http/pagination.js';
 import { query, withTransaction } from '../../../lib/db/pool.js';
 import { CATEGORIES, PRIORITIES, createTicket } from '../../../lib/platform/support.js';
+import { notifyCustomerReply, notifyTicketCreated } from '../../../lib/platform/notify.js';
 import type { AdminIdentity } from '../../../middleware/types.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -90,6 +91,7 @@ export function supportTenantRoutes(): Router {
       networkId: who(req).networkId, subject: b.subject, body: b.body, category: b.category, priority: b.priority,
       requester: { userId: me?.id ?? null, email: me?.email ?? null, name: me?.name ?? me?.email ?? null },
     });
+    void notifyTicketCreated(t.id);
     sendOk(res, await view(req, t.id), undefined, 201);
   }));
 
@@ -114,6 +116,7 @@ export function supportTenantRoutes(): Router {
         [t.id, me?.id ?? null, me?.name ?? me?.email ?? null, (req.body as { body: string }).body]);
       await c.query(`UPDATE support_tickets SET status = 'open', last_customer_at = now(), resolved_at = NULL WHERE id = $1`, [t.id]);
     });
+    void notifyCustomerReply(t.id, (req.body as { body: string }).body);
     sendOk(res, await view(req, t.id), undefined, 201);
   }));
 

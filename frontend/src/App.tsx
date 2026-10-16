@@ -81,6 +81,9 @@ const TenantSupport = lazy(() => import('./pages/admin/Support'));
 const TenantSupportTicket = lazy(() => import('./pages/admin/SupportTicket'));
 const PlatformRevenue = lazy(() => import('./pages/super-admin/money/Revenue'));
 const PlatformCoupons = lazy(() => import('./pages/super-admin/money/Coupons'));
+const FeatureFlags = lazy(() => import('./pages/super-admin/platform/FeatureFlags'));
+const PlatformAnnouncements = lazy(() => import('./pages/super-admin/platform/Announcements'));
+const SystemHealth = lazy(() => import('./pages/super-admin/platform/SystemHealth'));
 const RequestDemo = lazy(() => import('./pages/RequestDemo'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
@@ -202,6 +205,9 @@ export default function App() {
           <Route path="/admin/support/:id" element={<PlatformGate section="support"><TicketView /></PlatformGate>} />
           <Route path="/admin/revenue" element={<PlatformGate section="revenue"><PlatformRevenue /></PlatformGate>} />
           <Route path="/admin/coupons" element={<PlatformGate section="billing"><PlatformCoupons /></PlatformGate>} />
+          <Route path="/admin/flags" element={<PlatformGate section="platform"><FeatureFlags /></PlatformGate>} />
+          <Route path="/admin/announcements" element={<PlatformGate section="comms"><PlatformAnnouncements /></PlatformGate>} />
+          <Route path="/admin/system" element={<PlatformGate section="platform"><SystemHealth /></PlatformGate>} />
         </Route>
 
         {/* Admin / Network */}

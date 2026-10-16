@@ -27,6 +27,7 @@ import { containsPattern } from '../../lib/db/like.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import { CATEGORIES, PRIORITIES, STATUSES, createTicket, saveSupportSettings, supportSettings } from '../../lib/platform/support.js';
 import { requirePerm, networkScope, assertNetworkInScope } from './auth.js';
+import { notifyStaffReply } from '../../lib/platform/notify.js';
 import { UUID_RE, meId, ident } from './fields.js';
 
 const STATUS_FILTER = ['active', 'all', ...STATUSES] as const;
@@ -268,6 +269,7 @@ export function supportRoutes(): Router {
       if (b.macroId) await c.query('UPDATE support_macros SET uses = uses + 1 WHERE id = $1', [b.macroId]);
     });
     await writePlatformAudit(req, t.network_id, { action: b.internal ? 'support.note' : 'support.reply', entityType: 'support_ticket', entityId: t.id, after: { status: next } });
+    if (!b.internal) void notifyStaffReply(t.id, b.body, who);
     sendOk(res, (await query(`SELECT ${TICKET_COLS} FROM ${TICKET_FROM} WHERE t.id = $1`, [t.id])).rows[0], undefined, 201);
   }));
 

@@ -281,3 +281,8 @@ No ORM. All queries are raw SQL via `pool.query()` or `ScopedDb`.
 - Click outcomes histogram
 - Queue depth gauges
 - `queueDepth` sampled every 15s
+
+## Super Admin platform modules (lib/platform)
+- `permissions.ts` — staff role sections and levels; `sales.ts` — pipeline vocabulary, lead routing, inbound leads; `health.ts` — customer health score; `support.ts` — help desk rules (settings, auto-assign, auto-close); `flags.ts` — feature flags (evaluation, `requireFeature` on gateable tenant routes); `announcements.ts` — tenant announcements; `email.ts` — platform SMTP settings + notification toggles; `notify.ts` — the platform's emails (tickets, demo requests, tasks, invoices, overdue, suspension), fail-safe, through the email queue (`enqueuePlatformEmails`, `sendPlatformEmail` in lib/mailer.ts)
+- `lib/billing/charges.ts` (invoice lines: plan, overage, discount) and `lib/billing/revenue.ts` (MRR definition, snapshots, movements); `lib/networks/create.ts` (network creation, shared by New network and lead conversion); `lib/db/pool.ts withTransaction`
+

@@ -18,6 +18,9 @@ import { paginationSchema } from '../../lib/http/pagination.js';
 import { query, withTransaction } from '../../lib/db/pool.js';
 import { sectionName, type Section } from '../../lib/platform/permissions.js';
 import { logLeadActivity } from '../../lib/platform/sales.js';
+import { notifyTaskAssigned } from '../../lib/platform/notify.js';
+
+const myName = async (req: Request) => (await query<{ n: string }>('SELECT COALESCE(name, email) AS n FROM platform_admins WHERE id = $1', [meId(req)])).rows[0]?.n ?? null;
 import { can, isAssignedScope, assertNetworkInScope } from './auth.js';
 import { UUID_RE, optText, optDateTime, meId, ident } from './fields.js';
 
@@ -159,6 +162,7 @@ export function taskRoutes(): Router {
       `INSERT INTO platform_tasks (title, notes, kind, priority, due_at, assignee_id, lead_id, network_id, created_by)
        VALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7, $8, $9) RETURNING id`,
       [b.title, b.notes ?? null, b.kind, b.priority, b.dueAt ?? null, assignee, b.leadId ?? null, b.networkId ?? null, meId(req)])).rows[0]!.id;
+    if (assignee && assignee !== meId(req)) void notifyTaskAssigned(id, await myName(req));
     sendOk(res, await taskView(id), undefined, 201);
   }));
 
@@ -184,6 +188,7 @@ export function taskRoutes(): Router {
       await c.query(`UPDATE platform_tasks SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
       if (done && t.lead_id) await logLeadActivity(c, t.lead_id, 'task', t.title, { taskId: t.id }, meId(req));
     });
+    if (b.assigneeId && b.assigneeId !== t.assignee_id && b.assigneeId !== meId(req)) void notifyTaskAssigned(t.id, await myName(req));
     sendOk(res, await taskView(t.id));
   }));
 

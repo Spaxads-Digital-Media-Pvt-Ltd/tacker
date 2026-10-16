@@ -30,6 +30,7 @@ import { requireAuthAdmin } from '../../../lib/provisioning.js';
 import { invitePortalUser, inviteAuditView, type PortalInviteResult } from '../../../lib/portal-invite.js';
 import { getControlCenterConfig } from '../control-center/config.js';
 import { createInboundLead } from '../../../lib/platform/sales.js';
+import { notifyLeadInbound } from '../../../lib/platform/notify.js';
 import type { PublisherRow } from '../../../domain/entities.js';
 
 /**
@@ -160,10 +161,11 @@ export function signupRoutes(): Router {
     const b = req.body as z.infer<typeof demoSchema>;
     const thanks = 'Thanks — our team will contact you within one business day.';
     if (b.website_url) return sendOk(res, { received: true, message: thanks }, undefined, 201);
-    await createInboundLead({
+    const lead = await createInboundLead({
       company: b.company, contactName: b.name, email: b.email, phone: b.phone || null, website: b.website || null,
       country: b.country || null, monthlyClicks: b.monthlyClicks ?? null, message: b.message || null,
     });
+    if (!lead.duplicate) void notifyLeadInbound(lead.leadId);
     return sendOk(res, { received: true, message: thanks }, undefined, 201);
   }));
 

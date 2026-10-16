@@ -16,7 +16,7 @@ import { sendOk } from '../../lib/http/envelope.js';
 import { warnIfCapped } from '../../lib/http/list-cap.js';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { validateBody } from '../../lib/http/validate.js';
-import { badRequest } from '../../lib/http/errors.js';
+import { badRequest, conflict, notFound } from '../../lib/http/errors.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { query } from '../../lib/db/pool.js';
 import { dashboardAuth, requireAdmin, requireRole, requirePortal, notWhileImpersonating } from './auth.js';
@@ -33,6 +33,8 @@ import { offersAdminRoutes, offerPortalRoutes } from './offers/routes.js';
 import { trackingDomainsAdminRoutes } from './tracking-domains/routes.js';
 import { subscriptionRoutes } from './subscription/routes.js';
 import { supportTenantRoutes } from './support/routes.js';
+import { featuresFor, requireFeature } from '../../lib/platform/flags.js';
+import { announcementsFor } from '../../lib/platform/announcements.js';
 import { financeRoutes } from './finance/routes.js';
 import { adminReportsRoutes } from './reports/routes.js';
 import { alertsRoutes, fraudRulesRoutes } from './alerts/routes.js';
@@ -134,7 +136,25 @@ export function buildDashboardApp(): Express {
         `SELECT id, number, total, currency, due_at, suspend_at FROM platform_invoices
           WHERE network_id = $1 AND status = 'open' AND due_at <= now() ORDER BY due_at LIMIT 1`, [nid])).rows[0] ?? null
       : null;
-    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation, reportTimeZone, branding, billing: { overdue } });
+    // Feature flags (Super Admin › Feature flags: keys without a flag are on) and announcements for this person.
+    const kind = id && id.surface === 'dashboard' ? id.kind : null;
+    const [features, announcements] = nid && kind
+      ? await Promise.all([featuresFor(nid), announcementsFor(nid, kind, id!.surface === 'dashboard' ? id!.userId : '')])
+      : [{}, []];
+    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation, reportTimeZone, branding, billing: { overdue }, features, announcements });
+  }));
+
+  // Dismiss an announcement (a dismissible one this person can see) — it stays hidden for them.
+  authed.post('/announcements/:id/dismiss', asyncHandler(async (req, res) => {
+    const id = req.identity;
+    const aid = req.params['id'] ?? '';
+    if (!id || id.surface !== 'dashboard' || !/^[0-9a-f-]{36}$/i.test(aid)) throw notFound('Announcement not found');
+    const visible = (await announcementsFor(id.networkId, id.kind, id.userId)).find((a) => a.id === aid);
+    if (!visible) throw notFound('Announcement not found');
+    if (!visible.dismissible) throw conflict('This announcement can’t be dismissed.');
+    await query(`INSERT INTO platform_announcement_dismissals (announcement_id, user_key, network_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [aid, id.userId, id.networkId]);
+    sendOk(res, { dismissed: true });
   }));
 
   // My Account (Profile) General tab — this user's own real row + metadata profile fields.
@@ -423,7 +443,7 @@ export function buildDashboardApp(): Express {
   authed.use('/reports', requireAdmin, adminReportsRoutes());
   authed.use('/alerts', requireAdmin, alertsRoutes());
   authed.use('/fraud-rules', requireAdmin, fraudRulesRoutes());
-  authed.use('/ai', requireAdmin, aiRoutes());
+  authed.use('/ai', requireAdmin, requireFeature('ai_assistant'), aiRoutes());
   authed.use('/tags', requireAdmin, tagsRoutes());
   authed.use('/custom-fields', requireAdmin, customFieldRoutes());
   authed.use('/settings', requireAdmin, settingsRoutes());
@@ -437,17 +457,17 @@ export function buildDashboardApp(): Express {
   authed.use('/offer-groups', requireAdmin, offerGroupsRoutes());
   authed.use('/creatives', requireAdmin, creativesRoutes());
   authed.use('/custom-metrics', requireAdmin, customMetricsRoutes());
-  authed.use('/marketplace-profile', requireAdmin, marketplaceProfileRoutes());
+  authed.use('/marketplace-profile', requireAdmin, requireFeature('marketplace'), marketplaceProfileRoutes());
   authed.use('/communication-hub', requireAdmin, communicationHubRoutes());
   authed.use('/customer-value', requireAdmin, customerValueRoutes());
-  authed.use('/traffic-health', requireAdmin, trafficHealthRoutes());
-  authed.use('/investigator', requireAdmin, investigatorRoutes());
-  authed.use('/automation', requireAdmin, automationRoutes());
+  authed.use('/traffic-health', requireAdmin, requireFeature('traffic_health'), trafficHealthRoutes());
+  authed.use('/investigator', requireAdmin, requireFeature('fraud_investigator'), investigatorRoutes());
+  authed.use('/automation', requireAdmin, requireFeature('automation'), automationRoutes());
   authed.use('/audit-log', requireAdmin, auditLogRoutes());
   authed.use('/conversion-imports', requireAdmin, conversionImportsRoutes());
   authed.use('/traffic-controls', requireAdmin, trafficControlsRoutes());
   authed.use('/offer-custom-settings', requireAdmin, offerCustomSettingsRoutes());
-  authed.use('/smartswitch', requireAdmin, smartSwitchRoutes());
+  authed.use('/smartswitch', requireAdmin, requireFeature('smartswitch'), smartSwitchRoutes());
   authed.use('/users', requireAdmin, usersRoutes());
   authed.use('/postbacks', requireAdmin, postbacksRoutes());
   authed.use('/partner-tiers', requireAdmin, partnerTiersRoutes());
