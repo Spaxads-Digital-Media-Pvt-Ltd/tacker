@@ -28,6 +28,10 @@ const schema = z.object({
     .default('info'),
 
   DATABASE_URL: z.string().url(),
+  // Most Postgres connections each backend process may hold (5 processes share the database). Default 20 in
+  // production / 10 otherwise — but 3 on a Supabase session pooler (its default pool_size is 15 clients in
+  // all), so the five processes never exceed it (lib/db/pool.ts poolMax).
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(100).optional(),
 
   // Supabase — backend-only secrets. Optional at Phase 0 boot so the scaffold runs
   // before a real project is wired; surfaces that need them assert at use-time.

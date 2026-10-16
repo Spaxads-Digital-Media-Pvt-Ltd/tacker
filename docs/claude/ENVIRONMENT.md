@@ -8,6 +8,7 @@
 | `NODE_ENV` | Environment mode | `development`/`test`/`production` | `development` |
 | `LOG_LEVEL` | Log verbosity | `fatal`/`error`/`warn`/`info`/`debug`/`trace` | `info` |
 | `DATABASE_URL` | PostgreSQL connection string | URL | `postgres://tracker:tracker_local_dev@localhost:5432/tracker` |
+| `DB_POOL_MAX` | Optional. Most Postgres connections per backend process (5 processes). Default 20 in production / 10 otherwise — **3 on a Supabase session pooler** (`*.pooler.supabase.com:5432`, whose default pool_size is 15 clients for the whole project; more and jobs fail with `EMAXCONNSESSION`). Raise it together with the Supabase pool size | integer 1–100 | `3` |
 | `REDIS_URL` | Redis connection string | URL | `redis://localhost:6379` |
 
 ### Required for Auth
