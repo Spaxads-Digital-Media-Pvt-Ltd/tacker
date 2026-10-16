@@ -23,6 +23,7 @@ import { bearer } from '../helpers/tokens.js';
 
 const d = process.env.INTEGRATION_DB === '1' ? describe : describe.skip;
 const PW = 'a-strong-password-123';
+const ADMIN_ROLE = '00000000-0000-4000-a000-000000000002'; // built-in Admin (team: read)
 
 d('Super Admin operations (live DB)', () => {
   let platform: Express;
@@ -85,11 +86,11 @@ d('Super Admin operations (live DB)', () => {
 
   it('team: add, no duplicates, reset another password, change your own; never disable yourself; disabling is immediate', async () => {
     const otherEmail = `other-${randomUUID().slice(0, 6)}@test.local`;
-    const added = await request(platform).post('/platform/admins').set(pa).send({ email: otherEmail, name: 'Other', password: PW });
+    const added = await request(platform).post('/platform/admins').set(pa).send({ email: otherEmail, name: 'Other', password: PW, roleId: ADMIN_ROLE });
     expect(added.status, JSON.stringify(added.body)).toBe(201);
     expect(added.body.data).not.toHaveProperty('password_hash');
-    expect((await request(platform).post('/platform/admins').set(pa).send({ email: otherEmail.toUpperCase(), password: PW })).status).toBe(400);
-    expect((await request(platform).post('/platform/admins').set(pa).send({ email: 'x@test.local', password: 'short' })).status).toBe(422);
+    expect((await request(platform).post('/platform/admins').set(pa).send({ email: otherEmail.toUpperCase(), password: PW, roleId: ADMIN_ROLE })).status).toBe(400);
+    expect((await request(platform).post('/platform/admins').set(pa).send({ email: 'x@test.local', password: 'short', roleId: ADMIN_ROLE })).status).toBe(422);
     const otherId = added.body.data.id as string;
 
     // Sign-in records the last login.

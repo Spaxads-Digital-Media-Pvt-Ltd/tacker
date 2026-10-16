@@ -34,6 +34,7 @@ import {
 import { once } from 'node:events';
 import { softDeleteNetwork, exportNetwork, exportLedgerCsv, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
+import { requirePerm, networkScope, assertNetworkInScope } from './auth.js';
 import { networkStateChanged } from '../../lib/networks/state.js';
 import { usageVsPlan } from '../../lib/usage/meter.js';
 
@@ -88,14 +89,17 @@ export function platformRoutes(): Router {
  // the console shows — never a network's settings (its SMTP / integration credentials) or postback code.
  r.get(
  '/networks',
+ requirePerm('networks', 'read'),
  validateQuery(networkListSchema),
  asyncHandler(async (_req, res) => {
  const { limit, offset, q, status, plan } = res.locals.query as NetworkListQuery;
+ const scope = networkScope(_req, 'n', 4);
  const where = `($1::text IS NULL OR n.name ILIKE $1 ESCAPE '\\' OR n.slug ILIKE $1 ESCAPE '\\'
  OR EXISTS (SELECT 1 FROM users u WHERE u.network_id = n.id AND u.email ILIKE $1 ESCAPE '\\'))
  AND ($2::text IS NULL OR n.status = $2)
- AND ($3::text IS NULL OR ($3 = 'none' AND p.code IS NULL) OR p.code = $3)`;
- const params = [q ? containsPattern(q) : null, status ?? null, plan || null];
+ AND ($3::text IS NULL OR ($3 = 'none' AND p.code IS NULL) OR p.code = $3)
+ AND ${scope.sql}`;
+ const params = [q ? containsPattern(q) : null, status ?? null, plan || null, ...scope.params];
  const { rows } = await query(
  `SELECT n.id, n.ref, n.name, n.slug, n.status, n.suspended_reason, n.default_currency, n.created_at, n.updated_at, n.deleted_at, n.exported_at,
  s.status AS subscription_status, p.code AS plan_code, p.name AS plan_name,
@@ -104,7 +108,7 @@ export function platformRoutes(): Router {
  LEFT JOIN subscriptions s ON s.network_id = n.id
  LEFT JOIN subscription_plans p ON p.id = s.plan_id
  WHERE ${where}
- ORDER BY n.created_at DESC LIMIT $4 OFFSET $5`,
+ ORDER BY n.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
  [...params, limit, offset],
  );
  const { rows: countRows } = await query<{ n: number }>(
@@ -121,9 +125,11 @@ export function platformRoutes(): Router {
  // admin) with their last sign-in, how big it is, its tracking domains and its usage against its plan.
  r.get(
  '/networks/:id',
+ requirePerm('networks', 'read'),
  asyncHandler(async (req, res) => {
  const id = req.params.id!;
  if (!UUID_RE.test(id)) throw notFound('Network not found');
+ await assertNetworkInScope(req, id);
  const net = (await query(
  `SELECT id, ref, name, slug, status, suspended_reason, default_currency, created_at, updated_at, deleted_at, exported_at
  FROM networks WHERE id = $1`, [id])).rows[0];
@@ -161,9 +167,11 @@ export function platformRoutes(): Router {
  // The network's team (staff logins): role, status, whether they can sign in, and their last sign-in.
  r.get(
  '/networks/:id/users',
+ requirePerm('networks', 'read'),
  asyncHandler(async (req, res) => {
  const id = req.params.id!;
  if (!UUID_RE.test(id) || !(await query('SELECT 1 FROM networks WHERE id = $1', [id])).rows[0]) throw notFound('Network not found');
+ await assertNetworkInScope(req, id);
  const { rows } = await query(
  `SELECT u.id, u.email, u.name, u.role, u.status, u.created_at, (u.auth_user_id IS NOT NULL) AS has_login,
  (SELECT max(le.created_at) FROM login_events le WHERE le.network_id = u.network_id AND le.user_id = u.auth_user_id) AS last_sign_in_at
@@ -178,9 +186,11 @@ export function platformRoutes(): Router {
  // once here — they must choose their own at their next sign-in, and Supabase signs them out everywhere.
  r.post(
  '/networks/:id/users/:userId/temporary-password',
+ requirePerm('access', 'full'),
  asyncHandler(async (req, res) => {
  const { id, userId } = req.params as { id: string; userId: string };
  if (!UUID_RE.test(id) || !UUID_RE.test(userId)) throw notFound('User not found');
+ await assertNetworkInScope(req, id);
  const user = (await query<{ email: string; auth_user_id: string | null }>(
  'SELECT email, auth_user_id FROM users WHERE id = $1 AND network_id = $2', [userId, id])).rows[0];
  if (!user) throw notFound('User not found');
@@ -200,9 +210,11 @@ export function platformRoutes(): Router {
  // this Super Admin; passwords, emails and API keys can't be changed in it. Only an active network.
  r.post(
  '/networks/:id/support-session',
+ requirePerm('access', 'full'),
  asyncHandler(async (req, res) => {
  const id = req.params.id!;
  if (!UUID_RE.test(id)) throw notFound('Network not found');
+ await assertNetworkInScope(req, id);
  const net = (await query<{ name: string; status: string }>('SELECT name, status FROM networks WHERE id = $1', [id])).rows[0];
  if (!net) throw notFound('Network not found');
  if (net.status !== 'active') {
@@ -224,10 +236,12 @@ export function platformRoutes(): Router {
  // What Super Admins did to this network — including every change made in a support session.
  r.get(
  '/networks/:id/activity',
+ requirePerm('networks', 'read'),
  validateQuery(paginationSchema),
  asyncHandler(async (req, res) => {
  const id = req.params.id!;
  if (!UUID_RE.test(id)) throw notFound('Network not found');
+ await assertNetworkInScope(req, id);
  const { limit, offset } = res.locals.query as PaginationQuery;
  const { rows } = await query(
  `SELECT al.id, al.created_at, al.action, al.entity_type, al.entity_id, al.after, (al.impersonated_by IS NOT NULL) AS in_support_session,
@@ -242,6 +256,7 @@ export function platformRoutes(): Router {
  // Create network (+ optional admin owner + subdomain) — the onboarding entry point (§3D).
  r.post(
  '/networks',
+ requirePerm('networks', 'full'),
  validateBody(createNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as CreateNetwork;
@@ -297,6 +312,7 @@ export function platformRoutes(): Router {
  // Suspend / reactivate / rename.
  r.patch(
  '/networks/:id',
+ requirePerm('networks', 'full'),
  validateBody(updateNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as UpdateNetwork;
@@ -326,6 +342,7 @@ export function platformRoutes(): Router {
  // row is kept, PATCH { status: 'active' } restores it. The hard delete is POST /:id/purge below.
  r.delete(
  '/networks/:id',
+ requirePerm('networks', 'full'),
  asyncHandler(async (req, res) => {
  const { before, after } = await softDeleteNetwork(req.params.id!);
  await writePlatformAudit(req, req.params.id ?? null, { action: 'network.delete', entityType: 'network', entityId: req.params.id, before, after: { status: after.status, deletedAt: after.deleted_at, soft: true } });
@@ -339,6 +356,7 @@ export function platformRoutes(): Router {
  // Every row the network owns, as NDJSON (one snapshot, credentials redacted) — take it before a purge.
  r.get(
  '/networks/:id/export',
+ requirePerm('networks', 'full'),
  asyncHandler(async (req, res) => {
  const net = (await query<{ slug: string }>(`SELECT slug FROM networks WHERE id = $1`, [req.params.id])).rows[0];
  if (!net) throw notFound('Network not found');
@@ -356,6 +374,7 @@ export function platformRoutes(): Router {
  // waived), confirmed by its slug. Deletes its Supabase logins first, then its data (F-26).
  r.post(
  '/networks/:id/purge',
+ requirePerm('networks', 'full'),
  validateBody(purgeNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as PurgeNetwork;
@@ -372,6 +391,7 @@ export function platformRoutes(): Router {
  // and how many ledger entries it left (the ledger is kept; download it below).
  r.get(
  '/purged-networks',
+ requirePerm('networks', 'read'),
  validateQuery(paginationSchema),
  asyncHandler(async (_req, res) => {
  const { limit, offset } = res.locals.query as PaginationQuery;
@@ -386,6 +406,7 @@ export function platformRoutes(): Router {
  // A network's money ledger as CSV — a live one, or a purged one (its ledger outlives the purge).
  r.get(
  '/networks/:id/ledger.csv',
+ requirePerm('networks', 'full'),
  asyncHandler(async (req, res) => {
  const id = req.params.id!;
  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw notFound('Network not found');
@@ -405,7 +426,8 @@ export function platformRoutes(): Router {
  // Plans, subscriptions and billing: ./billing-routes.ts.
 
  // ---------- Usage dashboard ----------
- r.get('/networks/:id/usage', asyncHandler(async (req, res) => {
+ r.get('/networks/:id/usage', requirePerm('networks', 'read'), asyncHandler(async (req, res) => {
+ await assertNetworkInScope(req, req.params.id!);
  const { rows } = await query(
  `SELECT metric, SUM(value)::bigint AS total
  FROM usage_records

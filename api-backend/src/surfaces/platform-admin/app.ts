@@ -5,7 +5,6 @@
  */
 import { Router, type Express } from 'express';
 import { createBaseApp, finalizeApp } from '../../lib/http/express-app.js';
-import { sendOk } from '../../lib/http/envelope.js';
 import { platformAdminAuth } from './auth.js';
 import { platformRoutes, publicPlatformRoutes } from './routes.js';
 import { billingRoutes } from './billing-routes.js';
@@ -20,7 +19,6 @@ export function buildPlatformAdminApp(): Express {
  // Authenticated platform-admin routes.
  const authed = Router();
  authed.use(platformAdminAuth);
- authed.get('/me', (req, res) => sendOk(res, { identity: req.identity }));
  authed.use('/', platformRoutes());
  authed.use('/', billingRoutes());
  authed.use('/', opsRoutes());

@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { useSupportSession } from '../../lib/impersonation';
+import { usePlatformMe } from '../../lib/platformMe';
 import { useDebounced } from '../admin/pagedList';
 import { useAllNetworks } from './useAllNetworks';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
@@ -34,6 +35,9 @@ export default function Networks() {
   const { data, loading, error, refetch } = useAllNetworks({ q: search || undefined, status: statusFilter || undefined, plan: planFilter || undefined });
   const plans = useQuery<{ id: string; code: string; name: string }[]>('/platform/plans');
   const support = useSupportSession();
+  const { can } = usePlatformMe();
+  const canManage = can('networks', 'full');
+  const canAccess = can('access', 'full');
   const purged = useQuery<PurgedNetworkRow[]>('/platform/purged-networks?limit=200');
   const [open, setOpen] = useState(false);
   const [purging, setPurging] = useState<NetworkRow | null>(null);
@@ -79,12 +83,12 @@ export default function Networks() {
       header: '', className: 'text-right',
       cell: (n) => (
         <span className="flex justify-end gap-3 whitespace-nowrap">
-          {n.status === 'active' && <button className={linkBtn} disabled={support.busy} onClick={() => void support.start(n.id)}
+          {n.status === 'active' && canAccess && <button className={linkBtn} disabled={support.busy} onClick={() => void support.start(n.id)}
             title="Open this network's dashboard as its admin for 30 minutes — every change is recorded under you">Open dashboard</button>}
-          {n.status === 'active' && <button className={dangerBtn} onClick={() => setStatus(n, 'suspended', 'Suspend', 'Tracking, the dashboard, the portals and the API stop until you activate it again. Nothing is deleted.')}>Suspend</button>}
-          {n.status === 'suspended' && <button className={linkBtn} onClick={() => setStatus(n, 'active', 'Activate', 'Tracking, the dashboard, the portals and the API work again.')}>Activate</button>}
-          {n.status !== 'deleted' && <button className={dangerBtn} onClick={() => softDelete(n)}>Delete</button>}
-          {n.status === 'deleted' && <>
+          {n.status === 'active' && canManage && <button className={dangerBtn} onClick={() => setStatus(n, 'suspended', 'Suspend', 'Tracking, the dashboard, the portals and the API stop until you activate it again. Nothing is deleted.')}>Suspend</button>}
+          {n.status === 'suspended' && canManage && <button className={linkBtn} onClick={() => setStatus(n, 'active', 'Activate', 'Tracking, the dashboard, the portals and the API work again.')}>Activate</button>}
+          {n.status !== 'deleted' && canManage && <button className={dangerBtn} onClick={() => softDelete(n)}>Delete</button>}
+          {n.status === 'deleted' && canManage && <>
             <button className={linkBtn} onClick={() => setStatus(n, 'active', 'Restore', 'The network comes back as it was: tracking, the dashboard, the portals and the API work again.')}>Restore</button>
             <button className={linkBtn} onClick={() => void download(`/platform/networks/${n.id}/export`, `network-${n.slug}-${today()}.ndjson`)}>Export</button>
             <button className={dangerBtn} disabled={!purgeOpen(n)} title={purgeOpen(n) ? undefined : `Can be purged from ${day(n.purge_after)} (grace period)`}
@@ -112,7 +116,7 @@ export default function Networks() {
       <PageHeader
         title="Networks"
         subtitle="Create, suspend, delete, restore and purge tenant networks."
-        action={<button className="btn-primary" onClick={() => setOpen(true)}>New network</button>}
+        action={canManage ? <button className="btn-primary" onClick={() => setOpen(true)}>New network</button> : undefined}
       />
       {(actionError || support.error) && <p className="mb-3 text-small text-danger-text">{actionError ?? support.error}</p>}
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">

@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { PlatformMeProvider, PlatformGate } from './lib/PlatformMeProvider';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { ROLE_HOME } from './auth/roles';
@@ -163,18 +164,18 @@ export default function App() {
         <Route path="/impersonate" element={<Impersonate />} />
 
         {/* Super Admin */}
-        <Route element={<ProtectedRoute allow="super_admin"><AppShell /></ProtectedRoute>}>
-          <Route path="/admin" element={<PlatformOverview />} />
-          <Route path="/admin/networks" element={<Networks />} />
-          <Route path="/admin/networks/:id" element={<NetworkDetail />} />
-          <Route path="/admin/plans" element={<Plans />} />
+        <Route element={<ProtectedRoute allow="super_admin"><PlatformMeProvider><AppShell /></PlatformMeProvider></ProtectedRoute>}>
+          <Route path="/admin" element={<PlatformGate section="dashboard"><PlatformOverview /></PlatformGate>} />
+          <Route path="/admin/networks" element={<PlatformGate section="networks"><Networks /></PlatformGate>} />
+          <Route path="/admin/networks/:id" element={<PlatformGate section="networks"><NetworkDetail /></PlatformGate>} />
+          <Route path="/admin/plans" element={<PlatformGate section="plans"><Plans /></PlatformGate>} />
           <Route path="/admin/subscriptions" element={<Navigate to="/admin/plans" replace />} />
-          <Route path="/admin/billing" element={<PlatformBilling />} />
-          <Route path="/admin/invoices/:id" element={<InvoiceView />} />
-          <Route path="/admin/settings" element={<PlatformSettings />} />
-          <Route path="/admin/team" element={<PlatformTeam />} />
-          <Route path="/admin/activity" element={<PlatformActivity />} />
-          <Route path="/admin/usage" element={<Usage />} />
+          <Route path="/admin/billing" element={<PlatformGate section="billing"><PlatformBilling /></PlatformGate>} />
+          <Route path="/admin/invoices/:id" element={<PlatformGate section="billing"><InvoiceView /></PlatformGate>} />
+          <Route path="/admin/settings" element={<PlatformGate section="settings"><PlatformSettings /></PlatformGate>} />
+          <Route path="/admin/team" element={<PlatformGate section="team"><PlatformTeam /></PlatformGate>} />
+          <Route path="/admin/activity" element={<PlatformGate section="activity"><PlatformActivity /></PlatformGate>} />
+          <Route path="/admin/usage" element={<PlatformGate section="networks"><Usage /></PlatformGate>} />
         </Route>
 
         {/* Admin / Network */}

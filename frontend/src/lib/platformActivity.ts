@@ -32,10 +32,13 @@ const LABEL: Record<string, string> = {
   'plan.unarchive': 'Unarchived a plan',
   'settings.billing': 'Changed the billing settings',
   'billing.run': 'Ran billing',
-  'platform_admin.create': 'Added a Super Admin',
-  'platform_admin.update': 'Changed a Super Admin',
-  'platform_admin.password_reset': 'Reset a Super Admin’s password',
+  'platform_admin.create': 'Added a team member',
+  'platform_admin.update': 'Changed a team member',
+  'platform_admin.password_reset': 'Reset a team member’s password',
   'platform_admin.password_change': 'Changed their own password',
+  'platform_role.create': 'Created a role',
+  'platform_role.update': 'Changed a role',
+  'platform_role.delete': 'Deleted a role',
 };
 
 export const activityLabel = (action: string): string => LABEL[action] ?? action.replace(/[._]/g, ' ');

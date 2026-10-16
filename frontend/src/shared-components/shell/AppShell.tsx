@@ -16,6 +16,17 @@ import { SearchModal } from './SearchModal';
 import { ImpersonationBanner } from './ImpersonationBanner';
 import { OverdueInvoiceBanner } from './OverdueInvoiceBanner';
 import { useNetworkBranding } from '../../lib/useNetworkBranding';
+import { usePlatformMe } from '../../lib/platformMe';
+
+/** Drop what `can` doesn't allow; a flyout left empty goes too. */
+function permittedNav(entries: NavEntry[], can: (section: string) => boolean): NavEntry[] {
+  return entries.flatMap((e) => {
+    if (e.perm && !can(e.perm)) return [];
+    if (!e.flyout) return [e];
+    const flyout = e.flyout.filter((f) => !f.perm || can(f.perm));
+    return flyout.length ? [{ ...e, flyout }] : [];
+  });
+}
 
 /** Flatten a role's nav (groups + leaves) to {to,label} pairs for route→title resolution. */
 function flattenNav(role: Role): { to: string; label: string }[] {
@@ -219,6 +230,7 @@ export function AppShell() {
   const [searchOpen, setSearchOpen] = useState(false);
   // O12: the network's logo / favicon (staff and portals; the Super Admin console has no network).
   const { logoUrl, overdueInvoice } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
+  const platform = usePlatformMe();
 
   // Off-canvas drawer (< md): close on navigation and on Escape.
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
@@ -235,7 +247,8 @@ export function AppShell() {
 
   if (!session) return null;
 
-  const items = NAV[session.role];
+  // Super Admin: only what the member's role may read (an item's / flyout item's `perm`).
+  const items = session.role === 'super_admin' ? permittedNav(NAV.super_admin, platform.can) : NAV[session.role];
   const initials = session.displayName
     .split(' ')
     .map((w) => w[0])

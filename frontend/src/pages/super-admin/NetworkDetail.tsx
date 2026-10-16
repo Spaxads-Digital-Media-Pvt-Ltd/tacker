@@ -13,6 +13,7 @@ import { useConfirm } from '../../shared-components/primitives/confirm';
 import { PageHeader, Table, Badge, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import { PlanLimitBars } from '../../shared-components/panels/PlanLimitBars';
 import { activityLabel } from '../../lib/platformActivity';
+import { usePlatformMe } from '../../lib/platformMe';
 import { useAllPages } from '../../hooks/useAllPages';
 import { useInvoiceActions } from './invoiceActions';
 import { NewInvoice } from './Billing';
@@ -61,6 +62,11 @@ export default function NetworkDetail() {
   const [trialModal, setTrialModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const { can } = usePlatformMe();
+  const canManage = can('networks', 'full');
+  const canAccess = can('access', 'full');
+  const canPlans = can('plans', 'full');
+  const canBilling = can('billing', 'full');
 
   if (net.loading) return <StateBlock><Spinner /></StateBlock>;
   if (net.error || !net.data) return <StateBlock>{net.error ?? 'Network not found'}</StateBlock>;
@@ -95,9 +101,9 @@ export default function NetworkDetail() {
     { header: 'Last sign-in', cell: (m) => (m.last_sign_in_at ? when(m.last_sign_in_at) : <span className="text-fg-muted">never</span>) },
     {
       header: '', className: 'text-right',
-      cell: (m) => (m.has_login
+      cell: (m) => (m.has_login && canAccess
         ? <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => giveTemporaryPassword(m)}>Temporary password</button>
-        : <span className="text-tiny text-fg-muted">no login yet</span>),
+        : m.has_login ? null : <span className="text-tiny text-fg-muted">no login yet</span>),
     },
   ];
   const activityCols: Column<PlatformActivityRow>[] = [
@@ -114,14 +120,14 @@ export default function NetworkDetail() {
         action={
           <>
             <Link to="/admin/networks" className="btn-ghost">All networks</Link>
-            {n.status === 'active' && (
+            {n.status === 'active' && canManage && (
               <button className="btn-ghost text-danger-text" onClick={() => setStatus('suspended', 'Suspend',
                 'Tracking, the dashboard, the portals and the API stop until you activate it again. Nothing is deleted.')}>Suspend</button>
             )}
-            {n.status === 'suspended' && (
+            {n.status === 'suspended' && canManage && (
               <button className="btn-ghost" onClick={() => setStatus('active', 'Activate', 'Tracking, the dashboard, the portals and the API work again.')}>Activate</button>
             )}
-            {n.status === 'active' && (
+            {n.status === 'active' && canAccess && (
               <button className="btn-primary" disabled={support.busy} onClick={() => void support.start(n.id)}
                 title="Opens a new tab as this network's admin for 30 minutes — every change is recorded under you">
                 {support.busy ? 'Opening…' : 'Open dashboard'}
@@ -171,7 +177,7 @@ export default function NetworkDetail() {
           </dl>
         </Card>
 
-        <Card title="Plan & usage" action={n.status !== 'deleted' && (
+        <Card title="Plan & usage" action={n.status !== 'deleted' && canPlans && (
           <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => { setNotice(null); setPlanModal(true); }}>{live ? 'Change plan' : 'Assign plan'}</button>
         )}>
           {notice && <p className="mb-3 rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg-secondary">{notice}</p>}
@@ -188,7 +194,7 @@ export default function NetworkDetail() {
                 : <InfoRow label={sub.status === 'trialing' ? 'Trial period' : 'Current period'}>{day(sub.current_period_start)} – {day(sub.current_period_end)}</InfoRow>}
             </dl>
           ) : <p className="mb-3 text-small text-fg-secondary">No plan assigned.</p>}
-          {live && sub && (
+          {live && sub && canPlans && (
             <div className="mb-4 flex flex-wrap gap-3">
               {sub.status === 'trialing' && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setTrialModal(true)}>Extend trial</button>}
               {sub.cancel_at_period_end
@@ -205,7 +211,7 @@ export default function NetworkDetail() {
       </div>
 
       <div className="mt-4 space-y-4">
-        <Card title="Invoices" action={n.status !== 'deleted' && (
+        {can('billing') && <Card title="Invoices" action={n.status !== 'deleted' && canBilling && (
           <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setNewInvoice(true)}>New invoice</button>
         )}>
           {invoiceActions.notice && <p className="mb-2 text-small text-fg-secondary">{invoiceActions.notice}</p>}
@@ -220,7 +226,7 @@ export default function NetworkDetail() {
               { header: 'Suspends on', cell: (i: PlatformInvoice) => (i.status === 'open' ? day(i.suspend_at) : <span className="text-fg-muted">—</span>) },
               { header: '', className: 'text-right', cell: (i: PlatformInvoice) => invoiceActions.buttons(i) },
             ]} rows={invoices.data ?? []} rowKey={(i) => i.id} />}
-        </Card>
+        </Card>}
         <Card title="Team">
           {tempPassword.error && <p className="mb-2 text-small text-danger-text">{tempPassword.error}</p>}
           {team.loading ? <Spinner /> : team.error ? <p className="text-small text-danger-text">{team.error}</p>

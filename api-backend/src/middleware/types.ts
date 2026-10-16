@@ -78,6 +78,10 @@ export interface ApiKeyIdentity {
 export interface PlatformAdminIdentity {
   surface: 'platform-admin';
   platformAdminId: string;
+  /** Set by platformAdminAuth: the member's email, role and what it may do (lib/platform/permissions). */
+  email?: string;
+  role?: { key: string; name: string; scope: 'all' | 'assigned'; home: string };
+  permissions?: Partial<Record<string, 'none' | 'read' | 'full'>>;
 }
 
 export type Identity = DashboardIdentity | ApiKeyIdentity | PlatformAdminIdentity;

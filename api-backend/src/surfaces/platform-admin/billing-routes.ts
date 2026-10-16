@@ -5,7 +5,8 @@
  * the billing settings, and "Run billing now". No payment gateway: payments are recorded by hand.
  * Every action is in the platform audit.
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
+import { requirePerm, networkScope, assertNetworkInScope, isAssignedScope } from './auth.js';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
@@ -33,6 +34,14 @@ const isUnique = (err: unknown) => typeof err === 'object' && err !== null && (e
 const PLAN_SELECT = `p.*, (SELECT COUNT(*) FROM subscriptions s WHERE s.plan_id = p.id AND s.status IN ('trialing', 'active', 'past_due'))::int AS subscribers`;
 const DAY_MS = 86_400_000;
 
+/** An 'assigned' role reaches only the invoices of its networks (404 otherwise). */
+async function invoiceInScope(req: Request, invoiceId: string): Promise<void> {
+  if (!isAssignedScope(req)) return;
+  const n = (await query<{ network_id: string }>('SELECT network_id FROM platform_invoices WHERE id = $1', [invoiceId])).rows[0];
+  if (!n) throw notFound('Invoice not found');
+  await assertNetworkInScope(req, n.network_id).catch(() => { throw notFound('Invoice not found'); });
+}
+
 async function networkExists(id: string): Promise<{ name: string; default_currency: string } | undefined> {
   if (!UUID_RE.test(id)) return undefined;
   return (await query<{ name: string; default_currency: string }>('SELECT name, default_currency FROM networks WHERE id = $1', [id])).rows[0];
@@ -42,7 +51,7 @@ export function billingRoutes(): Router {
   const r = Router();
 
   // ---------- Plans ----------
-  r.get('/plans', asyncHandler(async (req, res) => {
+  r.get('/plans', requirePerm('plans', 'read'), asyncHandler(async (req, res) => {
     const status = String(req.query['status'] ?? 'active');
     if (!['active', 'archived', 'all'].includes(status)) throw badRequest('status must be active, archived or all');
     const { rows } = await query(
@@ -50,7 +59,7 @@ export function billingRoutes(): Router {
     sendOk(res, rows);
   }));
 
-  r.post('/plans', validateBody(createPlanSchema), asyncHandler(async (req, res) => {
+  r.post('/plans', requirePerm('plans', 'full'), validateBody(createPlanSchema), asyncHandler(async (req, res) => {
     const b = req.body as CreatePlan;
     try {
       const { rows } = await query(
@@ -65,7 +74,7 @@ export function billingRoutes(): Router {
     }
   }));
 
-  r.patch('/plans/:id', validateBody(updatePlanSchema), asyncHandler(async (req, res) => {
+  r.patch('/plans/:id', requirePerm('plans', 'full'), validateBody(updatePlanSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     const b = req.body as UpdatePlan;
     const before = UUID_RE.test(id) ? (await query('SELECT * FROM subscription_plans WHERE id = $1', [id])).rows[0] : undefined;
@@ -85,7 +94,7 @@ export function billingRoutes(): Router {
 
   // Archive: no new subscriptions on it (live ones keep it); unarchive brings it back.
   for (const [path, status] of [['archive', 'archived'], ['unarchive', 'active']] as const) {
-    r.post(`/plans/:id/${path}`, asyncHandler(async (req, res) => {
+    r.post(`/plans/:id/${path}`, requirePerm('plans', 'full'), asyncHandler(async (req, res) => {
       const id = req.params.id!;
       if (!UUID_RE.test(id)) throw notFound('Plan not found');
       const { rows } = await query(`UPDATE subscription_plans p SET status = $2 WHERE id = $1 RETURNING ${PLAN_SELECT}`, [id, status]);
@@ -96,9 +105,10 @@ export function billingRoutes(): Router {
   }
 
   // ---------- A network's subscription ----------
-  r.put('/networks/:id/subscription', validateBody(assignSubscriptionSchema), asyncHandler(async (req, res) => {
+  r.put('/networks/:id/subscription', requirePerm('plans', 'full'), validateBody(assignSubscriptionSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     if (!(await networkExists(id))) throw notFound('Network not found');
+    await assertNetworkInScope(req, id);
     const b = req.body as AssignSubscription;
     const out = await assignPlan(id, b.planId, { trialDays: b.trialDays }, adminId(req));
     await writePlatformAudit(req, id, {
@@ -108,75 +118,84 @@ export function billingRoutes(): Router {
     sendOk(res, { subscription: out.subscription, invoice: out.invoice, changed: out.changed });
   }));
 
-  r.post('/networks/:id/subscription/cancel', validateBody(cancelSubscriptionSchema), asyncHandler(async (req, res) => {
+  r.post('/networks/:id/subscription/cancel', requirePerm('plans', 'full'), validateBody(cancelSubscriptionSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     if (!(await networkExists(id))) throw notFound('Network not found');
+    await assertNetworkInScope(req, id);
     const { atPeriodEnd } = req.body as z.infer<typeof cancelSubscriptionSchema>;
     const out = await cancelSubscription(id, atPeriodEnd);
     await writePlatformAudit(req, id, { action: atPeriodEnd ? 'subscription.cancel_at_period_end' : 'subscription.cancel', entityType: 'subscription', entityId: out.after.id, before: out.before, after: out.after });
     sendOk(res, out.after);
   }));
 
-  r.post('/networks/:id/subscription/resume', asyncHandler(async (req, res) => {
+  r.post('/networks/:id/subscription/resume', requirePerm('plans', 'full'), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     if (!(await networkExists(id))) throw notFound('Network not found');
+    await assertNetworkInScope(req, id);
     const out = await resumeSubscription(id);
     await writePlatformAudit(req, id, { action: 'subscription.resume', entityType: 'subscription', entityId: out.after.id, before: out.before, after: out.after });
     sendOk(res, out.after);
   }));
 
-  r.post('/networks/:id/subscription/extend-trial', validateBody(extendTrialSchema), asyncHandler(async (req, res) => {
+  r.post('/networks/:id/subscription/extend-trial', requirePerm('plans', 'full'), validateBody(extendTrialSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     if (!(await networkExists(id))) throw notFound('Network not found');
+    await assertNetworkInScope(req, id);
     const out = await extendTrial(id, (req.body as { days: number }).days);
     await writePlatformAudit(req, id, { action: 'subscription.extend_trial', entityType: 'subscription', entityId: out.after.id, before: out.before, after: out.after });
     sendOk(res, out.after);
   }));
 
   // ---------- Invoices ----------
-  r.get('/invoices', validateQuery(invoiceListSchema), asyncHandler(async (_req, res) => {
+  r.get('/invoices', requirePerm('billing', 'read'), validateQuery(invoiceListSchema), asyncHandler(async (_req, res) => {
     const { limit, offset, status, networkId, q } = res.locals.query as InvoiceListQuery;
+    const scope = networkScope(_req, 'n', 4);
     const where = `($1 = 'all' OR ($1 = 'overdue' AND i.status = 'open' AND i.due_at <= now()) OR ($1 <> 'overdue' AND i.status = $1))
       AND ($2::uuid IS NULL OR i.network_id = $2)
-      AND ($3::text IS NULL OR i.number ILIKE $3 ESCAPE '\\' OR i.bill_to->>'name' ILIKE $3 ESCAPE '\\' OR i.bill_to->>'slug' ILIKE $3 ESCAPE '\\')`;
-    const params = [status, networkId ?? null, q ? containsPattern(q) : null];
+      AND ($3::text IS NULL OR i.number ILIKE $3 ESCAPE '\\' OR i.bill_to->>'name' ILIKE $3 ESCAPE '\\' OR i.bill_to->>'slug' ILIKE $3 ESCAPE '\\')
+      AND ${scope.sql}`;
+    const params = [status, networkId ?? null, q ? containsPattern(q) : null, ...scope.params];
     const [rows, count] = await Promise.all([
       query(
         `SELECT ${INVOICE_SELECT}, n.name AS network_name, n.status AS network_status, n.suspended_reason AS network_suspended_reason
            FROM platform_invoices i LEFT JOIN networks n ON n.id = i.network_id
-          WHERE ${where} ORDER BY i.issued_at DESC, i.number DESC LIMIT $4 OFFSET $5`, [...params, limit, offset]),
-      query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM platform_invoices i WHERE ${where}`, params),
+          WHERE ${where} ORDER BY i.issued_at DESC, i.number DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`, [...params, limit, offset]),
+      query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM platform_invoices i LEFT JOIN networks n ON n.id = i.network_id WHERE ${where}`, params),
     ]);
     sendOk(res, rows.rows, { limit, offset, total: count.rows[0]?.n ?? 0 });
   }));
 
   // Per currency (never summed across currencies): open, overdue, collected this month — all networks or one.
-  r.get('/invoices-summary', asyncHandler(async (req, res) => {
+  r.get('/invoices-summary', requirePerm('billing', 'read'), asyncHandler(async (req, res) => {
     const networkId = typeof req.query['networkId'] === 'string' && UUID_RE.test(req.query['networkId']) ? req.query['networkId'] : null;
+    const scope = networkScope(req, 'n', 2);
     const { rows } = await query(
-      `SELECT currency,
-              COUNT(*) FILTER (WHERE status = 'open')::int AS open_count,
-              COALESCE(SUM(total) FILTER (WHERE status = 'open'), 0)::text AS open_total,
-              COUNT(*) FILTER (WHERE status = 'open' AND due_at <= now())::int AS overdue_count,
-              COALESCE(SUM(total) FILTER (WHERE status = 'open' AND due_at <= now()), 0)::text AS overdue_total,
-              COALESCE(SUM(paid_amount) FILTER (WHERE status = 'paid' AND paid_at >= date_trunc('month', now())), 0)::text AS collected_this_month
-         FROM platform_invoices WHERE ($1::uuid IS NULL OR network_id = $1) GROUP BY currency ORDER BY currency`, [networkId]);
+      `SELECT i.currency,
+              COUNT(*) FILTER (WHERE i.status = 'open')::int AS open_count,
+              COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open'), 0)::text AS open_total,
+              COUNT(*) FILTER (WHERE i.status = 'open' AND i.due_at <= now())::int AS overdue_count,
+              COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open' AND i.due_at <= now()), 0)::text AS overdue_total,
+              COALESCE(SUM(i.paid_amount) FILTER (WHERE i.status = 'paid' AND i.paid_at >= date_trunc('month', now())), 0)::text AS collected_this_month
+         FROM platform_invoices i LEFT JOIN networks n ON n.id = i.network_id
+        WHERE ($1::uuid IS NULL OR i.network_id = $1) AND ${scope.sql} GROUP BY i.currency ORDER BY i.currency`, [networkId, ...scope.params]);
     sendOk(res, rows);
   }));
 
   // One invoice, with what its printed copy needs: the seller and how to pay.
-  r.get('/invoices/:id', asyncHandler(async (req, res) => {
+  r.get('/invoices/:id', requirePerm('billing', 'read'), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     const inv = UUID_RE.test(id) ? (await query(`SELECT ${INVOICE_SELECT} FROM platform_invoices i WHERE i.id = $1`, [id])).rows[0] : undefined;
     if (!inv) throw notFound('Invoice not found');
+    await invoiceInScope(req, id);
     const s = await billingSettings();
     sendOk(res, { invoice: inv, seller: s.seller, paymentInstructions: s.paymentInstructions });
   }));
 
-  r.post('/networks/:id/invoices', validateBody(manualInvoiceSchema), asyncHandler(async (req, res) => {
+  r.post('/networks/:id/invoices', requirePerm('billing', 'full'), validateBody(manualInvoiceSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     const net = await networkExists(id);
     if (!net) throw notFound('Network not found');
+    await assertNetworkInScope(req, id);
     const b = req.body as z.infer<typeof manualInvoiceSchema>;
     const invoice = await issueInvoice(pool, {
       networkId: id, description: b.description, subtotal: b.amount, currency: b.currency ?? net.default_currency,
@@ -186,9 +205,10 @@ export function billingRoutes(): Router {
     sendOk(res, invoice, undefined, 201);
   }));
 
-  r.post('/invoices/:id/mark-paid', validateBody(markPaidSchema), asyncHandler(async (req, res) => {
+  r.post('/invoices/:id/mark-paid', requirePerm('billing', 'full'), validateBody(markPaidSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     if (!UUID_RE.test(id)) throw notFound('Invoice not found');
+    await invoiceInScope(req, id);
     const b = req.body as z.infer<typeof markPaidSchema>;
     const paidAt = b.paidAt && /^\d{4}-\d{2}-\d{2}$/.test(b.paidAt) ? `${b.paidAt}T12:00:00Z` : b.paidAt;
     if (paidAt && new Date(paidAt).getTime() > Date.now() + DAY_MS) throw badRequest('The payment date can’t be in the future.');
@@ -200,10 +220,11 @@ export function billingRoutes(): Router {
     sendOk(res, { invoice: out.after, ...out.settled });
   }));
 
-  r.post('/invoices/:id/extend', validateBody(extendInvoiceSchema), asyncHandler(async (req, res) => {
+  r.post('/invoices/:id/extend', requirePerm('billing', 'full'), validateBody(extendInvoiceSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     const inv = UUID_RE.test(id) ? (await query<PlatformInvoice>('SELECT suspend_at FROM platform_invoices WHERE id = $1', [id])).rows[0] : undefined;
     if (!inv) throw notFound('Invoice not found');
+    await invoiceInScope(req, id);
     const b = req.body as { days?: number; suspendAt?: string };
     // From the later of now and the current deadline: "+7 days" always means seven more days of service.
     const base = Math.max(Date.now(), new Date(inv.suspend_at).getTime());
@@ -216,9 +237,10 @@ export function billingRoutes(): Router {
     sendOk(res, { invoice: out.after, ...out.settled });
   }));
 
-  r.post('/invoices/:id/void', validateBody(voidInvoiceSchema), asyncHandler(async (req, res) => {
+  r.post('/invoices/:id/void', requirePerm('billing', 'full'), validateBody(voidInvoiceSchema), asyncHandler(async (req, res) => {
     const id = req.params.id!;
     if (!UUID_RE.test(id)) throw notFound('Invoice not found');
+    await invoiceInScope(req, id);
     const out = await voidInvoice(id, (req.body as { reason: string }).reason);
     await writePlatformAudit(req, out.after.network_id, {
       action: 'invoice.void', entityType: 'platform_invoice', entityId: id,
@@ -228,9 +250,9 @@ export function billingRoutes(): Router {
   }));
 
   // ---------- Billing settings + run ----------
-  r.get('/settings/billing', asyncHandler(async (_req, res) => { sendOk(res, await billingSettings()); }));
+  r.get('/settings/billing', requirePerm('settings', 'read'), asyncHandler(async (_req, res) => { sendOk(res, await billingSettings()); }));
 
-  r.put('/settings/billing', validateBody(billingSettingsSchema), asyncHandler(async (req, res) => {
+  r.put('/settings/billing', requirePerm('settings', 'full'), validateBody(billingSettingsSchema), asyncHandler(async (req, res) => {
     const before = await billingSettings();
     const after = await saveBillingSettings(req.body as z.infer<typeof billingSettingsSchema>, adminId(req));
     await writePlatformAudit(req, null, { action: 'settings.billing', entityType: 'platform_settings', entityId: 'billing', before, after });
@@ -238,7 +260,7 @@ export function billingRoutes(): Router {
   }));
 
   // The worker runs this every 15 minutes; a Super Admin can run it now (e.g. right after a change).
-  r.post('/billing/run', asyncHandler(async (req, res) => {
+  r.post('/billing/run', requirePerm('billing', 'full'), asyncHandler(async (req, res) => {
     const result = await runBilling();
     await writePlatformAudit(req, null, { action: 'billing.run', entityType: 'billing', after: result });
     sendOk(res, result);

@@ -14,6 +14,7 @@ import { withQueryParams } from '../../lib/useApi';
 import { useDebounced } from '../admin/pagedList';
 import { useAllNetworks } from './useAllNetworks';
 import { useInvoiceActions } from './invoiceActions';
+import { usePlatformMe } from '../../lib/platformMe';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, Segmented, type Column } from '../../shared-components/primitives/ui';
 import { money, day, invoiceState, billingBadge, type PlatformInvoice, type InvoiceSummaryRow } from '../../lib/platformBilling';
 
@@ -28,6 +29,7 @@ export default function Billing() {
   const summary = useQuery<InvoiceSummaryRow[]>('/platform/invoices-summary');
   const refetch = () => { invoices.refetch(); summary.refetch(); };
   const actions = useInvoiceActions(refetch);
+  const canEdit = usePlatformMe().can('billing', 'full');
   const [creating, setCreating] = useState(false);
   const run = useMutation(() => api.post<Record<string, number>>('/platform/billing/run', {}));
   const [runNote, setRunNote] = useState<string | null>(null);
@@ -62,12 +64,12 @@ export default function Billing() {
   return (
     <>
       <PageHeader title="Billing" subtitle="Invoices to tenant networks — record payments, give more time, void."
-        action={<>
+        action={canEdit ? <>
           <button className="btn-ghost" disabled={run.busy} onClick={() => void runNow()} title="Renewals, ended trials, overdue flags and suspensions — the worker does this every 15 minutes">
             {run.busy ? 'Running…' : 'Run billing now'}
           </button>
           <button className="btn-primary" onClick={() => setCreating(true)}>New invoice</button>
-        </>} />
+        </> : undefined} />
       {(run.error || runNote || actions.notice) && (
         <p className={`mb-3 text-small ${run.error ? 'text-danger-text' : 'text-fg-secondary'}`}>{run.error ?? actions.notice ?? runNote}</p>
       )}

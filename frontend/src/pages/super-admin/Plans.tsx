@@ -9,6 +9,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { useConfirm } from '../../shared-components/primitives/confirm';
+import { usePlatformMe } from '../../lib/platformMe';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import { planPrice, centsToAmount, amountToCents, type PlatformPlan } from '../../lib/platformBilling';
 
@@ -28,6 +29,7 @@ export default function Plans() {
   const [editing, setEditing] = useState<PlatformPlan | 'new' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const confirm = useConfirm();
+  const canEdit = usePlatformMe().can('plans', 'full');
 
   const setArchived = (p: PlatformPlan, archive: boolean) => confirm({
     title: `${archive ? 'Archive' : 'Unarchive'} ${p.name}?`, confirmLabel: archive ? 'Archive' : 'Unarchive', destructive: archive,
@@ -52,7 +54,7 @@ export default function Plans() {
     { header: 'Networks', className: 'text-right', cell: (p) => p.subscribers },
     { header: 'Status', cell: (p) => <Badge value={p.status} /> },
     {
-      header: '', className: 'text-right', cell: (p) => (
+      header: '', className: 'text-right', cell: (p) => (!canEdit ? null :
         <span className="flex justify-end gap-3 whitespace-nowrap">
           <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setEditing(p)}>Edit</button>
           {p.status === 'active'
@@ -66,7 +68,7 @@ export default function Plans() {
   return (
     <>
       <PageHeader title="Plans" subtitle="What tenants subscribe to — price, trial and limits. Assign plans on a network's page."
-        action={<button className="btn-primary" onClick={() => setEditing('new')}>New plan</button>} />
+        action={canEdit ? <button className="btn-primary" onClick={() => setEditing('new')}>New plan</button> : undefined} />
       {error && <p className="mb-3 text-small text-danger-text">{error}</p>}
       <label className="mb-3 flex items-center gap-2 text-small text-fg-secondary">
         <input type="checkbox" className="h-4 w-4 rounded border-border" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />

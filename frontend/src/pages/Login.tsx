@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_HOME } from '../auth/roles';
 import { loadSession } from '../auth/session';
+import { api } from '../lib/api';
 import { Brandmark } from '../shared-components/primitives/Brandmark';
 import { BRAND } from '../config/branding';
 
@@ -54,7 +55,11 @@ export default function Login() {
     try {
       await (asSuperAdmin ? signInPlatform : signIn)(email, password);
       const s = loadSession();
-      navigate(s?.mustChangePassword ? '/change-password' : s ? ROLE_HOME[s.role] : '/', { replace: true });
+      // Platform staff land on their role's own panel (Sales → the sales dashboard, Support → the queue…).
+      const home = s?.role === 'super_admin'
+        ? await api.get<{ role?: { home?: string } }>('/platform/me').then((m) => m.role?.home ?? ROLE_HOME.super_admin).catch(() => ROLE_HOME.super_admin)
+        : null;
+      navigate(s?.mustChangePassword ? '/change-password' : home ?? (s ? ROLE_HOME[s.role] : '/'), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {

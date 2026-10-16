@@ -14,13 +14,14 @@ import { activityLabel } from '../../lib/platformActivity';
 interface Summary {
   networks: { total: number; active: number; suspended: number; suspended_for_billing: number; deleted: number; new_this_month: number };
   subscriptions: { trialing: number; active: number; past_due: number; without_plan: number };
-  mrr: { currency: string; amount: string; subscriptions: number }[];
-  billing: InvoiceSummaryRow[];
+  /** null: the role may not see revenue / billing. */
+  mrr: { currency: string; amount: string; subscriptions: number }[] | null;
+  billing: InvoiceSummaryRow[] | null;
   traffic: { clicks24h: number; conversions24h: number };
   trialsEndingSoon: { network_id: string; network_name: string; plan_name: string; trial_ends_at: string }[];
-  overdueInvoices: { id: string; number: string; network_id: string; network_name: string; total: string; currency: string; due_at: string; suspend_at: string; network_status: string | null; network_suspended_reason: string | null }[];
+  overdueInvoices: { id: string; number: string; network_id: string; network_name: string; total: string; currency: string; due_at: string; suspend_at: string; network_status: string | null; network_suspended_reason: string | null }[] | null;
   limitAlerts: { network_id: string; network_name: string; type: string; title: string; created_at: string }[];
-  recentActivity: { id: string; created_at: string; action: string; network_id: string | null; network_name: string | null; admin_email: string | null; in_support_session: boolean }[];
+  recentActivity: { id: string; created_at: string; action: string; network_id: string | null; network_name: string | null; admin_email: string | null; in_support_session: boolean }[] | null;
 }
 
 const int = (n: number) => n.toLocaleString();
@@ -58,7 +59,8 @@ export default function Overview() {
   const { data: s, loading, error } = useQuery<Summary>('/platform/summary');
   if (loading) return <StateBlock><Spinner /></StateBlock>;
   if (error || !s) return <StateBlock>{error ?? 'Could not load the overview'}</StateBlock>;
-  const overdueCount = s.billing.reduce((n, b) => n + b.overdue_count, 0);
+  const billing = s.billing ?? [];
+  const overdueCount = billing.reduce((n, b) => n + b.overdue_count, 0);
 
   return (
     <>
@@ -72,15 +74,19 @@ export default function Overview() {
           hint={<>{int(s.subscriptions.trialing)} in trial · {int(s.subscriptions.past_due)} past due · {int(s.subscriptions.without_plan)} without a plan</>}>
           {int(s.subscriptions.active + s.subscriptions.past_due)} <span className="text-base font-normal text-fg-secondary">paying</span>
         </Tile>
-        <Tile label="MRR" hint="Monthly recurring revenue — paying plans, a yearly price as a twelfth">
-          <PerCurrency rows={s.mrr} render={(m) => money(m.amount, m.currency)} none="None yet" />
-        </Tile>
-        <Tile label="Overdue" to="/admin/billing" hint={`${int(overdueCount)} invoice(s) past their due date`}>
-          <PerCurrency rows={s.billing.filter((b) => b.overdue_count > 0)} render={(b) => <span className="text-danger-text">{money(b.overdue_total, b.currency)}</span>} none="Nothing overdue" />
-        </Tile>
-        <Tile label="Collected this month" to="/admin/billing" hint="Payments recorded this month">
-          <PerCurrency rows={s.billing.filter((b) => Number(b.collected_this_month) > 0)} render={(b) => money(b.collected_this_month, b.currency)} none="None yet" />
-        </Tile>
+        {s.mrr && (
+          <Tile label="MRR" to="/admin/revenue" hint="Monthly recurring revenue — paying plans, a yearly price as a twelfth">
+            <PerCurrency rows={s.mrr} render={(m) => money(m.amount, m.currency)} none="None yet" />
+          </Tile>
+        )}
+        {s.billing && <>
+          <Tile label="Overdue" to="/admin/billing" hint={`${int(overdueCount)} invoice(s) past their due date`}>
+            <PerCurrency rows={billing.filter((b) => b.overdue_count > 0)} render={(b) => <span className="text-danger-text">{money(b.overdue_total, b.currency)}</span>} none="Nothing overdue" />
+          </Tile>
+          <Tile label="Collected this month" to="/admin/billing" hint="Payments recorded this month">
+            <PerCurrency rows={billing.filter((b) => Number(b.collected_this_month) > 0)} render={(b) => money(b.collected_this_month, b.currency)} none="None yet" />
+          </Tile>
+        </>}
         <Tile label="Traffic (24h)" hint="Platform-wide clicks and conversions">
           {int(s.traffic.clicks24h)} <span className="text-base font-normal text-fg-secondary">clicks · {int(s.traffic.conversions24h)} conversions</span>
         </Tile>
@@ -88,7 +94,7 @@ export default function Overview() {
 
       <h2 className="mb-3 mt-8 text-small font-semibold uppercase tracking-wide text-fg-secondary">Needs attention</h2>
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Panel title="Overdue invoices" to="/admin/billing">
+        {s.overdueInvoices && <Panel title="Overdue invoices" to="/admin/billing">
           {s.overdueInvoices.length === 0 ? <Empty>Nothing overdue.</Empty> : s.overdueInvoices.map((i) => (
             <div key={i.id} className="flex items-start justify-between gap-3 px-4 py-2.5 text-small">
               <div className="min-w-0">
@@ -103,7 +109,7 @@ export default function Overview() {
               </div>
             </div>
           ))}
-        </Panel>
+        </Panel>}
         <Panel title="Trials ending this week">
           {s.trialsEndingSoon.length === 0 ? <Empty>No trial ends in the next 7 days.</Empty> : s.trialsEndingSoon.map((t) => (
             <div key={t.network_id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-small">
@@ -122,7 +128,7 @@ export default function Overview() {
         </Panel>
       </div>
 
-      <div className="mt-4">
+      {s.recentActivity && <div className="mt-4">
         <Panel title="Recent Super Admin activity" to="/admin/activity">
           {s.recentActivity.length === 0 ? <Empty>Nothing yet.</Empty> : s.recentActivity.map((a) => (
             <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-small">
@@ -135,7 +141,7 @@ export default function Overview() {
             </div>
           ))}
         </Panel>
-      </div>
+      </div>}
     </>
   );
 }

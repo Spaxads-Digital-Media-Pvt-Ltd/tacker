@@ -8,6 +8,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { usePlatformMe } from '../../lib/platformMe';
 import type { BillingSettings } from '../../lib/platformBilling';
 
 export default function Settings() {
@@ -16,6 +17,7 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
   useEffect(() => { if (current.data) setF(current.data); }, [current.data]);
   const m = useMutation((b: BillingSettings) => api.put<BillingSettings>('/platform/settings/billing', b));
+  const canEdit = usePlatformMe().can('settings', 'full');
 
   if (current.loading || (!f && !current.error)) return <StateBlock><Spinner /></StateBlock>;
   if (current.error || !f) return <StateBlock>{current.error ?? 'Could not load the settings'}</StateBlock>;
@@ -32,6 +34,7 @@ export default function Settings() {
     <>
       <PageHeader title="Settings" subtitle="How the platform bills its tenant networks." />
       <form onSubmit={submit} className="mx-auto max-w-3xl space-y-4">
+        <fieldset disabled={!canEdit} className="space-y-4">
         {m.error && <p className="text-small text-danger-text">{m.error}</p>}
         {saved && <p className="text-small text-success-text">Saved — applies to invoices issued from now on (and suspensions from the next billing run).</p>}
 
@@ -82,7 +85,8 @@ export default function Settings() {
             placeholder={'Bank transfer to …\nAccount: …  IFSC / SWIFT: …\nPlease quote the invoice number.'} />
         </div>
 
-        <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={m.busy}>{m.busy ? 'Saving…' : 'Save settings'}</button></div>
+        {canEdit && <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={m.busy}>{m.busy ? 'Saving…' : 'Save settings'}</button></div>}
+        </fieldset>
       </form>
     </>
   );

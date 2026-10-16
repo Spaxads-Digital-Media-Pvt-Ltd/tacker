@@ -4,8 +4,9 @@ import type { Role } from '../../auth/roles';
 import { Icon } from './icons';
 import * as Lucide from 'lucide-react';
 
-export interface NavLeaf { to: string; label: string; icon?: keyof typeof Icon }
-export interface FlyoutItem { label: string; description: string; to?: string; icon?: React.ElementType }
+/** `perm` (Super Admin only): the platform section a role must be able to read to see the item. */
+export interface NavLeaf { to: string; label: string; icon?: keyof typeof Icon; perm?: string }
+export interface FlyoutItem { label: string; description: string; to?: string; icon?: React.ElementType; perm?: string }
 export interface NavEntry {
   label: string;
   icon: keyof typeof Icon;
@@ -13,6 +14,7 @@ export interface NavEntry {
   children?: NavLeaf[];     // expandable group (drives the in-page SectionTabs bar)
   flyout?: FlyoutItem[];    // Everflow-style rail flyout — opens on click instead of navigating directly
   group?: string;           // section header shown above this item in the expanded rail (undefined = ungrouped)
+  perm?: string;            // Super Admin: the platform section a role must read to see it (flyouts: per item)
 }
 
 /**
@@ -26,15 +28,28 @@ export interface NavEntry {
  * same convention used everywhere else in this app for backend-less features.
  */
 export const NAV: Record<Role, NavEntry[]> = {
+  // The platform team's console — each item shows only for roles that may read its section (lib/platformMe).
   super_admin: [
-    { to: '/admin', label: 'Overview', icon: 'dashboard' },
-    { to: '/admin/networks', label: 'Networks', icon: 'building' },
-    { to: '/admin/plans', label: 'Plans', icon: 'wallet' },
-    { to: '/admin/billing', label: 'Billing', icon: 'receipt' },
-    { to: '/admin/usage', label: 'Usage', icon: 'chart' },
-    { to: '/admin/activity', label: 'Activity', icon: 'pulse' },
-    { to: '/admin/team', label: 'Team', icon: 'users' },
-    { to: '/admin/settings', label: 'Settings', icon: 'settings' },
+    { to: '/admin', label: 'Overview', icon: 'dashboard', perm: 'dashboard' },
+    {
+      group: 'Customers', label: 'Networks', icon: 'building', flyout: [
+        { label: 'All networks', description: 'Every tenant network — search, open, manage', to: '/admin/networks', icon: Lucide.Building2, perm: 'networks' },
+        { label: 'Usage', description: 'Each network against its plan limits', to: '/admin/usage', icon: Lucide.Gauge, perm: 'networks' },
+      ],
+    },
+    {
+      group: 'Money', label: 'Billing', icon: 'receipt', flyout: [
+        { label: 'Invoices', description: 'Record payments, give more time, void', to: '/admin/billing', icon: Lucide.Receipt, perm: 'billing' },
+        { label: 'Plans', description: 'Prices, trials and limits', to: '/admin/plans', icon: Lucide.Layers, perm: 'plans' },
+      ],
+    },
+    {
+      group: 'Platform', label: 'Platform', icon: 'settings', flyout: [
+        { label: 'Activity', description: 'What the team and billing did', to: '/admin/activity', icon: Lucide.History, perm: 'activity' },
+        { label: 'Team & roles', description: 'Staff accounts and what each role may do', to: '/admin/team', icon: Lucide.Users, perm: 'team' },
+        { label: 'Settings', description: 'Billing and platform settings', to: '/admin/settings', icon: Lucide.Settings, perm: 'settings' },
+      ],
+    },
   ],
   admin: [
     { to: '/app', label: 'Dashboard', icon: 'dashboard' },
