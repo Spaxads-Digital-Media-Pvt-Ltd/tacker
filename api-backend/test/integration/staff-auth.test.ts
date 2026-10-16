@@ -23,6 +23,7 @@ interface FakeUser {
 const fake = vi.hoisted(() => ({
   users: new Map<string, unknown>(),
   tokens: new Map<string, string>(),
+  refresh: new Map<string, string>(), // refresh token → user id (live sessions)
   signOuts: [] as { jwt: string; scope?: string }[],
   mails: [] as { networkId: string; to: string[]; subject: string; html: string }[],
   smtp: true,
@@ -45,10 +46,14 @@ vi.mock('../../src/lib/supabase.js', () => {
   const all = () => [...fake.users.values()] as FakeUser[];
   const byEmail = (email: string) => all().find((u) => u.email === email.toLowerCase());
   const pub = (u: FakeUser) => ({ id: u.id, email: u.email, app_metadata: { ...u.app_metadata }, user_metadata: { ...u.user_metadata }, last_sign_in_at: u.last_sign_in_at });
-  const sessionFor = (u: FakeUser) => ({
-    access_token: jwt.sign({ iss, aud: 'authenticated', sub: u.id, email: u.email, app_metadata: u.app_metadata }, secret, { expiresIn: '1h' }),
-    refresh_token: `rt-${randomBytes(6).toString('hex')}`, expires_at: Math.floor(Date.now() / 1000) + 3600,
-  });
+  const sessionFor = (u: FakeUser) => {
+    const refresh_token = `rt-${randomBytes(6).toString('hex')}`;
+    fake.refresh.set(refresh_token, u.id);
+    return {
+      access_token: jwt.sign({ iss, aud: 'authenticated', sub: u.id, email: u.email, app_metadata: u.app_metadata }, secret, { expiresIn: '1h' }),
+      refresh_token, expires_at: Math.floor(Date.now() / 1000) + 3600,
+    };
+  };
   const admin = {
     createUser: async (a: { email: string; password: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }) => {
       if (byEmail(a.email)) return { data: { user: null }, error: { code: 'email_exists', message: 'A user with this email address has already been registered', status: 422 } };
@@ -63,7 +68,11 @@ vi.mock('../../src/lib/supabase.js', () => {
     updateUserById: async (id: string, attrs: { password?: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown>; ban_duration?: string; email?: string }) => {
       const u = fake.users.get(id) as FakeUser | undefined;
       if (!u) return { data: { user: null }, error: { status: 404, code: 'user_not_found', message: 'User not found' } };
-      if (attrs.password) u.password = attrs.password;
+      if (attrs.password) {
+        u.password = attrs.password;
+        // As GoTrue: a password set through the admin API signs the login out of every session.
+        for (const [rt, uid] of fake.refresh) if (uid === id) fake.refresh.delete(rt);
+      }
       if (attrs.app_metadata) u.app_metadata = { ...u.app_metadata, ...attrs.app_metadata }; // GoTrue merges
       if (attrs.user_metadata) u.user_metadata = { ...u.user_metadata, ...attrs.user_metadata };
       if (attrs.ban_duration) u.banned = attrs.ban_duration !== 'none';
@@ -86,6 +95,13 @@ vi.mock('../../src/lib/supabase.js', () => {
       const u = byEmail(a.email);
       if (!u || u.password !== a.password || u.banned) return { data: { session: null, user: null }, error: { message: 'Invalid login credentials', status: 400 } };
       u.last_sign_in_at = new Date().toISOString();
+      return { data: { session: sessionFor(u), user: pub(u) }, error: null };
+    },
+    refreshSession: async (a: { refresh_token: string }) => {
+      const id = fake.refresh.get(a.refresh_token);
+      const u = id ? fake.users.get(id) as FakeUser | undefined : undefined;
+      if (!u) return { data: { session: null, user: null }, error: { message: 'Invalid Refresh Token: Refresh Token Not Found', status: 400 } };
+      fake.refresh.delete(a.refresh_token); // rotated
       return { data: { session: sessionFor(u), user: pub(u) }, error: null };
     },
   };
@@ -130,6 +146,9 @@ d('signing in for real: invites, first-login password, resets (live DB, fake Sup
     for (let t = 0; t < ms; t += 50) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 50)); }
     return false;
   };
+  /** The refresh cookie a response set (`tracker_rt=…`), to send back as a Cookie header. */
+  const refreshCookieOf = (res: { headers: Record<string, unknown> }) =>
+    ((res.headers['set-cookie'] as string[] | undefined) ?? []).find((c) => c.startsWith('tracker_rt='))?.split(';')[0] ?? '';
   const statusOf = async (id: string) => (await query<{ status: string }>('SELECT status FROM users WHERE id = $1', [id])).rows[0]?.status;
 
   beforeAll(async () => {
@@ -165,7 +184,19 @@ d('signing in for real: invites, first-login password, resets (live DB, fake Sup
     expect(blocked.status).toBe(403);
     expect(blocked.body.error.details).toEqual({ reason: 'password_change_required' });
     expect((await request(dash).get('/api/me').set(t1)).status).toBe(200);
-    expect((await request(dash).patch('/api/me/password').set(t1).send({ password: NEW_PASSWORD })).status).toBe(200);
+    const signedInCookie = refreshCookieOf(first);
+    expect(signedInCookie).not.toBe('');
+    const changed = await request(dash).patch('/api/me/password').set(t1).send({ password: NEW_PASSWORD });
+    expect(changed.status).toBe(200);
+
+    // Supabase ends every session when the password changes: the sign-in's refresh cookie is dead —
+    // so the answer is a fresh session (new token + refresh cookie) that no longer must change it.
+    expect(changed.body.data.identity).toMatchObject({ kind: 'admin', mustChangePassword: false });
+    expect((await request(dash).get('/api/offers').set(bearer(changed.body.data.accessToken as string))).status).toBe(200);
+    expect((await request(dash).post('/api/auth/refresh').set('Cookie', signedInCookie)).status).toBe(401);
+    const refreshed = await request(dash).post('/api/auth/refresh').set('Cookie', refreshCookieOf(changed));
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.data.identity.mustChangePassword).toBe(false);
 
     expect((await login(address, temp)).status).toBe(401); // the temporary password is gone
     const second = await login(address, NEW_PASSWORD);
@@ -270,7 +301,10 @@ d('signing in for real: invites, first-login password, resets (live DB, fake Sup
     expect(first.body.data.identity).toMatchObject({ kind: 'publisher', mustChangePassword: true });
     const t = bearer(first.body.data.accessToken as string);
     expect((await request(dash).get('/api/portal/publisher/summary').set(t)).status).toBe(403);
-    expect((await request(dash).patch('/api/me/password').set(t).send({ password: NEW_PASSWORD })).status).toBe(200);
+    const changed = await request(dash).patch('/api/me/password').set(t).send({ password: NEW_PASSWORD });
+    expect(changed.status).toBe(200);
+    expect(changed.body.data.identity).toMatchObject({ kind: 'publisher', mustChangePassword: false });
+    expect((await request(dash).get('/api/portal/publisher/summary').set(bearer(changed.body.data.accessToken as string))).status).toBe(200);
     const second = await login(address, NEW_PASSWORD);
     expect((await request(dash).get('/api/portal/publisher/summary').set(bearer(second.body.data.accessToken as string))).status).toBe(200);
 

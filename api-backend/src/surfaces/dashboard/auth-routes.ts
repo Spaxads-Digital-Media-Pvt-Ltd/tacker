@@ -82,7 +82,7 @@ function identityFrom(user: User, fallbackEmail: string) {
  };
 }
 
-function respondWithSession(res: Response, session: Session, user: User, fallbackEmail: string): void {
+export function respondWithSession(res: Response, session: Session, user: User, fallbackEmail: string): void {
  setRefreshCookie(res, session.refresh_token);
  sendOk(res, {
  accessToken: session.access_token,

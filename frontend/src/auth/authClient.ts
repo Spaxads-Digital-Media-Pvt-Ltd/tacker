@@ -82,19 +82,27 @@ export const requestPasswordReset = (email: string): Promise<void> => authPost('
 /** Redeem the emailed link's token with the new password. */
 export const resetPassword = (token: string, password: string): Promise<void> => authPost('/api/auth/reset-password', { token, password });
 
+/** changeInitialPassword's error code when the password IS saved but this sign-in is over — sign in with it. */
+export const PASSWORD_SAVED_SIGN_IN_AGAIN = 'password_saved_sign_in_again';
+
 /**
- * First sign-in with a temporary password (O1): set the new password, then trade the refresh cookie
- * for a token that no longer carries "must change password".
+ * First sign-in with a temporary password (O1): set the new password. Supabase ends every session of
+ * a login whose password changes (the refresh cookie dies with it), so the API signs in again with the
+ * new password and answers with that session — no longer "must change password" — which is saved here.
+ * Without one (an older API), the refresh cookie is tried; if that's gone too, sign in again (401).
  */
 export async function changeInitialPassword(password: string): Promise<void> {
   const token = loadSession()?.token;
+  if (!token) throw new ApiError('unauthorized', 'You are no longer signed in — sign in again.', 401);
   const res = await authFetch('/api/me/password', {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     credentials: 'include', body: JSON.stringify({ password }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || json.ok === false) throw authError(json, res);
-  if (!(await refreshToken())) throw new ApiError('unauthorized', 'Your password was updated — sign in again with it.', 401);
+  const fresh = json.data as Partial<AuthPayload> | undefined;
+  if (fresh?.accessToken && fresh.identity) { saveSession(toSession(fresh as AuthPayload)); return; }
+  if (!(await refreshToken())) throw new ApiError(PASSWORD_SAVED_SIGN_IN_AGAIN, 'Your password was updated — sign in again with it.', 401);
   markPasswordChanged();
 }
 

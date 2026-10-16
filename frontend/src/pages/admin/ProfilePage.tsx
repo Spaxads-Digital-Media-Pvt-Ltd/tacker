@@ -11,7 +11,7 @@ import { ROLE_LABELS } from '../../auth/roles';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { imageAccept, imageTypesText, uploadImage } from '../../lib/imageUpload';
-import { loadSession, saveSession } from '../../auth/session';
+import { loadSession, saveSession, updateToken } from '../../auth/session';
 import { PageHeader, Badge, Modal, Field, Tabs } from '../../shared-components/primitives/ui';
 import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
 
@@ -506,12 +506,17 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [confirm, setConfirm] = useState('');
   const [done, setDone] = useState(false);
   const [mismatch, setMismatch] = useState(false);
-  const { run, busy, error } = useMutation((password: string) => api.patch('/api/me/password', { password }));
+  const { run, busy, error } = useMutation((password: string) =>
+    api.patch<{ accessToken?: string; expiresAt?: number | null }>('/api/me/password', { password }));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (pw !== confirm) { setMismatch(true); return; }
     setMismatch(false);
-    if (await run(pw)) { setDone(true); setTimeout(onClose, 1200); }
+    const res = await run(pw);
+    if (!res) return;
+    // Supabase signed this login out everywhere; the answer is this tab's new session (its refresh cookie is set).
+    if (res.accessToken) updateToken(res.accessToken, res.expiresAt ?? null);
+    setDone(true); setTimeout(onClose, 1200);
   };
   return (
     <Modal open onClose={onClose} title="Change password">

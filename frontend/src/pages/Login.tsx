@@ -31,6 +31,7 @@ const ENDED: Record<string, string> = {
   network_suspended: 'Your network has been suspended, so you have been signed out. Contact the platform administrator.',
   network_deleted: 'Your network has been deleted, so you have been signed out. It can still be restored for a while — contact the platform administrator if this is a mistake.',
   network_purged: 'Your network no longer exists — it was deleted and its data removed.',
+  session_expired: 'Your sign-in ended. Please sign in again.',
 };
 
 export default function Login() {

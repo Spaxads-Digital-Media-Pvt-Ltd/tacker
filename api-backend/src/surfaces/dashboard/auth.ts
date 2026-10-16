@@ -48,7 +48,7 @@ function bearer(req: Request): string | null {
  */
 export async function dashboardAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
  const token = bearer(req);
- if (!token) return next(unauthorized('Missing bearer token.'));
+ if (!token) return next(unauthorized('You are not signed in (the request had no sign-in token). Please sign in again.'));
 
  // Admin impersonation session (F-10): its own short-lived token and secret — the account's portal
  // identity plus the admin behind it (`impersonatedBy`). Everything else is a Supabase-issued token.

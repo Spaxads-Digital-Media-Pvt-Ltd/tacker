@@ -24,7 +24,9 @@ import { auditImpersonatedWrites } from '../../lib/audit.js';
 import { passwordSchema } from '../../lib/auth/password-policy.js';
 import { ownerIdOf } from '../../lib/db/from-request.js';
 import { apiKeyManagementRoutes } from './api-keys/routes.js';
-import { authRoutes } from './auth-routes.js';
+import { authRoutes, respondWithSession, LOGIN_TIMEOUT_MS } from './auth-routes.js';
+import { withTimeout } from '../../lib/timeout.js';
+import { logger } from '../../lib/logger.js';
 import { advertisersAdminRoutes, advertiserPortalRoutes } from './advertisers/routes.js';
 import { publishersAdminRoutes, publisherPortalRoutes } from './publishers/routes.js';
 import { offersAdminRoutes, offerPortalRoutes } from './offers/routes.js';
@@ -247,16 +249,30 @@ export function buildDashboardApp(): Express {
   }));
 
   // Change own password (Profile → Change password, and the first sign-in with an invite's temporary
-  // password: this also clears `must_change_password` — the SPA then refreshes its token, O1).
+  // password: this also clears `must_change_password`, O1). Supabase ends EVERY session of a login whose
+  // password changes (its refresh tokens are revoked), so the new password signs in again here and the
+  // answer is that fresh session — access token + refresh cookie, as from /api/auth/login — keeping this
+  // tab signed in. Should that sign-in fail, the change still stands: `{ ok: true }`, sign in again.
   authed.patch('/me/password', notWhileImpersonating(), validateBody(z.object({ password: passwordSchema })), asyncHandler(async (req, res) => {
     const userId = (req.identity as { userId?: string }).userId;
     if (!userId) return sendOk(res, { ok: false });
-    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(userId, {
-      password: (req.body as { password: string }).password,
+    const { password } = req.body as { password: string };
+    const sb = getSupabaseAdmin();
+    const { data: updated, error } = await sb.auth.admin.updateUserById(userId, {
+      password,
       app_metadata: { must_change_password: false },
     });
     if (error) throw badRequest(error.message);
-    sendOk(res, { ok: true });
+    const email = updated.user?.email;
+    const fresh = email
+      ? await withTimeout(sb.auth.signInWithPassword({ email, password }), LOGIN_TIMEOUT_MS, 'Sign-in with the new password timed out.')
+        .catch((err: unknown) => ({ data: { session: null, user: null }, error: err }))
+      : null;
+    if (!email || !fresh?.data.session || !fresh.data.user) {
+      logger.warn({ userId, err: fresh?.error }, 'password changed, but signing in with it failed — the user signs in again');
+      return sendOk(res, { ok: true });
+    }
+    respondWithSession(res, fresh.data.session, fresh.data.user, email);
   }));
 
   // Change own login email (auth + users row).

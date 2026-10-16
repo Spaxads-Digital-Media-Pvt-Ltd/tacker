@@ -25,7 +25,7 @@ interface PlatformAdminRow {
 export function platformAdminAuth(req: Request, _res: Response, next: NextFunction): void {
  const h = req.header('authorization');
  const token = h?.startsWith('Bearer ') ? h.slice(7).trim() : null;
- if (!token) return next(unauthorized('Missing bearer token.'));
+ if (!token) return next(unauthorized('You are not signed in (the request had no sign-in token). Please sign in again.'));
 
  verifyPlatformAdminToken(token)
  .then(async (payload) => {

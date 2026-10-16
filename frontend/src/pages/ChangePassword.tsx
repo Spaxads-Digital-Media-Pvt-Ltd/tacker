@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_HOME } from '../auth/roles';
-import { changeInitialPassword } from '../auth/authClient';
+import { changeInitialPassword, PASSWORD_SAVED_SIGN_IN_AGAIN } from '../auth/authClient';
+import { ApiError } from '../lib/api';
 import { PASSWORD_HINT, passwordProblem } from '../auth/passwordPolicy';
 import { AuthCard, AuthError } from '../shared-components/primitives/AuthCard';
 
@@ -32,6 +33,13 @@ export default function ChangePassword() {
       reloadSession();
       navigate(ROLE_HOME[session.role], { replace: true });
     } catch (err) {
+      // This sign-in is over (before or after the password was saved): never retry without one —
+      // back to the login page, which says to use the new password when it was saved.
+      if (err instanceof ApiError && err.status === 401) {
+        await signOut();
+        navigate(err.code === PASSWORD_SAVED_SIGN_IN_AGAIN ? '/login?reset=done' : '/login?ended=session_expired', { replace: true });
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Could not update the password');
       setBusy(false);
     }

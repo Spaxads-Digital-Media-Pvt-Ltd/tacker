@@ -20,7 +20,7 @@
 | PATCH | `/api/me/theme` | Set accent theme | Dashboard JWT | `{ theme: 'A'-'F' }` |
 | POST | `/api/me/photo` | Profile photo upload (O12): the raw image as the body with its Content-Type — PNG, JPEG, WebP or GIF, ≤ 2 MB, no SVG — goes to the public `network-images` bucket (`<network>/photo/<content hash>`) → `201 { url }` (other type → 400, too large → 413, storage not configured → 400 with that message; 403 while impersonating). Send the `url` as `photoUrl` | Dashboard JWT | `{ url }` |
 | PATCH | `/api/me/profile` | Update profile fields. `photoUrl` = an uploaded photo's http(s) URL (≤ 2000) or null — a new `data:` URI → 422 (an unchanged legacy one passes until `npm run images:backfill` moves it) | Dashboard JWT | `{ ok, ...fields }` |
-| PATCH | `/api/me/password` | Change own password (403 while impersonating); also clears `must_change_password` — the SPA then refreshes its token. Supabase errors → 400 | Dashboard JWT | `{ ok }` |
+| PATCH | `/api/me/password` | Change own password (403 while impersonating); also clears `must_change_password`. Supabase revokes every session of the login on a password change, so the answer is a **fresh session** — `{ accessToken, expiresAt, identity }` + refresh cookie, as `/api/auth/login` (only `{ ok: true }` if that sign-in fails: the password is saved, sign in again). Supabase errors → 400 | Dashboard JWT | `{ password }` |
 | PATCH | `/api/me/email` | Change own email (403 while impersonating) | Dashboard JWT | `{ ok, email }` |
 | GET | `/api/me/logins` | Own login history | Dashboard JWT | Login events array |
 | POST | `/api/me/anonymize` | GDPR anonymize (403 while impersonating) | Dashboard JWT | `{ ok }` |
