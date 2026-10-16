@@ -28,6 +28,9 @@ const ENDED: Record<string, string> = {
   account_inactive: 'Your account was set to inactive, so you have been signed out. Contact the network to re-enable it.',
   account_disabled: 'Your team account was disabled, so you have been signed out. Ask an admin of your network to re-enable it.',
   account_deleted: 'Your account no longer exists, so you have been signed out.',
+  network_suspended: 'Your network has been suspended, so you have been signed out. Contact the platform administrator.',
+  network_deleted: 'Your network has been deleted, so you have been signed out. It can still be restored for a while — contact the platform administrator if this is a mistake.',
+  network_purged: 'Your network no longer exists — it was deleted and its data removed.',
 };
 
 export default function Login() {

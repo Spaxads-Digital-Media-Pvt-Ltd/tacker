@@ -131,6 +131,9 @@ export async function loginPlatform(email: string, password: string): Promise<Se
  * trigger a single refresh.
  */
 let inflight: Promise<string | null> | null = null;
+/** Why the last refresh was refused, when the API said (e.g. `network_deleted`) — the login page explains it. */
+let refusedReason: string | null = null;
+export const lastRefreshRefusal = (): string | null => refusedReason;
 export function refreshToken(): Promise<string | null> {
   if (!inflight) {
     inflight = (async () => {
@@ -138,9 +141,12 @@ export function refreshToken(): Promise<string | null> {
         const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.ok === false) {
+          const reason = body?.error?.details?.reason;
+          refusedReason = typeof reason === 'string' ? reason : null;
           clearSession();
           return null;
         }
+        refusedReason = null;
         const p = body.data as AuthPayload;
         updateToken(p.accessToken, p.expiresAt);
         return p.accessToken;

@@ -29,8 +29,20 @@ const sb = vi.hoisted(() => {
       return { data: {}, error: null };
     },
   };
+  // Sign-in / refresh (D3): a known email signs in (any password); a refresh token is the user's id.
+  const signedIn = (u: FakeUser) => ({ data: { session: { access_token: 'x', refresh_token: u.id, expires_at: 0 }, user: { id: u.id, email: u.email, app_metadata: u.app_metadata, user_metadata: {} } }, error: null });
+  const auth = {
+    signInWithPassword: async ({ email }: { email: string }) => {
+      const u = [...users.values()].find((x) => x.email === email);
+      return u ? signedIn(u) : { data: { session: null, user: null }, error: { message: 'Invalid login credentials' } };
+    },
+    refreshSession: async ({ refresh_token }: { refresh_token: string }) => {
+      const u = users.get(refresh_token);
+      return u ? signedIn(u) : { data: { session: null, user: null }, error: { message: 'Invalid Refresh Token' } };
+    },
+  };
   return {
-    users, state, admin,
+    users, state, admin, auth,
     add(networkId: string | null, email = `u-${crypto.randomUUID().slice(0, 8)}@example.com`): FakeUser {
       const u = { id: crypto.randomUUID(), email, app_metadata: networkId ? { network_id: networkId } : {} };
       users.set(u.id, u);
@@ -41,7 +53,7 @@ const sb = vi.hoisted(() => {
 vi.mock('../../src/lib/supabase.js', () => ({
   getSupabaseAdmin: () => {
     if (!sb.state.configured) throw new Error('Supabase admin client requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
-    return { auth: { admin: sb.admin } };
+    return { auth: { admin: sb.admin, ...sb.auth } };
   },
 }));
 
@@ -144,6 +156,11 @@ d('network lifecycle: soft delete, export, purge (live DB, fake Supabase)', () =
     const blockedDash = await dashboardOf(w);
     expect(blockedDash.status).toBe(403);
     expect(blockedDash.body.error.message).toMatch(/This network is deleted/);
+    // D3: it says so — with until when it can be restored — and the SPA ends the session on the reason.
+    expect(blockedDash.body.error.details).toEqual({ reason: 'network_deleted', deletedAt: del.body.data.deletedAt, purgeAfter: del.body.data.purgeAfter });
+    expect(blockedDash.body.error.message).toContain(`can still be restored until ${String(del.body.data.purgeAfter).slice(0, 10)}`);
+    const listed = (await request(platform).get('/platform/networks?limit=200').set(pa)).body.data as { id: string; status: string; purge_after: string | null }[];
+    expect(listed.find((n) => n.id === w.fx.networkA)).toMatchObject({ status: 'deleted', purge_after: del.body.data.purgeAfter });
     expect((await apiOf(w)).status).toBe(403);
 
     expect({ offers: await count('offers', w.fx.networkA), clicks: await count('clicks', w.fx.networkA), conversions: await count('conversions', w.fx.networkA), ledger: await count('ledger_entries', w.fx.networkA) }).toEqual(before);
@@ -159,7 +176,9 @@ d('network lifecycle: soft delete, export, purge (live DB, fake Supabase)', () =
 
     expect((await request(platform).patch(`/platform/networks/${w.fx.networkA}`).set(pa).send({ status: 'suspended' })).status).toBe(200);
     expect((await clickVia(w)).statusCode).toBe(404);
-    expect((await dashboardOf(w)).body.error.message).toMatch(/This network is suspended/);
+    const suspended = await dashboardOf(w);
+    expect(suspended.body.error.message).toMatch(/This network is suspended/);
+    expect(suspended.body.error.details).toEqual({ reason: 'network_suspended' });
     await request(platform).patch(`/platform/networks/${w.fx.networkA}`).set(pa).send({ status: 'active' });
     // Another network was never affected.
     expect((await request(dash).get('/api/offers').set(bearer(operatorToken({ userId: randomUUID(), networkId: w.fx.networkB })))).status).toBe(200);
@@ -250,8 +269,59 @@ d('network lifecycle: soft delete, export, purge (live DB, fake Supabase)', () =
     expect(platformRows.rows.find((r) => r.action === 'network.purge')?.before).toMatchObject({ id: net, slug: w.slug });
 
     expect({ offers: await count('offers', w.fx.networkB), clicks: await count('clicks', w.fx.networkB) }).toEqual(otherBefore);
-    // Its old logins are refused outright now.
-    expect((await dashboardOf(w)).status).toBe(401);
+    // Its old logins are refused outright now — and told why.
+    const gone = await dashboardOf(w);
+    expect(gone.status).toBe(401);
+    expect(gone.body.error.details).toEqual({ reason: 'network_purged' });
+
+    // D3: the tombstone — who it was, when it went, by whom, how many ledger entries it left …
+    const tomb = (await request(platform).get('/platform/purged-networks').set(pa).expect(200)).body.data as Record<string, unknown>[];
+    expect(tomb.find((t) => t['id'] === net)).toMatchObject({
+      slug: w.slug, ledger_entries_retained: ledger, auth_users_deleted: 4, purged_by_email: expect.stringMatching(/@test\.local$/),
+      rows_deleted: { clicks: 3, conversions: 1, postbackLogs: 1 },
+    });
+    // … and its retained ledger as CSV, still downloadable.
+    const csv = await request(platform).get(`/platform/networks/${net}/ledger.csv`).set(pa).buffer(true).parse((r, cb) => {
+      let t = ''; r.setEncoding('utf8'); r.on('data', (c: string) => { t += c; }); r.on('end', () => cb(null, t));
+    });
+    expect(csv.status).toBe(200);
+    expect(csv.headers['content-type']).toMatch(/^text\/csv/);
+    const lines = String(csv.body).trim().split('\n');
+    expect(lines[0]).toBe('id,created_at,entry_type,direction,amount,currency,status,account_type,account_id,conversion_id');
+    expect(lines).toHaveLength(ledger + 1);
+    expect(lines[1]).toMatch(/,earning,credit,2\.0000,USD,approved,publisher,/);
+    expect((await request(platform).get(`/platform/networks/${randomUUID()}/ledger.csv`).set(pa)).status).toBe(404);
+  });
+
+  it('sign-in and session refresh say the network is deleted / suspended / gone (D3)', async () => {
+    const w = await world('signin');
+    const net = w.fx.networkA;
+    const user = sb.add(net, `signin-${randomUUID().slice(0, 8)}@example.com`);
+    user.app_metadata = { network_id: net, kind: 'admin', role: 'admin' };
+    const login = () => request(dash).post('/api/auth/login').send({ email: user.email, password: 'whatever-it-is' });
+    const refresh = () => request(dash).post('/api/auth/refresh').set('Cookie', `tracker_rt=${user.id}`);
+
+    await softDelete(net);
+    const del = await login();
+    expect(del.status).toBe(403);
+    expect(del.body.error.details.reason).toBe('network_deleted');
+    expect(del.body.error.message).toMatch(/This network is deleted — .* It can still be restored until \d{4}-\d{2}-\d{2}/);
+    const ref = await refresh();
+    expect(ref.status).toBe(403);
+    expect(ref.body.error.details.reason).toBe('network_deleted');
+    expect(String(ref.headers['set-cookie'] ?? '')).toMatch(/tracker_rt=;/); // the refresh cookie is cleared
+
+    await request(platform).patch(`/platform/networks/${net}`).set(pa).send({ status: 'suspended' });
+    expect((await login()).body.error.details.reason).toBe('network_suspended');
+
+    await request(platform).patch(`/platform/networks/${net}`).set(pa).send({ status: 'deleted' });
+    await backdate(net, 31);
+    expect((await purge(net, { confirm: w.slug, acknowledgeNoExport: true })).status).toBe(200);
+    const goneUser = sb.add(null, `gone-${randomUUID().slice(0, 8)}@example.com`); // a login left over elsewhere, naming the purged network
+    goneUser.app_metadata = { network_id: net, kind: 'admin', role: 'admin' };
+    const gone = await request(dash).post('/api/auth/login').send({ email: goneUser.email, password: 'whatever-it-is' });
+    expect(gone.status).toBe(401);
+    expect(gone.body.error.details.reason).toBe('network_purged');
   });
 
   it('a purge never leaves logins behind: Supabase not configured, or a login that cannot be deleted → 503 and nothing purged', async () => {

@@ -34,6 +34,7 @@ import { logger } from '../../lib/logger.js';
 import {
  sendPasswordReset, completePasswordReset, resetRequestLimited, resetRedeemLimited,
 } from '../../lib/auth/password-reset.js';
+import { networkAccessError } from '../../lib/networks/state.js';
 
 const REFRESH_COOKIE = 'tracker_rt';
 const COOKIE_PATH = '/api/auth';
@@ -135,6 +136,11 @@ export function authRoutes(): Router {
  const meta = (data.user.app_metadata ?? {}) as Record<string, unknown>;
  const umeta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
  const networkId = meta['network_id'] ? String(meta['network_id']) : null;
+ // A suspended, deleted or purged network: say so at sign-in (the right password still gets nowhere).
+ if (networkId) {
+ const refused = await networkAccessError(networkId);
+ if (refused) throw refused;
+ }
  if (networkId && meta['kind'] === 'admin') {
  // An invited team member's first sign-in: they're active from now on (O1).
  void query(`UPDATE users SET status = 'active' WHERE network_id = $1 AND auth_user_id = $2 AND status = 'invited'`, [networkId, data.user.id])
@@ -163,6 +169,15 @@ export function authRoutes(): Router {
  if (error || !data.session || !data.user) {
  res.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
  throw unauthorized('Session expired. Please sign in again.');
+ }
+ // The network was suspended / deleted / purged since sign-in: no new token, and the reason why.
+ const networkId = (data.user.app_metadata as Record<string, unknown> | undefined)?.['network_id'];
+ if (networkId) {
+ const refused = await networkAccessError(String(networkId));
+ if (refused) {
+ res.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
+ throw refused;
+ }
  }
  respondWithSession(res, data.session, data.user, data.user.email ?? '');
  }),

@@ -20,6 +20,7 @@ import { logger } from '../logger.js';
 import { networkTimeZone } from './network-zone.js';
 import { teamMembersByLogin, type TeamMember } from '../auth/team-members.js';
 import type { Dimension, Metric, ReportFilters, ReportRequest, ReportResult } from './types.js';
+import { csvCell } from '../csv.js';
 
 /** The report pages that save configurations (the SPA's `tracker.savedReports.<page>` keys). */
 export const SAVED_REPORT_PAGES = [
@@ -140,15 +141,6 @@ export function savedReportRequest(networkId: string, page: SavedReportPage, con
     ...(isUtcZone(tz) ? {} : { timeZone: tz }),
   };
 }
-
-/** One CSV cell — as the SPA's export (frontend lib/export.ts): text a spreadsheet would run as a
- *  formula (=, +, -, @, tab or CR first) gets a leading apostrophe, since partner / offer names are
- *  user-controlled; real numbers like "-5.0000" stay numeric. RFC 4180 quoting. */
-const csvCell = (v: unknown): string => {
-  let s = v == null ? '' : Array.isArray(v) ? v.join('|') : String(v);
-  if (/^[=+\-@\t\r]/.test(s) && !/^[-+]?\d+(\.\d+)?$/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
 
 const DIM_LABEL: Record<string, string> = { publisher: 'partner', smartLink: 'smart_link' };
 

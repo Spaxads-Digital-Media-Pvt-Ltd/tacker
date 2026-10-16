@@ -16,7 +16,7 @@ import { verifySupabaseJwt } from '../../lib/auth/verify-jwt.js';
 import {
  isImpersonationToken, verifyImpersonationToken, signImpersonationToken, impersonationConfigured,
 } from '../../lib/auth/impersonation-token.js';
-import { networkState, inactiveNetworkMessage } from '../../lib/networks/state.js';
+import { networkAccessError } from '../../lib/networks/state.js';
 import { staffState } from '../../lib/auth/staff-state.js';
 import {
  portalAccountStatus, portalAccessAllowed, inactiveAccountMessage, deletedAccountMessage,
@@ -104,13 +104,11 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  // dies on a `network_id` FK — reject them up front. A suspended or (soft-)deleted network (F-26)
  // has no dashboard or portal access either. Outside the try: a DB failure is a 500, not "invalid token".
  try {
- const state = await networkState(req.scope!.networkId);
- if (state !== 'active') {
+ const refused = await networkAccessError(req.scope!.networkId);
+ if (refused) {
  req.identity = undefined;
  req.scope = undefined;
- return next(state === null
- ? unauthorized('This login belongs to a network that no longer exists. Sign in with an account on an active network.')
- : forbidden(inactiveNetworkMessage(state)));
+ return next(refused);
  }
  // Team members: the users row decides — a disabled member is refused, and a role change applies
  // now (the token's role claim is only the fallback for a login with no users row).

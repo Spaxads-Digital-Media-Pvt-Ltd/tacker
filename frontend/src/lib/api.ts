@@ -7,7 +7,7 @@
  * refresh fails the session is cleared and the user is sent to login.
  */
 import { loadSession, clearSession, type Session } from '../auth/session';
-import { refreshToken, logout } from '../auth/authClient';
+import { refreshToken, logout, lastRefreshRefusal } from '../auth/authClient';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 const REQUEST_TIMEOUT = 30_000;
@@ -29,7 +29,7 @@ export class ApiError extends Error {
  * deleted, a team member disabled (the API tags them with `details.reason`). The session can't
  * recover, so it's ended (refresh cookie too) and the login page says why.
  */
-const ENDED_REASONS = new Set(['account_inactive', 'account_disabled', 'account_deleted']);
+const ENDED_REASONS = new Set(['account_inactive', 'account_disabled', 'account_deleted', 'network_suspended', 'network_deleted', 'network_purged']);
 let ending = false;
 function endSession(reason: string): void {
   if (ending) return;
@@ -88,7 +88,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       if (fresh) {
         res = await doFetch(path, init, fresh);
       } else {
-        if (!location.pathname.startsWith('/login')) location.href = '/login';
+        // A network that was suspended / deleted / purged refuses the refresh with its reason — say why.
+        const why = lastRefreshRefusal();
+        if (!location.pathname.startsWith('/login')) location.href = why && ENDED_REASONS.has(why) ? `/login?ended=${encodeURIComponent(why)}` : '/login';
         throw new ApiError('unauthorized', 'Session expired', 401);
       }
     }
@@ -133,6 +135,25 @@ export const api = {
   /** POST a raw file body (e.g. an image) with its own Content-Type. */
   upload: <T>(path: string, file: Blob) =>
     request<T>(path, { method: 'POST', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } }),
+  /** GET a file (an export, a CSV) and save it as `filename`. No time limit — a big export streams for a while. */
+  download: async (path: string, filename: string): Promise<void> => {
+    const token = loadSession()?.token ?? null;
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, { credentials: 'include', headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    } catch (e) {
+      throw new NetworkError('network', e instanceof Error ? e.message : 'Network error');
+    }
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Envelope<unknown>;
+      throw new ApiError(body.error?.code ?? 'unknown', body.error?.message ?? res.statusText, res.status, body.error?.details);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  },
 };
 
 /** Network-level error types so callers can distinguish them from HTTP errors. */

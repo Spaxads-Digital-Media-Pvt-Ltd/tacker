@@ -607,6 +607,18 @@ export interface NetworkRow {
   subscription_status: string | null;
   plan_code: string | null;
   created_at: string;
+  /** Soft delete (D3): when it was deleted, and from when it can be purged (until then: restorable). */
+  deleted_at?: string | null;
+  purge_after?: string | null;
+  /** Last full export (Super Admin › Export) — a purge wants one taken since the delete. */
+  exported_at?: string | null;
+}
+
+/** A purged network's tombstone (D3): who it was, when it went — its money ledger is kept. */
+export interface PurgedNetworkRow {
+  id: string; name: string; slug: string; default_currency: string | null;
+  created_at: string | null; deleted_at: string | null; exported_at: string | null; purged_at: string;
+  purged_by_email: string | null; ledger_entries_retained: number; auth_users_deleted: number;
 }
 
 export interface MarketplaceAdvertiser {

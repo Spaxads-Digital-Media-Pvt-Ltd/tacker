@@ -214,8 +214,13 @@ Network lifecycle (F-26):
  paused → PATCH active restores everything (no data was touched)
  → GET /platform/networks/:id/export (NDJSON snapshot, secrets redacted, exported_at)
  → after NETWORK_PURGE_GRACE_DAYS: POST /:id/purge { confirm: slug } → delete Supabase logins (all or
- nothing) → one transaction: clicks / conversions / postback_logs / own audit + logins rows, DELETE
- networks (cascade) — ledger_entries and platform audit rows stay
+ nothing) → one transaction: clicks / conversions / postback_logs / own audit + logins rows, the
+ purged_networks tombstone (D3), DELETE networks (cascade) — ledger_entries and platform audit rows
+ stay; the ledger stays downloadable (GET /platform/networks/:id/ledger.csv)
+ Its users: dashboard / sign-in / refresh refuse with a reason (network_suspended | network_deleted
+ with the restore deadline | network_purged) → the SPA signs them out to /login?ended=<reason>
+ Super Admin › Networks: Suspend / Activate, Delete, "Deleted … · can be restored until …", Restore,
+ Export, Purge (slug confirmation; export or waive), Purged networks + ledger CSV
 
 Usage metering (F-26, usage-meter queue, hourly):
  per active network: COUNT clicks / conversions / events for yesterday + today (UTC) → upsert

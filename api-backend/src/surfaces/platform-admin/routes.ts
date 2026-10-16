@@ -28,7 +28,8 @@ import {
  purgeNetworkSchema, type PurgeNetwork,
 } from './schemas.js';
 import { once } from 'node:events';
-import { softDeleteNetwork, exportNetwork, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
+import { softDeleteNetwork, exportNetwork, exportLedgerCsv, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
+import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { networkStateChanged } from '../../lib/networks/state.js';
 import { usageVsPlan } from '../../lib/usage/meter.js';
 
@@ -119,7 +120,9 @@ export function platformRoutes(): Router {
  [limit, offset],
  );
  const { rows: countRows } = await query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM networks`);
- sendOk(res, rows, { limit, offset, total: countRows[0]?.n ?? 0 });
+ // A deleted network says until when it can be restored (then the purge is possible) — D3.
+ sendOk(res, rows.map((n) => ({ ...n, purge_after: n['deleted_at'] ? purgeAfter(new Date(n['deleted_at'] as string)) : null })),
+ { limit, offset, total: countRows[0]?.n ?? 0 });
  }),
  );
 
@@ -250,12 +253,46 @@ export function platformRoutes(): Router {
  validateBody(purgeNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as PurgeNetwork;
- const { before, result } = await purgeNetwork(req.params.id!, b);
+ const { before, result } = await purgeNetwork(req.params.id!, { ...b, purgedBy: (req.identity as PlatformAdminIdentity | undefined)?.platformAdminId ?? null });
  await writePlatformAudit(req, null, {
  action: 'network.purge', entityType: 'network', entityId: req.params.id,
  before: { id: before.id, slug: before.slug, name: before.name, deletedAt: before.deleted_at, exportedAt: before.exported_at }, after: result,
  });
  sendOk(res, result);
+ }),
+ );
+
+ // Purged networks (D3): the tombstones — who the network was, when it was deleted and purged, by whom,
+ // and how many ledger entries it left (the ledger is kept; download it below).
+ r.get(
+ '/purged-networks',
+ validateQuery(paginationSchema),
+ asyncHandler(async (_req, res) => {
+ const { limit, offset } = res.locals.query as PaginationQuery;
+ const { rows } = await query(
+ `SELECT p.*, pa.email AS purged_by_email FROM purged_networks p LEFT JOIN platform_admins pa ON pa.id = p.purged_by
+ ORDER BY p.purged_at DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+ const { rows: countRows } = await query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM purged_networks`);
+ sendOk(res, rows, { limit, offset, total: countRows[0]?.n ?? 0 });
+ }),
+ );
+
+ // A network's money ledger as CSV — a live one, or a purged one (its ledger outlives the purge).
+ r.get(
+ '/networks/:id/ledger.csv',
+ asyncHandler(async (req, res) => {
+ const id = req.params.id!;
+ if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw notFound('Network not found');
+ const net = (await query<{ slug: string }>(
+ `SELECT slug FROM networks WHERE id = $1 UNION ALL SELECT slug FROM purged_networks WHERE id = $1 LIMIT 1`, [id])).rows[0];
+ if (!net) throw notFound('Network not found');
+ res.setHeader('content-type', 'text/csv; charset=utf-8');
+ res.setHeader('content-disposition', `attachment; filename="ledger-${net.slug}-${new Date().toISOString().slice(0, 10)}.csv"`);
+ const summary = await exportLedgerCsv(id, async (chunk) => {
+ if (!res.write(chunk)) await once(res, 'drain');
+ });
+ await writePlatformAudit(req, null, { action: 'network.ledger_export', entityType: 'network', entityId: id, after: summary });
+ res.end();
  }),
  );
 

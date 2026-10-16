@@ -10,7 +10,7 @@
 - Driver: `pg` (raw, no ORM)
 - Max connections: 10 (dev), 20 (prod)
 
-## Schema (83 Migrations)
+## Schema (84 Migrations)
 
 ### Core Tables
 
@@ -239,6 +239,7 @@ API keys for the Public REST API.
 | `usage_records` | Daily usage per network × metric (`clicks`, `conversions`, `events` — conversions with an event name — written hourly by the usage-meter worker; `api_calls`, `storage` reserved), unique (network, metric, period_date) — migration 074 added `events` (F-26) |
 | `saved_reports` | Report pages' saved configs per owner (`network_id`, `owner_user_id`, `page`, `name` unique together; `config` jsonb) + optional schedule: `schedule` (5-field cron, network zone), `range_preset`, `recipients` text[], `next_run_at` (due index), `last_run_at` / `last_run_status` (sent\|skipped\|failed) / `last_run_detail` (migration 073, F-24) |
 | `inbound_postback_logs` | Every inbound conversion request (postback / pixel / iframe / advertiser API — `source`) and what happened to it (migration 078): `outcome` (approved\|pending\|rejected = recorded, with `conversion_id`; duplicate\|click_not_found\|security_failed\|error = nothing recorded), `reason`, `click_id`, `transaction_id`, `event_name`, the click's `offer_id` / `publisher_id` / `advertiser_id`, `payout` / `revenue` / `currency` / `sale_amount`, `http_status`, `ip`, `user_agent`, `params` (secrets masked). Indexed (network, created_at), (network, click_id), (network, transaction_id). Pruned on the click retention window; FK-cascaded with the network (so exported / purged with it) |
+| `purged_networks` | Tombstone of a purged network (D3, migration 082; platform-level, no FK): id (= the ledger rows' network_id), name, slug, default_currency, created / deleted / exported / purged at, `purged_by` (platform admin), `ledger_entries_retained`, `auth_users_deleted`, `rows_deleted`. Written in the purge transaction |
 | `email_outbox` | Every queued email, one row per recipient (O11, migration 075): `event`, `recipient`, `subject`, `html` (enc:v1 while `sensitive` — invites / reset links — and wiped once sent), `attachments`, `status` queued\|sent\|failed, `attempts`, `last_error`, `sent_at`. Kept 90 days (retention) |
 | `partner_invoices` / `advertiser_invoices` (O8, migration 076) | Status adds `void` (+ `voided_at`, `voided_by`, `void_reason`); `deleted` only on rows soft-deleted before. The no-overlap exclusion ignores void + deleted. Trigger `invoice_paid_is_final`: a paid invoice's status can't change (no delete, no void) |
 | `communication_hub` | Communication hub config |
@@ -289,7 +290,7 @@ Indexes are defined within migration SQL files. Key indexes cover:
 
 ## Migrations
 - Tool: `node-pg-migrate` (SQL-based)
-- 83 migration files, timestamped `1700000000000_*.sql`
+- 84 migration files, timestamped `1700000000000_*.sql`
 - `1700000062000_partition-retention` is an intentional no-op: the original partitioned `clicks`/`conversions`/`postback_logs` without creating partitions and dropped the global unique keys (`click_id`, `conversion_id`, `(offer_id, transaction_id)`) that idempotency depends on. `1700000064000_unpartition-tracking-tables` converts any DB that ran the original back to regular tables (rows preserved). These three tables must stay non-partitioned; retention prunes them with bounded ctid deletes.
 - `1700000079000_multi-conversion` swaps the transaction-id key to `(offer_id, event_name, transaction_id)` and adds `offer_goals.duplicate_mode`; its down migration fails if two conversions share an offer + transaction id under different events (resolve those first).
 - Run: `npm run migrate` (up), `npm run migrate:down`

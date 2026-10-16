@@ -10,6 +10,8 @@
  * within 15 s.
  */
 import { query } from '../db/pool.js';
+import { env } from '../../config/env.js';
+import { AppError } from '../http/errors.js';
 
 export type NetworkState = 'active' | 'suspended' | 'deleted';
 
@@ -40,3 +42,29 @@ export async function networkStateChanged(networkId: string): Promise<void> {
 /** The 403 message for a network that isn't active. */
 export const inactiveNetworkMessage = (state: Exclude<NetworkState, 'active'>): string =>
   `This network is ${state === 'deleted' ? 'deleted' : 'suspended'} — tracking, the dashboard and the API are off. Contact the platform administrator.`;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Why a network's logins are refused, or null when it is active — one answer for the dashboard / portal
+ * auth, sign-in and session refresh, each with a `reason` the SPA ends the session on and explains:
+ * - `network_suspended` (403);
+ * - `network_deleted` (403) — soft-deleted: restorable until `purgeAfter` (the grace period), then the
+ *   platform administrator can purge it for good;
+ * - `network_purged` (401) — gone: its logins' tokens still name it, but nothing is left behind them.
+ */
+export async function networkAccessError(networkId: string): Promise<AppError | null> {
+  const state = await networkState(networkId);
+  if (state === 'active') return null;
+  if (state === null) {
+    return new AppError('unauthorized', 'This login belongs to a network that no longer exists — it was deleted and its data removed. Sign in with an account on an active network.',
+      { reason: 'network_purged' });
+  }
+  if (state === 'suspended') return new AppError('forbidden', inactiveNetworkMessage('suspended'), { reason: 'network_suspended' });
+  const { rows } = await query<{ deleted_at: Date | null }>('SELECT deleted_at FROM networks WHERE id = $1', [networkId]);
+  const deletedAt = rows[0]?.deleted_at ?? null;
+  const purgeAfter = deletedAt ? new Date(deletedAt.getTime() + env.NETWORK_PURGE_GRACE_DAYS * DAY_MS) : null;
+  return new AppError('forbidden',
+    `This network is deleted — tracking, the dashboard and the API are off.${purgeAfter ? ` It can still be restored until ${purgeAfter.toISOString().slice(0, 10)}, after which it may be removed for good.` : ''} Contact the platform administrator.`,
+    { reason: 'network_deleted', deletedAt: deletedAt?.toISOString() ?? null, purgeAfter: purgeAfter?.toISOString() ?? null });
+}

@@ -11,7 +11,8 @@
  *   is purged (no orphaned logins, retry is safe) — then its data. Kept: the platform's own audit rows
  *   (actor platform_admin; network_id becomes NULL) and — DECISION — its money ledger rows: the ledger
  *   is append-only (a trigger forbids DELETE) and is the financial record, so a purge leaves
- *   ledger_entries in place (unreachable without the network, included in the export). Deleting them
+ *   ledger_entries in place (included in the export, and still downloadable after the purge — the
+ *   purged_networks tombstone keeps whose they were; exportLedgerCsv). Deleting them
  *   would need a narrowly-scoped exception in that trigger — a decision for the owner, not this code.
  */
 import type { PoolClient } from 'pg';
@@ -21,6 +22,7 @@ import { AppError, notFound, serviceUnavailable, validationFailed } from '../htt
 import { getSupabaseAdmin } from '../supabase.js';
 import { isEncrypted } from '../crypto/secret-box.js';
 import { networkStateChanged } from './state.js';
+import { csvCell } from '../csv.js';
 
 interface NetworkRow {
   id: string; slug: string; name: string; status: string; deleted_at: Date | null; exported_at: Date | null;
@@ -123,6 +125,42 @@ export async function exportNetwork(id: string, write: (line: string) => Promise
   return { tables: tables + 1, rows };
 }
 
+// ---- Ledger (CSV) ------------------------------------------------------------------------------
+
+const LEDGER_COLUMNS = ['id', 'created_at', 'entry_type', 'direction', 'amount', 'currency', 'status', 'account_type', 'account_id', 'conversion_id'] as const;
+
+/**
+ * A network's money ledger as CSV, oldest first, from one snapshot — for a live network or a purged
+ * one (ledger rows outlive the purge; the purged_networks tombstone says whose they were). Amounts are
+ * the stored numeric text, never a float.
+ */
+export async function exportLedgerCsv(id: string, write: (chunk: string) => Promise<void>): Promise<{ rows: number }> {
+  const client = await pool.connect();
+  let rows = 0;
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await write(`${LEDGER_COLUMNS.join(',')}\n`);
+    await client.query(
+      `DECLARE ledger_cur NO SCROLL CURSOR FOR
+         SELECT id, created_at, entry_type, direction, amount::text AS amount, currency, status, account_type, account_id, conversion_id
+           FROM ledger_entries WHERE network_id = $1 ORDER BY created_at, id`, [id]);
+    for (;;) {
+      const batch = await client.query<Record<string, unknown>>('FETCH 1000 FROM ledger_cur');
+      if (!batch.rows.length) break;
+      await write(batch.rows.map((r) => `${LEDGER_COLUMNS.map((c) => csvCell(r[c])).join(',')}\n`).join(''));
+      rows += batch.rows.length;
+    }
+    await client.query('CLOSE ledger_cur');
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+  return { rows };
+}
+
 // ---- Purge -------------------------------------------------------------------------------------
 
 /** Every Supabase login of the network: the ones its users / partners / advertisers link, and any
@@ -153,7 +191,9 @@ export interface PurgeResult {
   ledgerEntriesRetained: number;
 }
 
-export async function purgeNetwork(id: string, opts: { confirm: string; acknowledgeNoExport?: boolean }, now: Date = new Date()): Promise<{ before: NetworkRow; result: PurgeResult }> {
+export async function purgeNetwork(
+  id: string, opts: { confirm: string; acknowledgeNoExport?: boolean; purgedBy?: string | null }, now: Date = new Date(),
+): Promise<{ before: NetworkRow; result: PurgeResult }> {
   const net = await loadNetwork(id);
   if (net.status !== 'deleted' || !net.deleted_at) {
     throw new AppError('conflict', 'Only a deleted network can be purged — DELETE /platform/networks/:id first (it can still be restored).', { reason: 'not_deleted' });
@@ -197,6 +237,13 @@ export async function purgeNetwork(id: string, opts: { confirm: string; acknowle
     counts.auditLog = (await client.query(`DELETE FROM audit_log WHERE network_id = $1 AND actor_type <> 'platform_admin'`, [id])).rowCount ?? 0;
     counts.loginEvents = (await client.query('DELETE FROM login_events WHERE network_id = $1', [id])).rowCount ?? 0;
     ledgerEntriesRetained = Number((await client.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM ledger_entries WHERE network_id = $1', [id])).rows[0]?.n ?? 0);
+    // The tombstone (D3): who the network was and when it went — Super Admin still lists it and hands
+    // out its retained ledger. Same transaction: a purge never leaves a network without one.
+    await client.query(
+      `INSERT INTO purged_networks (id, name, slug, default_currency, created_at, deleted_at, exported_at, purged_at, purged_by,
+                                    ledger_entries_retained, auth_users_deleted, rows_deleted)
+       SELECT id, name, slug, default_currency, created_at, deleted_at, exported_at, $2, $3, $4, $5, $6 FROM networks WHERE id = $1`,
+      [id, now, opts.purgedBy ?? null, ledgerEntriesRetained, authUsersDeleted, JSON.stringify(counts)]);
     await client.query('DELETE FROM networks WHERE id = $1', [id]); // cascades to every table with a FK to it
     await client.query('COMMIT');
   } catch (err) {

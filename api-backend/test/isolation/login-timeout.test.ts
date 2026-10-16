@@ -41,6 +41,8 @@ async function buildApp(opts: { timeoutFires: boolean }) {
     resetLoginCounter,
   }));
   vi.doMock('../../src/surfaces/dashboard/control-center/routes.js', () => ({ recordLoginEvent: async () => {} }));
+  // The network's state is checked at sign-in (D3) — an active one here; tested in network-lifecycle.
+  vi.doMock('../../src/lib/networks/state.js', () => ({ networkAccessError: async () => null }));
   // Simulate the 5s cap elapsing without waiting 5s; the real helper is unit-tested above.
   vi.doMock('../../src/lib/timeout.js', async () => {
     const actual = await vi.importActual<typeof import('../../src/lib/timeout.js')>('../../src/lib/timeout.js');

@@ -96,7 +96,9 @@ Network staff and demo data are still script-based:
 ### Middleware Chain
 ```
 dashboardAuth (JWT → req.identity + req.scope; the claim's network must exist (else 401) and be
- active (suspended / soft-deleted → 403, F-26 — lib/networks/state.ts, 'active' cached 15 s))
+ active (suspended / soft-deleted → 403, F-26 — lib/networks/state.ts, 'active' cached 15 s); D3:
+ networkAccessError gives the reason — network_suspended / network_deleted (+ restore deadline) /
+ network_purged (401) — and /api/auth/login + /refresh refuse the same way)
  → requireAdmin (dashboard kind === 'admin')
  → requireRole('admin', 'manager', 'finance', 'read_only') (RBAC)
  → Handler
