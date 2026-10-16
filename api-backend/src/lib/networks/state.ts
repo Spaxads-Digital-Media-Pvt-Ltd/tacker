@@ -60,7 +60,14 @@ export async function networkAccessError(networkId: string): Promise<AppError | 
     return new AppError('unauthorized', 'This login belongs to a network that no longer exists — it was deleted and its data removed. Sign in with an account on an active network.',
       { reason: 'network_purged' });
   }
-  if (state === 'suspended') return new AppError('forbidden', inactiveNetworkMessage('suspended'), { reason: 'network_suspended' });
+  if (state === 'suspended') {
+    // Suspended for an unpaid platform invoice (billing) — say so: paying (or more time) brings it back.
+    const why = (await query<{ suspended_reason: string | null }>('SELECT suspended_reason FROM networks WHERE id = $1', [networkId])).rows[0]?.suspended_reason;
+    return why === 'billing'
+      ? new AppError('forbidden', 'This network is suspended for an unpaid invoice — tracking, the dashboard and the API are off until it is paid. Contact the platform administrator.',
+        { reason: 'network_suspended', billing: true })
+      : new AppError('forbidden', inactiveNetworkMessage('suspended'), { reason: 'network_suspended' });
+  }
   const { rows } = await query<{ deleted_at: Date | null }>('SELECT deleted_at FROM networks WHERE id = $1', [networkId]);
   const deletedAt = rows[0]?.deleted_at ?? null;
   const purgeAfter = deletedAt ? new Date(deletedAt.getTime() + env.NETWORK_PURGE_GRACE_DAYS * DAY_MS) : null;

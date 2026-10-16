@@ -14,6 +14,8 @@ Four role-gated surfaces (UX-only gating — backend enforces authorization):
 /forgot-password — "Forgot password?": emails a one-time reset link (O1)
 /reset-password — Where that link lands: choose a new password (token dropped from the address bar)
 /change-password — First sign-in with an invite's temporary password: choose your own first (ProtectedRoute sends every route here while `session.mustChangePassword`)
+/admin/plans · /admin/billing · /admin/invoices/:id · /admin/settings — Super Admin › plan catalog; platform invoices (summary per currency, Mark paid / More time / Void, one-off invoice, Run billing now; `pages/super-admin/invoiceActions.tsx`); printable invoice (`shared-components/panels/InvoiceDocument.tsx`); billing settings. /admin/subscriptions redirects to /admin/plans
+/app/billing · /app/billing/invoices/:id — the network's own plan, usage vs limits, invoices and how to pay (staff; Control Center flyout › Billing); the shell shows `OverdueInvoiceBanner` while an invoice is overdue (`/api/me billing.overdue` via `lib/useNetworkBranding.ts`). Money helpers: `lib/platformBilling.ts` (amounts as text, never floats)
 /admin/networks/:id — Super Admin › one network: overview, owner, plan & usage, team (temporary password), Super Admin activity, "Open dashboard" (support session in a new tab, `lib/impersonation.ts useSupportSession`)
 /impersonate — Starts an admin impersonation session in this tab (opened by Impersonate)
 /admin/* — Super Admin (role: super_admin)

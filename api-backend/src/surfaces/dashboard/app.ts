@@ -127,7 +127,13 @@ export function buildDashboardApp(): Express {
     const [reportTimeZone, branding] = nid
       ? await Promise.all([networkTimeZone(nid), networkBranding(nid)])
       : ['UTC', { logoUrl: null, faviconUrl: null }];
-    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation, reportTimeZone, branding });
+    // Staff see their network's oldest overdue platform invoice (the shell warns before a suspension).
+    const overdue = nid && id && id.surface === 'dashboard' && id.kind === 'admin'
+      ? (await query<{ id: string; number: string; total: string; currency: string; due_at: Date; suspend_at: Date }>(
+        `SELECT id, number, total, currency, due_at, suspend_at FROM platform_invoices
+          WHERE network_id = $1 AND status = 'open' AND due_at <= now() ORDER BY due_at LIMIT 1`, [nid])).rows[0] ?? null
+      : null;
+    sendOk(res, { identity: id, scope: req.scope, impersonating: impersonation !== null, impersonation, reportTimeZone, branding, billing: { overdue } });
   }));
 
   // My Account (Profile) General tab — this user's own real row + metadata profile fields.
@@ -403,7 +409,8 @@ export function buildDashboardApp(): Express {
     }),
   );
 
-  authed.use('/subscription', subscriptionRoutes());
+  // The network's plan and its bill: staff only — never a partner / advertiser portal.
+  authed.use('/subscription', requireAdmin, subscriptionRoutes());
 
   // Admin-only, network-scoped CRUD.
   authed.use('/advertisers', requireAdmin, advertisersAdminRoutes());

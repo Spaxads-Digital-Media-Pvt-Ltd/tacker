@@ -10,7 +10,7 @@
 - Driver: `pg` (raw, no ORM)
 - Max connections: 10 (dev), 20 (prod)
 
-## Schema (84 Migrations)
+## Schema (85 Migrations)
 
 ### Core Tables
 
@@ -240,6 +240,9 @@ API keys for the Public REST API.
 | `saved_reports` | Report pages' saved configs per owner (`network_id`, `owner_user_id`, `page`, `name` unique together; `config` jsonb) + optional schedule: `schedule` (5-field cron, network zone), `range_preset`, `recipients` text[], `next_run_at` (due index), `last_run_at` / `last_run_status` (sent\|skipped\|failed) / `last_run_detail` (migration 073, F-24) |
 | `inbound_postback_logs` | Every inbound conversion request (postback / pixel / iframe / advertiser API — `source`) and what happened to it (migration 078): `outcome` (approved\|pending\|rejected = recorded, with `conversion_id`; duplicate\|click_not_found\|security_failed\|error = nothing recorded), `reason`, `click_id`, `transaction_id`, `event_name`, the click's `offer_id` / `publisher_id` / `advertiser_id`, `payout` / `revenue` / `currency` / `sale_amount`, `http_status`, `ip`, `user_agent`, `params` (secrets masked). Indexed (network, created_at), (network, click_id), (network, transaction_id). Pruned on the click retention window; FK-cascaded with the network (so exported / purged with it) |
 | `purged_networks` | Tombstone of a purged network (D3, migration 082; platform-level, no FK): id (= the ledger rows' network_id), name, slug, default_currency, created / deleted / exported / purged at, `purged_by` (platform admin), `ledger_entries_retained`, `auth_users_deleted`, `rows_deleted`. Written in the purge transaction |
+| `platform_invoices` | The platform's invoices to its tenant networks (migration 083): `number` (unique, from `platform_invoice_number_seq`), `network_id` (**no FK** — kept after a purge, with the `bill_to` snapshot), subscription / plan, description, currency, `subtotal` / `tax_rate` / `tax` / `total` numeric, period, `status` open\|paid\|void, `issued_at` / `due_at` / `suspend_at` (CHECK ≥ due), `suspension_applied_at` (once per deadline), paid at / amount / method / reference, void at / reason, notes, `created_by` (platform admin id or 'system'). Unique live invoice per (subscription_id, period_start) |
+| `platform_settings` | Platform-wide key → jsonb (migration 083); `billing` = invoice prefix, due / grace days, tax rate, auto-suspend, seller, payment instructions |
+| Migration 083 also | `subscription_plans.billing_interval` (month\|year), `trial_days`, `description`; `subscriptions.trial_ends_at`, `cancel_at_period_end`, `canceled_at`; `networks.suspended_reason` (manual\|billing — billing suspensions lift when paid) |
 | `email_outbox` | Every queued email, one row per recipient (O11, migration 075): `event`, `recipient`, `subject`, `html` (enc:v1 while `sensitive` — invites / reset links — and wiped once sent), `attachments`, `status` queued\|sent\|failed, `attempts`, `last_error`, `sent_at`. Kept 90 days (retention) |
 | `partner_invoices` / `advertiser_invoices` (O8, migration 076) | Status adds `void` (+ `voided_at`, `voided_by`, `void_reason`); `deleted` only on rows soft-deleted before. The no-overlap exclusion ignores void + deleted. Trigger `invoice_paid_is_final`: a paid invoice's status can't change (no delete, no void) |
 | `communication_hub` | Communication hub config |

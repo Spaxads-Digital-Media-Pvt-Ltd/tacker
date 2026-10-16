@@ -18,6 +18,7 @@ export const QUEUE = {
  reportingRollup: 'reporting-rollup',
  scheduledReports: 'scheduled-reports',
  usageMeter: 'usage-meter',
+ platformBilling: 'platform-billing',
  email: 'email',
 } as const;
 

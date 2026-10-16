@@ -14,6 +14,7 @@ import { SectionTabs } from './SectionTabs';
 import { NavFlyout } from './NavFlyout';
 import { SearchModal } from './SearchModal';
 import { ImpersonationBanner } from './ImpersonationBanner';
+import { OverdueInvoiceBanner } from './OverdueInvoiceBanner';
 import { useNetworkBranding } from '../../lib/useNetworkBranding';
 
 /** Flatten a role's nav (groups + leaves) to {to,label} pairs for route→title resolution. */
@@ -217,7 +218,7 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   // O12: the network's logo / favicon (staff and portals; the Super Admin console has no network).
-  const { logoUrl } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
+  const { logoUrl, overdueInvoice } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
 
   // Off-canvas drawer (< md): close on navigation and on Escape.
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
@@ -331,6 +332,7 @@ export function AppShell() {
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col bg-page">
         {session.impersonatedBy && <ImpersonationBanner session={session} />}
+        {session.role === 'admin' && overdueInvoice && <OverdueInvoiceBanner invoice={overdueInvoice} />}
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
           email={session.email} logoUrl={logoUrl} onSignOut={async () => {
             // Signing out of an impersonation tab only ends the impersonation (see auth/session.ts).

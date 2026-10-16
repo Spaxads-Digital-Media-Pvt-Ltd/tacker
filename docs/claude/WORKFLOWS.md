@@ -291,6 +291,27 @@ Script: provision:demo-admin
  → User can log in at /login → lands at /app
 ```
 
+## Platform Billing (Super Admin → tenant networks)
+
+```
+Super Admin › Plans: create a plan (price / month or year, trial days, limits)
+Super Admin › Networks › a network › Assign plan
+  → trial: subscription 'trialing' until trial_ends_at (no invoice)
+  → no trial: 'active' for one period from now + invoice issued at once (free plan: none)
+Billing run (worker every 15 min, or Billing › "Run billing now") — lib/billing/engine.ts
+  → trial ended → 'active', first period from the trial end, invoiced
+  → period ended → next period, invoiced (or 'canceled' when set to cancel at the period end)
+  → invoice unpaid at due_at → subscription 'past_due' (flag: Super Admin Billing, tenant banner + Billing page)
+  → invoice unpaid at suspend_at (due + grace days) and autoSuspend → network 'suspended' (reason 'billing'):
+    tracking, dashboard, portals, API stop; sign-in says "suspended for an unpaid invoice"; once per deadline
+Super Admin › Billing (no payment gateway yet — payments recorded by hand)
+  → Mark as paid → invoice 'paid' → subscription active again; a billing suspension lifts at once
+  → More time (+days / a date) → suspend_at later; a billing suspension it caused lifts at once
+  → Void → nothing owed on it (same settling)
+  A Super Admin's manual suspension is never lifted by billing; reactivating a billing-suspended network
+  by hand stands until a new deadline passes.
+```
+
 ## Multi-Tenant Data Isolation
 
 Every query is filtered by `network_id`:

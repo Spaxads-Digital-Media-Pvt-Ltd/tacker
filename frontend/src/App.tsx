@@ -57,7 +57,12 @@ const TieredCommissionForm = lazy(() => import('./pages/admin/TieredCommissionFo
 const AdvertiserEdit = lazy(() => import('./pages/admin/AdvertiserEdit'));
 const TrackingDomains = lazy(() => import('./pages/admin/TrackingDomains'));
 const Networks = lazy(() => import('./pages/super-admin/Networks'));
-const Subscriptions = lazy(() => import('./pages/super-admin/Subscriptions'));
+const Plans = lazy(() => import('./pages/super-admin/Plans'));
+const PlatformBilling = lazy(() => import('./pages/super-admin/Billing'));
+const PlatformSettings = lazy(() => import('./pages/super-admin/Settings'));
+const InvoiceView = lazy(() => import('./pages/super-admin/InvoiceView'));
+const NetworkBilling = lazy(() => import('./pages/admin/NetworkBilling'));
+const NetworkBillingInvoice = lazy(() => import('./pages/admin/NetworkBillingInvoice'));
 const Usage = lazy(() => import('./pages/super-admin/Usage'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
@@ -159,7 +164,11 @@ export default function App() {
           <Route path="/admin" element={<DashboardHome />} />
           <Route path="/admin/networks" element={<Networks />} />
           <Route path="/admin/networks/:id" element={<NetworkDetail />} />
-          <Route path="/admin/subscriptions" element={<Subscriptions />} />
+          <Route path="/admin/plans" element={<Plans />} />
+          <Route path="/admin/subscriptions" element={<Navigate to="/admin/plans" replace />} />
+          <Route path="/admin/billing" element={<PlatformBilling />} />
+          <Route path="/admin/invoices/:id" element={<InvoiceView />} />
+          <Route path="/admin/settings" element={<PlatformSettings />} />
           <Route path="/admin/usage" element={<Usage />} />
         </Route>
 
@@ -293,6 +302,8 @@ export default function App() {
           <Route path="/app/investigator/:id" element={<InvestigatorDetail />} />
           <Route path="/app/control-center" element={<ControlCenter />} />
           <Route path="/app/control-center/:tab" element={<ControlCenter />} />
+          <Route path="/app/billing" element={<NetworkBilling />} />
+          <Route path="/app/billing/invoices/:id" element={<NetworkBillingInvoice />} />
           <Route path="/app/ai" element={<AiOps />} />
           <Route path="/app/profile" element={<ProfilePage />} />
           <Route path="/app/profile/notifications" element={<NotificationPreferences />} />

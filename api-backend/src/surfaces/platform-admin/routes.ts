@@ -27,8 +27,8 @@ import {
  resetLoginCounter,
 } from '../../lib/auth/login-rate-limit.js';
 import {
- createNetworkSchema, updateNetworkSchema, createPlanSchema, assignSubscriptionSchema, loginSchema, networkListSchema,
- type CreateNetwork, type UpdateNetwork, type CreatePlan, type AssignSubscription, type Login, type NetworkListQuery,
+ createNetworkSchema, updateNetworkSchema, loginSchema, networkListSchema,
+ type CreateNetwork, type UpdateNetwork, type Login, type NetworkListQuery,
  purgeNetworkSchema, type PurgeNetwork,
 } from './schemas.js';
 import { once } from 'node:events';
@@ -119,7 +119,7 @@ export function platformRoutes(): Router {
  AND ($3::text IS NULL OR ($3 = 'none' AND p.code IS NULL) OR p.code = $3)`;
  const params = [q ? containsPattern(q) : null, status ?? null, plan || null];
  const { rows } = await query(
- `SELECT n.id, n.ref, n.name, n.slug, n.status, n.default_currency, n.created_at, n.updated_at, n.deleted_at, n.exported_at,
+ `SELECT n.id, n.ref, n.name, n.slug, n.status, n.suspended_reason, n.default_currency, n.created_at, n.updated_at, n.deleted_at, n.exported_at,
  s.status AS subscription_status, p.code AS plan_code, p.name AS plan_name,
  (SELECT u.email FROM users u WHERE u.network_id = n.id AND u.role = 'admin' ORDER BY u.created_at LIMIT 1) AS owner_email
  FROM networks n
@@ -147,13 +147,14 @@ export function platformRoutes(): Router {
  const id = req.params.id!;
  if (!UUID_RE.test(id)) throw notFound('Network not found');
  const net = (await query(
- `SELECT id, ref, name, slug, status, default_currency, created_at, updated_at, deleted_at, exported_at
+ `SELECT id, ref, name, slug, status, suspended_reason, default_currency, created_at, updated_at, deleted_at, exported_at
  FROM networks WHERE id = $1`, [id])).rows[0];
  if (!net) throw notFound('Network not found');
  const [sub, owner, counts, domains, usage] = await Promise.all([
  query(
  `SELECT s.id, s.status, s.current_period_start, s.current_period_end, s.renews_at, s.created_at,
- p.id AS plan_id, p.code AS plan_code, p.name AS plan_name, p.price_cents, p.currency, p.limits
+ s.trial_ends_at, s.cancel_at_period_end, s.canceled_at,
+ p.id AS plan_id, p.code AS plan_code, p.name AS plan_name, p.price_cents, p.currency, p.billing_interval, p.limits
  FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id WHERE s.network_id = $1`, [id]),
  query(
  `SELECT u.id, u.email, u.name, u.status, (u.auth_user_id IS NOT NULL) AS has_login,
@@ -330,6 +331,8 @@ export function platformRoutes(): Router {
  params.push(b.status); sets.push(`status = $${params.length}`);
  // 'deleted' is the soft delete (F-26); any other status restores it.
  sets.push(b.status === 'deleted' ? 'deleted_at = COALESCE(deleted_at, now())' : 'deleted_at = NULL');
+ // A Super Admin's suspension is 'manual' (only a Super Admin lifts it; billing never does).
+ sets.push(b.status === 'suspended' ? `suspended_reason = 'manual'` : 'suspended_reason = NULL');
  }
  if (sets.length === 0) throw badRequest('Nothing to update');
  params.push(req.params.id);
@@ -421,49 +424,7 @@ export function platformRoutes(): Router {
  }),
  );
 
- // ---------- Subscription plans (global catalog) ----------
- r.get('/plans', asyncHandler(async (_req, res) => {
- const { rows } = await query(`SELECT * FROM subscription_plans WHERE status = 'active' ORDER BY price_cents`);
- sendOk(res, rows);
- }));
-
- r.post('/plans', validateBody(createPlanSchema), asyncHandler(async (req, res) => {
- const b = req.body as CreatePlan;
- try {
- const { rows } = await query(
- `INSERT INTO subscription_plans (code, name, price_cents, currency, limits)
- VALUES ($1, $2, $3, $4, $5) RETURNING *`,
- [b.code, b.name, b.priceCents, b.currency, JSON.stringify(b.limits)],
- );
- await writePlatformAudit(req, null, { action: 'plan.create', entityType: 'subscription_plan', entityId: rows[0]!.id, after: rows[0] });
- sendOk(res, rows[0], undefined, 201);
- } catch (err) {
- if (isUnique(err)) throw badRequest('A plan with that code already exists');
- throw err;
- }
- }));
-
- // ---------- Subscriptions (per network) ----------
- r.put('/networks/:id/subscription', validateBody(assignSubscriptionSchema), asyncHandler(async (req, res) => {
- const b = req.body as AssignSubscription;
- const net = (await query(`SELECT id FROM networks WHERE id = $1`, [req.params.id])).rows[0];
- if (!net) throw notFound('Network not found');
- const plan = (await query(`SELECT id FROM subscription_plans WHERE id = $1`, [b.planId])).rows[0];
- if (!plan) throw badRequest('planId does not exist');
-
- const { rows } = await query(
- `INSERT INTO subscriptions (network_id, plan_id, status, current_period_start, current_period_end, renews_at)
- VALUES ($1, $2, $3, $4, $5, $6)
- ON CONFLICT (network_id) DO UPDATE SET
- plan_id = EXCLUDED.plan_id, status = EXCLUDED.status,
- current_period_start = EXCLUDED.current_period_start,
- current_period_end = EXCLUDED.current_period_end, renews_at = EXCLUDED.renews_at
- RETURNING *`,
- [req.params.id, b.planId, b.status, b.currentPeriodStart ?? null, b.currentPeriodEnd ?? null, b.renewsAt ?? null],
- );
- await writePlatformAudit(req, req.params.id ?? null, { action: 'subscription.assign', entityType: 'subscription', entityId: rows[0]!.id, after: rows[0] });
- sendOk(res, rows[0]);
- }));
+ // Plans, subscriptions and billing: ./billing-routes.ts.
 
  // ---------- Usage dashboard ----------
  r.get('/networks/:id/usage', asyncHandler(async (req, res) => {

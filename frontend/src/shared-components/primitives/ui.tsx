@@ -51,7 +51,7 @@ const NEUTRAL = 'bg-elevated text-fg-secondary ring-1 ring-inset ring-border';
 const BADGE_TONES: Record<string, string> = {
   active: SUCCESS, approved: SUCCESS, verified: SUCCESS, issued: SUCCESS, completed: SUCCESS,
   pending: WARNING, trialing: WARNING, hold: WARNING,
-  suspended: DANGER, rejected: DANGER, blocked: DANGER, failed: DANGER, deleted: DANGER,
+  suspended: DANGER, rejected: DANGER, blocked: DANGER, failed: DANGER, deleted: DANGER, overdue: DANGER, past_due: DANGER,
   // Inbound postbacks that recorded nothing (Advertiser Postback report).
   click_not_found: DANGER, security_failed: DANGER, error: DANGER,
   draft: NEUTRAL, paused: NEUTRAL, inactive: NEUTRAL, disabled: NEUTRAL, archived: NEUTRAL, duplicate: NEUTRAL,

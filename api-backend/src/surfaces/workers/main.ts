@@ -30,6 +30,7 @@ import { startSmartLinkKpiWorker, scheduleSmartLinkKpi } from './processors/smar
 import { startReportingRollupWorker, scheduleReportingRollup } from './processors/reporting-rollup.js';
 import { startScheduledReportsWorker, scheduleScheduledReports } from './processors/scheduled-reports.js';
 import { startUsageMeterWorker, scheduleUsageMeter } from './processors/usage-meter.js';
+import { startPlatformBillingWorker, schedulePlatformBilling } from './processors/platform-billing.js';
 import { startEmailWorker } from './processors/email.js';
 
 const log = surfaceLogger('workers');
@@ -57,6 +58,7 @@ const workers = [
  startReportingRollupWorker(),
  startScheduledReportsWorker(),
  startUsageMeterWorker(),
+ startPlatformBillingWorker(),
  startEmailWorker(),
 ];
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
@@ -70,6 +72,7 @@ void scheduleSmartLinkKpi().catch((err) => log.error({ err }, 'failed to schedul
 void scheduleReportingRollup().catch((err) => log.error({ err }, 'failed to schedule reporting rollups'));
 void scheduleScheduledReports().catch((err) => log.error({ err }, 'failed to schedule scheduled reports'));
 void scheduleUsageMeter().catch((err) => log.error({ err }, 'failed to schedule usage metering'));
+void schedulePlatformBilling().catch((err) => log.error({ err }, 'failed to schedule platform billing'));
 
 // Report only EXHAUSTED-retry failures to Sentry so transient retries don't spam it.
 for (const w of workers) {

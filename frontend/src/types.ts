@@ -615,6 +615,8 @@ export interface NetworkRow {
   plan_name?: string | null;
   /** The network's first admin (its owner). */
   owner_email?: string | null;
+  /** Why it is suspended: an unpaid invoice ('billing') or a Super Admin ('manual'). */
+  suspended_reason?: 'manual' | 'billing' | null;
 }
 
 /** A plan limit this billing period (lib/usage/meter.ts): used vs limit, ok | near (≥ 80 %) | over. */
@@ -632,9 +634,12 @@ export interface NetworkDetail {
   deleted_at: string | null;
   exported_at: string | null;
   purge_after: string | null;
+  suspended_reason: 'manual' | 'billing' | null;
   subscription: {
     id: string; status: string; plan_id: string; plan_code: string; plan_name: string; price_cents: number; currency: string;
+    billing_interval: 'month' | 'year';
     current_period_start: string | null; current_period_end: string | null; renews_at: string | null; created_at: string;
+    trial_ends_at: string | null; cancel_at_period_end: boolean; canceled_at: string | null;
     limits: Record<string, number | string | boolean>;
   } | null;
   owner: { id: string; email: string; name: string | null; status: string; has_login: boolean; last_sign_in_at: string | null } | null;

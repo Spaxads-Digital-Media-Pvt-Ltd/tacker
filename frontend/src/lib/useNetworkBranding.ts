@@ -1,13 +1,17 @@
 /**
  * The network's branding images (O12 — Control Center › Platform › Logo / Favicon), shown to everyone
  * in the network: staff and partner / advertiser portals (GET /api/me carries them as stored URLs).
- * The favicon replaces the tab icon while signed in and is put back on sign-out.
+ * The favicon replaces the tab icon while signed in and is put back on sign-out. The same answer
+ * carries the network's overdue platform invoice for staff — the shell warns before a suspension.
  */
 import { useEffect } from 'react';
 import { useQuery } from './useApi';
 
-export function useNetworkBranding(enabled: boolean): { logoUrl: string | null } {
-  const { data } = useQuery<{ branding?: { logoUrl: string | null; faviconUrl: string | null } }>(enabled ? '/api/me' : null);
+/** The network's oldest overdue platform invoice — staff only (GET /api/me `billing.overdue`). */
+export interface OverdueInvoice { id: string; number: string; total: string; currency: string; due_at: string; suspend_at: string }
+
+export function useNetworkBranding(enabled: boolean): { logoUrl: string | null; overdueInvoice: OverdueInvoice | null } {
+  const { data } = useQuery<{ branding?: { logoUrl: string | null; faviconUrl: string | null }; billing?: { overdue: OverdueInvoice | null } }>(enabled ? '/api/me' : null);
   const logoUrl = data?.branding?.logoUrl ?? null;
   const faviconUrl = data?.branding?.faviconUrl ?? null;
   useEffect(() => {
@@ -19,5 +23,5 @@ export function useNetworkBranding(enabled: boolean): { logoUrl: string | null }
     link.href = faviconUrl;
     return () => { if (added) link.remove(); else link.href = before; };
   }, [faviconUrl]);
-  return { logoUrl };
+  return { logoUrl, overdueInvoice: data?.billing?.overdue ?? null };
 }

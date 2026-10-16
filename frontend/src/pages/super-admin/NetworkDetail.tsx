@@ -11,12 +11,16 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { useSupportSession } from '../../lib/impersonation';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { PageHeader, Table, Badge, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
-import type { NetworkDetail as Detail, NetworkTeamMember, PlatformActivityRow, PlanLimitStatus } from '../../types';
+import { PlanLimitBars } from '../../shared-components/panels/PlanLimitBars';
+import { useAllPages } from '../../hooks/useAllPages';
+import { useInvoiceActions } from './invoiceActions';
+import { NewInvoice } from './Billing';
+import { AssignPlanModal, ExtendTrialModal } from './subscriptionActions';
+import { money as amountMoney, planPrice, billingBadge, invoiceState, type PlatformInvoice } from '../../lib/platformBilling';
+import type { NetworkDetail as Detail, NetworkTeamMember, PlatformActivityRow } from '../../types';
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString() : '—');
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : '—');
-const money = (cents: number, currency: string) => `${currency} ${(cents / 100).toFixed(2)}`;
-const LIMIT_LABEL: Record<string, string> = { clicks: 'Clicks', conversions: 'Conversions', events: 'Events', offers: 'Offers', seats: 'Team seats' };
 const ACTION_LABEL: Record<string, string> = {
   'network.create': 'Created the network',
   'network.update': 'Changed the network',
@@ -26,6 +30,15 @@ const ACTION_LABEL: Record<string, string> = {
   'network.support_session': 'Opened its dashboard (support session)',
   'network.user_temporary_password': 'Set a temporary password',
   'subscription.assign': 'Assigned a plan',
+  'subscription.change_plan': 'Changed the plan',
+  'subscription.cancel': 'Canceled the subscription',
+  'subscription.cancel_at_period_end': 'Set the subscription to end at the period end',
+  'subscription.resume': 'Resumed the subscription',
+  'subscription.extend_trial': 'Extended the trial',
+  'invoice.create': 'Issued an invoice',
+  'invoice.mark_paid': 'Recorded a payment',
+  'invoice.extend': 'Gave more time on an invoice',
+  'invoice.void': 'Voided an invoice',
 };
 const actionLabel = (a: PlatformActivityRow) => ACTION_LABEL[a.action] ?? a.action.replace(/[._]/g, ' ');
 
@@ -50,21 +63,6 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function LimitBar({ l }: { l: PlanLimitStatus }) {
-  const tone = l.state === 'over' ? 'bg-danger' : l.state === 'near' ? 'bg-warning' : 'bg-accent';
-  return (
-    <div className="py-2">
-      <div className="flex items-baseline justify-between text-small">
-        <span className="text-fg-secondary">{LIMIT_LABEL[l.key] ?? l.key}</span>
-        <span className="font-medium text-fg">{l.used.toLocaleString()} / {l.limit.toLocaleString()} <span className="text-tiny text-fg-muted">({l.pct}%)</span></span>
-      </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-border">
-        <div className={`h-full rounded-full ${tone}`} style={{ width: `${Math.min(100, l.pct)}%` }} />
-      </div>
-    </div>
-  );
-}
-
 export default function NetworkDetail() {
   const { id = '' } = useParams<{ id: string }>();
   const net = useQuery<Detail>(`/platform/networks/${id}`);
@@ -75,11 +73,24 @@ export default function NetworkDetail() {
   const [temp, setTemp] = useState<{ email: string; temporaryPassword: string } | null>(null);
   const tempPassword = useMutation((userId: string) =>
     api.post<{ email: string; temporaryPassword: string }>(`/platform/networks/${id}/users/${userId}/temporary-password`, {}));
+  const invoices = useAllPages<PlatformInvoice>(`/platform/invoices?networkId=${id}&status=all`);
+  const invoiceActions = useInvoiceActions(() => { invoices.refetch(); net.refetch(); activity.refetch(); });
+  const [planModal, setPlanModal] = useState(false);
+  const [trialModal, setTrialModal] = useState(false);
+  const [newInvoice, setNewInvoice] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   if (net.loading) return <StateBlock><Spinner /></StateBlock>;
   if (net.error || !net.data) return <StateBlock>{net.error ?? 'Network not found'}</StateBlock>;
   const n = net.data;
-  const refreshAll = () => { net.refetch(); activity.refetch(); };
+  const refreshAll = () => { net.refetch(); activity.refetch(); invoices.refetch(); };
+  const sub = n.subscription;
+  const live = Boolean(sub && ['trialing', 'active', 'past_due'].includes(sub.status));
+  const done = (msg: string) => { setPlanModal(false); setTrialModal(false); setNewInvoice(false); setNotice(msg); refreshAll(); };
+  const subscriptionAction = (path: 'cancel' | 'resume', body: Record<string, unknown>, title: string, message: string, label: string, destructive: boolean) => confirm({
+    title, message, confirmLabel: label, destructive,
+    onConfirm: async () => { await api.post(`/platform/networks/${n.id}/subscription/${path}`, body); setNotice(null); refreshAll(); },
+  });
 
   const setStatus = (status: 'active' | 'suspended', verb: string, message: string) => confirm({
     title: `${verb} ${n.name}?`, message, confirmLabel: verb, destructive: status === 'suspended',
@@ -142,7 +153,9 @@ export default function NetworkDetail() {
         <p className="mb-4 rounded-[var(--radius)] bg-warning-bg px-4 py-3 text-small text-warning-text">
           {n.status === 'deleted'
             ? `Deleted ${day(n.deleted_at)} — tracking, the dashboard and the API are off. It can be restored until ${day(n.purge_after)} (Networks › Restore).`
-            : 'Suspended — tracking, the dashboard, the portals and the API are off until you activate it.'}
+            : n.suspended_reason === 'billing'
+              ? 'Suspended for an unpaid invoice — tracking, the dashboard, the portals and the API are off. Record the payment or give more time (Invoices below) and it comes back at once.'
+              : 'Suspended — tracking, the dashboard, the portals and the API are off until you activate it.'}
         </p>
       )}
 
@@ -176,22 +189,56 @@ export default function NetworkDetail() {
           </dl>
         </Card>
 
-        <Card title="Plan & usage" action={<Link to="/admin/subscriptions" className="text-tiny font-medium text-accent-text hover:underline">Plans</Link>}>
-          {n.subscription ? (
+        <Card title="Plan & usage" action={n.status !== 'deleted' && (
+          <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => { setNotice(null); setPlanModal(true); }}>{live ? 'Change plan' : 'Assign plan'}</button>
+        )}>
+          {notice && <p className="mb-3 rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg-secondary">{notice}</p>}
+          {sub ? (
             <dl className="mb-3">
-              <InfoRow label="Plan">{n.subscription.plan_name} <span className="text-tiny font-normal text-fg-muted">{money(n.subscription.price_cents, n.subscription.currency)}</span></InfoRow>
-              <InfoRow label="Subscription"><Badge value={n.subscription.status} /></InfoRow>
-              <InfoRow label="Current period">{day(n.subscription.current_period_start)} – {day(n.subscription.current_period_end)}</InfoRow>
+              <InfoRow label="Plan">{sub.plan_name} <span className="text-tiny font-normal text-fg-muted">{planPrice(sub)}</span></InfoRow>
+              <InfoRow label="Subscription">
+                <Badge {...billingBadge(sub.status)} />
+                {sub.cancel_at_period_end && <span className="ml-2 text-tiny font-normal text-fg-muted">ends at the period end</span>}
+              </InfoRow>
+              {sub.status === 'trialing' && <InfoRow label="Trial ends">{day(sub.trial_ends_at)}</InfoRow>}
+              {sub.status === 'canceled'
+                ? <InfoRow label="Ended">{day(sub.canceled_at)}</InfoRow>
+                : <InfoRow label={sub.status === 'trialing' ? 'Trial period' : 'Current period'}>{day(sub.current_period_start)} – {day(sub.current_period_end)}</InfoRow>}
             </dl>
           ) : <p className="mb-3 text-small text-fg-secondary">No plan assigned.</p>}
+          {live && sub && (
+            <div className="mb-4 flex flex-wrap gap-3">
+              {sub.status === 'trialing' && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setTrialModal(true)}>Extend trial</button>}
+              {sub.cancel_at_period_end
+                ? <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => subscriptionAction('resume', {}, 'Resume the subscription?', 'It renews at the period end again, invoiced as usual.', 'Resume', false)}>Resume</button>
+                : <button className="text-tiny font-medium text-danger-text hover:underline" onClick={() => subscriptionAction('cancel', { atPeriodEnd: true }, 'Cancel at the period end?', `It runs until ${day(sub.current_period_end)}, then ends — no renewal invoice.`, 'Cancel at period end', true)}>Cancel at period end</button>}
+              <button className="text-tiny font-medium text-danger-text hover:underline" onClick={() => subscriptionAction('cancel', { atPeriodEnd: false }, 'Cancel now?', 'The subscription ends now (no more invoices). Open invoices stay — void them if they are waived. The network itself keeps running; suspend it separately if needed.', 'Cancel now', true)}>Cancel now</button>
+            </div>
+          )}
           <p className="text-tiny font-semibold uppercase tracking-wide text-fg-muted">This period · {day(n.usage.period.start)} – {day(n.usage.period.end)}</p>
           {n.usage.limits.length === 0
             ? <p className="mt-2 text-small text-fg-secondary">{n.usage.plan ? 'Its plan sets no limits.' : 'Usage is compared with a plan’s limits once one is assigned.'}</p>
-            : n.usage.limits.map((l) => <LimitBar key={l.key} l={l} />)}
+            : <PlanLimitBars limits={n.usage.limits} />}
         </Card>
       </div>
 
       <div className="mt-4 space-y-4">
+        <Card title="Invoices" action={n.status !== 'deleted' && (
+          <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setNewInvoice(true)}>New invoice</button>
+        )}>
+          {invoiceActions.notice && <p className="mb-2 text-small text-fg-secondary">{invoiceActions.notice}</p>}
+          {invoices.loading ? <Spinner /> : invoices.error ? <p className="text-small text-danger-text">{invoices.error}</p>
+            : (invoices.data ?? []).length === 0 ? <p className="text-small text-fg-secondary">No invoices yet.</p>
+            : <Table columns={[
+              { header: 'Invoice', cell: (i: PlatformInvoice) => <Link to={`/admin/invoices/${i.id}`} className="font-mono text-xs hover:underline">{i.number}</Link> },
+              { header: 'Description', cell: (i: PlatformInvoice) => <span className="text-small text-fg-secondary">{i.description}</span> },
+              { header: 'Total', className: 'text-right', cell: (i: PlatformInvoice) => <span className="whitespace-nowrap">{amountMoney(i.total, i.currency)}</span> },
+              { header: 'Due', cell: (i: PlatformInvoice) => day(i.due_at) },
+              { header: 'Status', cell: (i: PlatformInvoice) => <Badge {...billingBadge(invoiceState(i))} /> },
+              { header: 'Suspends on', cell: (i: PlatformInvoice) => (i.status === 'open' ? day(i.suspend_at) : <span className="text-fg-muted">—</span>) },
+              { header: '', className: 'text-right', cell: (i: PlatformInvoice) => invoiceActions.buttons(i) },
+            ]} rows={invoices.data ?? []} rowKey={(i) => i.id} />}
+        </Card>
         <Card title="Team">
           {tempPassword.error && <p className="mb-2 text-small text-danger-text">{tempPassword.error}</p>}
           {team.loading ? <Spinner /> : team.error ? <p className="text-small text-danger-text">{team.error}</p>
@@ -205,6 +252,10 @@ export default function NetworkDetail() {
         </Card>
       </div>
 
+      {invoiceActions.modal}
+      {planModal && <AssignPlanModal networkId={n.id} networkName={n.name} live={live} currentPlanId={live ? sub?.plan_id ?? null : null} onClose={() => setPlanModal(false)} onDone={done} />}
+      {trialModal && <ExtendTrialModal networkId={n.id} onClose={() => setTrialModal(false)} onDone={done} />}
+      {newInvoice && <NewInvoice networkId={n.id} onClose={() => setNewInvoice(false)} onCreated={(num) => done(`Invoice ${num} issued.`)} />}
       <Modal open={!!temp} onClose={() => setTemp(null)} title="Temporary password">
         {temp && (
           <div className="space-y-3">

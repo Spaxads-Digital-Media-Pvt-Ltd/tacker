@@ -165,6 +165,7 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Smart-Link KPI | `smart-link-kpi.ts` | `smart-link-kpi` | Every 10 min — re-scores due KPI smart links (lib/smart-links/kpi.ts) |
 | Reporting Rollups | `reporting-rollup.ts` | `reporting-rollup` | Every minute — freeze / dirty re-roll / backfill of the 15-min rollups (lib/reporting/rollups.ts) |
 | Usage Meter | `usage-meter.ts` | `usage-meter` | Hourly — meters each active network's clicks / conversions / events (today + yesterday, UTC) and raises plan-limit alerts (lib/usage/meter.ts) |
+| Platform Billing | `platform-billing.ts` | `platform-billing` | Every 15 min — `lib/billing/engine.ts runBilling`: ended trials → active + invoiced; ended periods → renewed + invoiced (caught up period by period) or canceled; overdue invoices → subscription `past_due`; past `suspend_at` → network suspended for billing (once per deadline; `autoSuspend`). Each subscription in its own transaction under `FOR UPDATE SKIP LOCKED` (pooler-safe); audited as system |
 | Scheduled Reports | `scheduled-reports.ts` | `scheduled-reports` | Every minute — emails due scheduled saved reports as CSV (lib/reporting/saved-reports.ts) |
 | Email | `email.ts` | `email` | On demand — sends each queued email (one `email_outbox` row) through the network's SMTP; 6 attempts, exponential backoff from 30 s; SMTP problems are final (lib/email/outbox.ts, O11) |
 

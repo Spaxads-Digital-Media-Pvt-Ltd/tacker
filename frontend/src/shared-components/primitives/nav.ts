@@ -29,8 +29,10 @@ export const NAV: Record<Role, NavEntry[]> = {
   super_admin: [
     { to: '/admin', label: 'Overview', icon: 'dashboard' },
     { to: '/admin/networks', label: 'Networks', icon: 'building' },
-    { to: '/admin/subscriptions', label: 'Subscriptions', icon: 'wallet' },
+    { to: '/admin/plans', label: 'Plans', icon: 'wallet' },
+    { to: '/admin/billing', label: 'Billing', icon: 'receipt' },
     { to: '/admin/usage', label: 'Usage', icon: 'chart' },
+    { to: '/admin/settings', label: 'Settings', icon: 'settings' },
   ],
   admin: [
     { to: '/app', label: 'Dashboard', icon: 'dashboard' },
@@ -140,6 +142,7 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Security', description: 'API keys & IP whitelist', to: '/app/control-center/security', icon: Lucide.ShieldCheck },
         { label: 'Tracking Domains', description: 'Custom tracking hosts & DNS verification', to: '/app/domains', icon: Lucide.Globe },
         { label: 'Usage', description: 'Account usage per month', to: '/app/control-center/usage', icon: Lucide.Activity },
+        { label: 'Billing', description: 'Plan, invoices & how to pay', to: '/app/billing', icon: Lucide.Receipt },
         { label: 'Documents', description: 'Contracts & resources', to: '/app/control-center/documents', icon: Lucide.File },
         { label: 'Segmentation Options', description: 'Categories, labels & channels', to: '/app/control-center/segmentations', icon: Lucide.Tags },
       ],
