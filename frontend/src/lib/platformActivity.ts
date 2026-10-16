@@ -1,0 +1,41 @@
+/**
+ * What a platform audit action means, in words — Super Admin › Activity and a network's page. Unknown
+ * actions read as their dotted name with spaces. Pure.
+ */
+const LABEL: Record<string, string> = {
+  'network.create': 'Created a network',
+  'network.update': 'Changed a network',
+  'network.delete': 'Deleted a network',
+  'network.export': 'Exported a network',
+  'network.purge': 'Purged a network',
+  'network.ledger_export': 'Downloaded a ledger',
+  'network.support_session': 'Opened a network’s dashboard (support session)',
+  'network.user_temporary_password': 'Set a temporary password',
+  'network.suspended_billing': 'Suspended a network for an unpaid invoice',
+  'subscription.assign': 'Assigned a plan',
+  'subscription.change_plan': 'Changed a plan',
+  'subscription.cancel': 'Canceled a subscription',
+  'subscription.cancel_at_period_end': 'Set a subscription to end at the period end',
+  'subscription.resume': 'Resumed a subscription',
+  'subscription.extend_trial': 'Extended a trial',
+  'subscription.trial_ended': 'A trial ended — invoiced',
+  'subscription.renewed': 'Renewed a subscription',
+  'subscription.canceled': 'A subscription ended at its period end',
+  'subscription.past_due': 'Flagged a subscription past due',
+  'invoice.create': 'Issued an invoice',
+  'invoice.mark_paid': 'Recorded a payment',
+  'invoice.extend': 'Gave more time on an invoice',
+  'invoice.void': 'Voided an invoice',
+  'plan.create': 'Created a plan',
+  'plan.update': 'Changed a plan',
+  'plan.archive': 'Archived a plan',
+  'plan.unarchive': 'Unarchived a plan',
+  'settings.billing': 'Changed the billing settings',
+  'billing.run': 'Ran billing',
+  'platform_admin.create': 'Added a Super Admin',
+  'platform_admin.update': 'Changed a Super Admin',
+  'platform_admin.password_reset': 'Reset a Super Admin’s password',
+  'platform_admin.password_change': 'Changed their own password',
+};
+
+export const activityLabel = (action: string): string => LABEL[action] ?? action.replace(/[._]/g, ' ');

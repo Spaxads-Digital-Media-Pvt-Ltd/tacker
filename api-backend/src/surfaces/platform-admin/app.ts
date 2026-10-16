@@ -9,6 +9,7 @@ import { sendOk } from '../../lib/http/envelope.js';
 import { platformAdminAuth } from './auth.js';
 import { platformRoutes, publicPlatformRoutes } from './routes.js';
 import { billingRoutes } from './billing-routes.js';
+import { opsRoutes } from './ops-routes.js';
 
 export function buildPlatformAdminApp(): Express {
  const app = createBaseApp('platform-admin');
@@ -22,6 +23,7 @@ export function buildPlatformAdminApp(): Express {
  authed.get('/me', (req, res) => sendOk(res, { identity: req.identity }));
  authed.use('/', platformRoutes());
  authed.use('/', billingRoutes());
+ authed.use('/', opsRoutes());
 
  app.use('/platform', authed);
 

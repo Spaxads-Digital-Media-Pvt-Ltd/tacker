@@ -33,6 +33,7 @@ export default function DashboardHome() {
   const { session } = useAuth();
   if (!session) return null;
   if (session.role === 'admin') return <AdminDashboard name={session.displayName} />;
+  if (session.role === 'super_admin') return null; // the Super Admin's own Overview (pages/super-admin/Overview.tsx)
   return <RoleTiles role={session.role} name={session.displayName} />;
 }
 
@@ -545,16 +546,7 @@ const portalMoney = (s: Summary, key: string, field?: MoneyField) =>
 const portalBalance = (s: Summary) =>
   balanceText({ balance: s['balance'], balances: s['balances'], currency: s['balanceCurrency'] ?? s['currency'] })?.text
   ?? money(String(s['balance'] ?? 0));
-const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] }> = {
-  super_admin: {
-    endpoint: '/platform/summary',
-    tiles: [
-      { label: 'Networks', hint: 'Active / total', val: (s) => `${int(s['activeNetworks'])} / ${int(s['networks'])}` },
-      { label: 'MRR', hint: 'Active subscriptions', val: (s) => money(String(s['mrr'] ?? 0)) },
-      { label: 'Clicks (24h)', hint: 'Platform-wide', val: (s) => int(s['clicks24h']) },
-      { label: 'Conversions (24h)', hint: 'Platform-wide', val: (s) => int(s['conversions24h']) },
-    ],
-  },
+const CONFIG: Record<Exclude<Role, 'admin' | 'super_admin'>, { endpoint?: string; tiles: Tile[] }> = {
   publisher: {
     endpoint: '/api/portal/publisher/summary',
     tiles: [
@@ -634,7 +626,7 @@ function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, f
   );
 }
 
-function RoleTiles({ role, name }: { role: Exclude<Role, 'admin'>; name: string }) {
+function RoleTiles({ role, name }: { role: Exclude<Role, 'admin' | 'super_admin'>; name: string }) {
   const cfg = CONFIG[role];
   const { data, loading } = useQuery<Summary>(cfg.endpoint ?? '/api/me');
   return (

@@ -32,6 +32,8 @@ export const NAV: Record<Role, NavEntry[]> = {
     { to: '/admin/plans', label: 'Plans', icon: 'wallet' },
     { to: '/admin/billing', label: 'Billing', icon: 'receipt' },
     { to: '/admin/usage', label: 'Usage', icon: 'chart' },
+    { to: '/admin/activity', label: 'Activity', icon: 'pulse' },
+    { to: '/admin/team', label: 'Team', icon: 'users' },
     { to: '/admin/settings', label: 'Settings', icon: 'settings' },
   ],
   admin: [

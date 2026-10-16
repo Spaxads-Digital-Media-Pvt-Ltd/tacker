@@ -12,6 +12,7 @@ import { useSupportSession } from '../../lib/impersonation';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { PageHeader, Table, Badge, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
 import { PlanLimitBars } from '../../shared-components/panels/PlanLimitBars';
+import { activityLabel } from '../../lib/platformActivity';
 import { useAllPages } from '../../hooks/useAllPages';
 import { useInvoiceActions } from './invoiceActions';
 import { NewInvoice } from './Billing';
@@ -21,26 +22,7 @@ import type { NetworkDetail as Detail, NetworkTeamMember, PlatformActivityRow } 
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString() : '—');
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : '—');
-const ACTION_LABEL: Record<string, string> = {
-  'network.create': 'Created the network',
-  'network.update': 'Changed the network',
-  'network.delete': 'Deleted the network',
-  'network.export': 'Exported the network',
-  'network.ledger_export': 'Downloaded the ledger',
-  'network.support_session': 'Opened its dashboard (support session)',
-  'network.user_temporary_password': 'Set a temporary password',
-  'subscription.assign': 'Assigned a plan',
-  'subscription.change_plan': 'Changed the plan',
-  'subscription.cancel': 'Canceled the subscription',
-  'subscription.cancel_at_period_end': 'Set the subscription to end at the period end',
-  'subscription.resume': 'Resumed the subscription',
-  'subscription.extend_trial': 'Extended the trial',
-  'invoice.create': 'Issued an invoice',
-  'invoice.mark_paid': 'Recorded a payment',
-  'invoice.extend': 'Gave more time on an invoice',
-  'invoice.void': 'Voided an invoice',
-};
-const actionLabel = (a: PlatformActivityRow) => ACTION_LABEL[a.action] ?? a.action.replace(/[._]/g, ' ');
+const actionLabel = (a: PlatformActivityRow) => activityLabel(a.action);
 
 function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (

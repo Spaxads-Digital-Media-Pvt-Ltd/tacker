@@ -68,6 +68,7 @@ export function publicPlatformRoutes(): Router {
  if (!valid) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
 
  await resetLoginCounter(normalizedEmail);
+ await query('UPDATE platform_admins SET last_login_at = now() WHERE id = $1', [admin.id]);
 
  const token = await signPlatformAdminToken(admin.id);
  return sendOk(_res, { token, admin: { id: admin.id, email: admin.email } });
@@ -80,30 +81,7 @@ export function publicPlatformRoutes(): Router {
 export function platformRoutes(): Router {
  const r = Router();
 
- // ---------- Platform summary (super-admin dashboard tiles) ----------
- r.get(
- '/summary',
- asyncHandler(async (_req, res) => {
- const [nets, subs, clicks, convs] = await Promise.all([
- query<{ total: number; active: number }>(
- `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'active')::int AS active FROM networks`),
- query<{ mrr_cents: string }>(
- `SELECT COALESCE(SUM(p.price_cents),0)::text AS mrr_cents
- FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id
- WHERE s.status IN ('active', 'trialing')`),
- query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM clicks WHERE created_at >= now() - interval '24 hours'`),
- query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM conversions WHERE created_at >= now() - interval '24 hours'`),
- ]);
- const mrrCents = Number(subs.rows[0]?.mrr_cents ?? 0);
- sendOk(res, {
- networks: nets.rows[0]?.total ?? 0,
- activeNetworks: nets.rows[0]?.active ?? 0,
- mrr: (mrrCents / 100).toFixed(2),
- clicks24h: clicks.rows[0]?.n ?? 0,
- conversions24h: convs.rows[0]?.n ?? 0,
- });
- }),
- );
+ // Overview (/summary), usage across networks, the Super Admin team and activity: ./ops-routes.ts.
 
  // ---------- Networks ----------
  // Search (name, slug, a team member's email) and filters (status; plan code, or 'none'). Only the columns

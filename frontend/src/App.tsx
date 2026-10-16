@@ -58,6 +58,9 @@ const AdvertiserEdit = lazy(() => import('./pages/admin/AdvertiserEdit'));
 const TrackingDomains = lazy(() => import('./pages/admin/TrackingDomains'));
 const Networks = lazy(() => import('./pages/super-admin/Networks'));
 const Plans = lazy(() => import('./pages/super-admin/Plans'));
+const PlatformOverview = lazy(() => import('./pages/super-admin/Overview'));
+const PlatformTeam = lazy(() => import('./pages/super-admin/Team'));
+const PlatformActivity = lazy(() => import('./pages/super-admin/Activity'));
 const PlatformBilling = lazy(() => import('./pages/super-admin/Billing'));
 const PlatformSettings = lazy(() => import('./pages/super-admin/Settings'));
 const InvoiceView = lazy(() => import('./pages/super-admin/InvoiceView'));
@@ -161,7 +164,7 @@ export default function App() {
 
         {/* Super Admin */}
         <Route element={<ProtectedRoute allow="super_admin"><AppShell /></ProtectedRoute>}>
-          <Route path="/admin" element={<DashboardHome />} />
+          <Route path="/admin" element={<PlatformOverview />} />
           <Route path="/admin/networks" element={<Networks />} />
           <Route path="/admin/networks/:id" element={<NetworkDetail />} />
           <Route path="/admin/plans" element={<Plans />} />
@@ -169,6 +172,8 @@ export default function App() {
           <Route path="/admin/billing" element={<PlatformBilling />} />
           <Route path="/admin/invoices/:id" element={<InvoiceView />} />
           <Route path="/admin/settings" element={<PlatformSettings />} />
+          <Route path="/admin/team" element={<PlatformTeam />} />
+          <Route path="/admin/activity" element={<PlatformActivity />} />
           <Route path="/admin/usage" element={<Usage />} />
         </Route>
 
