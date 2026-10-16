@@ -12,7 +12,8 @@
 import { pool } from '../db/pool.js';
 import { badRequest, conflict, notFound } from '../http/errors.js';
 import { billingSettings } from './settings.js';
-import { centsToDecimal, issueInvoice, type PlatformInvoice } from './invoices.js';
+import { issueInvoice, type PlatformInvoice } from './invoices.js';
+import { periodDescription, subscriptionLines, useDiscount, type OverageConfig } from './charges.js';
 
 export interface PlanRow {
   id: string;
@@ -23,6 +24,9 @@ export interface PlanRow {
   billing_interval: 'month' | 'year';
   trial_days: number;
   status: 'active' | 'archived';
+  limits: Record<string, unknown>;
+  /** Per metric over the limit: { per, price } (lib/billing/charges.ts). */
+  overage: OverageConfig | null;
 }
 
 export interface SubscriptionRow {
@@ -39,10 +43,7 @@ export interface SubscriptionRow {
 }
 
 const LIVE = ['trialing', 'active', 'past_due'];
-const ymd = (d: Date) => d.toISOString().slice(0, 10);
-
-/** "Growth plan · 2026-10-16 – 2026-11-16" — what an invoice for one period says. */
-export const periodDescription = (planName: string, start: Date, end: Date): string => `${planName} plan · ${ymd(start)} – ${ymd(end)}`;
+export { periodDescription };
 
 /** SQL for `$start + one billing interval` (Postgres keeps month ends: 31 Jan + 1 month = 28/29 Feb). */
 export const PLUS_INTERVAL = (start: string, interval: string) =>
@@ -88,12 +89,15 @@ export async function assignPlan(
 
     let invoice: PlatformInvoice | null = null;
     if (!trial && plan.price_cents > 0) {
+      const period = { start: subscription.current_period_start!, end: subscription.current_period_end! };
+      const { lines, subtotal, discount } = await subscriptionLines(client, networkId, plan, period, null);
       invoice = await issueInvoice(client, {
         networkId, subscriptionId: subscription.id, planId: plan.id,
-        description: periodDescription(plan.name, subscription.current_period_start!, subscription.current_period_end!),
-        currency: plan.currency, subtotal: centsToDecimal(plan.price_cents),
+        description: periodDescription(plan.name, period.start, period.end),
+        currency: plan.currency, subtotal, lines,
         periodStart: subscription.current_period_start, periodEnd: subscription.current_period_end, createdBy, issuedAt: now,
       }, settings);
+      if (invoice && discount) await useDiscount(client, discount);
     }
     await client.query('COMMIT');
     return { before, subscription, invoice, changed: false };

@@ -20,6 +20,7 @@ const LIMITS: { key: string; label: string; hint: string }[] = [
   { key: 'offers', label: 'Offers', hint: 'Live offers' },
   { key: 'seats', label: 'Team seats', hint: 'Active team members' },
 ];
+const OVERAGE = ['clicks', 'conversions', 'events'] as const;
 const limitsText = (l: PlatformPlan['limits']) =>
   LIMITS.filter((x) => Number(l[x.key]) > 0).map((x) => `${x.label.replace(' / period', '')}: ${Number(l[x.key]).toLocaleString()}`).join(' · ') || 'Unlimited';
 
@@ -93,6 +94,9 @@ function PlanForm({ plan, onClose, onSaved }: { plan: PlatformPlan | null; onClo
   const [description, setDescription] = useState(plan?.description ?? '');
   const [limits, setLimits] = useState<Record<string, string>>(
     Object.fromEntries(LIMITS.map((l) => [l.key, plan && Number(plan.limits[l.key]) > 0 ? String(plan.limits[l.key]) : ''])));
+  // Overage: per started block of usage over a limit (clicks / conversions / events), charged at renewal.
+  const [overage, setOverage] = useState<Record<string, { per: string; price: string }>>(
+    Object.fromEntries(OVERAGE.map((k) => [k, { per: plan?.overage?.[k] ? String(plan.overage[k]!.per) : '', price: plan?.overage?.[k]?.price ?? '' }])));
   const [formError, setFormError] = useState<string | null>(null);
   const m = useMutation((body: Record<string, unknown>) => (plan ? api.patch(`/platform/plans/${plan.id}`, body) : api.post('/platform/plans', body)));
 
@@ -108,17 +112,26 @@ function PlanForm({ plan, onClose, onSaved }: { plan: PlatformPlan | null; onClo
       parsedLimits[l.key] = Number(v);
     }
     if (!/^\d+$/.test(trialDays.trim() || '0')) { setFormError('Trial days must be a whole number.'); return; }
+    const parsedOverage: Record<string, { per: number; price: string }> = {};
+    for (const k of OVERAGE) {
+      const o = overage[k]!;
+      if (!o.per.trim() && !o.price.trim()) continue;
+      if (!parsedLimits[k]) { setFormError(`Overage on ${k} needs a ${k} limit to go over.`); return; }
+      if (!/^\d+$/.test(o.per.trim()) || Number(o.per) <= 0) { setFormError(`Overage on ${k}: “per” must be a whole number, e.g. 1000.`); return; }
+      if (amountToCents(o.price) === null) { setFormError(`Overage on ${k}: the price must be an amount like 0.50.`); return; }
+      parsedOverage[k] = { per: Number(o.per), price: o.price.trim() };
+    }
     setFormError(null);
     const body: Record<string, unknown> = {
       name: name.trim(), priceCents: cents, currency: currency.trim().toUpperCase(), billingInterval,
-      trialDays: Number(trialDays.trim() || '0'), description: description.trim() || null, limits: parsedLimits,
+      trialDays: Number(trialDays.trim() || '0'), description: description.trim() || null, limits: parsedLimits, overage: parsedOverage,
     };
     if (!plan) body['code'] = code.trim();
     if (await m.run(body)) onSaved();
   };
 
   return (
-    <Modal open onClose={onClose} title={plan ? `Edit ${plan.name}` : 'New plan'}>
+    <Modal open size="xl" onClose={onClose} title={plan ? `Edit ${plan.name}` : 'New plan'}>
       <form onSubmit={submit} className="space-y-4">
         {(formError || m.error) && <p className="text-small text-danger-text">{formError ?? m.error}</p>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -147,6 +160,20 @@ function PlanForm({ plan, onClose, onSaved }: { plan: PlatformPlan | null; onClo
               <Field key={l.key} label={l.label} hint={l.hint}>
                 <input className="input" inputMode="numeric" value={limits[l.key] ?? ''} onChange={(e) => setLimits((s) => ({ ...s, [l.key]: e.target.value }))} />
               </Field>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="mb-2 text-small font-medium text-fg">Overage <span className="font-normal text-fg-secondary">— charged on the renewal invoice for usage over a limit (blank = none)</span></p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {OVERAGE.map((k) => (
+              <div key={k} className="rounded-[var(--radius)] border border-border p-3">
+                <p className="mb-2 text-small font-medium capitalize text-fg">{k}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Per"><input className="input" inputMode="numeric" placeholder="1000" value={overage[k]!.per} onChange={(e) => setOverage((s) => ({ ...s, [k]: { ...s[k]!, per: e.target.value } }))} /></Field>
+                  <Field label={`Price (${currency.trim().toUpperCase() || '—'})`}><input className="input" inputMode="decimal" placeholder="0.50" value={overage[k]!.price} onChange={(e) => setOverage((s) => ({ ...s, [k]: { ...s[k]!, price: e.target.value } }))} /></Field>
+                </div>
+              </div>
             ))}
           </div>
         </div>

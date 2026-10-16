@@ -50,6 +50,11 @@ export const createPlanSchema = z.object({
   trialDays: z.number().int().min(0).max(365).default(0),
   description: z.string().max(1000).nullable().optional(),
   limits: planLimits.default({}),
+  /** Charged per started block of usage over the limit, at renewal: { clicks: { per: 1000, price: "0.50" } }. */
+  overage: z.object(Object.fromEntries(['clicks', 'conversions', 'events'].map((m) => [m, z.object({
+    per: z.number().int().min(1).max(1_000_000_000),
+    price: z.string().trim().regex(/^\d{1,9}(\.\d{1,2})?$/, 'must be an amount like 0.50'),
+  }).strict().optional()]))).strict().default({}),
 }).strict();
 
 /** Everything but the code (a plan's code is its stable identity). Price changes apply to the next invoices. */

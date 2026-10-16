@@ -12,6 +12,7 @@ import { notFound } from '../../../lib/http/errors.js';
 import { query } from '../../../lib/db/pool.js';
 import { usageVsPlan } from '../../../lib/usage/meter.js';
 import { billingSettings } from '../../../lib/billing/settings.js';
+import { invoiceLines } from '../../../lib/billing/invoices.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -68,8 +69,13 @@ export function subscriptionRoutes(): Router {
              FROM platform_invoices i WHERE i.id = $1 AND i.network_id = $2`, [id, req.scope!.networkId])).rows[0]
         : undefined;
       if (!inv) throw notFound('Invoice not found');
-      const s = await billingSettings();
-      sendOk(res, { invoice: inv, seller: s.seller, paymentInstructions: s.paymentInstructions });
+      const [s, lines, credits] = await Promise.all([
+        billingSettings(),
+        invoiceLines(id),
+        query(`SELECT number, amount::text, currency, reason, refunded, created_at FROM platform_credit_notes WHERE invoice_id = $1 AND network_id = $2 ORDER BY created_at`,
+          [id, req.scope!.networkId]),
+      ]);
+      sendOk(res, { invoice: inv, lines, creditNotes: credits.rows, seller: s.seller, paymentInstructions: s.paymentInstructions });
     }),
   );
 

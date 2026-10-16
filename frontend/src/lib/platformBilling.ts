@@ -14,6 +14,8 @@ export interface PlatformPlan {
   trial_days: number;
   description: string | null;
   limits: Record<string, number | string | boolean>;
+  /** Per started block over a limit, charged at renewal: { clicks: { per: 1000, price: "0.50" } }. */
+  overage?: Partial<Record<'clicks' | 'conversions' | 'events', { per: number; price: string }>>;
   status: 'active' | 'archived';
   subscribers: number;
 }
@@ -67,9 +69,16 @@ export interface BillingSettings {
   paymentInstructions: string;
 }
 
-/** The printed copy: the invoice, who bills it and how to pay. */
+/** One line of an invoice: the plan, overage, a discount (negative), a one-off charge. Amounts are text. */
+export interface InvoiceLine { kind: 'plan' | 'overage' | 'discount' | 'addon' | 'setup' | 'one_off'; description: string; quantity: string; unit_amount: string; amount: string }
+/** Credit against a paid invoice (a refund or a goodwill credit). */
+export interface CreditNote { id?: string; number: string; amount: string; currency: string; reason: string; refunded: boolean; refund_method?: string | null; refund_reference?: string | null; created_at: string }
+
+/** The printed copy: the invoice, its lines and credit notes, who bills it and how to pay. */
 export interface InvoiceDocumentData {
   invoice: PlatformInvoice;
+  lines?: InvoiceLine[];
+  creditNotes?: CreditNote[];
   seller: BillingSettings['seller'];
   paymentInstructions: string;
 }

@@ -1,11 +1,13 @@
 /**
  * Platform billing (Super Admin) — every 15 minutes: trials that ended, renewals (invoiced), overdue
- * flags and suspensions for unpaid invoices (lib/billing/engine.ts).
+ * flags and suspensions for unpaid invoices (lib/billing/engine.ts); then the MRR snapshot and its
+ * movements (lib/billing/revenue.ts).
  */
 import { Worker, type ConnectionOptions } from 'bullmq';
 import { makeQueueConnection } from '../../../lib/redis.js';
 import { surfaceLogger } from '../../../lib/logger.js';
 import { runBilling } from '../../../lib/billing/engine.js';
+import { snapshotMrr } from '../../../lib/billing/revenue.js';
 import { getQueue, QUEUE } from '../queues.js';
 
 const log = surfaceLogger('workers');
@@ -16,7 +18,9 @@ export function startPlatformBillingWorker(): Worker {
     QUEUE.platformBilling,
     async () => {
       const r = await runBilling();
-      log.info(r, 'platform billing run');
+      // Then today's MRR per network and how it moved (Super Admin › Revenue).
+      const mrr = await snapshotMrr();
+      log.info({ ...r, mrr }, 'platform billing run');
     },
     { connection: makeQueueConnection() as unknown as ConnectionOptions, concurrency: 1 },
   );

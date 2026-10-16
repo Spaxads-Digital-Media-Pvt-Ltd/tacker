@@ -17,6 +17,7 @@ import { query } from '../../lib/db/pool.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import { usageVsPlan, type UsageVsPlan } from '../../lib/usage/meter.js';
+import { NETWORK_MRR_SQL } from '../../lib/billing/revenue.js';
 import { hashPassword, verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import { passwordSchema } from '../../lib/auth/password-policy.js';
 import { LEVELS, SECTIONS, SECTION_KEYS, normalizePermissions } from '../../lib/platform/permissions.js';
@@ -96,15 +97,12 @@ export function opsRoutes(): Router {
                 (SELECT COUNT(*) FROM networks n WHERE n.status <> 'deleted' AND ${sc.sql} AND NOT EXISTS (
                    SELECT 1 FROM subscriptions x WHERE x.network_id = n.id AND x.status IN ('trialing', 'active', 'past_due')))::int AS without_plan
            FROM subscriptions s JOIN networks n ON n.id = s.network_id WHERE n.status <> 'deleted' AND ${sc.sql}`, p),
-      // Monthly recurring revenue per currency (never summed across currencies): paying subscriptions
-      // only (trials excluded), a yearly price counted as a twelfth.
+      // Monthly recurring revenue per currency (never summed across currencies): paying subscriptions only
+      // (trials excluded), a yearly price as a twelfth, net of recurring discounts (lib/billing/revenue.ts).
       can(req, 'revenue', 'read') ? query(
-        `SELECT p.currency,
-                round(SUM(CASE WHEN p.billing_interval = 'year' THEN p.price_cents::numeric / 12 ELSE p.price_cents END) / 100, 2)::text AS amount,
-                COUNT(*)::int AS subscriptions
-           FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id JOIN networks n ON n.id = s.network_id
-          WHERE s.status IN ('active', 'past_due') AND n.status <> 'deleted' AND p.price_cents > 0 AND ${sc.sql}
-          GROUP BY p.currency ORDER BY p.currency`, p) : null,
+        `SELECT m.currency, SUM(m.mrr)::text AS amount, COUNT(*)::int AS subscriptions
+           FROM (${NETWORK_MRR_SQL}) m JOIN networks n ON n.id = m.network_id
+          WHERE m.mrr > 0 AND ${sc.sql} GROUP BY m.currency ORDER BY m.currency`, p) : null,
       can(req, 'billing', 'read') ? query(
         `SELECT i.currency,
                 COUNT(*) FILTER (WHERE i.status = 'open')::int AS open_count,

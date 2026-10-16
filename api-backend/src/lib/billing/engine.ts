@@ -18,7 +18,8 @@ import { pool, query } from '../db/pool.js';
 import { writeSystemAudit } from '../audit.js';
 import { networkStateChanged } from '../networks/state.js';
 import { billingSettings, type BillingSettings } from './settings.js';
-import { centsToDecimal, issueInvoice } from './invoices.js';
+import { issueInvoice } from './invoices.js';
+import { subscriptionLines, useDiscount } from './charges.js';
 import { PLUS_INTERVAL, periodDescription, type PlanRow, type SubscriptionRow } from './subscriptions.js';
 
 export interface BillingRunResult {
@@ -64,12 +65,19 @@ async function advance(subscriptionId: string, now: Date, settings: BillingSetti
           WHERE id = $1 RETURNING *`, [row.id, plan.billing_interval])).rows[0]!;
       let invoiced = false;
       if (plan.price_cents > 0) {
-        invoiced = (await issueInvoice(client, {
+        // The next period in advance; overage for the period that just ended (not after a trial).
+        const period = { start: new Date(next.current_period_start!), end: new Date(next.current_period_end!) };
+        const usagePeriod = trialOver || !row.current_period_start || !row.current_period_end
+          ? null : { start: new Date(row.current_period_start), end: new Date(row.current_period_end) };
+        const { lines, subtotal, discount } = await subscriptionLines(client, row.network_id, plan, period, usagePeriod);
+        const invoice = await issueInvoice(client, {
           networkId: row.network_id, subscriptionId: row.id, planId: plan.id,
-          description: periodDescription(plan.name, new Date(next.current_period_start!), new Date(next.current_period_end!)),
-          currency: plan.currency, subtotal: centsToDecimal(plan.price_cents),
+          description: periodDescription(plan.name, period.start, period.end),
+          currency: plan.currency, subtotal, lines,
           periodStart: next.current_period_start, periodEnd: next.current_period_end, createdBy: 'system', issuedAt: now,
-        }, settings)) !== null;
+        }, settings);
+        invoiced = invoice !== null;
+        if (invoice && discount) await useDiscount(client, discount);
       }
       step = { kind: trialOver ? 'trial_ended' : 'renewed', invoiced };
     }

@@ -11,13 +11,13 @@ import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
 import { badRequest, notFound } from '../../lib/http/errors.js';
-import { pool, query } from '../../lib/db/pool.js';
+import { query, withTransaction } from '../../lib/db/pool.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { billingSettings, saveBillingSettings } from '../../lib/billing/settings.js';
 import {
-  INVOICE_SELECT, issueInvoice, markInvoicePaid, extendInvoiceDeadline, voidInvoice, type PlatformInvoice,
+  INVOICE_SELECT, issueInvoice, invoiceLines, markInvoicePaid, extendInvoiceDeadline, voidInvoice, type PlatformInvoice,
 } from '../../lib/billing/invoices.js';
 import { assignPlan, cancelSubscription, resumeSubscription, extendTrial } from '../../lib/billing/subscriptions.js';
 import { runBilling } from '../../lib/billing/engine.js';
@@ -63,9 +63,9 @@ export function billingRoutes(): Router {
     const b = req.body as CreatePlan;
     try {
       const { rows } = await query(
-        `INSERT INTO subscription_plans (code, name, price_cents, currency, billing_interval, trial_days, description, limits)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *, 0 AS subscribers`,
-        [b.code, b.name, b.priceCents, b.currency, b.billingInterval, b.trialDays, b.description ?? null, JSON.stringify(b.limits)]);
+        `INSERT INTO subscription_plans (code, name, price_cents, currency, billing_interval, trial_days, description, limits, overage)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *, 0 AS subscribers`,
+        [b.code, b.name, b.priceCents, b.currency, b.billingInterval, b.trialDays, b.description ?? null, JSON.stringify(b.limits), JSON.stringify(b.overage)]);
       await writePlatformAudit(req, null, { action: 'plan.create', entityType: 'subscription_plan', entityId: rows[0]!['id'] as string, after: rows[0] });
       sendOk(res, rows[0], undefined, 201);
     } catch (err) {
@@ -82,6 +82,7 @@ export function billingRoutes(): Router {
     const cols: Record<string, unknown> = {
       name: b.name, price_cents: b.priceCents, currency: b.currency, billing_interval: b.billingInterval,
       trial_days: b.trialDays, description: b.description, limits: b.limits === undefined ? undefined : JSON.stringify(b.limits),
+      overage: b.overage === undefined ? undefined : JSON.stringify(b.overage),
     };
     const sets: string[] = []; const params: unknown[] = [];
     for (const [col, v] of Object.entries(cols)) if (v !== undefined) { params.push(v); sets.push(`${col} = $${params.length}`); }
@@ -187,8 +188,12 @@ export function billingRoutes(): Router {
     const inv = UUID_RE.test(id) ? (await query(`SELECT ${INVOICE_SELECT} FROM platform_invoices i WHERE i.id = $1`, [id])).rows[0] : undefined;
     if (!inv) throw notFound('Invoice not found');
     await invoiceInScope(req, id);
-    const s = await billingSettings();
-    sendOk(res, { invoice: inv, seller: s.seller, paymentInstructions: s.paymentInstructions });
+    const [s, lines, credits] = await Promise.all([
+      billingSettings(),
+      invoiceLines(id),
+      query(`SELECT id, number, amount::text, currency, reason, refunded, refund_method, refund_reference, created_at FROM platform_credit_notes WHERE invoice_id = $1 ORDER BY created_at`, [id]),
+    ]);
+    sendOk(res, { invoice: inv, lines, creditNotes: credits.rows, seller: s.seller, paymentInstructions: s.paymentInstructions });
   }));
 
   r.post('/networks/:id/invoices', requirePerm('billing', 'full'), validateBody(manualInvoiceSchema), asyncHandler(async (req, res) => {
@@ -197,10 +202,11 @@ export function billingRoutes(): Router {
     if (!net) throw notFound('Network not found');
     await assertNetworkInScope(req, id);
     const b = req.body as z.infer<typeof manualInvoiceSchema>;
-    const invoice = await issueInvoice(pool, {
+    const settings = await billingSettings();
+    const invoice = await withTransaction((c) => issueInvoice(c, {
       networkId: id, description: b.description, subtotal: b.amount, currency: b.currency ?? net.default_currency,
       dueDays: b.dueDays, notes: b.notes ?? null, createdBy: adminId(req),
-    }, await billingSettings());
+    }, settings));
     await writePlatformAudit(req, id, { action: 'invoice.create', entityType: 'platform_invoice', entityId: invoice!.id, after: invoice });
     sendOk(res, invoice, undefined, 201);
   }));

@@ -310,6 +310,13 @@ Super Admin › Billing (no payment gateway yet — payments recorded by hand)
   → Void → nothing owed on it (same settling)
   A Super Admin's manual suspension is never lifted by billing; reactivating a billing-suspended network
   by hand stands until a new deadline passes.
+Invoice lines (lib/billing/charges.ts, whole cents): the plan · overage for the period that just ended
+  (usage_records over plan.limits, per started block of plan.overage) · the network's coupon discount
+  (percent of the plan line or an amount; never more) — a fully discounted invoice is recorded as paid
+Coupons: Money › Coupons; apply on a network's Billing tab (one active); 'once' / 'repeating' count down
+Credit notes: on a paid invoice (Billing › Credit note) — refunded ones reduce cash collected
+MRR history: after every billing run (15 min) snapshotMrr writes today's MRR per paying network and the
+  movement against the previous run day → Money › Revenue (MRR, net new, churn, LTV, trend, cash)
 ```
 
 ## Platform Sales (Super Admin › Sales)

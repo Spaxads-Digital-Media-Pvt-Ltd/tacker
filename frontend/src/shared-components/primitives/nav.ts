@@ -54,8 +54,10 @@ export const NAV: Record<Role, NavEntry[]> = {
     },
     {
       group: 'Money', label: 'Billing', icon: 'receipt', flyout: [
-        { label: 'Invoices', description: 'Record payments, give more time, void', to: '/admin/billing', icon: Lucide.Receipt, perm: 'billing' },
-        { label: 'Plans', description: 'Prices, trials and limits', to: '/admin/plans', icon: Lucide.Layers, perm: 'plans' },
+        { label: 'Revenue', description: 'MRR, growth, churn, LTV and cash collected', to: '/admin/revenue', icon: Lucide.TrendingUp, perm: 'revenue' },
+        { label: 'Invoices', description: 'Record payments, give more time, void, credit', to: '/admin/billing', icon: Lucide.Receipt, perm: 'billing' },
+        { label: 'Plans', description: 'Prices, trials, limits and overage', to: '/admin/plans', icon: Lucide.Layers, perm: 'plans' },
+        { label: 'Coupons', description: 'Discounts on networks’ subscriptions', to: '/admin/coupons', icon: Lucide.BadgePercent, perm: 'billing' },
       ],
     },
     {

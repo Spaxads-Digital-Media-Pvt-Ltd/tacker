@@ -15,6 +15,7 @@ import { query } from '../db/pool.js';
 import { badRequest, conflict, notFound } from '../http/errors.js';
 import { networkStateChanged } from '../networks/state.js';
 import type { BillingSettings } from './settings.js';
+import type { InvoiceLine } from './charges.js';
 
 type Db = Pick<PoolClient, 'query'>;
 
@@ -78,6 +79,8 @@ export interface IssueInvoice {
   notes?: string | null;
   issuedAt?: Date;
   dueDays?: number;
+  /** Its lines (plan, overage, discount…; `subtotal` must be their sum). Without: one line — the description. */
+  lines?: InvoiceLine[];
 }
 
 /**
@@ -112,7 +115,32 @@ export async function issueInvoice(db: Db, inv: IssueInvoice, settings: BillingS
     [number, inv.networkId, inv.subscriptionId ?? null, inv.planId ?? null, inv.description, inv.currency.toUpperCase(),
      inv.subtotal, settings.taxRate, inv.periodStart ?? null, inv.periodEnd ?? null, issuedAt,
      inv.dueDays ?? settings.dueDays, settings.graceDays, JSON.stringify(billTo), inv.notes ?? null, inv.createdBy]);
-  return rows[0] ?? null;
+  const invoice = rows[0];
+  if (!invoice) return null;
+  const lines: InvoiceLine[] = inv.lines?.length ? inv.lines : [{
+    kind: inv.subscriptionId ? 'plan' : 'one_off', description: inv.description, quantity: '1', unitAmount: inv.subtotal, amount: inv.subtotal,
+  }];
+  await db.query(
+    `INSERT INTO platform_invoice_lines (invoice_id, position, kind, description, quantity, unit_amount, amount, meta)
+     SELECT $1, t.pos, t.kind, t.description, t.quantity, t.unit_amount, t.amount, t.meta
+       FROM unnest($2::int[], $3::text[], $4::text[], $5::numeric[], $6::numeric[], $7::numeric[], $8::jsonb[])
+            AS t(pos, kind, description, quantity, unit_amount, amount, meta)`,
+    [invoice.id, lines.map((_, i) => i + 1), lines.map((l) => l.kind), lines.map((l) => l.description), lines.map((l) => l.quantity),
+      lines.map((l) => l.unitAmount), lines.map((l) => l.amount), lines.map((l) => JSON.stringify(l.meta ?? {}))]);
+  // Nothing to pay (fully discounted): settled at once, kept as the record.
+  if (Number(invoice.total) === 0) {
+    return (await db.query<PlatformInvoice>(
+      `UPDATE platform_invoices SET status = 'paid', paid_at = issued_at, paid_amount = 0, payment_method = 'other', payment_reference = 'Nothing to pay'
+        WHERE id = $1 RETURNING *, false AS overdue`, [invoice.id])).rows[0]!;
+  }
+  return invoice;
+}
+
+/** An invoice's lines, in order (amounts as text). */
+export async function invoiceLines(id: string): Promise<{ kind: string; description: string; quantity: string; unit_amount: string; amount: string }[]> {
+  return (await query<{ kind: string; description: string; quantity: string; unit_amount: string; amount: string }>(
+    `SELECT kind, description, trim_scale(quantity)::text AS quantity, trim_scale(unit_amount)::text AS unit_amount, amount::text
+       FROM platform_invoice_lines WHERE invoice_id = $1 ORDER BY position`, [id])).rows;
 }
 
 async function openInvoice(id: string): Promise<PlatformInvoice> {

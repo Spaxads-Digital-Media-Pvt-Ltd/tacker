@@ -79,6 +79,8 @@ const TicketView = lazy(() => import('./pages/super-admin/support/TicketView'));
 const SupportMacros = lazy(() => import('./pages/super-admin/support/Macros'));
 const TenantSupport = lazy(() => import('./pages/admin/Support'));
 const TenantSupportTicket = lazy(() => import('./pages/admin/SupportTicket'));
+const PlatformRevenue = lazy(() => import('./pages/super-admin/money/Revenue'));
+const PlatformCoupons = lazy(() => import('./pages/super-admin/money/Coupons'));
 const RequestDemo = lazy(() => import('./pages/RequestDemo'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
@@ -198,6 +200,8 @@ export default function App() {
           <Route path="/admin/support" element={<PlatformGate section="support"><SupportDesk /></PlatformGate>} />
           <Route path="/admin/support/macros" element={<PlatformGate section="support"><SupportMacros /></PlatformGate>} />
           <Route path="/admin/support/:id" element={<PlatformGate section="support"><TicketView /></PlatformGate>} />
+          <Route path="/admin/revenue" element={<PlatformGate section="revenue"><PlatformRevenue /></PlatformGate>} />
+          <Route path="/admin/coupons" element={<PlatformGate section="billing"><PlatformCoupons /></PlatformGate>} />
         </Route>
 
         {/* Admin / Network */}

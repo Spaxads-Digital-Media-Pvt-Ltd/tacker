@@ -22,6 +22,7 @@ import { AssignPlanModal, ExtendTrialModal } from './subscriptionActions';
 import { money as amountMoney, planPrice, billingBadge, invoiceState, type PlatformInvoice } from '../../lib/platformBilling';
 import type { NetworkDetail as Detail, NetworkTeamMember, PlatformActivityRow } from '../../types';
 import { NetworkAccount } from './success/NetworkAccount';
+import { NetworkDiscount } from './money/NetworkDiscount';
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString() : '—');
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : '—');
@@ -221,6 +222,7 @@ export default function NetworkDetail() {
       {tab === 'Account' && <NetworkAccount networkId={n.id} networkName={n.name} />}
 
       <div className="space-y-4">
+        {tab === 'Billing' && <NetworkDiscount networkId={n.id} />}
         {tab === 'Billing' && <Card title="Invoices" action={n.status !== 'deleted' && canBilling && (
           <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setNewInvoice(true)}>New invoice</button>
         )}>

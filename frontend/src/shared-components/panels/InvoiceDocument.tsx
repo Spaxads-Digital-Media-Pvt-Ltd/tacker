@@ -56,9 +56,12 @@ export function InvoiceDocument({ data, actions }: { data: InvoiceDocumentData; 
           <div className="flex justify-between border-b border-border pb-2 text-tiny font-semibold uppercase tracking-wide text-fg-muted">
             <span>Description</span><span>Amount</span>
           </div>
-          <div className="flex justify-between gap-6 py-3 text-small text-fg">
-            <span>{inv.description}</span><span className="whitespace-nowrap">{money(inv.subtotal, inv.currency)}</span>
-          </div>
+          {(data.lines?.length ? data.lines : [{ kind: 'one_off' as const, description: inv.description, quantity: '1', unit_amount: inv.subtotal, amount: inv.subtotal }]).map((l, i) => (
+            <div key={i} className={`flex justify-between gap-6 border-b border-border/60 py-3 text-small last:border-0 ${l.kind === 'discount' ? 'text-success-text' : 'text-fg'}`}>
+              <span>{l.description}{l.kind === 'overage' && <span className="ml-1 text-tiny text-fg-muted">(overage)</span>}</span>
+              <span className="whitespace-nowrap">{money(l.amount, inv.currency)}</span>
+            </div>
+          ))}
           <div className="ml-auto max-w-xs">
             <Line label="Subtotal">{money(inv.subtotal, inv.currency)}</Line>
             <Line label={`Tax${inv.tax_rate && Number(inv.tax_rate) > 0 ? ` (${inv.tax_rate}%)` : ''}`}>{money(inv.tax, inv.currency)}</Line>
@@ -80,6 +83,18 @@ export function InvoiceDocument({ data, actions }: { data: InvoiceDocumentData; 
             <p className="mt-2 text-tiny text-fg-secondary">Please quote {inv.number} with your payment.</p>
           </div>
         ) : null}
+
+        {(data.creditNotes ?? []).length > 0 && (
+          <section className="rounded-[var(--radius)] border border-border px-4 py-3">
+            <p className="text-tiny font-semibold uppercase tracking-wide text-fg-muted">Credit notes</p>
+            {data.creditNotes!.map((c) => (
+              <div key={c.number} className="mt-1 flex justify-between gap-6 text-small">
+                <span className="text-fg"><span className="font-mono">{c.number}</span> · {c.reason}{c.refunded ? ' · refunded' : ''} · {day(c.created_at)}</span>
+                <span className="whitespace-nowrap text-success-text">−{money(c.amount, c.currency)}</span>
+              </div>
+            ))}
+          </section>
+        )}
 
         {inv.notes && <p className="whitespace-pre-line text-small text-fg-secondary">{inv.notes}</p>}
       </article>

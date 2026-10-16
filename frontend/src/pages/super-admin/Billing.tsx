@@ -31,6 +31,12 @@ export default function Billing() {
   const actions = useInvoiceActions(refetch);
   const canEdit = usePlatformMe().can('billing', 'full');
   const [creating, setCreating] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportCsv = async () => {
+    setExportError(null);
+    try { await api.download(withQueryParams('/platform/invoices.csv', { status, q: search || undefined }), `invoices-${new Date().toISOString().slice(0, 10)}.csv`); }
+    catch (e) { setExportError(e instanceof Error ? e.message : 'Export failed'); }
+  };
   const run = useMutation(() => api.post<Record<string, number>>('/platform/billing/run', {}));
   const [runNote, setRunNote] = useState<string | null>(null);
   const runNow = async () => {
@@ -63,15 +69,18 @@ export default function Billing() {
 
   return (
     <>
-      <PageHeader title="Billing" subtitle="Invoices to tenant networks — record payments, give more time, void."
-        action={canEdit ? <>
-          <button className="btn-ghost" disabled={run.busy} onClick={() => void runNow()} title="Renewals, ended trials, overdue flags and suspensions — the worker does this every 15 minutes">
-            {run.busy ? 'Running…' : 'Run billing now'}
-          </button>
-          <button className="btn-primary" onClick={() => setCreating(true)}>New invoice</button>
-        </> : undefined} />
-      {(run.error || runNote || actions.notice) && (
-        <p className={`mb-3 text-small ${run.error ? 'text-danger-text' : 'text-fg-secondary'}`}>{run.error ?? actions.notice ?? runNote}</p>
+      <PageHeader title="Billing" subtitle="Invoices to tenant networks — record payments, give more time, void, credit."
+        action={<>
+          <button className="btn-ghost" onClick={() => void exportCsv()}>Export CSV</button>
+          {canEdit && <>
+            <button className="btn-ghost" disabled={run.busy} onClick={() => void runNow()} title="Renewals, ended trials, overdue flags and suspensions — the worker does this every 15 minutes">
+              {run.busy ? 'Running…' : 'Run billing now'}
+            </button>
+            <button className="btn-primary" onClick={() => setCreating(true)}>New invoice</button>
+          </>}
+        </>} />
+      {(run.error || runNote || actions.notice || exportError) && (
+        <p className={`mb-3 text-small ${run.error || exportError ? 'text-danger-text' : 'text-fg-secondary'}`}>{run.error ?? exportError ?? actions.notice ?? runNote}</p>
       )}
 
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
