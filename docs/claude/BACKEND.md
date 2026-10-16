@@ -212,13 +212,14 @@ No ORM. All queries are raw SQL via `pool.query()` or `ScopedDb`.
 
 - **zod** schemas inline in route handlers (`validateBody(schema)`)
 - Common: email, password, pagination params, CRUD bodies
-- `validateBody` middleware returns 400 with error details
+- `validateBody` / `validateQuery` return 422 `validation_failed`; the message names each field's problem (first three, e.g. `Email: Invalid email · Password: Required`), `details` keeps the full per-field list
 
 ## Error Handling
 
 - **Express**: `notFoundHandler` (404), `errorHandler` (wraps in envelope)
 - **Fastify**: Custom error handler → Sentry → generic error response
 - Errors use the envelope: `{ ok: false, error: { code: string, message: string } }`
+- Every Express request has an id (a proxy's `X-Request-Id` if it looks like one, else a uuid), returned as `X-Request-Id` and logged. An unexpected error → 500 `internal`, message "Something went wrong on our side… quote reference <id>", `details.reference`; outside production the message also names the cause
 
 ## Database
 

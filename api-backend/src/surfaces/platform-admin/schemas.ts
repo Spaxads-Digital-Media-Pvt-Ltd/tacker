@@ -8,7 +8,7 @@ export const loginSchema = z.object({
 
 export const createNetworkSchema = z.object({
   name: z.string().min(1).max(200),
-  slug: z.string().min(1).max(63).regex(/^[a-z0-9-]+$/, 'lowercase letters, digits, hyphens'),
+  slug: z.string().min(1).max(63).regex(/^[a-z0-9-]+$/, 'use only lowercase letters, digits and hyphens (e.g. "acme-media")'),
   defaultCurrency: z.string().length(3).default('USD'),
   // Optional: provision the first admin admin login + a subdomain tracking host during onboarding.
   owner: z

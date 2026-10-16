@@ -8,6 +8,7 @@
  */
 import { loadSession, clearSession, type Session } from '../auth/session';
 import { refreshToken, logout, lastRefreshRefusal } from '../auth/authClient';
+import { NETWORK_ERROR_MESSAGE, httpFailureMessage, timeoutMessage } from './errorMessages';
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 const REQUEST_TIMEOUT = 30_000;
@@ -97,7 +98,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
     const body = (await res.json().catch(() => ({}))) as Envelope<T>;
     if (!res.ok || body.ok === false) {
-      const err = body.error ?? { code: 'unknown', message: res.statusText };
+      // No envelope = something before our API answered (a gateway, the dev proxy with the backend down).
+      const err = body.error ?? { code: res.status >= 500 ? 'unavailable' : 'unknown', message: httpFailureMessage(res.status, res.statusText) };
       const reason = (err.details as { reason?: unknown } | undefined)?.reason;
       if (typeof reason === 'string' && ENDED_REASONS.has(reason) && isOwnSession(session)) endSession(reason);
       if (reason === 'password_change_required' && !location.pathname.startsWith('/change-password')) location.href = '/change-password';
@@ -113,9 +115,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     if (e instanceof ApiError) throw e;
     if (e instanceof NetworkError) throw e;
     if (e instanceof DOMException) {
-      if (e.name === 'AbortError') throw new NetworkError('timeout', `Request timed out after ${REQUEST_TIMEOUT}ms`);
+      if (e.name === 'AbortError') throw new NetworkError('timeout', timeoutMessage(REQUEST_TIMEOUT));
     }
-    throw new NetworkError('network', e instanceof Error ? e.message : 'Network error');
+    throw new NetworkError('network', NETWORK_ERROR_MESSAGE);
   }
 }
 
@@ -141,12 +143,12 @@ export const api = {
     let res: Response;
     try {
       res = await fetch(`${BASE}${path}`, { credentials: 'include', headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    } catch (e) {
-      throw new NetworkError('network', e instanceof Error ? e.message : 'Network error');
+    } catch {
+      throw new NetworkError('network', NETWORK_ERROR_MESSAGE);
     }
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as Envelope<unknown>;
-      throw new ApiError(body.error?.code ?? 'unknown', body.error?.message ?? res.statusText, res.status, body.error?.details);
+      throw new ApiError(body.error?.code ?? 'unknown', body.error?.message ?? httpFailureMessage(res.status, res.statusText), res.status, body.error?.details);
     }
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement('a');

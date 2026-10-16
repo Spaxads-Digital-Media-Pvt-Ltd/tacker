@@ -158,6 +158,7 @@ User enters credentials → POST /api/auth/login
 - **Auth header**: `Authorization: Bearer <token>`
 - **Credentials**: `credentials: 'include'` (for refresh cookie)
 - **Envelope**: `{ ok: true, data: T }` success, `{ ok: false, error: { code, message } }` error
+- **Error messages**: the envelope's `message` is shown as is; failures with no envelope (server unreachable, timeout, a gateway/proxy answering) get sentences from `lib/errorMessages.ts`
 
 ## Styling System
 
