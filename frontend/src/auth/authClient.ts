@@ -74,6 +74,17 @@ export async function changeInitialPassword(password: string): Promise<void> {
   markPasswordChanged();
 }
 
+/**
+ * A refused sign-in as an ApiError the login page can show: a validation failure says what's wrong
+ * ("Password must be at least 12 characters.") instead of "Request body failed validation".
+ */
+function signInError(body: { error?: { code?: string; message?: string; details?: unknown } }, status: number, fallback: string): ApiError {
+  const details = body.error?.details;
+  const reasons = details && typeof details === 'object' ? Object.values(details as Record<string, unknown>).flat() : [];
+  const reason = status === 422 ? reasons.find((r): r is string => typeof r === 'string' && r.length > 0) : undefined;
+  return new ApiError(body.error?.code ?? 'login_failed', reason ?? body.error?.message ?? fallback, status, details);
+}
+
 export async function login(email: string, password: string): Promise<Session> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
@@ -82,7 +93,7 @@ export async function login(email: string, password: string): Promise<Session> {
     body: JSON.stringify({ email, password }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) throw new ApiError(body.error?.code ?? 'login_failed', body.error?.message ?? 'Login failed', res.status);
+  if (!res.ok || body.ok === false) throw signInError(body, res.status, 'Login failed');
   const session = toSession(body.data as AuthPayload);
   saveSession(session);
   return session;
@@ -110,7 +121,7 @@ export async function loginPlatform(email: string, password: string): Promise<Se
     body: JSON.stringify({ email, password }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) throw new ApiError(body.error?.code ?? 'login_failed', body.error?.message ?? 'Login failed', res.status);
+  if (!res.ok || body.ok === false) throw signInError(body, res.status, 'Login failed');
   const { token, admin } = body.data as { token: string; admin: { id: string; email: string } };
   const session: Session = {
     token,
