@@ -8,6 +8,9 @@ export default defineConfig({
   fileParallelism: false,
   env: {
    NODE_ENV: 'test',
+   // Tests never read the developer's .env (as in CI, which has none): its real keys — e.g. the Supabase
+   // service-role key — would otherwise fill every var not pinned here. Test-only overrides go in .env.test.
+   DOTENV_CONFIG_PATH: process.env.DOTENV_CONFIG_PATH ?? '.env.test',
    PLATFORM_ADMIN_JWT_SECRET: process.env.PLATFORM_ADMIN_JWT_SECRET ?? 'plat-test-secret-do-not-use-in-prod',
    // Test-only settings encryption key (32 bytes hex) — never use outside tests.
    SETTINGS_ENC_KEY: process.env.SETTINGS_ENC_KEY ?? '7465737420736574746e6773206b6579202d20646f206e6f74207573652121ff',
