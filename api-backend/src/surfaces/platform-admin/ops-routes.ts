@@ -21,6 +21,10 @@ import { NETWORK_MRR_SQL } from '../../lib/billing/revenue.js';
 import { hashPassword, verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import { passwordSchema } from '../../lib/auth/password-policy.js';
 import { LEVELS, SECTIONS, SECTION_KEYS, normalizePermissions } from '../../lib/platform/permissions.js';
+import { generateSecret, otpauthUrl, verifyTotp, generateRecoveryCodes, hashRecoveryCode, looksLikeRecoveryCode } from '../../lib/auth/totp.js';
+import { encryptSecret, decryptSecret } from '../../lib/crypto/secret-box.js';
+import { checkSecondFactor, securitySettings, saveSecuritySettings } from '../../lib/platform/twofactor.js';
+import { BRAND } from '../../config/branding.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { requirePerm, can, networkScope } from './auth.js';
 
@@ -29,7 +33,7 @@ const ident = (req: Request) => req.identity as PlatformAdminIdentity;
 const me = (req: Request) => ident(req).platformAdminId;
 const isOwner = (req: Request) => ident(req).role?.key === 'owner';
 const OWNER_ROLE_ID = '00000000-0000-4000-a000-000000000001';
-const ADMIN_SELECT = `pa.id, pa.email, pa.name, pa.status, pa.created_at, pa.last_login_at,
+const ADMIN_SELECT = `pa.id, pa.email, pa.name, pa.status, pa.created_at, pa.last_login_at, (pa.totp_enabled_at IS NOT NULL) AS two_factor,
   r.id AS role_id, r.key AS role_key, r.name AS role_name`;
 
 const newAdminSchema = z.object({
@@ -44,6 +48,7 @@ const updateAdminSchema = z.object({
   roleId: z.string().uuid().optional(),
 }).strict();
 const setPasswordSchema = z.object({ password: passwordSchema }).strict();
+const codeSchema = z.object({ code: z.string().trim().min(6).max(20) }).strict();
 const ownPasswordSchema = z.object({ currentPassword: z.string().min(1).max(200), newPassword: passwordSchema }).strict();
 const roleSchema = z.object({
   name: z.string().trim().min(1).max(60),
@@ -71,9 +76,14 @@ export function opsRoutes(): Router {
   // ---------- Me ----------
   r.get('/me', asyncHandler(async (req, res) => {
     const id = ident(req);
-    const row = (await query<{ name: string | null; email: string; last_login_at: Date | null }>(
-      'SELECT name, email, last_login_at FROM platform_admins WHERE id = $1', [id.platformAdminId])).rows[0];
-    sendOk(res, { identity: id, id: id.platformAdminId, email: row?.email, name: row?.name ?? null, role: id.role, permissions: id.permissions, sections: SECTIONS });
+    const row = (await query<{ name: string | null; email: string; last_login_at: Date | null; totp_enabled_at: Date | null; codes: number; has_password: boolean }>(
+      `SELECT name, email, last_login_at, totp_enabled_at, cardinality(recovery_code_hashes)::int AS codes, (password_hash IS NOT NULL) AS has_password
+         FROM platform_admins WHERE id = $1`, [id.platformAdminId])).rows[0];
+    const required = (await securitySettings()).requireTwoFactor;
+    sendOk(res, {
+      identity: id, id: id.platformAdminId, email: row?.email, name: row?.name ?? null, role: id.role, permissions: id.permissions, sections: SECTIONS,
+      twoFactor: { enabled: Boolean(row?.totp_enabled_at), enabledAt: row?.totp_enabled_at ?? null, required, recoveryCodesLeft: row?.codes ?? 0 },
+    });
   }));
 
   // ---------- Overview ----------
@@ -256,6 +266,76 @@ export function opsRoutes(): Router {
     await query(`UPDATE platform_admins SET password_hash = $2 WHERE id = $1`, [me(req), await hashPassword(b.newPassword)]);
     await writePlatformAudit(req, null, { action: 'platform_admin.password_change', entityType: 'platform_admin', entityId: me(req) });
     sendOk(res, { ok: true });
+  }));
+
+  // ---------- Two-factor sign-in (your own) ----------
+  r.post('/me/2fa/setup', asyncHandler(async (req, res) => {
+    const row = (await query<{ email: string; totp_enabled_at: Date | null }>('SELECT email, totp_enabled_at FROM platform_admins WHERE id = $1', [me(req)])).rows[0]!;
+    if (row.totp_enabled_at) throw conflict('Two-factor sign-in is already on — turn it off first to set up a new app.');
+    const secret = generateSecret();
+    await query('UPDATE platform_admins SET totp_pending_secret = $2 WHERE id = $1', [me(req), encryptSecret(secret)]);
+    sendOk(res, { secret, otpauthUrl: otpauthUrl(BRAND.name, row.email, secret) });
+  }));
+
+  r.post('/me/2fa/enable', validateBody(codeSchema), asyncHandler(async (req, res) => {
+    const row = (await query<{ totp_pending_secret: string | null; totp_enabled_at: Date | null }>(
+      'SELECT totp_pending_secret, totp_enabled_at FROM platform_admins WHERE id = $1', [me(req)])).rows[0]!;
+    if (row.totp_enabled_at) throw conflict('Two-factor sign-in is already on.');
+    if (!row.totp_pending_secret) throw badRequest('Start the setup first.');
+    const step = verifyTotp(decryptSecret(row.totp_pending_secret), (req.body as { code: string }).code);
+    if (step === null) throw badRequest('That code isn’t right — enter the 6-digit code your authenticator app shows now (check its clock).');
+    const codes = generateRecoveryCodes();
+    await query(
+      `UPDATE platform_admins SET totp_secret = totp_pending_secret, totp_pending_secret = NULL, totp_enabled_at = now(), totp_last_step = $2,
+              recovery_code_hashes = $3 WHERE id = $1`, [me(req), step, codes.map(hashRecoveryCode)]);
+    await writePlatformAudit(req, null, { action: 'platform_admin.2fa_enable', entityType: 'platform_admin', entityId: me(req) });
+    sendOk(res, { enabled: true, recoveryCodes: codes });
+  }));
+
+  r.post('/me/2fa/recovery-codes', validateBody(codeSchema), asyncHandler(async (req, res) => {
+    const code = (req.body as { code: string }).code;
+    // Checked before checkSecondFactor, which would spend a recovery code it was given.
+    if (looksLikeRecoveryCode(code)) throw badRequest('Enter the current 6-digit code from your authenticator app — a recovery code can’t be used here.');
+    if ((await checkSecondFactor(me(req), code)) !== 'totp') throw badRequest('That code isn’t right — enter the current 6-digit code from your authenticator app.');
+    const codes = generateRecoveryCodes();
+    await query('UPDATE platform_admins SET recovery_code_hashes = $2 WHERE id = $1', [me(req), codes.map(hashRecoveryCode)]);
+    await writePlatformAudit(req, null, { action: 'platform_admin.2fa_recovery_codes', entityType: 'platform_admin', entityId: me(req) });
+    sendOk(res, { recoveryCodes: codes });
+  }));
+
+  r.post('/me/2fa/disable', validateBody(z.object({ password: z.string().min(1).max(200) }).strict()), asyncHandler(async (req, res) => {
+    if ((await securitySettings()).requireTwoFactor) throw conflict('Two-factor sign-in is required for every member (Settings › Security) — it can’t be turned off.');
+    const row = (await query<{ password_hash: string | null }>('SELECT password_hash FROM platform_admins WHERE id = $1', [me(req)])).rows[0];
+    if (!row?.password_hash || !(await verifyPassword((req.body as { password: string }).password, row.password_hash))) throw badRequest('Your password is not right.');
+    await query(`UPDATE platform_admins SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled_at = NULL, totp_last_step = NULL, recovery_code_hashes = '{}' WHERE id = $1`, [me(req)]);
+    await writePlatformAudit(req, null, { action: 'platform_admin.2fa_disable', entityType: 'platform_admin', entityId: me(req) });
+    sendOk(res, { enabled: false });
+  }));
+
+  // Another member lost their phone: their two-factor is cleared (they set it up again at their next sign-in).
+  r.post('/admins/:id/2fa/reset', requirePerm('team', 'full'), asyncHandler(async (req, res) => {
+    const id = req.params.id!;
+    if (id === me(req)) throw badRequest('Turn your own two-factor off or on under Your account.');
+    const target = UUID_RE.test(id) ? (await query<{ email: string; role_id: string; totp_enabled_at: Date | null }>(
+      'SELECT email, role_id, totp_enabled_at FROM platform_admins WHERE id = $1', [id])).rows[0] : undefined;
+    if (!target) throw notFound('Member not found');
+    if (target.role_id === OWNER_ROLE_ID && !isOwner(req)) throw forbidden('Only an Owner can reset an Owner’s two-factor sign-in.');
+    if (!target.totp_enabled_at) throw conflict(`${target.email} doesn’t use two-factor sign-in.`);
+    await query(`UPDATE platform_admins SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled_at = NULL, totp_last_step = NULL, recovery_code_hashes = '{}' WHERE id = $1`, [id]);
+    await writePlatformAudit(req, null, { action: 'platform_admin.2fa_reset', entityType: 'platform_admin', entityId: id, after: { email: target.email } });
+    sendOk(res, { reset: true });
+  }));
+
+  r.get('/settings/security', requirePerm('settings', 'read'), asyncHandler(async (_req, res) => { sendOk(res, await securitySettings()); }));
+  r.put('/settings/security', requirePerm('settings', 'full'), validateBody(z.object({ requireTwoFactor: z.boolean() }).strict()), asyncHandler(async (req, res) => {
+    const b = req.body as { requireTwoFactor: boolean };
+    if (b.requireTwoFactor) {
+      const mine = (await query<{ on: boolean }>('SELECT totp_enabled_at IS NOT NULL AS on FROM platform_admins WHERE id = $1', [me(req)])).rows[0];
+      if (!mine?.on) throw conflict('Turn on two-factor sign-in for your own account first (Team › Your account).');
+    }
+    const after = await saveSecuritySettings(b, me(req));
+    await writePlatformAudit(req, null, { action: 'settings.security', entityType: 'platform_settings', entityId: 'security', after });
+    sendOk(res, after);
   }));
 
   // ---------- Roles ----------

@@ -198,7 +198,7 @@ export default function App() {
           <Route path="/admin/sales/leads" element={<PlatformGate section="sales"><SalesLeads /></PlatformGate>} />
           <Route path="/admin/sales/leads/:id" element={<PlatformGate section="sales"><LeadDetail /></PlatformGate>} />
           <Route path="/admin/sales/pipeline" element={<PlatformGate section="sales"><SalesPipeline /></PlatformGate>} />
-          <Route path="/admin/tasks" element={<PlatformTasks />} />
+          <Route path="/admin/tasks" element={<PlatformGate><PlatformTasks /></PlatformGate>} />
           <Route path="/admin/success" element={<PlatformGate section="success"><HealthBoard /></PlatformGate>} />
           <Route path="/admin/support" element={<PlatformGate section="support"><SupportDesk /></PlatformGate>} />
           <Route path="/admin/support/macros" element={<PlatformGate section="support"><SupportMacros /></PlatformGate>} />

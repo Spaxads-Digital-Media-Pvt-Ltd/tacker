@@ -15,7 +15,9 @@ import { impersonationConfigured, signSupportSessionToken } from '../../lib/auth
 import { query } from '../../lib/db/pool.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
-import { signPlatformAdminToken } from '../../lib/auth/platform-admin-token.js';
+import { signPlatformAdminToken, signMfaChallenge, verifyMfaChallenge } from '../../lib/auth/platform-admin-token.js';
+import { checkSecondFactor } from '../../lib/platform/twofactor.js';
+import { z } from 'zod';
 import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import {
  checkLoginRateLimit,
@@ -54,8 +56,8 @@ export function publicPlatformRoutes(): Router {
  const preCheck = await checkLoginRateLimit(ip, normalizedEmail);
  if (preCheck.limited) throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
 
- const { rows } = await query<{ id: string; email: string; status: string; password_hash: string; auth_provider: string }>(
- `SELECT id, email, status, password_hash, auth_provider FROM platform_admins WHERE lower(email) = lower($1) LIMIT 1`,
+ const { rows } = await query<{ id: string; email: string; status: string; password_hash: string; auth_provider: string; totp_enabled_at: Date | null }>(
+ `SELECT id, email, status, password_hash, auth_provider, totp_enabled_at FROM platform_admins WHERE lower(email) = lower($1) LIMIT 1`,
  [b.email],
  );
  const admin = rows[0];
@@ -67,14 +69,44 @@ export function publicPlatformRoutes(): Router {
  if (!valid) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
 
  await resetLoginCounter(normalizedEmail);
+ // Two-factor on: the password was right — now the authenticator code (POST /login/2fa), no session yet.
+ if (admin.totp_enabled_at) {
+ return sendOk(_res, { twoFactorRequired: true, challenge: await signMfaChallenge(admin.id), admin: { email: admin.email } });
+ }
  await query('UPDATE platform_admins SET last_login_at = now() WHERE id = $1', [admin.id]);
 
  const token = await signPlatformAdminToken(admin.id);
  return sendOk(_res, { token, admin: { id: admin.id, email: admin.email } });
  }));
 
+ // The second step: the challenge from the password step and a 6-digit code (or a recovery code). Wrong codes
+ // count like wrong passwords (5 → a wait), per member.
+ r.post('/login/2fa', validateBody(mfaSchema), asyncHandler(async (req, res) => {
+ const b = req.body as { challenge: string; code: string };
+ let id: string;
+ try { id = await verifyMfaChallenge(b.challenge); } catch { throw unauthorized('Your sign-in took too long — enter your password again.'); }
+ const ip = clientIp(req);
+ const key = `mfa:${id}`;
+ const pre = await checkLoginRateLimit(ip, key);
+ if (pre.limited) throw tooMany(loginRateLimitMessage(pre), { retryAfter: pre.retryAfterSeconds });
+ const admin = (await query<{ email: string; status: string }>('SELECT email, status FROM platform_admins WHERE id = $1', [id])).rows[0];
+ if (!admin) throw unauthorized('Your sign-in took too long — enter your password again.');
+ if (admin.status !== 'active') throw forbidden('Account is disabled.');
+ const used = await checkSecondFactor(id, b.code);
+ if (!used) {
+ await recordLoginFailure(ip, key);
+ throw unauthorized('That code isn’t right — enter the current 6-digit code from your authenticator app (check its clock), or a recovery code.');
+ }
+ await resetLoginCounter(key);
+ await query('UPDATE platform_admins SET last_login_at = now() WHERE id = $1', [id]);
+ const left = (await query<{ n: number }>('SELECT cardinality(recovery_code_hashes)::int AS n FROM platform_admins WHERE id = $1', [id])).rows[0]?.n ?? 0;
+ return sendOk(res, { token: await signPlatformAdminToken(id), admin: { id, email: admin.email }, usedRecoveryCode: used === 'recovery', recoveryCodesLeft: left });
+ }));
+
  return r;
 }
+
+const mfaSchema = z.object({ challenge: z.string().min(10).max(2000), code: z.string().trim().min(6).max(20) }).strict();
 
 /** Authenticated platform-admin routes. */
 export function platformRoutes(): Router {

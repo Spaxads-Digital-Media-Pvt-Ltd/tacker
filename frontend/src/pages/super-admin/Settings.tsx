@@ -15,8 +15,9 @@ import { usePlatformMe } from '../../lib/platformMe';
 import type { BillingSettings } from '../../lib/platformBilling';
 import { SupportSettings } from './support/SupportSettings';
 import { EmailSettings } from './platform/EmailSettings';
+import { SecuritySettings } from './platform/SecuritySettings';
 
-const TABS = ['Billing', 'Support', 'Email'];
+const TABS = ['Billing', 'Support', 'Email', 'Security'];
 
 export default function Settings() {
   const [params, setParams] = useSearchParams();
@@ -25,7 +26,7 @@ export default function Settings() {
     <>
       <PageHeader title="Settings" subtitle="How the platform bills its networks, runs its help desk and sends email." />
       <div className="mx-auto max-w-3xl"><Tabs tabs={TABS} active={tab} onChange={(t) => setParams(t === 'Billing' ? {} : { tab: t }, { replace: true })} /></div>
-      {tab === 'Billing' ? <BillingSettingsForm /> : tab === 'Support' ? <SupportSettings /> : <EmailSettings />}
+      {tab === 'Billing' ? <BillingSettingsForm /> : tab === 'Support' ? <SupportSettings /> : tab === 'Email' ? <EmailSettings /> : <SecuritySettings />}
     </>
   );
 }

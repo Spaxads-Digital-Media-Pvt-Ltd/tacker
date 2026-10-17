@@ -36,7 +36,7 @@ const ENDED: Record<string, string> = {
 };
 
 export default function Login() {
-  const { signIn, signInPlatform } = useAuth();
+  const { signIn, signInPlatform, completePlatformSignIn } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const ended = ENDED[params.get('ended') ?? ''] ?? null;
@@ -47,19 +47,48 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   // Super Admins sign in against the platform-admin surface (F-05), not the tenant auth exchange.
   const [asSuperAdmin, setAsSuperAdmin] = useState(false);
+  // Two-factor on: after the password, the authenticator code (or a recovery code).
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+
+  /** Signed in: the first-sign-in password change, a Super Admin's role page, or the role's home. */
+  const land = async () => {
+    const s = loadSession();
+    const home = s?.role === 'super_admin'
+      ? await api.get<{ role?: { home?: string } }>('/platform/me').then((m) => m.role?.home ?? ROLE_HOME.super_admin).catch(() => ROLE_HOME.super_admin)
+      : null;
+    navigate(s?.mustChangePassword ? '/change-password' : home ?? (s ? ROLE_HOME[s.role] : '/'), { replace: true });
+  };
+  const onCode = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!challenge) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await completePlatformSignIn(challenge, code.trim());
+      await land();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Sign-in failed';
+      if (/too long/i.test(msg)) { setChallenge(null); setCode(''); }
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await (asSuperAdmin ? signInPlatform : signIn)(email, password);
-      const s = loadSession();
+      if (asSuperAdmin) {
+        const twoFactor = await signInPlatform(email, password);
+        if (twoFactor) { setChallenge(twoFactor.challenge); setCode(''); return; }
+      } else {
+        await signIn(email, password);
+      }
       // Platform staff land on their role's own panel (Sales → the sales dashboard, Support → the queue…).
-      const home = s?.role === 'super_admin'
-        ? await api.get<{ role?: { home?: string } }>('/platform/me').then((m) => m.role?.home ?? ROLE_HOME.super_admin).catch(() => ROLE_HOME.super_admin)
-        : null;
-      navigate(s?.mustChangePassword ? '/change-password' : home ?? (s ? ROLE_HOME[s.role] : '/'), { replace: true });
+      await land();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -120,6 +149,18 @@ export default function Login() {
               </div>
             )}
 
+            {challenge ? (
+              <form onSubmit={onCode} className="mt-6 space-y-4">
+                <p className="text-small text-fg-secondary">Two-factor sign-in is on for {email}. Enter the 6-digit code from your authenticator app — or one of your recovery codes.</p>
+                <div>
+                  <label className="label" htmlFor="code">Code</label>
+                  <input id="code" className="input text-center font-mono text-lg tracking-[0.3em]" autoComplete="one-time-code" inputMode="text" required autoFocus
+                    maxLength={20} value={code} onChange={(e) => setCode(e.target.value)} placeholder="123 456" />
+                </div>
+                <button type="submit" disabled={busy || code.trim().length < 6} className="btn-primary w-full">{busy ? 'Checking…' : 'Verify and sign in'}</button>
+                <button type="button" className="w-full text-center text-tiny font-medium text-accent-text hover:underline" onClick={() => { setChallenge(null); setCode(''); setError(null); }}>Back</button>
+              </form>
+            ) : (
             <form onSubmit={onSubmit}>
               <div className="mt-6 space-y-4">
                 <div>
@@ -143,11 +184,12 @@ export default function Login() {
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
+            )}
 
-            <button type="button" onClick={() => { setAsSuperAdmin((v) => !v); setError(null); }}
+            {!challenge && <button type="button" onClick={() => { setAsSuperAdmin((v) => !v); setError(null); }}
               className="mt-4 w-full text-center text-tiny font-medium text-accent-text hover:underline">
               {asSuperAdmin ? 'Back to regular sign in' : 'Sign in as Super Admin'}
-            </button>
+            </button>}
 
             {!asSuperAdmin && (
               <p className="mt-4 text-center text-tiny text-fg-secondary">

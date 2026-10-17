@@ -140,7 +140,10 @@ function tokenExpiry(token: string): number | null {
  * surface checks their own credentials at POST /platform/login and returns its own short-lived
  * token (1 h, no refresh cookie). Stored like any session, so the api client sends it on /platform/*.
  */
-export async function loginPlatform(email: string, password: string): Promise<Session> {
+/** The password was right but two-factor is on: the code step comes next (POST /platform/login/2fa). */
+export interface TwoFactorChallenge { twoFactorRequired: true; challenge: string; email: string }
+
+export async function loginPlatform(email: string, password: string): Promise<Session | TwoFactorChallenge> {
   const res = await authFetch('/platform/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -148,7 +151,22 @@ export async function loginPlatform(email: string, password: string): Promise<Se
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.ok === false) throw authError(body, res);
-  const { token, admin } = body.data as { token: string; admin: { id: string; email: string } };
+  if (body.data?.twoFactorRequired) return { twoFactorRequired: true, challenge: body.data.challenge as string, email };
+  return platformSession(body.data as { token: string; admin: { id: string; email: string } });
+}
+
+/** The second step: the challenge and a 6-digit code (or a recovery code). */
+export async function loginPlatformCode(challenge: string, code: string): Promise<Session & { recoveryCodesLeft?: number; usedRecoveryCode?: boolean }> {
+  const res = await authFetch('/platform/login/2fa', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge, code }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.ok === false) throw authError(body, res);
+  const d = body.data as { token: string; admin: { id: string; email: string }; recoveryCodesLeft: number; usedRecoveryCode: boolean };
+  return { ...platformSession(d), recoveryCodesLeft: d.recoveryCodesLeft, usedRecoveryCode: d.usedRecoveryCode };
+}
+
+function platformSession({ token, admin }: { token: string; admin: { id: string; email: string } }): Session {
   const session: Session = {
     token,
     role: 'super_admin',

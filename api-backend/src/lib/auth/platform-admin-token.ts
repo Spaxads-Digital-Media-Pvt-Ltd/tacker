@@ -49,3 +49,25 @@ export async function verifyPlatformAdminToken(token: string): Promise<PlatformA
  if (!paSub) throw new Error('Token missing pa_sub claim');
  return payload as unknown as PlatformAdminTokenPayload;
 }
+
+/**
+ * The second step of a two-factor sign-in: after the right password, a 5-minute challenge that only
+ * POST /platform/login/2fa accepts (its own issuer — it never works as a session token).
+ */
+export async function signMfaChallenge(platformAdminId: string): Promise<string> {
+ assertSecret();
+ return new SignJWT({ pa_sub: platformAdminId, purpose: 'mfa' })
+ .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+ .setIssuer('tracker-platform-mfa')
+ .setIssuedAt()
+ .setExpirationTime('5m')
+ .sign(SECRET);
+}
+
+export async function verifyMfaChallenge(token: string): Promise<string> {
+ assertSecret();
+ const { payload } = await jwtVerify(token, SECRET, { algorithms: ['HS256'], issuer: 'tracker-platform-mfa' });
+ const id = String((payload as Record<string, unknown>)['pa_sub'] ?? '');
+ if (!id || (payload as Record<string, unknown>)['purpose'] !== 'mfa') throw new Error('Not a sign-in challenge');
+ return id;
+}

@@ -19,11 +19,16 @@ import { verifyPlatformAdminToken } from '../../lib/auth/platform-admin-token.js
 import { query } from '../../lib/db/pool.js';
 import { allows, normalizePermissions, sectionName, type Section } from '../../lib/platform/permissions.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
+import { securitySettings } from '../../lib/platform/twofactor.js';
+
+/** What a member who must set up two-factor may still reach. */
+const SETUP_PATHS = /^\/me(\/2fa(\/[a-z-]+)?|\/password)?\/?$/;
 
 interface PlatformAdminRow {
  id: string;
  status: string;
  email: string;
+ totp_enabled_at: Date | null;
  role_key: string;
  role_name: string;
  permissions: unknown;
@@ -42,7 +47,7 @@ export function platformAdminAuth(req: Request, _res: Response, next: NextFuncti
 
  // Membership gate — verify an ACTIVE platform_admins row so access can be revoked; its role decides the rest.
  const { rows } = await query<PlatformAdminRow>(
- `SELECT pa.id, pa.status, pa.email, r.key AS role_key, r.name AS role_name, r.permissions, r.scope, r.home
+ `SELECT pa.id, pa.status, pa.email, pa.totp_enabled_at, r.key AS role_key, r.name AS role_name, r.permissions, r.scope, r.home
  FROM platform_admins pa JOIN platform_roles r ON r.id = pa.role_id
  WHERE pa.id = $1 LIMIT 1`,
  [paSub],
@@ -57,6 +62,11 @@ export function platformAdminAuth(req: Request, _res: Response, next: NextFuncti
  permissions: normalizePermissions(admin.permissions),
  };
  req.identity = identity;
+ // Two-factor required for all staff (Settings › Security) and not set up yet: only setting it up (and
+ // reading who you are / changing your password) until then.
+ if (!admin.totp_enabled_at && (await securitySettings()).requireTwoFactor && !SETUP_PATHS.test(req.path)) {
+ return next(new AppError('forbidden', 'Set up two-factor sign-in first — it is required for every member (Team › Your account).', { reason: 'two_factor_setup_required' }));
+ }
  // No req.scope: platform code opts into a specific tenant explicitly and audibly.
  return next();
  })

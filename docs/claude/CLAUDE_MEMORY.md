@@ -54,7 +54,7 @@ frontend/src/
 ├── pages/
 │ ├── admin/ — 80+ page files (advertisers, publishers, offers, reports, etc.)
 │ ├── portal/ — Publisher/Advertiser portal pages
-│ └── super-admin/ — Networks, Subscriptions, Usage
+│ └── super-admin/ — Networks, Plans, Billing, Usage, Team & roles (+ two-factor), sales/, success/, support/, money/, platform/ (flags, announcements, system, email, security)
 ├── lib/ — api.ts (HTTP client), authClient.ts, useApi.ts, reportFilters.ts
 ├── theme/ — Light/dark theme (CSS-only)
 ├── config/branding.ts — Brand name
@@ -116,7 +116,7 @@ api-backend/src/
 | Surface | Auth | Token | Claims |
 |---|---|---|---|
 | Dashboard (:4001) | Supabase JWT (jose JWKS) | Bearer header | network_id, kind, role, owner_id |
-| Platform Admin (:4004) | Own JWT (PLATFORM_ADMIN_JWT_SECRET) | Bearer header | Separate from tenants |
+| Platform Admin (:4004) | Own JWT (PLATFORM_ADMIN_JWT_SECRET); optional TOTP two-factor step (`/platform/login/2fa`) | Bearer header | Separate from tenants; staff roles per section (`requirePerm`) |
 | Tracking (:4002) | **None** | Host header → tenant | network_id from DB |
 | Public API (:4003) | API key (sha256) | Authorization: ApiKey | audience |
 | Workers (:4005) | Internal | — | — |

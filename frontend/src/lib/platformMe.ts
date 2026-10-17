@@ -14,6 +14,8 @@ export interface PlatformMe {
   role: { key: string; name: string; scope: 'all' | 'assigned'; home: string };
   permissions: Record<string, Level>;
   sections: { key: string; name: string; description: string }[];
+  /** Two-factor sign-in: on for this member; required for everyone (Settings › Security). */
+  twoFactor?: { enabled: boolean; enabledAt: string | null; required: boolean; recoveryCodesLeft: number };
 }
 
 export interface PlatformMeCtx {

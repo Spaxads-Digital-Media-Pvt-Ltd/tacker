@@ -12,10 +12,11 @@ import { usePlatformMe, type Level } from '../../lib/platformMe';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, Tabs, type Column } from '../../shared-components/primitives/ui';
 import { PASSWORD_HINT, PASSWORD_MIN } from '../../auth/passwordPolicy';
+import { TwoFactorCard } from '../../shared-components/panels/TwoFactorCard';
 
 interface Member {
   id: string; email: string; name: string | null; status: 'active' | 'disabled'; created_at: string; last_login_at: string | null;
-  role_id: string; role_key: string; role_name: string; you: boolean;
+  role_id: string; role_key: string; role_name: string; you: boolean; two_factor: boolean;
 }
 interface Role {
   id: string; key: string; name: string; description: string | null; scope: 'all' | 'assigned'; home: string;
@@ -60,6 +61,11 @@ export default function Team() {
     onConfirm: async () => { await api.del(`/platform/roles/${r.id}`); roles.refetch(); },
   });
 
+  const reset2fa = (m: Member) => confirm({
+    title: `Reset ${m.email}’s two-factor sign-in?`, confirmLabel: 'Reset', destructive: true,
+    message: 'For a member who lost their phone: their authenticator and recovery codes stop working; they set it up again (it may be required at their next sign-in).',
+    onConfirm: async () => { await api.post(`/platform/admins/${m.id}/2fa/reset`, {}); setNotice(`${m.email}’s two-factor sign-in was reset.`); members.refetch(); },
+  });
   const roleOptions = (current: string) => (roles.data ?? []).filter((r) => owner || r.key !== 'owner' || r.id === current);
   const memberCols: Column<Member>[] = [
     { header: 'Member', cell: (m) => <div><p className="font-medium">{m.name || m.email}{m.you && <span className="ml-2 text-tiny font-normal text-fg-muted">(you)</span>}</p>{m.name && <p className="text-tiny text-fg-muted">{m.email}</p>}</div> },
@@ -73,11 +79,13 @@ export default function Team() {
         : <Badge value="active" label={m.role_name} />),
     },
     { header: 'Status', cell: (m) => <Badge value={m.status} /> },
+    { header: 'Two-factor', cell: (m) => (m.two_factor ? <span className="text-success-text">On</span> : <span className="text-fg-muted">Off</span>) },
     { header: 'Last sign-in', cell: (m) => (m.last_login_at ? new Date(m.last_login_at).toLocaleString() : <span className="text-fg-muted">never</span>) },
     {
       header: '', className: 'text-right', cell: (m) => (!manage || m.you ? null : (
         <span className="flex justify-end gap-3 whitespace-nowrap">
           {(owner || m.role_key !== 'owner') && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setResetting(m)}>Reset password</button>}
+          {m.two_factor && (owner || m.role_key !== 'owner') && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => reset2fa(m)}>Reset two-factor</button>}
           {m.status === 'active'
             ? <button className="text-tiny font-medium text-danger-text hover:underline" onClick={() => setStatus(m, 'disabled')}>Disable</button>
             : <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setStatus(m, 'active')}>Enable</button>}
@@ -101,6 +109,7 @@ export default function Team() {
             : members.error ? <StateBlock>{members.error}</StateBlock>
             : <Table columns={memberCols} rows={members.data ?? []} rowKey={(m) => m.id} />}
           <OwnPassword onDone={() => setNotice('Your password was changed. Use it at your next sign-in.')} />
+          <div className="mt-6"><TwoFactorCard onChanged={() => members.refetch()} /></div>
         </>
       ) : roles.loading ? <StateBlock><Spinner /></StateBlock>
         : roles.error ? <StateBlock>{roles.error}</StateBlock>
