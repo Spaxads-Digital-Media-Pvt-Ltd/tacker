@@ -9,7 +9,8 @@ export const createOfferSchema = z.object({
   name: z.string().min(1).max(200),
   status: z.enum(['draft', 'active', 'paused', 'archived']).default('draft'),
   destinationUrl: redirectUrlWithMax(2000),
-  payoutModel: z.enum(['CPA', 'CPL', 'CPC', 'CPI', 'RevShare']).default('CPA'),
+  // CPC pays the partner per click, CPM per 1000 impressions (lib/offer-settings/billing.ts); the others per conversion.
+  payoutModel: z.enum(['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare']).default('CPA'),
   defaultPayout: moneySchema.default('0'),
   defaultRevenue: moneySchema.default('0'),
   currency: z.string().length(3).default('USD'),

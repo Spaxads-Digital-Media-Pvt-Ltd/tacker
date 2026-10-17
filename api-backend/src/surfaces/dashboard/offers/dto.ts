@@ -50,6 +50,8 @@ export interface OfferAdminDTO {
   internalNotes: string | null;
   productId: string | null;
   thumbnailUrl: string | null;
+  /** The advertiser's impression URL (/impression redirects there); null = /impression answers a pixel. */
+  impressionUrl: string | null;
   targeting: OfferTargeting;
   attributionSettings: AttributionSettings;
   revenueSettings: RevenueSettings;
@@ -99,6 +101,7 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     internalNotes: readString(meta, 'internal_notes'),
     productId: readString(meta, 'product_id'),
     thumbnailUrl: readString(meta, 'thumbnail_url'),
+    impressionUrl: readString(meta, 'impression_url'),
     targeting: readTargeting(meta),
     attributionSettings: readAttribution(meta),
     revenueSettings: readRevenue(meta),

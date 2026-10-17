@@ -57,7 +57,7 @@ function ChangeRow({
       return (
         <select className="input" value={change.value} onChange={(e) => onChange({ ...change, value: e.target.value })}>
           <option value="">Select…</option>
-          {['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((p) => <option key={p} value={p}>{p}</option>)}
+          {['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'].map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
       );
     }

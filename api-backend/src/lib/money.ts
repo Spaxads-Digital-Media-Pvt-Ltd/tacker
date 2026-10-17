@@ -85,6 +85,15 @@ export function percentOfMoney(amount: string, pct: string | number): string {
   return fromUnits(divRound(toUnits(amount) * pctScaled, 100n * 1_000_000n));
 }
 
+/** `amount` × `times` / `per`, rounded half away from zero to 4 dp — e.g. a unit price × quantity, or a rate
+ * per 1000 impressions × impressions (`per` = 1000). `times` / `per` are whole numbers. */
+export function scaleMoney(amount: string, times: number | bigint, per: number | bigint = 1): string {
+  const t = BigInt(times);
+  const p = BigInt(per);
+  if (p <= 0n) throw new Error(`Invalid divisor: ${String(per)}`);
+  return fromUnits(divRound(toUnits(amount) * t, p));
+}
+
 /** A currency code as the ledger accepts it: exactly 3 upper-case letters (e.g. USD). */
 export const CURRENCY_RE = /^[A-Z]{3}$/;
 

@@ -3,6 +3,9 @@ import { makeQueueConnection } from '../lib/redis.js';
 
 export const QUEUE = {
  clickPersist: 'click-persist',
+ impressionPersist: 'impression-persist',
+ impressionBilling: 'impression-billing',
+ tracker24: 'tracker24',
  outboundPostback: 'outbound-postback',
  fraudScore: 'fraud-score',
  reconciliation: 'reconciliation',

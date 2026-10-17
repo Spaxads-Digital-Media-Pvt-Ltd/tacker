@@ -13,6 +13,8 @@
  *     carry the click id in the address bar so you can copy it into a postback
  *   • a partner revenue share (CPS 25 % of the sale) through Offer Custom Settings
  *   • deep links on the Amazon offer and a coupon code TEST10 (Alpha) for clickless conversions
+ *   • CPC (paid per click), CPM with view-through (impressions), email ownership (rebills without a click),
+ *     price per product (SKU / category rules) and direct linking (the JavaScript tag) offers
  *   • localhost / 127.0.0.1 as tracking domains, so http://localhost:4002/click works
  *
  * Re-running is safe: anything that already exists (by name) is kept, not duplicated. Names end in "(test)".
@@ -56,9 +58,15 @@ interface OfferSpec {
   geo?: { country: string; action?: 'allow' | 'deny'; payoutOverride?: string; revenueOverride?: string; destinationOverride?: string }[];
   goals?: Json[];
   approve?: string[];
+  /** Price Per Product rules (/api/offers/:id/products). */
+  products?: Json[];
 }
 const fixed = (extra: Json = {}): Json => ({
   baseEventName: null, manualApproval: false, allowDuplicates: true, revenueAction: 'conversion', revenueType: 'fixed', revenuePct: null, pricePerProduct: false, ...extra,
+});
+const attribution = (extra: Json = {}): Json => ({
+  tracker24: { enabled: false, trackerId: null }, ipqs: { enabled: false }, throttle: { enabled: false, ratePct: 0 },
+  clickToConversion: { enabled: false, minSeconds: 5, maxSeconds: 21600 }, emailOwnership: false, viewThrough: false, serverSideClick: false, ...extra,
 });
 const OFFERS: OfferSpec[] = [
   { advertiser: 'Google Ads (test)', geo: [{ country: 'US' }, { country: 'CA', payoutOverride: '2.00', revenueOverride: '3.20' }], body: {
@@ -130,6 +138,32 @@ const OFFERS: OfferSpec[] = [
     name: 'Debug — echo every macro (httpbin)', payoutModel: 'CPA', defaultPayout: '1.00', defaultRevenue: '2.00', category: 'Testing',
     destinationUrl: 'https://httpbin.org/anything?click_id={click_id}&offer_id={offer_id}&publisher_id={publisher_id}&country={country}&device={device}&sub1={sub1}&sub2={sub2}&sub3={sub3}',
     description: 'Lands on a page showing exactly what the tracker passed — the quickest way to copy a click id for a postback.' } },
+  { advertiser: 'Google Ads (test)', body: {
+    name: 'Google Display — CPC 0.30 a click', payoutModel: 'CPC', defaultPayout: '0.30', defaultRevenue: '0.50', category: 'Display', objective: 'clicks',
+    revenueSettings: fixed({ revenueAction: 'click' }), destinationUrl: 'https://www.google.com/search?q=display+ads&click_id={click_id}',
+    description: 'Each unique, valid click from a partner is paid (0.30) and billed (0.50) — a "paid click" in Reports › Conversion (source click). No postback needed.' } },
+  { advertiser: 'YouTube (test)', body: {
+    name: 'YouTube Pre-roll — CPM 2.00 · view-through 24 h', payoutModel: 'CPM', defaultPayout: '2.00', defaultRevenue: '5.00', category: 'Video', objective: 'impressions',
+    revenueSettings: fixed({ revenueAction: 'impression' }), attributionSettings: attribution({ viewThrough: true, viewThroughWindowHours: 24 }),
+    destinationUrl: 'https://www.youtube.com/?click_id={click_id}',
+    description: 'Fire the impression pixel (/impression?offer_id=…&pub_id=…): 2.00 / 5.00 per 1,000 valid impressions, booked every few minutes. A postback with impression_id=<id> (or offer_id + ip) and no click is a view-through conversion.' } },
+  { advertiser: 'Meta (test)', body: {
+    name: 'Netflix Subscription — email ownership (rebills)', payoutModel: 'CPA', defaultPayout: '4.00', defaultRevenue: '6.00', category: 'Streaming',
+    attributionSettings: attribution({ emailOwnership: true, emailOwnershipMethod: 'first' }),
+    destinationUrl: 'https://www.netflix.com/?click_id={click_id}',
+    description: 'A conversion with &email=… makes its partner the customer\'s owner. A later postback with offer_id + the same email and NO click id (a rebill) is credited to that partner.' } },
+  { advertiser: 'Amazon Shopping (test)', products: [
+    { sku: 'SHOE-1', name: 'Running shoe', payoutType: 'fixed', payoutValue: '5.00', revenueType: 'percent', revenueValue: '20' },
+    { category: 'electronics', name: 'All electronics', payoutType: 'percent', payoutValue: '3' },
+  ], body: {
+    name: 'Amazon Fashion — price per product', payoutModel: 'CPA', defaultPayout: '1.00', defaultRevenue: '0', category: 'E-commerce', objective: 'sale',
+    revenueSettings: fixed({ revenueType: 'percentage', revenuePct: 10, pricePerProduct: true }),
+    destinationUrl: 'https://www.amazon.com/fashion?click_id={click_id}',
+    description: 'Send the order\'s products on the postback (products=[{"sku":"SHOE-1","price":"50","quantity":2},…]): SHOE-1 pays 5.00 a unit and bills 20 %, electronics pay 3 %, anything else 1.00 a unit (10 % revenue).' } },
+  { advertiser: 'Booking EU (test)', body: {
+    name: 'Booking Direct — direct linking (JavaScript tag)', payoutModel: 'CPA', defaultPayout: '2.00', defaultRevenue: '3.50', category: 'Travel',
+    linkingType: 'redirect_direct', destinationUrl: 'https://www.booking.com/?click_id={click_id}',
+    description: 'Partners link straight to booking.com with ?offer_id=…&pub_id=…; the tag (/sdk.js) on the advertiser\'s page registers the click. GET /api/offers/:id/links gives the direct link and the tag.' } },
 ];
 
 const ok = (r: request.Response, what: string): Json => {
@@ -186,6 +220,7 @@ async function main(): Promise<void> {
     for (const g of o.geo ?? []) ok(await api.post(`/offers/${id}/geo-rules`, { action: 'allow', ...g }), `geo rule ${g.country} on ${name}`);
     for (const g of o.goals ?? []) ok(await api.post(`/offers/${id}/goals`, g), `goal ${String(g['name'])} on ${name}`);
     for (const p of o.approve ?? []) ok(await api.post(`/offers/${id}/publishers`, { publisherId: pubsAfter.get(p)!.id, access: 'allow', approvalStatus: 'approved' }), `approve ${p} on ${name}`);
+    for (const p of o.products ?? []) ok(await api.post(`/offers/${id}/products`, p), `product rule on ${name}`);
     offers.set(name, { id, name, ref: String(d['ref'] ?? '') });
     created += 1;
   }
@@ -250,6 +285,9 @@ Force a country with &geo=US (dev only). Then fire a conversion (copy click_id f
 Coupon (no click): http://localhost:4002/postback?coupon_code=TEST10&txn_id=order-2&sale_amount=40&status=approved&secure_code=<CODE>
 Deep link (Amazon): http://localhost:4002/click?offer_id=${amazon.ref}&pub_id=${alpha.ref}&url=https%3A%2F%2Fwww.amazon.com%2Fdp%2FB0TEST
 Real GEO on localhost: add -H 'X-Forwarded-For: 49.36.0.1' (IN) / 8.8.4.4 (US) to curl, or &geo=US / &geo=US-CA
+Impression pixel (CPM offer): http://localhost:4002/impression?offer_id=${offersAfter.get('YouTube Pre-roll — CPM 2.00 · view-through 24 h')!.ref}&pub_id=${alpha.ref}
+Products (price per product): …/postback?click_id=<CLICK_ID>&products=%5B%7B%22sku%22%3A%22SHOE-1%22%2C%22price%22%3A%2250%22%2C%22quantity%22%3A2%7D%5D&status=approved&secure_code=<CODE>
+Email rebill (no click): …/postback?offer_id=${offersAfter.get('Netflix Subscription — email ownership (rebills)')!.ref}&email=jane@example.com&txn_id=rebill-1&status=approved&secure_code=<CODE>
 `);
 }
 

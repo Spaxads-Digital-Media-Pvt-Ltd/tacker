@@ -150,6 +150,78 @@ channel postback.
 3. Their system fires your postback, and the conversion appears in Reports › Conversion. Reports › Advertiser
    Postback shows each request, including refused ones (wrong code, unknown click).
 
+## 5. Test the other pricing and attribution features
+
+The test catalog has an offer for each (refs 16–20 on the `test` network; the seed prints yours). `<CODE>` is your
+secure code (Settings › Security). On localhost, add `-H 'X-Forwarded-For: <some IP>'` to give each visitor its
+own address, because the fraud check flags an address after 30 clicks a minute.
+
+**CPC: paid per click** (Google Display, payout model CPC, Revenue Action "Click"). Each unique, valid click from a
+partner is a *paid click*: the partner earns 0.30, the advertiser is billed 0.50, and the ledger books it. Nothing
+else to send. It shows in Reports › Conversion with source `click` and event `click`. In reports it counts as
+money, not as a conversion. A repeat click from the same visitor, or a flagged click, isn't paid. A partner
+postback with level **CPC** fires for each paid click.
+
+```bash
+curl -sI -H 'X-Forwarded-For: 198.51.100.7' 'http://localhost:4002/click?offer_id=16&pub_id=1'
+```
+
+**Impressions and CPM** (YouTube Pre-roll, payout model CPM, Revenue Action "Impression"). The partner puts the
+impression pixel where the ad shows:
+`<img src="https://<tracking-domain>/impression?offer_id=17&pub_id=1&sub1=…" width="1" height="1">`.
+Each impression goes through the same checks as a click and is recorded (Reports › Impression), with the reason
+when it's rejected. Valid impressions are booked as money every few minutes: 2.00 / 5.00 per 1,000. Add
+`&format=json` to get `{ impression_id }` back. With an **Impression URL** on the offer, the pixel redirects the
+browser there with `{imp_id}` filled in (an MMP's view-through link, for example). Reports can show
+`metrics=impressions,unique_impressions,invalid_impressions,ctr`.
+
+**View-through** (same offer, Attribution › View-Through, 24 h). A conversion with no click is credited to the
+partner whose impression the visitor saw:
+
+```bash
+curl -s 'http://localhost:4002/impression?offer_id=17&pub_id=1&format=json'   # → impression_id
+curl -s 'http://localhost:4002/postback?impression_id=<IMPRESSION_ID>&txn_id=vt-1&status=approved&secure_code=<CODE>'
+# or without the id: &offer_id=17&ip=<the visitor's IP> — or the pixel on the thank-you page (it sends the cookie)
+```
+
+**Email ownership** (Netflix Subscription, Attribution › Email Ownership). A conversion with `&email=` makes its
+partner the customer's owner. A later postback with the email and `offer_id`, but no click id, is credited to the
+owner, for example a subscription rebill:
+
+```bash
+curl -s 'http://localhost:4002/postback?click_id=<CLICK_ID>&email=jane@example.com&txn_id=sub-1&status=approved&secure_code=<CODE>'
+curl -s 'http://localhost:4002/postback?offer_id=18&email=jane@example.com&txn_id=rebill-1&status=approved&secure_code=<CODE>'
+```
+
+Set the owner rule and window in Attribution: first or last partner, and the number of days. Only a hash of the
+address is stored.
+
+**Price per product** (Amazon Fashion, Revenue › Price Per Product). The postback lists the order's products. Each
+line is priced by its product rule: SKU `SHOE-1` pays 5.00 a unit and bills 20 %, category `electronics` pays
+3 %, and anything else gets the base rate, 1.00 a unit with 10 % revenue. Manage the rules with
+`GET|POST /api/offers/:id/products` and `PATCH|DELETE /api/offers/:id/products/:productId`.
+
+```bash
+curl -s "http://localhost:4002/postback?click_id=<CLICK_ID>&txn_id=order-9&status=approved&secure_code=<CODE>&products=$(python3 -c 'import urllib.parse,json;print(urllib.parse.quote(json.dumps([{"sku":"SHOE-1","price":"50","quantity":2},{"sku":"TV-9","category":"electronics","price":"300","quantity":1}])))')"
+# one product as plain parameters: &sku=SHOE-1&quantity=3&price=10
+```
+
+**Direct linking** (Booking Direct, Click Tracking Type "Redirect + Direct"). Partners link straight to the
+advertiser's page, `https://www.booking.com/?offer_id=20&pub_id=1&sub1=…`, and the advertiser's page has the tag:
+`<script src="https://<tracking-domain>/sdk.js" data-auto-click></script>`. On the thank-you page:
+`trk.conversion({ event: 'purchase', txn_id: 'ORDER-1' })`. `GET /api/offers/:id/links?publisherId=…` returns the
+direct link, the impression pixel and the tag. A click the tag sends from any other site is ignored.
+
+**24metrics** (Attribution › 24metrics Tracker, with your 24metrics integration ID). Every click is checked by
+24metrics in the background:
+- **Rejected:** the click is flagged `24metrics:<reason>`, its conversions wait as pending, and the address is
+  blocked for a day.
+- **Approved:** its conversions are reported to 24metrics.
+
+Without an account, run the stand-in: `npm run dev:fake-24metrics` (port 4799; it rejects 203.0.113.66). Then
+put `TRACKER24_GATEWAY_URL=http://localhost:4799/{id}` in `api-backend/.env`, restart, and click with
+`-H 'X-Forwarded-For: 203.0.113.66'`.
+
 ## When something doesn't record
 
 | Advertiser Postback says | Why | Fix |
@@ -158,6 +230,9 @@ channel postback.
 | `click_not_found` | The click id isn't ours, or the click was rejected | Use the `click_id` from the landing page URL; check Reports › Click |
 | `duplicate` | The same `txn_id` (or no `txn_id`) for the same event | Send a new `txn_id`, or change the offer's duplicate rule |
 | 404 `unknown_tracking_host` | The domain isn't registered | Run `npm run tunnel -- <slug>` again (free ngrok URLs change) |
+| `unknown_impression` | No valid impression with that id, the offer has view-through off, or the window passed | Check Reports › Impression; turn on Attribution › View-Through |
+| `unknown_email` | Nobody owns that customer's email on the offer (or the ownership window ended) | Send the first conversion with `&email=` and its click id |
+| pending, `24metrics_flagged` | 24metrics rejected the click | Review it in Reports › Conversion (approve or reject) |
 
 | Partner Postback says | Why | Fix |
 |---|---|---|

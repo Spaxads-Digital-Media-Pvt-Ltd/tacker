@@ -37,6 +37,8 @@
 | `AI_DAILY_CHAT_LIMIT` | AI chats per network per UTC day on `/api/ai/chat`; `0` = no cap | `200` |
 | `AI_DAILY_TOKEN_LIMIT` | Model tokens (input + output, every tool-loop turn) per network per UTC day; `0` = no cap | `2000000` |
 | `MAXMIND_LICENSE_KEY` | GeoIP2 DB updates | — |
+| `TRACKER24_GATEWAY_URL` | The 24metrics gateway base (`{id}` = the offer's 24metrics tracker ID) — point it at `scripts/fake-24metrics.mjs` (`http://localhost:4799/{id}`) to test without an account | `https://{id}.gateway.go2link.co` |
+| `TRACKING_RL_CLICK_LIMIT` × 5 | `/impression` per IP per 5 min (a page can show several ads) — derived, not its own variable | `600` |
 | `CLICK_RETENTION_DAYS` | Default days to keep clicks + postback logs (a network can override in Settings › Retention; 0 = keep forever) | `90` |
 | `CONVERSION_RETENTION_DAYS` | Default days to keep conversions that never touched the ledger (per-network override as above). Ledgered conversions are never pruned (F-21) | `400` |
 | `NETWORK_PURGE_GRACE_DAYS` | Days a soft-deleted network waits before `POST /platform/networks/:id/purge` may hard-delete it; `0` = no wait (F-26) | `30` |

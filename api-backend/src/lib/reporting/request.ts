@@ -14,17 +14,17 @@ import type { Dimension, Metric, MoneyField, OrderKey, ReportRequest, ReportFilt
 export type ReportAudience = 'admin' | 'network' | 'publisher' | 'advertiser';
 
 const ALL_DIMS: Dimension[] = ['offer', 'publisher', 'advertiser', 'smartLink', 'country', 'device', 'city', 'region', 'isp', 'browser', 'os', 'day', 'hour', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'];
-const ALL_METRICS: Metric[] = ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'invalid_clicks', 'total_conversions', 'avg_fraud_score', 'currencies', 'money_by_currency'];
+const ALL_METRICS: Metric[] = ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'invalid_clicks', 'total_conversions', 'avg_fraud_score', 'currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'invalid_impressions', 'ctr'];
 // `currencies` / `money_by_currency` describe the money columns per currency rather than being one
 // figure: returned only when asked for by name (an omitted `metrics` keeps today's set) and never a
 // sort key. `money_by_currency` only ever carries the money fields the audience may see (moneyFields).
-const OPT_IN_METRICS = new Set<Metric>(['currencies', 'money_by_currency']);
+const OPT_IN_METRICS = new Set<Metric>(['currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'invalid_impressions', 'ctr']);
 
 const METRIC_POLICY: Record<ReportAudience, Metric[]> = {
   admin: ALL_METRICS,
   network: ALL_METRICS,
-  publisher: ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'epc', 'currencies', 'money_by_currency'], // NO revenue/margin
-  advertiser: ['clicks', 'unique_clicks', 'conversions', 'cr', 'revenue', 'currencies', 'money_by_currency'],      // NO payout/margin/epc
+  publisher: ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'epc', 'currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'ctr'], // NO revenue/margin
+  advertiser: ['clicks', 'unique_clicks', 'conversions', 'cr', 'revenue', 'currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'ctr'],      // NO payout/margin/epc
 };
 
 /** Portal audiences see only clicks that reached the offer (ReportFilters.excludeRejected). */

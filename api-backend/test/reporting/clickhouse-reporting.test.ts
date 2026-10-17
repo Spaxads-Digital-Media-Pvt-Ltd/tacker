@@ -223,7 +223,7 @@ describe('ClickHouseReportingProvider — SQL structure', () => {
  const sql = (querySpy.mock.calls[0]?.[0] as { query: string }).query;
  expect(sql).toContain('COUNTIf(c.is_unique = 1)');
  expect(sql).toContain('COUNTIf(length(c.fraud_flags) > 0)');
- expect(sql).toContain("COUNTIf(k.status = 'approved')");
+ expect(sql).toContain("COUNTIf(k.status = 'approved' AND k.source NOT IN ('click', 'impression'))");
  });
 
  it('uses FULL OUTER JOIN for grouped reports and CROSS JOIN for grand totals', async () => {

@@ -19,6 +19,7 @@
 import type { PoolClient } from 'pg';
 import { pool, query } from '../db/pool.js';
 import { rejectedClickSql } from '../click-rejections.js';
+import { billingRowSql } from '../offer-settings/billing.js';
 
 export const BUCKET_MS = 15 * 60_000;
 /** Buckets older than this are frozen into the rollups; newer ones are always read raw. */
@@ -55,13 +56,16 @@ async function rollRange(db: Db, networkId: string, from: Date, to: Date): Promi
       WHERE network_id = $1 AND created_at >= $2 AND created_at < $3
       GROUP BY 1, 2, 3, 4, 5, 6, 7`, p);
   await db.query(
+    // Billing rows (CPC paid clicks / CPM bookings) are money, not conversions: counted in billed_rows; a conversion
+    // with no click row (view-through, a CPM booking) is placed by its own country / device.
     `INSERT INTO stats_conversions_15m (network_id, bucket, offer_id, publisher_id, advertiser_id, smart_link_id, country,
-                                        device, currency, total_conversions, conversions, payout, revenue)
+                                        device, currency, total_conversions, conversions, payout, revenue, billed_rows)
      SELECT c.network_id, ${binSql('c.created_at')}, c.offer_id, c.publisher_id, c.advertiser_id,
-            k.smart_link_id, k.country, k.device, c.currency,
-            COUNT(*), COUNT(*) FILTER (WHERE c.status = 'approved'),
+            k.smart_link_id, COALESCE(k.country, c.country), COALESCE(k.device, c.device), c.currency,
+            COUNT(*) FILTER (WHERE NOT ${billingRowSql('c')}), COUNT(*) FILTER (WHERE c.status = 'approved' AND NOT ${billingRowSql('c')}),
             COALESCE(SUM(c.payout) FILTER (WHERE c.status = 'approved'), 0),
-            COALESCE(SUM(c.revenue) FILTER (WHERE c.status = 'approved'), 0)
+            COALESCE(SUM(c.revenue) FILTER (WHERE c.status = 'approved'), 0),
+            COUNT(*) FILTER (WHERE c.status = 'approved' AND ${billingRowSql('c')})
        FROM conversions c LEFT JOIN clicks k ON k.click_id = c.click_id AND k.network_id = c.network_id
       WHERE c.network_id = $1 AND c.created_at >= $2 AND c.created_at < $3
       GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9`, p);

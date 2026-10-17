@@ -64,7 +64,7 @@ export interface Offer {
   name: string;
   status: 'draft' | 'active' | 'paused' | 'archived';
   destinationUrl: string;
-  payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+  payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
   defaultPayout: string;
   defaultRevenue: string;
   currency: string;
@@ -90,6 +90,8 @@ export interface Offer {
   securityCodeHidden?: boolean;
   trackingDomainId?: string | null;
   linkingType?: 'redirect' | 'redirect_direct' | null;
+  /** The advertiser's / MMP's impression URL: /impression sends the browser there with {imp_id}; null = a pixel. */
+  impressionUrl?: string | null;
   deepLinkEnabled?: boolean | null;
   firePartnerPostback?: boolean | null;
   appIdentifier?: string | null;
@@ -138,7 +140,14 @@ export interface OfferAttributionSettings {
   throttle: { enabled: boolean; ratePct: number };
   clickToConversion: { enabled: boolean; minSeconds: number; maxSeconds: number | null };
   emailOwnership: boolean;
+  /** Email Ownership: 'first' partner keeps the customer, or the 'last' converting partner takes it over. */
+  emailOwnershipMethod?: 'first' | 'last';
+  /** Ownership ends this many days after it began ('static') or after the latest conversion ('dynamic'); null = never. */
+  emailOwnershipWindowDays?: number | null;
+  emailOwnershipWindowMode?: 'static' | 'dynamic';
   viewThrough: boolean;
+  /** How long after an impression a click-less conversion is credited to it (hours, default 24). */
+  viewThroughWindowHours?: number;
   serverSideClick: boolean;
 }
 
@@ -239,7 +248,7 @@ export interface PublisherOffer {
  id: string;
  name: string;
  status: 'draft' | 'active' | 'paused' | 'archived';
- payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+ payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
  payout: string;
  currency: string;
  trackingUrl: string | null;
@@ -267,7 +276,7 @@ export interface AdvertiserOffer {
  ref?: number;
  name: string;
  status: 'draft' | 'active' | 'paused' | 'archived';
- payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+ payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
  revenue: string;
  currency: string;
  destinationUrl: string;

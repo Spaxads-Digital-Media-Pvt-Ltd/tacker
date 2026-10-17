@@ -43,6 +43,8 @@ const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-s
 const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
 const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
+/** CPC pays per click, CPM per 1,000 impressions (backend lib/offer-settings/billing.ts); the rest per conversion. */
+const PAYOUT_LABEL: Record<string, string> = { CPC: 'Payout Per Click', CPM: 'Payout Per 1,000 Impressions' };
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
 /** Category picker option that switches to the "New category name" text input. */
 const NEW_CATEGORY = '__new__';
@@ -58,7 +60,7 @@ interface FormState {
   payoutModel: string; defaultPayout: string; defaultRevenue: string;
   attributionWindowS: string; dedupWindowS: string; fallbackUrl: string; allowedTrafficTypes: string[];
   trackingDomainId: string;
-  linkingType: string; deepLinkEnabled: boolean; firePartnerPostback: boolean;
+  linkingType: string; deepLinkEnabled: boolean; firePartnerPostback: boolean; impressionUrl: string;
   appIdentifier: string; internalNotes: string; productId: string; thumbnailUrl: string;
   targeting: OfferTargeting;
   attribution: OfferAttributionSettings; revenue: OfferRevenueSettings; email: OfferEmailSettings;
@@ -109,6 +111,7 @@ export default function OfferEdit() {
       fallbackUrl: offer.fallbackUrl ?? '', allowedTrafficTypes: offer.allowedTrafficTypes ?? [],
       trackingDomainId: offer.trackingDomainId ?? '',
       linkingType: offer.linkingType ?? 'redirect',
+      impressionUrl: offer.impressionUrl ?? '',
       deepLinkEnabled: offer.deepLinkEnabled ?? false,
       // Unset = on (the tracker fires partner postbacks unless explicitly turned off).
       firePartnerPostback: offer.firePartnerPostback ?? true,
@@ -173,6 +176,7 @@ export default function OfferEdit() {
       previewUrl: form.previewUrl.trim() ? normalizeUrl(form.previewUrl.trim()) : null,
       description: orNull(form.description),
       linkingType: form.linkingType,
+      impressionUrl: form.impressionUrl.trim() || null,
       deepLinkEnabled: form.deepLinkEnabled,
       firePartnerPostback: form.firePartnerPostback,
       // Disabled or cleared → null, so the server really drops the old value.
@@ -344,6 +348,9 @@ export default function OfferEdit() {
               <Field label="Linking Type">
                 <Segmented options={LINKING_TYPES} value={form.linkingType || 'redirect'} onChange={(v) => set('linkingType', v)} />
               </Field>
+              <Field label="Impression URL" hint="Optional — the advertiser's or MMP's impression link. The impression pixel sends the browser there with {imp_id} and the click macros filled in; without one it answers with a 1×1 pixel.">
+                <input className="input" placeholder="https://… {imp_id}" value={form.impressionUrl} onChange={(e) => set('impressionUrl', e.target.value)} />
+              </Field>
 
               <p className="text-small font-semibold text-fg">Conversion Event Tracking</p>
               <div>
@@ -441,10 +448,10 @@ export default function OfferEdit() {
               <h3 className="text-h3 font-medium text-fg">Base Payout</h3>
               <Field label="Model">
                 <select className="input" value={form.payoutModel} onChange={(e) => set('payoutModel', e.target.value)}>
-                  {['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
+                  {['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
                 </select>
               </Field>
-              <Field label="Payout Per Action *"><input className="input" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} /></Field>
+              <Field label={`${PAYOUT_LABEL[form.payoutModel] ?? 'Payout Per Action'} *`}><input className="input" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} /></Field>
             </div>
           </div>
         )}

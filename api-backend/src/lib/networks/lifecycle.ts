@@ -31,7 +31,7 @@ interface NetworkRow {
 
 const DAY_MS = 86_400_000;
 /** Tables that hold a network's rows but have no foreign key to networks (so no cascade). */
-const FKLESS = ['clicks', 'conversions', 'postback_logs', 'ledger_entries'] as const;
+const FKLESS = ['clicks', 'impressions', 'conversions', 'postback_logs', 'ledger_entries'] as const;
 /**
  * The platform team's own records about a network (sales leads, tasks, account notes…) reference it but
  * aren't its data: never in its export. (A purge still cascades / nulls them through their foreign keys.)
@@ -192,7 +192,7 @@ async function networkAuthUsers(id: string): Promise<{ linked: string[]; scan: (
 export interface PurgeResult {
   purged: true;
   authUsersDeleted: number;
-  rowsDeleted: { clicks: number; conversions: number; postbackLogs: number; auditLog: number; loginEvents: number };
+  rowsDeleted: { clicks: number; impressions: number; conversions: number; postbackLogs: number; auditLog: number; loginEvents: number };
   ledgerEntriesRetained: number;
 }
 
@@ -231,11 +231,12 @@ export async function purgeNetwork(
   }
 
   const client = await pool.connect();
-  const counts = { clicks: 0, conversions: 0, postbackLogs: 0, auditLog: 0, loginEvents: 0 };
+  const counts = { clicks: 0, impressions: 0, conversions: 0, postbackLogs: 0, auditLog: 0, loginEvents: 0 };
   let ledgerEntriesRetained = 0;
   try {
     await client.query('BEGIN');
     counts.clicks = (await client.query('DELETE FROM clicks WHERE network_id = $1', [id])).rowCount ?? 0;
+    counts.impressions = (await client.query('DELETE FROM impressions WHERE network_id = $1', [id])).rowCount ?? 0;
     counts.conversions = (await client.query('DELETE FROM conversions WHERE network_id = $1', [id])).rowCount ?? 0;
     counts.postbackLogs = (await client.query('DELETE FROM postback_logs WHERE network_id = $1', [id])).rowCount ?? 0;
     // The tenant's own audit trail and login history go with it; the platform's audit rows stay.

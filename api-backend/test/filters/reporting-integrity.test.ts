@@ -573,7 +573,9 @@ describe('/click-to-conversion-time status', () => {
     const { sql, params } = calls()[0]!;
     expect(sql).toContain('c.status = $2');
     expect(params.slice(0, 2)).toEqual([NET, 'approved']);
-    expect(sql).not.toMatch(/source/);
+    // Paid clicks (CPC billing rows) are left out of the timing; no other source filter.
+    expect(sql).toContain("NOT (c.source IN ('click', 'impression'))");
+    expect(sql.replace("NOT (c.source IN ('click', 'impression'))", '')).not.toMatch(/source/);
   });
   it.each(['approved', 'pending', 'rejected'])('status=%s binds that status', async (s) => {
     await request(reportsApp()).get(`/click-to-conversion-time?status=${s}`);
@@ -805,7 +807,8 @@ describe('money sort never compares currencies', () => {
     expect(sql).toContain(`ORDER BY s.money_bucket ASC, s.money_currency ASC NULLS LAST, CASE WHEN s.money_bucket = 0 THEN ${col} END DESC NULLS LAST, s.d0::text LIMIT $2 OFFSET $3`);
     expect(sql).toContain("COUNT(DISTINCT c.currency) FILTER (WHERE c.status = 'approved') AS cur_n");
     expect(sql).toContain("COUNT(*) FILTER (WHERE c.status = 'approved' AND c.currency IS NULL) AS cur_null");
-    expect(sql).toMatch(/CASE WHEN COALESCE\(cv\.conversions, 0\) = 0 THEN 1\s+WHEN cv\.cur_n = 1 AND cv\.cur_null = 0 THEN 0 ELSE 2 END AS money_bucket/);
+    // money_rows = approved rows incl. CPC / CPM billing rows (money, not conversions).
+    expect(sql).toMatch(/CASE WHEN COALESCE\(cv\.money_rows, 0\) = 0 THEN 1\s+WHEN cv\.cur_n = 1 AND cv\.cur_null = 0 THEN 0 ELSE 2 END AS money_bucket/);
     expect(params).toEqual([NET, 10, 20]);
     // The count query sees the same groups (classification columns don't change the row set).
     expect(calls()[0]!.sql).toMatch(/^SELECT COUNT\(\*\)::int AS total FROM \(WITH cl AS/);
@@ -836,7 +839,7 @@ describe('money sort never compares currencies', () => {
     expect(out.sortedWithinCurrency).toBe(true);
     const sql = (querySpy.mock.calls[1]![0] as { query: string }).query;
     expect(sql).toContain("uniqExactIf(k.currency, k.status = 'approved' AND isNotNull(k.currency)) AS cur_n");
-    expect(sql).toContain('multiIf(COALESCE(cv.conversions, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket');
+    expect(sql).toContain('multiIf(COALESCE(cv.money_rows, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket');
     expect(sql).toMatch(/ORDER BY money_bucket ASC, money_currency ASC, if\(money_bucket = 0, margin, NULL\) DESC NULLS LAST, d0 LIMIT/);
   });
 });

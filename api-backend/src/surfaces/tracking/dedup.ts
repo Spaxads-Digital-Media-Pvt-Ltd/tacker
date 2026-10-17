@@ -10,9 +10,10 @@ function ipHash(ip: string): string {
   return createHash('sha1').update(ip).digest('hex').slice(0, 16);
 }
 
-export async function markUnique(offerId: string, ip: string, dedupWindowS: number): Promise<boolean> {
+/** `kind`: clicks and impressions are unique separately (seeing the ad doesn't make the click a repeat). */
+export async function markUnique(offerId: string, ip: string, dedupWindowS: number, kind: 'click' | 'impression' = 'click'): Promise<boolean> {
   if (dedupWindowS <= 0) return true;
-  const key = `dedup:${offerId}:${ipHash(ip)}`;
+  const key = `${kind === 'impression' ? 'dedupimp' : 'dedup'}:${offerId}:${ipHash(ip)}`;
   // SET key 1 NX EX window → 'OK' if newly set (unique), null if it already existed.
   const res = await getRedis().set(key, '1', 'EX', dedupWindowS, 'NX');
   return res === 'OK';

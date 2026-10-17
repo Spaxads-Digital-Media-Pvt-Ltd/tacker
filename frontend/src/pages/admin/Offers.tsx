@@ -78,8 +78,8 @@ const STATUS_OPTS = ['active', 'paused', 'draft', 'archived'] as const;
 const STATUS_LABEL: Record<string, string> = { active: 'Active', paused: 'Paused', draft: 'Pending', archived: 'Deleted' };
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-fg-muted', draft: 'bg-warning', archived: 'bg-danger' };
 // Everflow-style model prefixes: R- on the revenue side, C- on the payout side, same suffix.
-const REV_PREFIX: Record<string, string> = { CPA: 'RPA', CPL: 'RPL', CPC: 'RPC', CPI: 'RPI', RevShare: 'RevShare' };
-const PAYOUT_TYPES = ['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'] as const;
+const REV_PREFIX: Record<string, string> = { CPA: 'RPA', CPL: 'RPL', CPC: 'RPC', CPI: 'RPI', CPM: 'RPM', RevShare: 'RevShare' };
+const PAYOUT_TYPES = ['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'] as const;
 // Device Type filter — reference uses "PC/Tablet/Mobile"; this app stores allowed_traffic_types as
 // desktop/mobile/tablet (the only device values the Add/Edit Offer form writes).
 const DEVICE_TYPES: { value: string; label: string }[] = [

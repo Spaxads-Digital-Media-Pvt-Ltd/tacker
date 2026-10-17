@@ -51,6 +51,12 @@ import { checkConversionAbuse, CONV_ABUSE_LIMIT } from '../../../lib/conversion-
 import { capCountedSql } from '../../../lib/conversion-caps.js';
 import { logger } from '../../../lib/logger.js';
 import { rejectedClickSql } from '../../../lib/click-rejections.js';
+import { actionPricing } from '../../../lib/offer-settings/billing.js';
+import { priceProducts, type ProductLine } from '../../../lib/offer-settings/products.js';
+import { getVerdict, enqueueConversionReport } from '../../../lib/integrations/tracker24.js';
+import { recordEmailOwnership } from './email-ownership.js';
+
+const ZERO_MONEY = '0.0000';
 
 /** Request params that carry the sale / order value — explicit names first, so an older integration
  * sending `amount=<payout>&sale_amount=<order>` keeps its revenue base. Only ever the base for
@@ -78,9 +84,16 @@ export interface RecordConversionInput {
  /** Browser-fired sources (pixel / iframe): the page and host headers that bind the conversion to
   * the offer's own site. Ignored for postbacks. */
  requestOrigin?: RequestOrigin;
- /** A click the caller already resolved instead of one looked up by clickId — a coupon's clickless conversion
-  *  (conversions/coupon.ts). The click-to-conversion time doesn't apply to it. */
+ /** A click the caller already resolved instead of one looked up by clickId — a clickless conversion: a coupon
+  *  (conversions/coupon.ts), an email owner (email-ownership.ts), a view-through impression (view-through.ts).
+  *  The click's attribution window and click-to-conversion time don't apply to it (the caller checked its own). */
  click?: StoredClick;
+ /** How the conversion found its partner — 'click' (default) unless `click` came from a coupon / email / impression. */
+ attribution?: 'click' | 'coupon' | 'email' | 'view_through';
+ /** sha256 of the customer's email (Email Ownership — email-ownership.ts). */
+ emailHash?: string | null;
+ /** The order's product lines from the S2S postback (Price Per Product — lib/offer-settings/products.ts). */
+ products?: ProductLine[] | null;
 }
 
 /** Why a request recorded nothing (outcome duplicate / click_not_found / security_failed). */
@@ -282,6 +295,15 @@ export function dedupeRule(k: {
  return { key: key('retry', k.networkId, k.clickId, k.event, fingerprint), ttlS: RETRY_WINDOW_S, reason: 'repeat_within_60s', dbCheck: null };
 }
 
+/** Why a postback's secure code fails for this offer (its own code, else the network's), or null when it passes. */
+export function secureCodeFailure(
+ offer: { securityCode: string | null; networkSecurityCode: string | null } | null | undefined, secureCode: string | null,
+): Extract<NotRecordedReason, 'no_security_code_configured' | 'wrong_security_code' | 'missing_security_code'> | null {
+ const required = offer?.securityCode || offer?.networkSecurityCode || null;
+ if (required && timingSafeCompare(secureCode, required).ok) return null;
+ return !required ? 'no_security_code_configured' : secureCode ? 'wrong_security_code' : 'missing_security_code';
+}
+
 export async function recordConversion(rawInput: RecordConversionInput): Promise<RecordConversionResult> {
  const redis = getRedis();
  // A blank transaction id is no transaction id (it would otherwise make every blank one a duplicate).
@@ -299,11 +321,8 @@ export async function recordConversion(rawInput: RecordConversionInput): Promise
  // postback with no configured code at all — e.g. after Settings > Security "Clear" — is rejected
  // instead of accepted from anyone who has seen a click_id. API-key callers pass skipSecureCode.
  if (input.source === 'postback' && !input.skipSecureCode) {
- const required = offer?.securityCode || offer?.networkSecurityCode || null;
- if (!required || !timingSafeCompare(input.secureCode, required).ok) {
- const reason: NotRecordedReason = !required ? 'no_security_code_configured' : input.secureCode ? 'wrong_security_code' : 'missing_security_code';
- return { outcome: 'security_failed', reason, ...who };
- }
+ const reason = secureCodeFailure(offer, input.secureCode);
+ if (reason) return { outcome: 'security_failed', reason, ...who };
  }
 
  // Pixel / iframe are fired by the visitor's browser and carry no secret. Bind them to the offer's
@@ -362,12 +381,13 @@ async function recordAttributed(
  const volume = await checkConversionAbuse(redis, input.clickId, input.networkId,
  revCfg?.clickConversionLimit === undefined ? CONV_ABUSE_LIMIT : revCfg.clickConversionLimit);
 
- // Attribution window (spec §6).
+ // Attribution window (spec §6). A conversion the caller matched without a click of its own — a coupon, an email
+ // owner, a view-through impression (`input.click`) — was held to its own window there.
  const ageS = (Date.now() - new Date(click.created_at).getTime()) / 1000;
  const windowS = offer?.attributionWindowS ?? 2592000;
  let status = mapStatus(input.statusHint);
  let reason: string | null = null;
- if (ageS > windowS) {
+ if (!input.click && ageS > windowS) {
  status = 'rejected';
  reason = 'outside_attribution_window';
  }
@@ -375,7 +395,7 @@ async function recordAttributed(
  const cfg = await getFraudConfig(input.networkId);
  const fraudFlags: string[] = [];
  let fraudScore = 0;
- if (cfg.enabled && ageS < cfg.minClickToConversionSeconds) {
+ if (cfg.enabled && !input.click && ageS < cfg.minClickToConversionSeconds) {
  fraudFlags.push('too_fast');
  fraudScore += 50;
  }
@@ -391,16 +411,42 @@ async function recordAttributed(
  // browser-fired pixel or iframe is priced from the goal / click / offer defaults alone.
  const clientPayout = browserFired ? null : safeMoney(input.payoutParam);
  const clientRevenue = browserFired ? null : safeMoney(input.revenueParam);
- let payout = clientPayout ?? eventGoal?.payout ?? clickOverride(click.resolved_payout, offer?.defaultPayout)
- ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null;
- let revenue = clientRevenue ?? eventGoal?.revenue ?? clickOverride(click.resolved_revenue, offer?.defaultRevenue)
- ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null;
+ // A side the offer prices per click or per 1000 impressions (lib/offer-settings/billing.ts) is paid on the
+ // clicks / impressions themselves, so the BASE conversion carries none of it — an event goal's own price and an
+ // explicit S2S amount still apply.
+ const clickAttrs: ClickAttrs = {
+ country: click.country ?? null, device: click.device ?? null, os: click.os ?? null, browser: click.browser ?? null,
+ };
+ const sides = offer ? actionPricing(offer, click.publisher_id, clickAttrs, new Date(click.created_at),
+ { payout: click.resolved_payout, revenue: click.resolved_revenue }) : null;
+ const payoutPerConversion = (sides?.payout.action ?? 'conversion') === 'conversion';
+ const revenuePerConversion = (sides?.revenue.action ?? 'conversion') === 'conversion';
+ let payout = clientPayout ?? eventGoal?.payout ?? (payoutPerConversion
+ ? clickOverride(click.resolved_payout, offer?.defaultPayout) ?? goal?.payout ?? click.resolved_payout ?? offer?.defaultPayout ?? null
+ : ZERO_MONEY);
+ let revenue = clientRevenue ?? eventGoal?.revenue ?? (revenuePerConversion
+ ? clickOverride(click.resolved_revenue, offer?.defaultRevenue) ?? goal?.revenue ?? click.resolved_revenue ?? offer?.defaultRevenue ?? null
+ : ZERO_MONEY);
  // The sale amount the advertiser reports (sale_amount / order_amount / amount). A browser-fired
  // conversion's sale amount is visitor-controlled, so it never prices anything.
- const saleAmount = browserFired ? null : safeMoney(input.saleAmount ?? paramStr(input.rawParams, [...SALE_AMOUNT_PARAMS]));
+ let saleAmount = browserFired ? null : safeMoney(input.saleAmount ?? paramStr(input.rawParams, [...SALE_AMOUNT_PARAMS]));
+ // Price Per Product (lib/offer-settings/products.ts): a base conversion whose S2S postback lists the order's
+ // products is priced line by line — the offer's rule for the SKU / category, else the base rate per unit.
+ const priced = !browserFired && revCfg?.pricePerProduct && input.products?.length && !eventGoal
+ ? priceProducts(input.products, offer?.products ?? [], {
+ payout: payoutPerConversion ? payout : null, revenue: revenuePerConversion ? revenue : null,
+ revenueType: revCfg.revenueType, revenuePct: revCfg.revenuePct,
+ })
+ : null;
+ if (priced) {
+ if (clientPayout == null && payoutPerConversion && priced.payout != null) payout = priced.payout;
+ if (clientRevenue == null && revenuePerConversion && priced.revenue != null) revenue = priced.revenue;
+ saleAmount ??= priced.total;
+ }
  // Percentage / Mixed revenue: a share of the sale amount (only when the postback didn't send an
- // explicit revenue). The sale amount only ever feeds revenue here — it never sets the partner payout.
- if (clientRevenue == null && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
+ // explicit revenue, and the products didn't already price it). The sale amount only ever feeds revenue
+ // here — it never sets the partner payout.
+ if (!priced && clientRevenue == null && revenuePerConversion && revCfg && revCfg.revenueType !== 'fixed' && revCfg.revenuePct != null) {
  if (saleAmount != null) {
  const share = percentOfMoney(saleAmount, revCfg.revenuePct);
  revenue = revCfg.revenueType === 'mixed' ? addMoney(revenue ?? '0', share) : share;
@@ -409,12 +455,10 @@ async function recordAttributed(
  // Offer Custom Settings › Revenue & Payout (F-12): this partner's own rate on this offer — or on
  // the goal that fired — beats the goal / partner / country / default rate (an explicit S2S payout
  // or revenue still wins). Matched against the click: its time, country, device, OS and browser.
- const clickAttrs: ClickAttrs = {
- country: click.country ?? null, device: click.device ?? null, os: click.os ?? null, browser: click.browser ?? null,
- };
  const custom = click.publisher_id ? customPricing(offer?.customSettings, {
  publisherId: click.publisher_id, attrs: clickAttrs, clickAt: new Date(click.created_at),
  eventGoalId: eventGoal?.id ?? null, defaultGoalId: goal?.is_default ? goal.id : null, saleAmount,
+ units: priced?.units ?? null, revenue,
  }) : null;
  if (custom) {
  if (clientPayout == null && custom.payout != null) payout = custom.payout;
@@ -422,10 +466,11 @@ async function recordAttributed(
  }
  // Partner Tiers (F-17b): a tier member is paid the tier margin off this conversion's final revenue —
  // unless the payout is already their own (an S2S payout param, their custom setting, their per-offer
- // override). It beats the goal / country / default payout.
+ // override), or the offer pays them per click / impression instead. It beats the goal / country / default payout.
  const ownRate = clientPayout != null || custom?.payout != null
  || (click.publisher_id != null && offer?.partnerPayouts?.[click.publisher_id] != null);
- const tierRate = !ownRate && click.publisher_id ? tierPayout(revenue, offer?.tierMargins?.[click.publisher_id]) : null;
+ const tierRate = !ownRate && click.publisher_id && (payoutPerConversion || eventGoal)
+ ? tierPayout(revenue, offer?.tierMargins?.[click.publisher_id]) : null;
  if (tierRate != null) payout = tierRate;
  const currency = click.currency ?? goal?.currency ?? offer?.currency ?? null;
  const goalId = goal?.id ?? null;
@@ -457,6 +502,12 @@ async function recordAttributed(
  if (status === 'approved' && click.publisher_id && !(await isActivePartner(input.networkId, click.publisher_id))) {
  status = 'pending';
  reason = 'partner_not_active';
+ }
+ // 24metrics rejected the click (lib/integrations/tracker24.ts): held for review — recorded, never paid until approved.
+ const t24 = attrCfg?.tracker24?.enabled && !input.click ? await getVerdict(input.networkId, input.clickId) : null;
+ if (t24?.status === 'rejected' && (status === 'approved' || (status === 'pending' && reason == null))) {
+ status = 'pending';
+ reason = '24metrics_flagged';
  }
  // Unusual volume from one click (T-2, above): held for review — recorded, never dropped. Beats an
  // "accept" postback control; a hold or rejection with its own reason keeps it.
@@ -557,21 +608,28 @@ async function recordAttributed(
  `INSERT INTO conversions (
  conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,
  event_name, status, reason, payout, revenue, currency, transaction_id, source, raw_params,
- fraud_score, fraud_flags, goal_id
- ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+ fraud_score, fraud_flags, goal_id, attribution, country, device, products
+ ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
  ON CONFLICT (offer_id, event_name, transaction_id) WHERE transaction_id IS NOT NULL DO NOTHING
  RETURNING conversion_id`,
  [
  conversionId, input.networkId, input.clickId, click.offer_id, click.publisher_id,
  advertiserId, eventName, status, reason, payout, revenue, currency,
  input.txnId, input.source, JSON.stringify(input.rawParams),
- fraudScore, fraudFlags, goalId,
+ fraudScore, fraudFlags, goalId, input.attribution ?? 'click', click.country ?? null, click.device ?? null,
+ priced ? JSON.stringify(priced.lines) : null,
  ],
  );
  insertedOk = ins.rows.length > 0;
  // Not inserted without a (click, event) duplicate = the transaction id was already used for this
  // offer + event (the unique index).
  if (!insertedOk && !duplicateReason) duplicateReason = 'duplicate_transaction_id';
+ // Email Ownership: the conversion's partner owns (or keeps, or takes over) this customer on the offer.
+ if (insertedOk && status !== 'rejected' && attrCfg?.emailOwnership && input.emailHash && click.publisher_id) {
+ await recordEmailOwnership(client, {
+ networkId: input.networkId, offerId: click.offer_id, emailHash: input.emailHash, publisherId: click.publisher_id, settings: attrCfg,
+ });
+ }
  if (insertedOk && status === 'approved') {
  await writeConversionLedger(client, {
  networkId: input.networkId, conversionId,
@@ -611,11 +669,11 @@ async function recordAttributed(
  reason,
  source: input.source,
  eventName,
- country: null,
+ country: click.country ?? null,
  region: null,
  city: null,
  isp: null,
- device: null,
+ device: click.device ?? null,
  os: null,
  browser: null,
  sub1: click.sub1,
@@ -648,6 +706,14 @@ async function recordAttributed(
  payout, currency,
  txnId: input.txnId,
  subs: [click.sub1, click.sub2, click.sub3, click.sub4, click.sub5],
+ });
+ }
+
+ // 24metrics checked the click and approved it: report the conversion to them (queued, retried).
+ if (t24?.status === 'approved' && t24.transactionId && attrCfg?.tracker24?.trackerId) {
+ await enqueueConversionReport({
+ trackerId: attrCfg.tracker24.trackerId, transactionId: t24.transactionId, offerId: click.offer_id,
+ publisherId: click.publisher_id, event: eventName, payout, revenue, conversionId,
  });
  }
 

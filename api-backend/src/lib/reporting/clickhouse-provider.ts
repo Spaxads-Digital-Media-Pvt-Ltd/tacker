@@ -110,28 +110,32 @@ const METRIC_CLICKS: Record<SideMetric, string> = {
  total_conversions: '0',
  avg_fraud_score: 'AVG(c.fraud_score)',
  currencies: 'CAST([], \'Array(String)\')',
+ // Impressions aren't in ClickHouse (Postgres only).
+ impressions: '0', unique_impressions: '0', invalid_impressions: '0', ctr: '0',
 };
 
 const METRIC_CONV: Record<SideMetric, string> = {
  clicks: '0',
  unique_clicks: '0',
- conversions: "COUNTIf(k.status = 'approved')",
+ // Billing rows (CPC paid clicks / CPM bookings — source click / impression) are money, not conversions.
+ conversions: "COUNTIf(k.status = 'approved' AND k.source NOT IN ('click', 'impression'))",
  cr: '0',
  payout: 'SUMIf(k.payout, k.status = \'approved\')',
  revenue: 'SUMIf(k.revenue, k.status = \'approved\')',
  margin: 'SUMIf(k.revenue - k.payout, k.status = \'approved\')',
  epc: '0',
  invalid_clicks: '0',
- total_conversions: 'COUNT(*)',
+ total_conversions: "COUNTIf(k.source NOT IN ('click', 'impression'))",
  avg_fraud_score: 'AVG(k.fraud_score)',
  // Distinct currencies of exactly the conversions behind payout/revenue/margin (approved), sorted.
  currencies: 'arraySort(groupUniqArrayIf(toString(assumeNotNull(k.currency)), k.status = \'approved\' AND isNotNull(k.currency)))',
+ impressions: '0', unique_impressions: '0', invalid_impressions: '0', ctr: '0',
 };
 
 // ORDER BY expressions over the outer select's aliases. cr/epc order by the derived ratio itself
 // (computed the same way as `derivedExpr` below) — not by clicks.
 // `currencies` / `money_by_currency` are never sort keys (request.ts refuses them as orderBy).
-type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'> | SortOnlyKey;
+type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency' | 'impressions' | 'unique_impressions' | 'invalid_impressions' | 'ctr'> | SortOnlyKey;
 const ORDER_COL: Record<OrderMetric, string> = {
  clicks: 'clicks',
  // Sort-only: net (valid) clicks — what the admin reports' "Clicks" column shows.
@@ -304,7 +308,8 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  // currency / none / mixed-or-unknown so currencies are never compared (see the ORDER BY below).
  const moneySort = req.orderBy != null && MONEY_SORT_METRICS.has(req.orderBy);
  const sortSql = moneySort
- ? `, uniqExactIf(k.currency, ${approvedCur}) AS cur_n, countIf(k.status = 'approved' AND isNull(k.currency)) AS cur_null, minIf(CAST(assumeNotNull(k.currency) AS String), ${approvedCur}) AS cur_one`
+ // money_rows: approved rows WITH billing rows (CPC / CPM money, not conversions) — what carries money.
+ ? `, countIf(k.status = 'approved') AS money_rows, uniqExactIf(k.currency, ${approvedCur}) AS cur_n, countIf(k.status = 'approved' AND isNull(k.currency)) AS cur_null, minIf(CAST(assumeNotNull(k.currency) AS String), ${approvedCur}) AS cur_one`
  : '';
  const conversionsCte =
  `SELECT ${gbHas ? convSel + ',' : ''}${convMetrics}${mbcSql}${sortSql}
@@ -348,8 +353,8 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) - (COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0)) AS margin${wantCurrencies ? `,
  cv.currencies AS currencies` : ''}${wantMbc ? `,
  arrayMap((cur, p, r) -> tuple(cur, toString(p), toString(r), toString(r - p)), tupleElement(cv.mbc, 1), tupleElement(cv.mbc, 2), tupleElement(cv.mbc, 3)) AS money_by_currency` : ''}${moneySort ? `,
- multiIf(COALESCE(cv.conversions, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket,
- if(COALESCE(cv.conversions, 0) > 0 AND COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, cv.cur_one, '') AS money_currency` : ''}${outerMetrics ? `,
+ multiIf(COALESCE(cv.money_rows, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket,
+ if(COALESCE(cv.money_rows, 0) > 0 AND COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, cv.cur_one, '') AS money_currency` : ''}${outerMetrics ? `,
  ${outerMetrics}` : ''}
  FROM cl ${joinType} cv ${onClause}`;
 

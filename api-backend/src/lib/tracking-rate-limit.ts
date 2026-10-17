@@ -50,7 +50,9 @@ export const POSTBACK_PER_CLICK_LIMIT = env.TRACKING_RL_POSTBACK_PER_CLICK_LIMIT
 // ---------------------------------------------------------------------------
 
 /** 'signup' = the dashboard's unauthenticated partner sign-up (F-04), which reuses this limiter. */
-export type TrackingEndpoint = 'click' | 'postback' | 'pixel' | 'iframe' | 'sl' | 'postback_click' | 'signup' | 'demo_request';
+export type TrackingEndpoint = 'click' | 'impression' | 'postback' | 'pixel' | 'iframe' | 'sl' | 'postback_click' | 'signup' | 'demo_request';
+/** A page can show several ads, so an address may send more impressions than clicks. */
+export const IMPRESSION_LIMIT = env.TRACKING_RL_CLICK_LIMIT * 5;
 
 function sha256(value: string): string {
  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');

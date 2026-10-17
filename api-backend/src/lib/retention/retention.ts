@@ -40,6 +40,8 @@ export const EMAIL_LOG_RETENTION_DAYS = 90;
 
 export interface RetentionResult {
  clicksDeleted: number;
+ /** Impressions (on the click window, like clicks). Optional: absent in results from before impressions. */
+ impressionsDeleted?: number;
  postbackLogsDeleted: number;
  /** Inbound postback log rows (every conversion request received), on the click window. */
  inboundPostbackLogsDeleted: number;
@@ -152,7 +154,7 @@ const NOT_LEDGERED = `NOT EXISTS (SELECT 1 FROM ledger_entries le
  * through the (network_id, created_at) index. `extra` narrows what may go (the ledger rule).
  */
 async function pruneNetwork(
- table: 'clicks' | 'postback_logs' | 'inbound_postback_logs' | 'conversions',
+ table: 'clicks' | 'impressions' | 'postback_logs' | 'inbound_postback_logs' | 'conversions',
  networkId: string,
  cutoff: Date,
  extra?: string,
@@ -196,6 +198,7 @@ export function retentionWindows(settings: Record<string, unknown> | null | unde
 export async function runRetention(now: Date = new Date()): Promise<RetentionResult> {
  const result: RetentionResult = {
  clicksDeleted: 0,
+ impressionsDeleted: 0,
  postbackLogsDeleted: 0,
  inboundPostbackLogsDeleted: 0,
  conversionsDeleted: 0,
@@ -225,6 +228,7 @@ export async function runRetention(now: Date = new Date()): Promise<RetentionRes
  if (n.clickDays > 0) {
  const c = cutoff(n.clickDays, now);
  result.clicksDeleted += await pruneNetwork('clicks', n.id, c);
+ result.impressionsDeleted = (result.impressionsDeleted ?? 0) + await pruneNetwork('impressions', n.id, c);
  result.postbackLogsDeleted += await pruneNetwork('postback_logs', n.id, c);
  result.inboundPostbackLogsDeleted += await pruneNetwork('inbound_postback_logs', n.id, c);
  }

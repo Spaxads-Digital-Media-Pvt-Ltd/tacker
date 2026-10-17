@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { isValidPostal, normalizePostal } from './postal.js';
 import { isValidExactIp, isValidIpRange } from './ip-match.js';
+import { redirectUrlWithMax } from '../url-schemas.js';
 
 export const TARGETING_KEYS = [
   'platform', 'browser', 'deviceBrand', 'osVersion', 'language',
@@ -65,8 +66,20 @@ export interface AttributionSettings {
   ipqs: { enabled: boolean };
   throttle: { enabled: boolean; ratePct: number };
   clickToConversion: { enabled: boolean; minSeconds: number; maxSeconds: number | null };
+  /** Email Ownership (Everflow's term): the partner behind a conversion carrying `email=` owns that customer
+   * on this offer, and a later postback with the email and no click id is credited to them
+   * (tracking/conversions/email-ownership.ts). */
   emailOwnership: boolean;
+  /** 'first' — the first partner keeps the customer; 'last' — ownership moves to the latest converting partner. */
+  emailOwnershipMethod: 'first' | 'last';
+  /** Ownership ends this many days after it began ('static') or after the customer's latest conversion
+   * ('dynamic'); null = never. */
+  emailOwnershipWindowDays: number | null;
+  emailOwnershipWindowMode: 'static' | 'dynamic';
+  /** View-through: a conversion with no click is credited to the partner whose impression the visitor saw
+   * within `viewThroughWindowHours` (tracking/conversions/view-through.ts). */
   viewThrough: boolean;
+  viewThroughWindowHours: number;
   serverSideClick: boolean;
 }
 
@@ -76,7 +89,11 @@ export const DEFAULT_ATTRIBUTION: AttributionSettings = {
   throttle: { enabled: false, ratePct: 0 },
   clickToConversion: { enabled: false, minSeconds: 5, maxSeconds: 21600 },
   emailOwnership: false,
+  emailOwnershipMethod: 'first',
+  emailOwnershipWindowDays: null,
+  emailOwnershipWindowMode: 'static',
   viewThrough: false,
+  viewThroughWindowHours: 24,
   serverSideClick: false,
 };
 
@@ -92,7 +109,12 @@ export const attributionSettingsSchema = z.object({
     message: 'Max click-to-conversion time must be greater than the minimum', path: ['maxSeconds'],
   }),
   emailOwnership: z.boolean(),
+  // Optional for clients that don't send them yet (the stored value, else the default, applies).
+  emailOwnershipMethod: z.enum(['first', 'last']).optional(),
+  emailOwnershipWindowDays: z.number().int().min(1).max(3650).nullable().optional(),
+  emailOwnershipWindowMode: z.enum(['static', 'dynamic']).optional(),
   viewThrough: z.boolean(),
+  viewThroughWindowHours: z.number().int().min(1).max(720).optional(),
   serverSideClick: z.boolean(),
 });
 
@@ -198,6 +220,9 @@ export const offerSettingsFields = {
   productId: z.string().trim().max(255).nullable().optional(),
   thumbnailUrl: z.string().trim().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL').nullable().optional(),
   targeting: targetingSchema.nullable().optional(),
+  /** The advertiser's (or their MMP's) impression URL: /impression sends the visitor's browser there with
+   * {imp_id} and the other macros filled, instead of answering with a pixel. */
+  impressionUrl: redirectUrlWithMax(2000).nullable().optional(),
   attributionSettings: attributionSettingsSchema.nullable().optional(),
   revenueSettings: revenueSettingsSchema.nullable().optional(),
   emailSettings: emailSettingsSchema.nullable().optional(),
@@ -216,6 +241,7 @@ const METADATA_FIELDS: Record<string, string> = {
   productId: 'product_id',
   thumbnailUrl: 'thumbnail_url',
   targeting: 'targeting',
+  impressionUrl: 'impression_url',
   attributionSettings: 'attribution_settings',
   revenueSettings: 'revenue_settings',
   emailSettings: 'email_settings',
@@ -229,7 +255,12 @@ const METADATA_FIELDS: Record<string, string> = {
 export function mergeOfferMetadata(before: Record<string, unknown> | null | undefined, body: Record<string, unknown>): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {};
   for (const [bodyKey, metaKey] of Object.entries(METADATA_FIELDS)) {
-    if (body[bodyKey] !== undefined) patch[metaKey] = body[bodyKey];
+    if (body[bodyKey] === undefined) continue;
+    // Attribution settings merge over the stored ones, so a client that doesn't send the newer keys (email
+    // ownership method / window, view-through window) keeps what was saved rather than resetting them.
+    const stored = metaKey === 'attribution_settings' ? obj(before?.[metaKey]) : null;
+    const value = obj(body[bodyKey]);
+    patch[metaKey] = stored && value ? { ...stored, ...value } : body[bodyKey];
   }
   return Object.keys(patch).length ? { ...(before ?? {}), ...patch } : null;
 }

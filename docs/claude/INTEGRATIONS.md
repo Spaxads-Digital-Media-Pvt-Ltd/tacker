@@ -102,6 +102,13 @@
  - `api-backend/src/surfaces/dashboard/automation/routes.ts`
 - **Data flow**: Event trigger → POST to configured URL
 
+## 24metrics (Clickshield)
+- **Files**: `src/lib/integrations/tracker24.ts`, worker `processors/tracker24.ts`; stand-in `scripts/fake-24metrics.mjs` (`npm run dev:fake-24metrics`)
+- **Setting**: Edit Offer › Attribution › 24metrics Tracker + the tracker ID (24metrics' integration ID — a host-name label)
+- **Endpoints** (those of 24metrics' own JavaScript SDK): `GET https://<id>.gateway.go2link.co/c?no_redirect=true&offer&publisher&sub_id…&external_transaction_id=<click id>&ip&ua&referer` → `{ data: { status: approved|rejected, reason, transaction_id } }`; conversions `GET …/api/event-tx?transaction_id&offer&publisher&event&payout&revenue&use_current_time=true`. `TRACKER24_GATEWAY_URL` (`{id}` = the tracker ID) overrides the base.
+- **Flow**: the click-persist worker checks each click before writing it (2.5 s cap, fail open). Rejected → click flags `24metrics`, `24metrics:<reason>`, score +50; its conversions held pending (`24metrics_flagged`); the address blocked for a day on the network's 24metrics offers (`/click` → `24metrics_blocked`). Approved → its approved conversions reported (queue `tracker24`, retried).
+- **To confirm with 24metrics** before production: the parameter names their gateway reads for the visitor's IP / user agent on a server-to-server call (`ip`, `ua` here — their SDK sends them implicitly from the browser).
+
 ## NOT Integrated (Not Yet)
 - No email service provider (SendGrid, Mailgun) — uses raw SMTP
 - No analytics CDN

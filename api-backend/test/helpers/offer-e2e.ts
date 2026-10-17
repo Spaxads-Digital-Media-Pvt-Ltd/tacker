@@ -21,6 +21,7 @@ import { loadGeoIp } from '../../src/lib/geo/geoip.js';
 import { query } from '../../src/lib/db/pool.js';
 import { CLICK_REJECTION_REASONS } from '../../src/lib/click-rejections.js';
 import { startClickPersistWorker } from '../../src/surfaces/workers/processors/click-persist.js';
+import { startImpressionPersistWorker } from '../../src/surfaces/workers/processors/impression-persist.js';
 import { getQueue, QUEUE } from '../../src/surfaces/workers/queues.js';
 import { seedFixture, type Fixture } from './db.js';
 import { operatorToken, bearer } from './tokens.js';
@@ -60,6 +61,15 @@ export interface ClickResult {
   reason: string | null;
 }
 
+export interface ImpressionResult {
+  status: number; location: string | undefined; impressionId: string | null; json: Record<string, unknown> | null;
+  setCookie: string | undefined;
+  /** The stored impression (null if none was recorded). */
+  row: Record<string, unknown> | null;
+  /** Why it was rejected (its first flag, when that is a rejection reason), or null. */
+  reason: string | null;
+}
+
 export interface Lab {
   fx: Fixture; host: string; track: FastifyInstance; dash: Express; admin: Record<string, string>;
   api: <T = any>(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string, body?: unknown) => Promise<T>;
@@ -67,6 +77,7 @@ export interface Lab {
   offer: (body?: Record<string, unknown>, extra?: { geo?: Record<string, unknown>[]; goals?: Record<string, unknown>[]; approve?: string[] }) => Promise<{ id: string; ref: number }>;
   partner: (status?: 'active' | 'pending' | 'inactive') => Promise<string>;
   click: (offerId: string, opts?: ClickOpts) => Promise<ClickResult>;
+  impression: (offerId: string, opts?: Omit<ClickOpts, 'path'>) => Promise<ImpressionResult>;
   postback: (params: Record<string, string | undefined>, opts?: { secureCode?: string | null }) => Promise<{ status: number; body: any }>;
   conversion: (conversionId: string) => Promise<Record<string, any> | null>;
   close: () => Promise<void>;
@@ -93,7 +104,9 @@ export async function startLab(name: string): Promise<Lab> {
   const admin = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkA, role: 'admin' }));
   // Other files leave click jobs no worker took (test Redis only) — drop them, or ours would wait behind them.
   await getQueue(QUEUE.clickPersist).drain(true);
+  await getQueue(QUEUE.impressionPersist).drain(true);
   const worker: Worker = startClickPersistWorker();
+  const impWorker: Worker = startImpressionPersistWorker();
 
   const apiRaw: Lab['apiRaw'] = (method, path, body) => {
     const r = request(dash)[method](`/api${path}`).set(admin);
@@ -149,6 +162,33 @@ export async function startLab(name: string): Promise<Lab> {
     return { status: res.statusCode, location, clickId, json, row, reason };
   };
 
+  const impression: Lab['impression'] = async (offerId, opts = {}) => {
+    const marker = `m${randomUUID().slice(0, 12)}`;
+    const pub = opts.pub === undefined ? fx.pubA1 : opts.pub;
+    const qs = [`offer_id=${offerId}`, pub ? `pub_id=${pub}` : '', opts.qs ?? '', `sub5=${marker}`].filter(Boolean).join('&');
+    const headers: Record<string, string> = { host };
+    if (opts.ua !== null) headers['user-agent'] = opts.ua ?? UA.windows;
+    if (opts.ip) headers['x-forwarded-for'] = opts.ip;
+    if (opts.lang) headers['accept-language'] = opts.lang;
+    if (opts.referer) headers['referer'] = opts.referer;
+    const res = await track.inject({ method: 'GET', url: `/impression?${qs}`, headers });
+    let json: Record<string, unknown> | null = null;
+    try { json = res.headers['content-type']?.toString().includes('json') ? res.json() : null; } catch { json = null; }
+    let row: Record<string, unknown> | null = null;
+    if (!opts.noRow) {
+      for (let i = 0; i < 60 && !row; i++) {
+        row = (await query(`SELECT impression_id, country, region, city, device, os, browser, ip, referrer, sub1, fraud_flags, is_unique,
+                                   resolved_payout::text AS payout, resolved_revenue::text AS revenue, publisher_id, creative_id
+                              FROM impressions WHERE network_id = $1 AND sub5 = $2`, [fx.networkA, marker])).rows[0] ?? null;
+        if (!row) await sleep(100);
+      }
+    }
+    const first = (row?.['fraud_flags'] as string[] | undefined)?.[0];
+    const reason = first && (CLICK_REJECTION_REASONS as readonly string[]).includes(first) ? first : null;
+    const impressionId = (row?.['impression_id'] as string | undefined) ?? ((json?.['data'] as { impression_id?: string } | undefined)?.impression_id ?? null);
+    return { status: res.statusCode, location: res.headers['location'] as string | undefined, impressionId, json, setCookie: res.headers['set-cookie'] as string | undefined, row, reason };
+  };
+
   const postback: Lab['postback'] = async (params, opts = {}) => {
     const p = new URLSearchParams();
     const code = opts.secureCode === undefined ? fx.secureCodeA : opts.secureCode;
@@ -161,9 +201,10 @@ export async function startLab(name: string): Promise<Lab> {
   };
 
   const conversion: Lab['conversion'] = async (conversionId) => (await query(
-    `SELECT conversion_id, status, reason, event_name, goal_id, payout::text AS payout, revenue::text AS revenue, currency, publisher_id, raw_params
+    `SELECT conversion_id, click_id, status, reason, event_name, goal_id, payout::text AS payout, revenue::text AS revenue, currency,
+            publisher_id, raw_params, source, attribution, country, device, products, transaction_id
        FROM conversions WHERE conversion_id = $1`, [conversionId])).rows[0] ?? null;
 
-  const close = async () => { await worker.close(); await track.close(); };
-  return { fx, host, track, dash, admin, api, apiRaw, offer, partner, click, postback, conversion, close };
+  const close = async () => { await worker.close(); await impWorker.close(); await track.close(); };
+  return { fx, host, track, dash, admin, api, apiRaw, offer, partner, click, impression, postback, conversion, close };
 }

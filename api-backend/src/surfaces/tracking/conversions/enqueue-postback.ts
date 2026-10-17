@@ -16,6 +16,9 @@ export interface OutboundPostbackJob {
   currency: string | null;
   txnId: string | null;
   subs: (string | null)[];
+  /** 'cpc' — a paid click on a CPC offer (conversions/volume-billing.ts): fires the partner's CPC-level postbacks
+   * (Partners › Postbacks, level "CPC") instead of their conversion postbacks. Absent = a conversion. */
+  level?: 'conversion' | 'cpc';
 }
 
 export async function enqueueOutboundPostback(job: OutboundPostbackJob): Promise<void> {

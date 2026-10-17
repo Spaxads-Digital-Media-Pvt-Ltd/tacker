@@ -82,10 +82,10 @@ api-backend/src/
 │ ├── ai/, analytics/, fraud/, geo/, integrations/, ledger/, observability/, postback/, postback-controls/, reporting/, retention/, tiered-commissions/
 ├── surfaces/ — 5 independently scalable services
 │ ├── dashboard/main.ts → app.ts (50+ route modules) → auth.ts (RBAC)
-│ ├── tracking/main.ts → Fastify /click /postback /pixel /iframe /sl
+│ ├── tracking/main.ts → Fastify /click /postback /pixel /iframe /sl /impression /sdk.js
 │ ├── public-api/main.ts → Express /api/v1/advertiser|publisher|network/*
 │ ├── platform-admin/main.ts → Express /platform/*
-│ └── workers/main.ts → BullMQ processors (click-persist, outbound-postback, fraud-scan, retention, facebook-capi, offer-feed-sync, domain-verify, scheduled-actions, alert-rules, automation-webhook, smart-link-kpi, reporting-rollup)
+│ └── workers/main.ts → BullMQ processors (click-persist, impression-persist, impression-billing (CPM), tracker24, outbound-postback, fraud-scan, retention, facebook-capi, offer-feed-sync, domain-verify, scheduled-actions, alert-rules, automation-webhook, smart-link-kpi, reporting-rollup)
 ```
 
 ---
@@ -156,6 +156,8 @@ api-backend/src/
 - `GET/POST /postback` — S2S conversion
 - `GET /pixel` — Pixel conversion (1x1 GIF)
 - `GET /iframe` — Iframe conversion
+- `GET /impression` — Ad impression (CPM billing, view-through), 1x1 GIF / redirect to the advertiser's impression URL
+- `GET /sdk.js` — Direct-linking JavaScript tag (`trk.click()` / `trk.conversion()`)
 
 ### Public API (API key auth)
 - `/api/v1/advertiser/*` — Advertiser keys only

@@ -18,7 +18,12 @@ export type Metric =
   // The same approved conversions' money split by currency: { [currency]: { payout?, revenue?, margin? } }
   // (numeric(14,4) text; only the fields the audience may see; NULL currency excluded; {} when none).
   // Opt-in only, never an orderBy.
-  | 'money_by_currency';
+  | 'money_by_currency'
+  // Ad impressions (/impression — the impressions table): all, unique, invalid (flagged / rejected), and
+  // CTR = clicks ÷ impressions. Opt-in only (a report without them never reads impressions), never an orderBy.
+  | 'impressions' | 'unique_impressions' | 'invalid_impressions' | 'ctr';
+
+export const IMPRESSION_METRICS: readonly Metric[] = ['impressions', 'unique_impressions', 'invalid_impressions', 'ctr'];
 
 /** One currency's share of a row's money — numeric(14,4) text, only the fields the audience may see. */
 export interface CurrencyMoney { payout?: string; revenue?: string; margin?: string }

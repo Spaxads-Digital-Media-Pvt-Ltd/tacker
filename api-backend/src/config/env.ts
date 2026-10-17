@@ -92,6 +92,9 @@ const schema = z.object({
  TRUSTED_PROXIES: z.string().optional(),
  TRACKING_ALLOWED_HOSTS: z.string().optional(), // comma-sep allowlist; empty = all (after validation)
  TRACKING_REJECT_RAW_IPS: z.coerce.boolean().default(true),
+ // 24metrics gateway (lib/integrations/tracker24.ts); {id} = the offer's 24metrics tracker ID. Override to
+ // point at a stand-in server when testing.
+ TRACKER24_GATEWAY_URL: z.string().min(1).default('https://{id}.gateway.go2link.co'),
 
   PORT_DASHBOARD: z.coerce.number().int().positive().default(4001),
   PORT_TRACKING: z.coerce.number().int().positive().default(4002),

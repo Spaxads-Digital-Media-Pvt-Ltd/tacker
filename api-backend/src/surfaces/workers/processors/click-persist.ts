@@ -15,6 +15,13 @@ import { getFraudConfigCached } from '../../../lib/fraud/rules.js';
 import { foldIpqsVerdict } from '../../tracking/fraud-presignals.js';
 import type { ClickJob } from '../../tracking/click-job.js';
 import { blankToNull } from '../../tracking/click-params.js';
+import { CLICK_REJECTION_REASONS } from '../../../lib/click-rejections.js';
+import { checkClick, storeVerdict, verdictFlags } from '../../../lib/integrations/tracker24.js';
+import { recordClickBilling } from '../../tracking/conversions/volume-billing.js';
+
+const REJECTIONS = new Set<string>(CLICK_REJECTION_REASONS);
+/** A click /click rejected (its first flag is the reason) — never sent on, never checked or billed. */
+const isRejected = (flags: string[]) => flags.length > 0 && REJECTIONS.has(flags[0]!);
 
 const log = surfaceLogger('workers');
 
@@ -28,6 +35,22 @@ async function persist(job: ClickJob): Promise<void> {
  // The same fold /click applies, so a click scored before the verdict was cached gets its weights too.
  const { weights } = await getFraudConfigCached(job.networkId);
  ({ score: fraudScore, flags: fraudFlags } = foldIpqsVerdict({ score: fraudScore, flags: fraudFlags }, ipqs, weights));
+ }
+ }
+ // 24metrics (lib/integrations/tracker24.ts): ask about an accepted click before it is stored, so a rejection
+ // lands on the row as flags; its verdict also decides its conversions (record.ts) and blocks the address.
+ if (job.tracker24 && !isRejected(job.fraudFlags)) {
+ const verdict = await checkClick({
+ trackerId: job.tracker24.trackerId, networkId: job.networkId, clickId: job.clickId, offerId: job.offerId,
+ publisherId: job.publisherId, ip: job.ip, userAgent: job.userAgent, referrer: job.referrer,
+ subs: [job.sub1, job.sub2, job.sub3, job.sub4, job.sub5], sourceId: job.sourceId ?? null,
+ });
+ if (verdict) {
+ await storeVerdict(job.networkId, job.clickId, job.ip, verdict);
+ if (verdict.status === 'rejected') {
+ fraudFlags = [...fraudFlags, ...verdictFlags(verdict).filter((f) => !fraudFlags.includes(f))];
+ fraudScore = Math.min(100, fraudScore + 50);
+ }
  }
  }
  await query(
@@ -50,6 +73,17 @@ async function persist(job: ClickJob): Promise<void> {
  blankToNull(job.sourceId), blankToNull(job.fbclid), blankToNull(job.gclid),
  ],
  );
+
+ // CPC (conversions/volume-billing.ts): a billable click — unique, valid, with a partner — is booked as a paid
+ // click on an offer that bills this partner per click. Idempotent on the click, so a retried job books once.
+ if (job.cpc && job.publisherId && job.isUnique && fraudFlags.length === 0) {
+ await recordClickBilling({
+ networkId: job.networkId, clickId: job.clickId, offerId: job.offerId, publisherId: job.publisherId,
+ advertiserId: job.cpc.advertiserId, payout: job.cpc.payout, revenue: job.cpc.revenue, currency: job.currency,
+ country: job.country, device: job.device, ts: job.ts, manualApproval: job.cpc.manualApproval,
+ subs: [job.sub1, job.sub2, job.sub3, job.sub4, job.sub5],
+ });
+ }
 
  await getAnalyticsWriter().writeClicks([
  {

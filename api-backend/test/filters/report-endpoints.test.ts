@@ -88,7 +88,11 @@ describe('/conversions click-side filters', () => {
     expect(sql).toMatch(/FROM conversions WHERE network_id = \$1 AND offer_id = \$2\) v/);
     // …click-side ones filter the LEFT JOINed click, every value a bound parameter.
     const where = sql.slice(sql.indexOf('LEFT JOIN offer_goals'));
-    for (const col of ['k.smart_link_id', 'k.country', 'k.city', 'k.device', 'k.sub1']) expect(where).toMatch(new RegExp(`${col.replace('.', '\\.')} = \\$\\d+`));
+    // Country / device fall back to the conversion's own (view-through, CPM bookings — no click row).
+    for (const col of ['k.smart_link_id', 'COALESCE(k.country, v.country)', 'k.city', 'COALESCE(k.device, v.device)', 'k.sub1']) {
+      expect(where).toContain(col);
+      expect(where).toMatch(new RegExp(`${col.replace(/[.()]/g, '\\$&')} = \\$\\d+`));
+    }
     expect(sql).not.toContain('Pune');
     expect(sql).not.toContain('abc');
     expect(params.slice(0, 7)).toEqual([NET, A, B, 'IN', 'Pune', 'mobile', 'abc']);

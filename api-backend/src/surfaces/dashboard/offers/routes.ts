@@ -31,6 +31,7 @@ import type {
 } from '../../../domain/entities.js';
 import { requireRole } from '../auth.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
+import { sdkSnippet } from '../../tracking/sdk.js';
 import { offerStatusChanged, offerAccessChanged } from '../../../lib/email/notifications.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
 import { mergeOfferMetadata, type OfferTargeting } from '../../../lib/offer-settings/index.js';
@@ -676,6 +677,23 @@ export function offersAdminRoutes(): Router {
  sendOk(res, result);
  }));
 
+ // --- Links to hand out: the tracking link, the impression pixel, and (direct linking) the direct link + the tag ---
+ r.get(
+ '/:id/links',
+ asyncHandler(async (req, res) => {
+ const db = dbForRequest(req);
+ const offer = await db.selectOne<OfferRow>('offers', { id: req.params.id });
+ if (!offer) throw notFound('Offer not found');
+ const pub = typeof req.query['publisherId'] === 'string' && req.query['publisherId'] ? req.query['publisherId'] : null;
+ if (pub && (!/^[0-9a-f-]{36}$/i.test(pub) || !(await db.selectOne<PublisherRow>('publishers', { id: pub })))) {
+ throw badRequest('publisherId does not belong to this network');
+ }
+ const networkId = db.scope.networkId;
+ const host = (await offerTrackingHost(networkId, offer.tracking_domain_id)) ?? await primaryTrackingHost(networkId);
+ sendOk(res, { host, ...offerLinks(host, offer, pub) });
+ }),
+ );
+
  // --- Geo rules (nested) ---
  r.get(
  '/:id/geo-rules',
@@ -993,11 +1011,52 @@ async function offerTrackingHost(networkId: string, trackingDomainId: string | n
  return rows[0]?.host ?? null;
 }
 
+/** The tracking server's base URL on a host (local dev hosts point at the tracking server port). */
+function trackingBase(host: string | null): string | null {
+ if (!host) return null;
+ return /^(localhost|127\.0\.0\.1)$/i.test(host) ? `http://${host}:${env.PORT_TRACKING}` : `https://${host}`;
+}
+
 /** Tracking link on the offer's own domain (local dev hosts point at the tracking server port). */
 function portalClickUrl(host: string | null, offerId: string, pubId: string | null): string | null {
- if (!host) return null;
- const base = /^(localhost|127\.0\.0\.1)$/i.test(host) ? `http://${host}:${env.PORT_TRACKING}` : `https://${host}`;
- return `${base}/click?offer_id=${offerId}${pubId ? `&pub_id=${pubId}` : ''}`;
+ const base = trackingBase(host);
+ return base ? `${base}/click?offer_id=${offerId}${pubId ? `&pub_id=${pubId}` : ''}` : null;
+}
+
+/** The impression pixel for a partner (tracking/impression.ts). */
+function portalImpressionUrl(host: string | null, offerId: string, pubId: string | null): string | null {
+ const base = trackingBase(host);
+ return base ? `${base}/impression?offer_id=${offerId}${pubId ? `&pub_id=${pubId}` : ''}` : null;
+}
+
+/**
+ * Direct linking (Click Tracking Type "Redirect + Direct"): the advertiser's page itself with our parameters —
+ * the JavaScript tag there (/sdk.js) registers the click. The page is the offer's preview URL, else its
+ * destination without the parameters that carry macros (nothing fills them without a redirect).
+ */
+function directLink(offer: Pick<OfferRow, 'metadata' | 'preview_url' | 'destination_url'>, offerId: string, pubId: string | null): string | null {
+ const meta = offer.metadata ?? {};
+ if (meta['linking_type'] !== 'redirect_direct' && meta['linkingType'] !== 'redirect_direct') return null;
+ let u: URL;
+ try { u = new URL(offer.preview_url ?? offer.destination_url); } catch { return null; }
+ if (/[{}]/.test(u.hostname) || (u.protocol !== 'https:' && u.protocol !== 'http:')) return null;
+ for (const [k, v] of [...u.searchParams]) if (/\{\w+\}/.test(v)) u.searchParams.delete(k);
+ u.searchParams.set('offer_id', offerId);
+ if (pubId) u.searchParams.set('pub_id', pubId);
+ return u.toString();
+}
+
+/** Every link a partner (or, for the tag, the advertiser) needs for an offer. */
+function offerLinks(host: string | null, offer: OfferRow, pubId: string | null) {
+ const base = trackingBase(host);
+ const direct = directLink(offer, offer.id, pubId);
+ return {
+ trackingUrl: portalClickUrl(host, offer.id, pubId),
+ impressionUrl: portalImpressionUrl(host, offer.id, pubId),
+ directUrl: direct,
+ // The JavaScript tag for the advertiser's site (direct-linking offers only).
+ sdk: direct && base ? sdkSnippet(base) : null,
+ };
 }
 
 export function offerPortalRoutes(): Router {
@@ -1082,6 +1141,8 @@ export function offerPortalRoutes(): Router {
  const withLink = rows.map((row) => ({
  ...toPublisherDTO(row, row.effective_payout),
  trackingUrl: portalCanRun(row) ? portalClickUrl(row.offer_host ?? primary, row.id, ownerId) : null,
+ impressionUrl: portalCanRun(row) ? portalImpressionUrl(row.offer_host ?? primary, row.id, ownerId) : null,
+ directUrl: portalCanRun(row) ? directLink(row, row.id, ownerId) : null,
  access: row.access as 'allow' | 'deny' | 'pending',
  approvalStatus: row.approval_status as 'approved' | 'pending' | 'rejected',
  }));
@@ -1121,8 +1182,12 @@ export function offerPortalRoutes(): Router {
  if (!rows[0]) throw notFound('Offer not found');
  const row = rows[0];
  const host = row.offer_host ?? await primaryTrackingHost(networkId);
- sendOk(res, toPublisherDetailDTO(row, row.effective_payout, row.access as 'allow' | 'deny' | null, row.approval_status as 'approved' | 'pending' | 'rejected' | null,
- portalCanRun(row) ? portalClickUrl(host, row.id, ownerId) : null));
+ sendOk(res, {
+ ...toPublisherDetailDTO(row, row.effective_payout, row.access as 'allow' | 'deny' | null, row.approval_status as 'approved' | 'pending' | 'rejected' | null,
+ portalCanRun(row) ? portalClickUrl(host, row.id, ownerId) : null),
+ impressionUrl: portalCanRun(row) ? portalImpressionUrl(host, row.id, ownerId) : null,
+ directUrl: portalCanRun(row) ? directLink(row, row.id, ownerId) : null,
+ });
  }),
  );
 

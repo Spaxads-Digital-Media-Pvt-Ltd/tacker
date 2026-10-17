@@ -7,7 +7,6 @@
  * deferred to a queue. The only goal after decisions are made is the fastest possible 302.
  */
 import { randomUUID } from 'node:crypto';
-import { isIP } from 'node:net';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { env } from '../../config/env.js';
 import { buildHealthReport, buildLivenessReport, buildReadinessReport, errorEnvelope } from '../../lib/http/index.js';
@@ -23,47 +22,42 @@ import { tierPayout } from '../../lib/partner-tiers.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
 import { buildTrustedProxyCheck, configuredProxies } from '../../lib/net/trusted-proxy.js';
-import { SOURCE_PARAMS, firstNonBlank } from './click-params.js';
+import { SOURCE_PARAMS, firstNonBlank, firstStr, asIp } from './click-params.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
 import { evaluateGeoRules } from './geo-rules.js';
 import { visitorGeo } from './visitor-geo.js';
 import { COUPON_PARAMS, couponClick } from './conversions/coupon.js';
-import { deepLinkDestination, onOfferSite } from './conversions/origin.js';
+import { IMPRESSION_ID_PARAMS, parseCookies, viewThroughClick } from './conversions/view-through.js';
+import { emailHashOf, emailOwnerClick } from './conversions/email-ownership.js';
+import { parseProductLines } from '../../lib/offer-settings/products.js';
+import type { StoredClick } from './click-store.js';
+import { deepLinkDestination, onOfferSite, sdkOrigin } from './conversions/origin.js';
+import { PIXEL_GIF, registerImpressionRoutes } from './impression.js';
+import { registerSdkRoutes } from './sdk.js';
 import {
  checkTrackingRateLimit, peekTrackingRateLimit, chargeTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT,
 } from '../../lib/tracking-rate-limit.js';
 import { isClickCapped, isCustomClickCapped, clickCapReached } from './caps.js';
 import { getSmartLinkConfig } from './smart-link-cache.js';
 import { applicableSettings } from '../../lib/offer-settings/custom-settings.js';
+import { actionPricing } from '../../lib/offer-settings/billing.js';
+import { isAddressBlocked } from '../../lib/integrations/tracker24.js';
 import type { ClickRejectionReason } from '../../lib/click-rejections.js';
 import { markUnique } from './dedup.js';
 import { fraudPreSignals } from './fraud-presignals.js';
 import { buildMacros, substituteMacros } from './macros.js';
 import { enqueueClick, type ClickJob } from './click-job.js';
 import { storeClickForAttribution } from './click-store.js';
-import { recordConversion, SALE_AMOUNT_PARAMS, type RecordConversionResult } from './conversions/record.js';
+import { recordConversion, secureCodeFailure, SALE_AMOUNT_PARAMS, type RecordConversionResult } from './conversions/record.js';
 import { logInbound, type InboundPostback } from './conversions/inbound-log.js';
 import { clicksTotal, redirectLatency, metricsText, metricsContentType } from '../../lib/metrics.js';
 import { captureError } from '../../lib/observability/sentry.js';
 import { isRedirectUrlSafe, getRedirectUrlRejectReason } from '../../lib/url-security.js';
 
-// 1x1 transparent GIF for the pixel endpoint.
-const PIXEL_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-
-function firstStr(v: unknown): string | null {
- return typeof v === 'string' ? v : Array.isArray(v) && typeof v[0] === 'string' ? v[0] : null;
-}
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Return the value only if it's a valid UUID (else null) — guards uuid columns downstream. */
-/** A plain IPv4 / IPv6 address, else null (a visitor IP passed on a server-to-server click, D2). */
-function asIp(v: string | null): string | null {
- const s = v?.trim() ?? '';
- return s && s.length <= 45 && isIP(s) ? s : null;
-}
-
 function asUuid(v: string | null): string | null {
  return v && UUID_RE.test(v) ? v : null;
 }
@@ -236,7 +230,13 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  // it passes the VISITOR's (`ip` / `user_ip`, `user_agent` / `ua`), those are what geo, the IP lists,
  // dedup, fraud checks and the stored click use — and a fraud block then applies like to any click;
  // without the visitor's IP it is scored on the server but never blocked.
- const serverSideClick = Boolean(offer.attribution?.serverSideClick) && firstStr(q['format']) === 'json';
+ // Direct linking (Click Tracking Type "Redirect + Direct"): the JavaScript tag on the advertiser's page
+ // (/sdk.js) registers the click with format=json from the VISITOR's browser — so the connection is the
+ // visitor's — and only from the offer's own site (Origin, else Referer). It answers the click id as JSON
+ // (CORS for that origin), and the visitor's referrer is the one the tag reports (the partner's page).
+ const directOrigin = offer.linkingType === 'redirect_direct' && firstStr(q['format']) === 'json'
+ ? sdkOrigin(firstStr(req.headers['origin']) ?? firstStr(req.headers['referer']), offer) : null;
+ const serverSideClick = !directOrigin && Boolean(offer.attribution?.serverSideClick) && firstStr(q['format']) === 'json';
  const visitorIp = serverSideClick ? asIp(firstStr(q['ip']) ?? firstStr(q['user_ip']) ?? firstStr(q['visitor_ip'])) : null;
  const visitorUa = serverSideClick ? ((firstStr(q['user_agent']) ?? firstStr(q['ua']))?.trim().slice(0, 512) || null) : null;
  const ip = visitorIp ?? (req.ip || null);
@@ -251,6 +251,9 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const geo = where.geo;
  const country = where.country;
  const region = where.region;
+ const referrer = directOrigin
+ ? ((firstStr(q['referrer']) ?? firstStr(q['ref']))?.trim().slice(0, 2000) || null)
+ : firstStr(req.headers['referer']) ?? null;
 
  // A click that isn't sent to the offer is still recorded — as an INVALID click whose first fraud flag
  // is the reason (Everflow standard; lib/click-rejections.ts) — so reports show the rejected traffic
@@ -264,7 +267,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  ts: new Date().toISOString(), ip,
  country, region, city: geo?.city ?? null, isp: geo?.isp ?? null,
  device: ua.device, os: ua.os, browser: ua.browser,
- referrer: firstStr(req.headers['referer']) ?? null, userAgent,
+ referrer, userAgent,
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
  isUnique: false, fraudScore: fraud?.score ?? 0, fraudFlags: [reason, ...(fraud?.flags ?? [])],
  resolvedPayout: '0.0000', resolvedRevenue: '0.0000', currency: offer.currency, smartLinkId,
@@ -294,12 +297,15 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
 
  // 3. The platform blocklist (Super Admin › Trust & safety): an address, user agent or referrer domain the
  // platform blocked for every network — ahead of the network's own lists. The hit is counted, not awaited.
- const platformHit = platformBlocklist?.match({ ip, userAgent, referrer: firstStr(req.headers['referer']) ?? null });
+ const platformHit = platformBlocklist?.match({ ip, userAgent, referrer });
  if (platformHit) { recordBlocklistHit(platformHit.id); return reject('platform_blocked'); }
 
  // 3a. Network IP blacklist (Control Center › Security, F-16): a listed address is rejected, the same
  // outcome as a blocking traffic control. req.ip is the real client (trusted-proxy aware, above).
  if (ip && ipBlacklist?.check(ip)) return reject('ip_blacklisted');
+ // 3b. 24metrics rejected a click from this address in the last day (lib/integrations/tracker24.ts) — on an
+ // offer with 24metrics on. One Redis read, only for those offers.
+ if (ip && offer.attribution?.tracker24?.enabled && await isAddressBlocked(tenant.networkId, ip)) return reject('24metrics_blocked');
 
  // 4. Geo targeting (country, or country + region).
  const geoKnown = where.known;
@@ -322,7 +328,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  // click through but flags it, so it already shows up as invalid in existing fraud reporting.
  const tcFields = {
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
- referrer: firstStr(req.headers['referer']) ?? null, ip, country,
+ referrer, ip, country,
  device: ua.device, os: ua.os, browser: ua.browser, userAgent,
  };
  const tcMatch = evaluateTrafficControls(offer.trafficControls, tcFields, publisherId);
@@ -373,6 +379,10 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const resolvedRevenue = geoDecision.revenueOverride ?? offer.defaultRevenue;
  const tierRate = publisherId ? tierPayout(resolvedRevenue, offer.tierMargins?.[publisherId]) : null;
  const resolvedPayout = partnerPayout ?? tierRate ?? geoDecision.payoutOverride ?? offer.defaultPayout;
+ // Priced per click (payout model CPC, Revenue Action "Click", or the partner's own CPC custom setting —
+ // lib/offer-settings/billing.ts): the click-persist worker books a billable click as a paid click.
+ const pricing = actionPricing(offer, publisherId, clickAttrs, new Date(), { payout: resolvedPayout, revenue: resolvedRevenue });
+ const perClick = publisherId != null && (pricing.payout.action === 'click' || pricing.revenue.action === 'click');
 
  // 10. Enqueue durable write (async) — the hot path never blocks on Postgres.
  const job: ClickJob = {
@@ -380,7 +390,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  ts: new Date().toISOString(), ip,
  country, region, city: geo?.city ?? null, isp: geo?.isp ?? null,
  device: ua.device, os: ua.os, browser: ua.browser,
- referrer: firstStr(req.headers['referer']) ?? null, userAgent,
+ referrer, userAgent,
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
  isUnique, fraudScore: fraud.score,
  fraudFlags: tcMatch?.action === 'fail_traffic' ? [...fraud.flags, 'traffic_control'] : fraud.flags,
@@ -389,6 +399,13 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  // Taken verbatim from the click URL (already parsed — no extra work on the hot path); absent → null.
  sourceId, fbclid: firstNonBlank(q, ['fbclid']), gclid: firstNonBlank(q, ['gclid']),
  ipqs: offer.attribution?.ipqs?.enabled ?? false,
+ cpc: perClick ? {
+ payout: pricing.payout.action === 'click' ? pricing.payout.rate : null,
+ revenue: pricing.revenue.action === 'click' ? pricing.revenue.rate : null,
+ advertiserId: offer.advertiserId, manualApproval: Boolean(offer.revenue?.manualApproval),
+ } : null,
+ tracker24: offer.attribution?.tracker24?.enabled && offer.attribution.tracker24.trackerId
+ ? { trackerId: offer.attribution.tracker24.trackerId } : null,
  };
  await enqueueClick(job);
 
@@ -434,8 +451,17 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  if (serverSideClick) {
  return reply.code(200).header('cache-control', 'no-store').send({ ok: true, data: { click_id: clickId, redirect_url: finalUrl } });
  }
+ // Direct linking: the tag on the advertiser's page keeps the click id (the visitor is already there).
+ if (directOrigin) {
+ return reply.code(200).header('cache-control', 'no-store').header('access-control-allow-origin', directOrigin).header('vary', 'Origin')
+ .send({ ok: true, data: { click_id: clickId, offer_id: offer.id, attribution_window_s: offer.attributionWindowS } });
+ }
  return reply.code(302).header('location', finalUrl).header('cache-control', 'no-store').send();
  });
+
+ // Ad impressions (CPM billing, view-through) — impression.ts. The direct-linking JavaScript tag — sdk.ts.
+ registerImpressionRoutes(app, { rateLimits });
+ registerSdkRoutes(app);
 
  // Smart link resolver — pick an offer (Weight / Priority / KPI) and hand off to /click so all the
  // normal click logic (caps, macros, attribution, smart_link_id) applies. F-17b: the link comes from
@@ -556,12 +582,50 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  networkId: tenant.networkId, source, method: req.method, clickId, transactionId: txnId, event, saleAmount, httpStatus,
  ip: (req.ip as string | undefined) ?? null, userAgent: firstStr(req.headers['user-agent']), params: rawParams, result,
  });
- // No click id but a coupon (S2S only): a clickless conversion for the coupon's partner (conversions/coupon.ts).
- const couponCode = !clickId && source === 'postback' ? pick(...COUPON_PARAMS) : null;
- const coupon = couponCode ? await couponClick(tenant.networkId, couponCode) : null;
- if (coupon) clickId = coupon.clickId;
+ // The customer's email (Email Ownership): recorded with the conversion's partner, or — with no click id — the owner.
+ const emailHash = emailHashOf(rawParams);
+ // No click id: a clickless conversion, matched in this order — a coupon (S2S; conversions/coupon.ts), the
+ // impression it's a view-through of (`impression_id`), the customer's owner by email (S2S, with the offer —
+ // email-ownership.ts), then the offer's impression cookie / the visitor's address (view-through.ts).
+ let virtual: { clickId: string; click: StoredClick; attribution: 'coupon' | 'email' | 'view_through' } | null = null;
+ let notFound = 'missing_click_id';
  if (!clickId) {
- const missing: RecordConversionResult = { outcome: 'click_not_found', reason: couponCode ? 'unknown_coupon' : 'missing_click_id' };
+ const couponCode = source === 'postback' ? pick(...COUPON_PARAMS) : null;
+ const impressionId = pick(...IMPRESSION_ID_PARAMS);
+ const rawOffer = pick('offer_id', 'oid');
+ const offerId = rawOffer ? await resolveEntityId('offer', tenant.networkId, rawOffer) : null;
+ if (couponCode) {
+ const c = await couponClick(tenant.networkId, couponCode);
+ if (c) virtual = { ...c, attribution: 'coupon' }; else notFound = 'unknown_coupon';
+ } else if (impressionId) {
+ const v = await viewThroughClick(tenant.networkId, { impressionId, offerId, cookies: {}, ip: null });
+ if (v) virtual = { ...v, attribution: 'view_through' }; else notFound = 'unknown_impression';
+ } else if (offerId) {
+ const offer = await getOfferConfig(tenant.networkId, offerId);
+ // A postback is authenticated BEFORE its email / address is looked up, so no answer can tell a caller
+ // without the code whether the advertiser has that customer or an impression from that address.
+ const denied = source === 'postback' ? secureCodeFailure(offer, pick('secure_code', 'security_code')) : null;
+ if (denied) {
+ const failed: RecordConversionResult = { outcome: 'security_failed', reason: denied };
+ await log(failed, 403);
+ return { ...failed, networkResolved: true };
+ }
+ const owner = source === 'postback' && emailHash && offer ? await emailOwnerClick(tenant.networkId, offer, emailHash) : null;
+ if (owner) virtual = { ...owner, attribution: 'email' };
+ else {
+ // A postback names the visitor's address (`ip`); a pixel / iframe comes from the visitor's browser.
+ const ip = source === 'postback' ? asIp(pick('ip', 'user_ip')) : (req.ip || null);
+ const v = await viewThroughClick(tenant.networkId, {
+ impressionId: null, offerId, cookies: source === 'postback' ? {} : parseCookies(req.headers.cookie), ip,
+ });
+ if (v) virtual = { ...v, attribution: 'view_through' };
+ else if (emailHash && offer?.attribution?.emailOwnership) notFound = 'unknown_email';
+ }
+ }
+ if (virtual) clickId = virtual.clickId;
+ }
+ if (!clickId) {
+ const missing: RecordConversionResult = { outcome: 'click_not_found', reason: notFound };
  await log(missing, source === 'postback' ? 404 : 200);
  return { ...missing, networkResolved: true };
  }
@@ -571,7 +635,10 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  result = await recordConversion({
  networkId: tenant.networkId,
  clickId,
- ...(coupon ? { click: coupon.click } : {}),
+ ...(virtual ? { click: virtual.click, attribution: virtual.attribution } : {}),
+ emailHash,
+ // Price Per Product: the order's lines — priced only from the authenticated S2S postback.
+ products: source === 'postback' ? parseProductLines(rawParams, saleAmount) : null,
  txnId,
  event,
  statusHint: pick('status'),

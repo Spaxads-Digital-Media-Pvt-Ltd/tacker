@@ -24,6 +24,7 @@ import { money4, MONEY_FIELDS, type MoneyByCurrency } from '../../../lib/reporti
 import { getReportingProvider } from '../../../lib/reporting/index.js';
 import { networkCapTimeZone, networkTimeZone } from '../../../lib/reporting/network-zone.js';
 import { isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore, formatInZone } from '../../../lib/reporting/time-zone.js';
+import { billingRowSql } from '../../../lib/offer-settings/billing.js';
 
 /** Admin endpoints: every money field per currency (CTE alias `cm` with columns cur / p / r). */
 const MBC_JSON = mbcJsonSql('cm');
@@ -105,6 +106,22 @@ const clicksSchema = z.object({
   ...pageKeys,
 }).strict().transform(withZonedRange);
 type ClicksFilters = z.infer<typeof clicksSchema>;
+
+// Impressions (tracking/impression.ts) — same shape as clicks, minus the smart link; plus the creative.
+const { smartLinkId: _noSmartLink, ...impressionAttrKeys } = clickAttrKeys;
+const impressionsSchema = z.object({
+  ...rangeKeys,
+  offerId: uuid, publisherId: uuid, advertiserId: uuid,
+  ...impressionAttrKeys,
+  isUnique: z.enum(['true', 'false']).optional(),
+  /** true = only flagged / rejected impressions; false = only valid ones. */
+  invalid: z.enum(['true', 'false']).optional(),
+  ip: ipParam,
+  sourceId: z.string().max(200).optional(),
+  creativeId: z.string().max(200).optional(),
+  ...pageKeys,
+}).strict().transform(withZonedRange);
+type ImpressionsFilters = z.infer<typeof impressionsSchema>;
 
 const conversionsSchema = z.object({
   ...rangeKeys,
@@ -496,6 +513,40 @@ export function mountDetailReports(r: Router): void {
     sendOk(res, rows.map((r) => ({ ...r, referrer: r.referrer == null ? null : redactUrl(r.referrer) })), { limit: f.limit, offset: f.offset });
   }));
 
+  // ── Impression report — row-level impression log (accepted and rejected — the first flag is the reason).
+  r.get('/impressions', validateQuery(impressionsSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as ImpressionsFilters;
+    const { where, params } = buildWhere<ImpressionsFilters>(req.scope!.networkId, f, [
+      { key: 'from', col: 'created_at', op: '>=' }, { key: 'to', col: 'created_at', op: '<=' },
+      { key: 'offerId', col: 'offer_id' }, { key: 'publisherId', col: 'publisher_id' },
+      { key: 'country', col: 'country' }, { key: 'region', col: 'region' }, { key: 'city', col: 'city' },
+      { key: 'device', col: 'device' }, { key: 'os', col: 'os' }, { key: 'browser', col: 'browser' },
+      { key: 'sub1', col: 'sub1' }, { key: 'sub2', col: 'sub2' }, { key: 'sub3', col: 'sub3' },
+      { key: 'sub4', col: 'sub4' }, { key: 'sub5', col: 'sub5' },
+      { key: 'isUnique', col: 'is_unique', bool: true },
+      { key: 'sourceId', col: 'source_id' }, { key: 'creativeId', col: 'creative_id' },
+    ]);
+    let impWhere = where;
+    if (f.advertiserId) {
+      params.push(f.advertiserId);
+      impWhere += ` AND offer_id IN (SELECT id FROM offers WHERE network_id = $1 AND advertiser_id = $${params.length})`;
+    }
+    if (f.invalid === 'true') impWhere += ' AND array_length(fraud_flags, 1) > 0';
+    if (f.invalid === 'false') impWhere += ' AND array_length(fraud_flags, 1) IS NULL';
+    if (f.ip) { params.push(f.ip); impWhere += ` AND ip = $${params.length}::inet`; }
+    params.push(f.limit, f.offset);
+    const { rows } = await query<{ referrer: string | null }>(
+      `SELECT impression_id, created_at, offer_id, publisher_id, host(ip) AS ip, country, region, city, isp,
+              device, os, browser, is_unique, fraud_score, fraud_flags, sub1, sub2, sub3, sub4, sub5,
+              source_id, creative_id, referrer, user_agent, currency,
+              resolved_payout::text AS resolved_payout, resolved_revenue::text AS resolved_revenue
+         FROM impressions WHERE ${impWhere}
+        ORDER BY created_at DESC, impression_id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+    sendOk(res, rows.map((r) => ({ ...r, referrer: r.referrer == null ? null : redactUrl(r.referrer) })), { limit: f.limit, offset: f.offset });
+  }));
+
   // ── Conversions report — row-level conversion log, incl. click-time context (geo/device/subs)
   // for the originating click via a LEFT JOIN on click_id. Filtering runs on the `conversions`-only
   // subquery first (avoids column-name ambiguity with `clicks` on the outer join) before joining.
@@ -512,8 +563,9 @@ export function mountDetailReports(r: Router): void {
     // Click-side filters run on the joined originating click (same numbering as `params`).
     const { where: clickWhere } = buildWhere<ConversionsFilters>(req.scope!.networkId, f, [
       { key: 'smartLinkId', col: 'k.smart_link_id' },
-      { key: 'country', col: 'k.country' }, { key: 'region', col: 'k.region' }, { key: 'city', col: 'k.city' },
-      { key: 'device', col: 'k.device' }, { key: 'os', col: 'k.os' }, { key: 'browser', col: 'k.browser' },
+      // A conversion with no click row (view-through, a CPM booking) has its own country / device.
+      { key: 'country', col: 'COALESCE(k.country, v.country)' }, { key: 'region', col: 'k.region' }, { key: 'city', col: 'k.city' },
+      { key: 'device', col: 'COALESCE(k.device, v.device)' }, { key: 'os', col: 'k.os' }, { key: 'browser', col: 'k.browser' },
       { key: 'sub1', col: 'k.sub1' }, { key: 'sub2', col: 'k.sub2' }, { key: 'sub3', col: 'k.sub3' },
       { key: 'sub4', col: 'k.sub4' }, { key: 'sub5', col: 'k.sub5' },
     ], params, '');
@@ -521,13 +573,13 @@ export function mountDetailReports(r: Router): void {
     const { rows } = await query<{ raw_params: unknown }>(
       `SELECT v.conversion_id, v.created_at, v.click_id, v.offer_id, v.publisher_id, v.advertiser_id,
               v.event_name, v.goal_id, og.name AS goal_name, v.status, v.reason, v.payout, v.revenue,
-              v.currency, v.transaction_id, v.source, v.fraud_score, v.raw_params,
-              k.created_at AS click_created_at, k.country, k.region, k.city, k.isp,
-              k.device, k.os, k.browser, k.sub1, k.sub2, k.sub3, k.sub4, k.sub5,
+              v.currency, v.transaction_id, v.source, v.attribution, v.products, v.fraud_score, v.raw_params,
+              k.created_at AS click_created_at, COALESCE(k.country, v.country) AS country, k.region, k.city, k.isp,
+              COALESCE(k.device, v.device) AS device, k.os, k.browser, k.sub1, k.sub2, k.sub3, k.sub4, k.sub5,
               EXTRACT(EPOCH FROM (v.created_at - k.created_at))::int AS delta_seconds
          FROM (SELECT conversion_id, network_id, created_at, click_id, offer_id, publisher_id, advertiser_id,
                       event_name, goal_id, status, reason, payout, revenue, currency, transaction_id, source,
-                      fraud_score, raw_params
+                      attribution, products, country, device, fraud_score, raw_params
                  FROM conversions WHERE ${convWhere}) v
          LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id
          LEFT JOIN offer_goals og ON og.id = v.goal_id AND og.network_id = v.network_id
@@ -1028,6 +1080,8 @@ export function mountDetailReports(r: Router): void {
     const f = res.locals.query as z.infer<typeof mttiSchema>;
     const where = ['c.network_id = $1'];
     const params: unknown[] = [nid];
+    // Paid clicks (CPC billing rows) are booked the moment their click is — not conversions, no conversion time.
+    where.push(`NOT ${billingRowSql('c')}`);
     const status = f.status ?? 'approved';
     if (status !== 'all') { params.push(status); where.push(`c.status = $${params.length}`); }
     if (f.from) { params.push(f.from); where.push(`c.created_at >= $${params.length}`); }

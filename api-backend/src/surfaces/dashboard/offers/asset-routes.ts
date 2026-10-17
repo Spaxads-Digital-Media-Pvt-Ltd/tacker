@@ -23,6 +23,7 @@ import {
   createGoalSchema, updateGoalSchema,
   createCreativeSchema, updateCreativeSchema,
   createCouponSchema, updateCouponSchema,
+  createOfferProductSchema, updateOfferProductSchema,
   createDealSchema, updateDealSchema,
   createForwardingRuleSchema, updateForwardingRuleSchema,
   createOfferPostbackSchema, updateOfferPostbackSchema, POSTBACK_LEVELS,
@@ -190,6 +191,11 @@ const couponDTO = (r: Row) => ({
   id: r.id, code: r.code, publisherId: r.publisher_id, description: r.description,
   discount: r.discount, status: r.status, startsAt: r.starts_at, endsAt: r.ends_at,
 });
+const productDTO = (r: Row) => ({
+  id: r.id, offerId: r.offer_id, sku: r.sku, category: r.category, name: r.name,
+  payoutType: r.payout_type, payoutValue: r.payout_value, revenueType: r.revenue_type, revenueValue: r.revenue_value,
+  status: r.status, createdAt: r.created_at, updatedAt: r.updated_at,
+});
 const dealDTO = (r: Row) => ({
   id: r.id, name: r.name, description: r.description, dealType: r.deal_type,
   value: r.value, status: r.status, startsAt: r.starts_at, endsAt: r.ends_at,
@@ -235,6 +241,18 @@ export function mountOfferAssets(r: Router): void {
         if (!pub) throw badRequest('publisherId does not belong to this network');
       }
     },
+  });
+
+  // Price Per Product rules (lib/offer-settings/products.ts) — the tracking cache holds them, so writes bust it.
+  mountAsset(r, {
+    collection: 'products', table: 'offer_products',
+    createSchema: createOfferProductSchema, updateSchema: updateOfferProductSchema,
+    colMap: {
+      sku: 'sku', category: 'category', name: 'name', payoutType: 'payout_type', payoutValue: 'payout_value',
+      revenueType: 'revenue_type', revenueValue: 'revenue_value', status: 'status',
+    },
+    dto: productDTO, auditKind: 'product', invalidateCache: true,
+    uniqueMessage: 'This offer already has a product with that SKU (or, without a SKU, that category).',
   });
 
   mountAsset(r, {

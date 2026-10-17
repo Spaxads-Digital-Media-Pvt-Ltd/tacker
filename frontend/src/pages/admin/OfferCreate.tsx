@@ -45,6 +45,8 @@ const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-s
 const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
 const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
+/** CPC pays per click, CPM per 1,000 impressions (backend lib/offer-settings/billing.ts); the rest per conversion. */
+const PAYOUT_LABEL: Record<string, string> = { CPC: 'Payout Per Click', CPM: 'Payout Per 1,000 Impressions' };
 // Non-binding autocomplete for the free-text currency column (no server-side currency list exists).
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
 /** Category picker option that switches to the "New category name" text input. */
@@ -105,6 +107,7 @@ export default function OfferCreate() {
   const [failTrafficEnabled, setFailTrafficEnabled] = useState(false);
   const [linkingType, setLinkingType] = useState('redirect');
   const [deepLinkEnabled, setDeepLinkEnabled] = useState(false);
+  const [impressionUrl, setImpressionUrl] = useState('');
   // On by default — the tracker fires partner postbacks unless this is explicitly turned off.
   const [firePartnerPostback, setFirePartnerPostback] = useState(true);
   const [targeting, setTargeting] = useState<OfferTargeting>({});
@@ -149,7 +152,7 @@ export default function OfferCreate() {
       payoutModel: form.payoutModel, currency: form.currency,
       defaultRevenue: form.defaultRevenue || '0', defaultPayout: form.defaultPayout || '0',
       visibility: form.visibility, status: form.status, allowedTrafficTypes: form.allowedTrafficTypes,
-      linkingType, deepLinkEnabled, firePartnerPostback,
+      linkingType, deepLinkEnabled, firePartnerPostback, impressionUrl: impressionUrl.trim() || null,
       fallbackUrl: failTrafficEnabled && form.fallbackUrl.trim() ? normalizeUrl(form.fallbackUrl.trim()) : null,
       dailyClickCap: capOrNull(caps.dailyClickCap),
       dailyConversionCap: capOrNull(caps.dailyConversionCap),
@@ -334,6 +337,9 @@ export default function OfferCreate() {
               <Field label="Linking Type">
                 <Segmented options={LINKING_TYPES} value={linkingType} onChange={setLinkingType} />
               </Field>
+              <Field label="Impression URL" hint="Optional — the advertiser's or MMP's impression link. The impression pixel sends the browser there with {imp_id} and the click macros filled in; without one it answers with a 1×1 pixel.">
+                <input className="input" placeholder="https://… {imp_id}" value={impressionUrl} onChange={(e) => setImpressionUrl(e.target.value)} />
+              </Field>
               <div>
                 <label className="label mb-1 block">Conversion Tracking</label>
                 <p className="text-small text-fg-secondary">Conversions are accepted via Server-to-Server postback, pixel, or iframe — the advertiser fires whichever they use. It isn't a per-offer setting.</p>
@@ -404,10 +410,10 @@ export default function OfferCreate() {
               <h3 className="text-h3 font-medium text-fg">Base Payout</h3>
               <Field label="Model">
                 <select className="input" value={form.payoutModel} onChange={(e) => set('payoutModel', e.target.value)}>
-                  {['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
+                  {['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
                 </select>
               </Field>
-              <Field label="Payout Per Action *"><input className="input" required inputMode="decimal" pattern="-?\d{1,10}(\.\d{1,4})?" title="A number with up to 4 decimals" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} placeholder="5.00" /></Field>
+              <Field label={`${PAYOUT_LABEL[form.payoutModel] ?? 'Payout Per Action'} *`}><input className="input" required inputMode="decimal" pattern="-?\d{1,10}(\.\d{1,4})?" title="A number with up to 4 decimals" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} placeholder="5.00" /></Field>
             </div>
           </div>
         )}

@@ -120,7 +120,12 @@ export interface PrivacyRequestRow {
   id: string; network_id: string | null; kind: 'erasure' | 'access'; subject_type: SubjectType; subject: string;
 }
 
-export interface ErasureResult { clicks: number; conversions: number; inboundPostbacks: number; outboundPostbacks: number; networks: number }
+export interface ErasureResult {
+  clicks: number; conversions: number; inboundPostbacks: number; outboundPostbacks: number; networks: number;
+  /** Impressions whose personal fields were cleared, and Email Ownership records removed (both optional:
+   * absent on results recorded before impressions / email ownership existed). */
+  impressions?: number; emailOwnerships?: number;
+}
 
 /** The SQL matching the subject's clicks (alias-free; $1 = the subject). */
 function clickMatch(type: SubjectType): string {
@@ -147,7 +152,7 @@ export async function eraseSubject(r: PrivacyRequestRow): Promise<ErasureResult>
   const subject = normalizeSubject(r.subject_type, r.subject);
   return withTransaction(async (c) => {
     await c.query(`SET LOCAL statement_timeout = '120s'`);
-    const out: ErasureResult = { clicks: 0, conversions: 0, inboundPostbacks: 0, outboundPostbacks: 0, networks: 0 };
+    const out: ErasureResult = { clicks: 0, conversions: 0, inboundPostbacks: 0, outboundPostbacks: 0, networks: 0, impressions: 0, emailOwnerships: 0 };
     const byNetwork = await matchingClicks(c, r, subject);
     const wholeClick = r.subject_type === 'ip' || r.subject_type === 'click_id';
     for (const [networkId, ids] of byNetwork) {
@@ -180,6 +185,26 @@ export async function eraseSubject(r: PrivacyRequestRow): Promise<ErasureResult>
           [networkId, allConversions]);
         out.outboundPostbacks += outbound.rowCount ?? 0;
       }
+    }
+    // Impressions hold the same personal fields as clicks: an IP erases the impression's, a sub id / email the
+    // matching sub ids. Email Ownership holds only the address's sha256 — the subject's records go.
+    const iScope = r.network_id ? 'AND network_id = $2' : '';
+    const iParams = r.network_id ? [subject, r.network_id] : [subject];
+    if (r.subject_type === 'ip') {
+      out.impressions = (await c.query(
+        `UPDATE impressions SET ip = NULL, user_agent = NULL, referrer = NULL, city = NULL, region = NULL,
+                sub1 = NULL, sub2 = NULL, sub3 = NULL, sub4 = NULL, sub5 = NULL
+          WHERE ip = $1::inet ${iScope}`, iParams)).rowCount ?? 0;
+    } else if (r.subject_type === 'sub_id' || r.subject_type === 'email') {
+      out.impressions = (await c.query(
+        `UPDATE impressions SET sub1 = CASE WHEN lower(sub1) = lower($1) THEN NULL ELSE sub1 END, sub2 = CASE WHEN lower(sub2) = lower($1) THEN NULL ELSE sub2 END,
+                sub3 = CASE WHEN lower(sub3) = lower($1) THEN NULL ELSE sub3 END, sub4 = CASE WHEN lower(sub4) = lower($1) THEN NULL ELSE sub4 END,
+                sub5 = CASE WHEN lower(sub5) = lower($1) THEN NULL ELSE sub5 END
+          WHERE lower($1) IN (lower(sub1), lower(sub2), lower(sub3), lower(sub4), lower(sub5)) ${iScope}`, iParams)).rowCount ?? 0;
+    }
+    if (r.subject_type === 'email') {
+      out.emailOwnerships = (await c.query(
+        `DELETE FROM email_owners WHERE email_hash = encode(sha256(convert_to(lower(btrim($1)), 'UTF8')), 'hex') ${iScope}`, iParams)).rowCount ?? 0;
     }
     // A sub id / email can sit in a conversion's raw parameters without a click carrying it: drop those keys.
     if (!wholeClick) {

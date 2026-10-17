@@ -60,6 +60,26 @@ export const createCouponSchema = z.object({
 });
 export const updateCouponSchema = createCouponSchema.partial();
 
+/** Price Per Product: a product's payout / revenue on the offer — fixed per unit, or a percentage of the line's
+ * amount (lib/offer-settings/products.ts). Matched by SKU, else (no SKU) by category. */
+const offerProductFields = z.object({
+  sku: z.string().trim().min(1).max(200).nullable().optional(),
+  category: z.string().trim().min(1).max(200).nullable().optional(),
+  name: z.string().trim().max(200).nullable().optional(),
+  payoutType: z.enum(['fixed', 'percent']).default('fixed'),
+  payoutValue: moneySchema.nullable().optional(),
+  revenueType: z.enum(['fixed', 'percent']).default('fixed'),
+  revenueValue: moneySchema.nullable().optional(),
+  status: z.enum(['active', 'inactive']).default('active'),
+});
+const percentOk = (p: { payoutType?: string; payoutValue?: string | null; revenueType?: string; revenueValue?: string | null }) =>
+  (p.payoutType !== 'percent' || p.payoutValue == null || Number(p.payoutValue) <= 100)
+  && (p.revenueType !== 'percent' || p.revenueValue == null || Number(p.revenueValue) <= 100);
+export const createOfferProductSchema = offerProductFields
+  .refine((p) => p.sku || p.category, { message: 'A product needs a SKU or a category', path: ['sku'] })
+  .refine(percentOk, { message: 'A percentage can be at most 100', path: ['payoutValue'] });
+export const updateOfferProductSchema = offerProductFields.partial().refine(percentOk, { message: 'A percentage can be at most 100', path: ['payoutValue'] });
+
 export const createDealSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(1000).nullable().optional(),

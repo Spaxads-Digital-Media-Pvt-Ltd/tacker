@@ -58,7 +58,7 @@ export interface OfferRow {
   name: string;
   status: 'draft' | 'active' | 'paused' | 'archived';
   destination_url: string;
-  payout_model: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+  payout_model: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
   default_payout: string; // numeric arrives as string from pg — keep as string, never float
   default_revenue: string;
   currency: string;

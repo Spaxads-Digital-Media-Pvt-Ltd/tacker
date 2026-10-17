@@ -43,13 +43,22 @@ describe('who a setting applies to', () => {
 });
 
 describe('pricing models', () => {
-  it('CPA (or none) is a fixed amount; CPS is a % of the sale; other models are not applied', () => {
-    expect(priceFor('CPA', '9.0000', null)).toBe('9.0000');
-    expect(priceFor(null, '9.0000', null)).toBe('9.0000');
-    expect(priceFor('CPS', '10.0000', '200.0000')).toBe('20.0000');
-    expect(priceFor('CPS_PPP', '12.5000', '80.0000')).toBe('10.0000');
-    expect(priceFor('CPS', '10.0000', null)).toBeNull();
-    for (const m of ['CPA_CPS', 'CPC', 'CPM', 'PRV']) expect(priceFor(m, '5.0000', '100.0000')).toBeNull();
+  it('CPA (or none) is a fixed amount; CPS is a % of the sale; PRV a % of the revenue; _PPP per unit / products total', () => {
+    const sale = (saleAmount: string | null) => ({ saleAmount });
+    expect(priceFor('CPA', '9.0000', sale(null))).toBe('9.0000');
+    expect(priceFor(null, '9.0000', sale(null))).toBe('9.0000');
+    expect(priceFor('CPS', '10.0000', sale('200.0000'))).toBe('20.0000');
+    expect(priceFor('CPS_PPP', '12.5000', sale('80.0000'))).toBe('10.0000');
+    expect(priceFor('CPS', '10.0000', sale(null))).toBeNull();
+    // Price per product: CPA per unit sold; without product lines, per conversion.
+    expect(priceFor('CPA_PPP', '2.5000', { saleAmount: null, units: 3 })).toBe('7.5000');
+    expect(priceFor('CPA_PPP', '2.5000', sale(null))).toBe('2.5000');
+    // PRV: the payout is a share of the conversion's revenue — never a revenue model.
+    expect(priceFor('PRV', '40', { saleAmount: null, revenue: '25.0000' })).toBe('10.0000');
+    expect(priceFor('PRV', '40', { saleAmount: null, revenue: '25.0000' }, 'revenue')).toBeNull();
+    expect(priceFor('PRV', '40', sale(null))).toBeNull();
+    // Clicks / impressions are priced elsewhere (billing.ts); a mixed model needs two amounts.
+    for (const m of ['CPA_CPS', 'CPC', 'CPM']) expect(priceFor(m, '5.0000', sale('100.0000'))).toBeNull();
   });
 
   it('a goal-scoped setting prices only that goal; an unscoped one prices the base conversion', () => {

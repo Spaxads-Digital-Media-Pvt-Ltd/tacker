@@ -12,6 +12,7 @@ import {
 } from '../../lib/offer-settings/index.js';
 import type { CustomSettingConfig, CustomCategory, CapsMatrix, CustomTargeting } from '../../lib/offer-settings/custom-settings.js';
 import { capTimeZoneOf } from '../../lib/offer-settings/custom-settings.js';
+import type { ProductPrice } from '../../lib/offer-settings/products.js';
 
 export interface GeoRuleConfig {
   country: string;
@@ -92,6 +93,13 @@ export interface OfferConfig {
   targeting: OfferTargeting;
   /** Edit Offer › "Allow deep links": a partner may send the visitor to another page of the offer's own site (&url=…). */
   deepLinkEnabled?: boolean;
+  /** Edit Offer › Click Tracking Type: 'redirect_direct' also takes clicks the JavaScript tag on the advertiser's
+   * site registers (/sdk.js — direct linking). Undefined on a config cached before it existed = 'redirect'. */
+  linkingType?: string;
+  /** The advertiser's impression URL: /impression sends the browser there (macros filled) instead of a pixel. */
+  impressionUrl?: string | null;
+  /** Price Per Product rules (active offer_products) — loaded only while the offer prices per product. */
+  products?: ProductPrice[];
   attribution: AttributionSettings;
   revenue: RevenueSettings;
 }
@@ -225,6 +233,21 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     [networkId, offerId],
   );
 
+  // Price Per Product rules — only while the offer prices per product (Revenue › Price Per Product).
+  const revenue = readRevenue(r.metadata);
+  const products = revenue.pricePerProduct ? (await query<{
+    id: string; sku: string | null; category: string | null; payout_type: 'fixed' | 'percent'; payout_value: string | null;
+    revenue_type: 'fixed' | 'percent'; revenue_value: string | null;
+  }>(
+    `SELECT id, sku, category, payout_type, payout_value::text, revenue_type, revenue_value::text
+       FROM offer_products WHERE network_id = $1 AND offer_id = $2 AND status = 'active'
+      ORDER BY created_at, id LIMIT 5000`,
+    [networkId, offerId],
+  )).rows.map((p): ProductPrice => ({
+    id: p.id, sku: p.sku, category: p.category, payoutType: p.payout_type, payoutValue: p.payout_value,
+    revenueType: p.revenue_type, revenueValue: p.revenue_value,
+  })) : [];
+
   // Partner Tiers (F-17b): the members of every ACTIVE tier linked to this offer with apply_margin.
   // DECISION: a partner in several such tiers gets the lowest margin (the best rate it qualifies for).
   const tierRes = await query<{ publisher_id: string; margin: string }>(
@@ -265,8 +288,11 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     firePartnerPostback: r.metadata?.['fire_partner_postback'] !== false,
     targeting: readTargeting(r.metadata),
     deepLinkEnabled: r.metadata?.['deep_link_enabled'] === true,
+    linkingType: r.metadata?.['linking_type'] === 'redirect_direct' || r.metadata?.['linkingType'] === 'redirect_direct' ? 'redirect_direct' : 'redirect',
+    impressionUrl: typeof r.metadata?.['impression_url'] === 'string' ? (r.metadata['impression_url'] as string) : null,
+    products,
     attribution: readAttribution(r.metadata),
-    revenue: readRevenue(r.metadata),
+    revenue,
     customSettings: csRes.rows.map((c): CustomSettingConfig => {
       const partnerIds = [...new Set([...(c.partner_id ? [c.partner_id] : []), ...(c.partner_ids ?? [])])];
       return {

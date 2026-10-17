@@ -14,12 +14,14 @@
  * targeting (countries / devices / OS / browsers — the same click fields Traffic Controls use)
  * matches the click. A partner-specific setting beats an all-partners one; then oldest first.
  *
- * Pricing models: CPA / CPA_PPP (or none) = a fixed amount per conversion, like the offer default
- * payout; CPS / CPS_PPP = a percentage of the sale amount the S2S postback reports. The mixed
- * (CPA_CPS*) and non-conversion (CPC, CPM, PRV*) models need data this tracker doesn't have (a
- * second amount, impressions, …) — they are stored but not applied.
+ * Pricing models of a conversion: CPA (or none) = a fixed amount per conversion, like the offer default
+ * payout; CPS = a percentage of the sale amount the S2S postback reports; PRV (payout only) = a percentage of
+ * the conversion's revenue. The _PPP ("price per product") variants price the order's product lines: CPA_PPP
+ * = the amount per unit sold, CPS_PPP / PRV_PPP as above over the products' total. CPC and CPM price clicks /
+ * impressions instead (lib/offer-settings/billing.ts) — never a conversion. The mixed CPA_CPS* models need two
+ * amounts and a setting holds one: they are stored but not applied.
  */
-import { percentOfMoney } from '../money.js';
+import { percentOfMoney, scaleMoney } from '../money.js';
 import { addDays, isValidTimeZone, localDate, zonedDayStart } from '../reporting/time-zone.js';
 
 export type CustomCategory = 'revenue_payout' | 'caps' | 'throttle_rates' | 'landing_pages' | 'creatives';
@@ -80,17 +82,30 @@ export function applicableSettings(
   return [...hits.filter((s) => !s.allPartners), ...hits.filter((s) => s.allPartners)];
 }
 
-const FIXED_MODELS = new Set(['CPA', 'CPA_PPP']);
 const PERCENT_MODELS = new Set(['CPS', 'CPS_PPP']);
+const REVENUE_SHARE_MODELS = new Set(['PRV', 'PRV_PPP']);
+
+/** What a conversion's amount can be priced from. */
+export interface PriceContext {
+  /** The sale amount the S2S postback reports (the products' total for a priced order). */
+  saleAmount: string | null;
+  /** Units sold, for a postback with product lines (Price Per Product); null otherwise. */
+  units?: number | null;
+  /** The conversion's revenue — what a PRV payout is a share of. */
+  revenue?: string | null;
+}
 
 /**
- * A custom amount under its pricing model: fixed (CPA, or no model) → as is; percentage (CPS) → that
- * share of `saleAmount`; anything else, or a percentage with no sale amount → null (not applied).
+ * A custom amount under its pricing model: fixed (CPA, or no model) → as is; CPA_PPP → per unit sold (as is
+ * without product lines); percentage (CPS*) → that share of the sale amount; PRV* (payout only) → that share of
+ * the revenue; anything else, or nothing to take a share of → null (not applied).
  */
-export function priceFor(model: string | null, value: string | null, saleAmount: string | null): string | null {
+export function priceFor(model: string | null, value: string | null, ctx: PriceContext, side: 'payout' | 'revenue' = 'payout'): string | null {
   if (value == null) return null;
-  if (model == null || FIXED_MODELS.has(model)) return value;
-  if (PERCENT_MODELS.has(model)) return saleAmount == null ? null : percentOfMoney(saleAmount, value);
+  if (model == null || model === 'CPA') return value;
+  if (model === 'CPA_PPP') return ctx.units != null && ctx.units > 0 ? scaleMoney(value, ctx.units) : value;
+  if (PERCENT_MODELS.has(model)) return ctx.saleAmount == null ? null : percentOfMoney(ctx.saleAmount, value);
+  if (REVENUE_SHARE_MODELS.has(model) && side === 'payout') return ctx.revenue == null ? null : percentOfMoney(ctx.revenue, value);
   return null;
 }
 
@@ -103,7 +118,11 @@ export interface CustomPricing { payout: string | null; revenue: string | null; 
  */
 export function customPricing(
   settings: CustomSettingConfig[] | undefined,
-  args: { publisherId: string; attrs: ClickAttrs; clickAt: Date; eventGoalId: string | null; defaultGoalId: string | null; saleAmount: string | null },
+  args: {
+    publisherId: string; attrs: ClickAttrs; clickAt: Date; eventGoalId: string | null; defaultGoalId: string | null; saleAmount: string | null;
+    /** Units sold (product lines) and the conversion's revenue so far — for the _PPP and PRV models. */
+    units?: number | null; revenue?: string | null;
+  },
 ): CustomPricing | null {
   const applicable = applicableSettings(settings, 'revenue_payout', args.publisherId, args.attrs, args.clickAt)
     .filter((s) => (args.eventGoalId
@@ -114,8 +133,11 @@ export function customPricing(
   let firePartnerPostback = true;
   const ids: string[] = [];
   for (const s of applicable) {
-    const p: string | null = payout == null ? priceFor(s.payoutModel, s.payout, args.saleAmount) : null;
-    const r: string | null = revenue == null ? priceFor(s.revenueModel, s.revenue, args.saleAmount) : null;
+    const r: string | null = revenue == null ? priceFor(s.revenueModel, s.revenue, { saleAmount: args.saleAmount, units: args.units }, 'revenue') : null;
+    // A PRV payout is a share of the revenue — this setting's own, else the conversion's.
+    const p: string | null = payout == null
+      ? priceFor(s.payoutModel, s.payout, { saleAmount: args.saleAmount, units: args.units, revenue: r ?? revenue ?? args.revenue ?? null })
+      : null;
     if (p == null && r == null) continue;
     if (p != null) payout = p;
     if (r != null) revenue = r;

@@ -211,6 +211,10 @@ API keys for the Public REST API.
 | `smart_links` | Smart link definitions (weight / priority / kpi, catch-all, KPI settings, `kpi_computed_at` — migration 071) |
 | `smart_link_items` | Items within a smart link (offer_id, weight, position, country; KPI worker output `kpi_weight`, `kpi_score`, `kpi_clicks` — migration 071) |
 | `offer_geo_rules` | Per-offer geo targeting rules |
+| `impressions` | Ad impressions from `/impression` (migration 094) — like `clicks` (no FKs, written by the impression-persist worker, rejected ones flagged with the reason, `creative_id`); purged / pruned with clicks |
+| `impression_billing` | CPM counters: billable impressions per (offer, partner, day, country, device, currency, rates) and how many are `booked` — the impression-billing worker books the difference as a conversion (source `impression`) |
+| `email_owners` | Email Ownership: (offer, sha256 of the email) → the owning partner, `owned_since`, `last_conversion_at` |
+| `offer_products` | Price Per Product rules: SKU (else category) → payout / revenue, fixed per unit or % of the line |
 | `offer_publisher_access` | Per-offer publisher allow/deny |
 | `offer_templates` | Offer templates |
 | `offer_groups` | Offer groups with shared caps |
@@ -315,6 +319,7 @@ Indexes are defined within migration SQL files. Key indexes cover:
 - Tool: `node-pg-migrate` (SQL-based)
 - 84 migration files, timestamped `1700000000000_*.sql`
 - `1700000062000_partition-retention` is an intentional no-op: the original partitioned `clicks`/`conversions`/`postback_logs` without creating partitions and dropped the global unique keys (`click_id`, `conversion_id`, `(offer_id, transaction_id)`) that idempotency depends on. `1700000064000_unpartition-tracking-tables` converts any DB that ran the original back to regular tables (rows preserved). These three tables must stay non-partitioned; retention prunes them with bounded ctid deletes.
+- `1700000094000_impressions-billing-attribution`: `impressions`, `impression_billing`, `email_owners`, `offer_products`; `conversions.source` adds `click` (CPC paid clicks) / `impression` (CPM bookings), new `attribution` (click / coupon / email / view_through / impression), `country`, `device` (for conversions with no click row), `products`; `stats_conversions_15m.billed_rows` (approved billing rows — money, not conversions); `offers.payout_model` adds `CPM`.
 - `1700000079000_multi-conversion` swaps the transaction-id key to `(offer_id, event_name, transaction_id)` and adds `offer_goals.duplicate_mode`; its down migration fails if two conversions share an offer + transaction id under different events (resolve those first).
 - Run: `npm run migrate` (up), `npm run migrate:down`
 - Create: `npm run migrate:create -j sql`

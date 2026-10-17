@@ -16,7 +16,7 @@ interface ConvRow {
   conversion_id: string; status: string; click_id: string; offer_id: string;
   publisher_id: string | null; advertiser_id: string | null;
   payout: string | null; revenue: string | null; currency: string | null;
-  event_name: string | null; transaction_id: string | null;
+  event_name: string | null; transaction_id: string | null; source: string;
 }
 
 /** The `data` of a conversion event sent to Automation webhooks (F-17a). */
@@ -26,7 +26,7 @@ const hookData = (r: ConvRow, reason: string) => ({
 });
 
 const LOCK_SQL = `SELECT conversion_id, status, click_id, offer_id, publisher_id, advertiser_id, payout, revenue,
-                         currency, event_name, transaction_id
+                         currency, event_name, transaction_id, source
                     FROM conversions WHERE network_id = $1 AND conversion_id = $2 FOR UPDATE`;
 
 export async function approveConversion(networkId: string, conversionId: string): Promise<ConvRow> {
@@ -69,7 +69,8 @@ export async function approveConversion(networkId: string, conversionId: string)
   }
 
   const offer = await getOfferConfig(networkId, row.offer_id);
-  if (offer?.firePartnerPostback ?? true) {
+  // A paid click (CPC billing row) fires the partner's CPC-level postback; a CPM booking fires none.
+  if ((offer?.firePartnerPostback ?? true) && row.source !== 'impression') {
     const subs = (await query<{ sub1: string | null; sub2: string | null; sub3: string | null; sub4: string | null; sub5: string | null }>(
       `SELECT sub1, sub2, sub3, sub4, sub5 FROM clicks WHERE network_id = $1 AND click_id = $2 LIMIT 1`,
       [networkId, row.click_id],
@@ -78,6 +79,7 @@ export async function approveConversion(networkId: string, conversionId: string)
       networkId, conversionId, offerId: row.offer_id, publisherId: row.publisher_id, clickId: row.click_id,
       event: row.event_name, payout: row.payout, currency: row.currency, txnId: row.transaction_id,
       subs: [subs?.sub1 ?? null, subs?.sub2 ?? null, subs?.sub3 ?? null, subs?.sub4 ?? null, subs?.sub5 ?? null],
+      ...(row.source === 'click' ? { level: 'cpc' as const } : {}),
     });
   }
   await emitAutomationEvent(networkId, 'conversion.approved', hookData(row, 'manually_approved'));

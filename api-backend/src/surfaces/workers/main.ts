@@ -16,6 +16,9 @@ import { installReportingProvider } from '../../lib/reporting/clickhouse.js';
 import { closeClickHouse, isClickHouseEnabled } from '../../lib/clickhouse/client.js';
 import { QUEUE, getQueue, type QueueName } from './queues.js';
 import { startClickPersistWorker } from './processors/click-persist.js';
+import { startImpressionPersistWorker } from './processors/impression-persist.js';
+import { startImpressionBillingWorker, scheduleImpressionBilling } from './processors/impression-billing.js';
+import { startTracker24Worker } from './processors/tracker24.js';
 import { startOutboundPostbackWorker } from './processors/outbound-postback.js';
 import { startFraudScanWorker, scheduleFraudScan } from './processors/fraud-scan.js';
 import { startRetentionWorker, scheduleRetention } from './processors/retention.js';
@@ -47,6 +50,9 @@ installReportingProvider();
 // Phase 2: click persistence. Phase 3: outbound postbacks. Phase 6: fraud scan. Phase 8: retention.
 const workers = [
  startClickPersistWorker(),
+ startImpressionPersistWorker(),
+ startImpressionBillingWorker(),
+ startTracker24Worker(),
  startOutboundPostbackWorker(),
  startFraudScanWorker(),
  startRetentionWorker(),
@@ -67,6 +73,7 @@ const workers = [
  startPlatformTrustWorker(),
  startEmailWorker(),
 ];
+void scheduleImpressionBilling().catch((err) => log.error({ err }, 'failed to schedule impression billing'));
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
 void scheduleRetention().catch((err) => log.error({ err }, 'failed to schedule retention'));
 void scheduleOfferFeedScan().catch((err) => log.error({ err }, 'failed to schedule offer feed scan'));

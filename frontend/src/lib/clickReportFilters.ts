@@ -220,6 +220,7 @@ const CLICK_REJECTION_LABELS: Record<string, string> = {
   traffic_control_blocked: 'Blocked by a traffic control',
   traffic_blocked: 'Blocked by traffic blocking',
   fraud_blocked: 'Blocked as fraud',
+  '24metrics_blocked': 'Blocked — 24metrics rejected this address',
   cap_exceeded: 'Cap has been exceeded',
   partner_cap_exceeded: 'Partner cap has been exceeded',
 };

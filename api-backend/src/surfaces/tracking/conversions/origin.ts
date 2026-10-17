@@ -156,6 +156,18 @@ export function onOfferSite(url: string, offer: Pick<OfferConfig, 'destinationUr
 }
 
 /**
+ * The origin (scheme://host[:port]) of a page on the offer's own site — what a direct-link click from the
+ * JavaScript tag (/sdk.js) must come from — else null. Takes the request's Origin, else its Referer.
+ */
+export function sdkOrigin(originOrReferer: string | null, offer: Pick<OfferConfig, 'destinationUrl' | 'geoRules'>): string | null {
+  if (!originOrReferer) return null;
+  let u: URL;
+  try { u = new URL(originOrReferer); } catch { return null; }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  return onOfferSite(u.origin, offer) ? u.origin : null;
+}
+
+/**
  * The page a partner deep-links to (&url=…), carrying every query parameter of the offer's own URL that the
  * deep link doesn't set itself — so the click id (and the other macros) still reach the advertiser the way the
  * offer URL passes them. Raw string work: the template's {macros} must survive to be filled in afterwards.

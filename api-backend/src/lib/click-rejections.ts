@@ -13,7 +13,7 @@ export const CLICK_REJECTION_REASONS = [
   'offer_not_active',
   'unknown_partner', 'partner_pending', 'partner_inactive', 'partner_blocked', 'partner_not_approved',
   'platform_blocked', 'ip_blacklisted', 'geo_not_allowed', 'device_not_allowed', 'targeting_not_matched',
-  'traffic_control_blocked', 'traffic_blocked', 'fraud_blocked',
+  'traffic_control_blocked', 'traffic_blocked', 'fraud_blocked', '24metrics_blocked',
   'cap_exceeded', 'partner_cap_exceeded',
 ] as const;
 export type ClickRejectionReason = (typeof CLICK_REJECTION_REASONS)[number];

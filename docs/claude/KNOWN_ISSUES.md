@@ -37,10 +37,14 @@
 ### GeoIP data quality depends on the provider
 - **Issue**: DB-IP Lite (the no-account fallback) has region names but no region codes, postal codes or DMA codes, and is updated monthly. Region rules still match by name; zip / DMA targeting needs MaxMind GeoLite2 (or paid GeoIP2) — set `MAXMIND_LICENSE_KEY` and re-run `npm run geoip:download`.
 
-### Offer linking type "redirect_direct" is stored but not enforced
-- **Issue**: Edit Offer › Linking type `redirect_direct` (Everflow-style direct linking) needs a JavaScript tag on the advertiser's site that registers the click; it isn't built, so offers behave as `redirect`. Deep links (`deepLinkEnabled`) ARE enforced.
+### CPC / CPM billing rows in a few secondary views
+- **Issue**: Paid clicks and CPM bookings are conversions (source `click` / `impression`) so their money reaches the ledger, invoices, balances and every report. The aggregate reports, conversion caps and the click-to-conversion report leave them out of conversion COUNTS; some secondary views (AI tools, offer groups, tiered-commission volume, smart-link KPI conversion counts) still count them as conversions.
 
-## Potential Issues (Need Investigation)
+### Impressions are not in ClickHouse
+- **Issue**: `impressions` is Postgres-only (no rollup, no ClickHouse table): impression metrics read the raw table (indexed by network + time), and the ClickHouse provider returns 0 for them.
+
+### Mixed custom pricing models (CPA_CPS*) are not applied
+- **Issue**: Offer Custom Settings models CPA_CPS / CPA_CPS_PPP need two amounts (fixed + %) and a setting holds one value — they are stored but not applied. CPA, CPS, PRV, the _PPP variants, CPC and CPM are applied.
 
 ### 6. Smart Link PG Read on Hot Path
 **Location**: `api-backend/src/surfaces/tracking/app.ts:241-251`
@@ -95,7 +99,7 @@ Some of the 50+ dashboard route modules have minimal implementations. As phases 
 `frontend/src/pages/dashboardMock.ts` holds dev-only sample data for the admin dashboard (shown in dev when a dashboard request errors, or with `VITE_DEMO_DATA=true`). DashboardHome passes it only under `import.meta.env.DEV`, so production builds don't include it (F-25·F-28).
 
 ### 17. Stored-but-not-enforced settings (labelled in the UI)
-Saved and shown, but not acted on by the tracker yet — each page says so: Link Templates, Coupon Codes (no coupon-based attribution), Reporting Adjustments (not applied to ledger/reports), invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), group-level shared caps, CPC-level postbacks.
+Saved and shown, but not acted on by the tracker yet — each page says so: Link Templates, Reporting Adjustments (not applied to ledger/reports), invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), group-level shared caps. (Coupon codes credit clickless postbacks, and CPC-level postbacks fire for paid clicks — both enforced now; some pages' wording may still say otherwise until the frontend is redone.)
 
 ### 16. Schema Uses Serial Ref Numbers
 The `ref` column on entities (offers, publishers, advertisers, etc.) is a `serial` (auto-increment integer). This is visible to users as display IDs. Consider if this should remain sequential.

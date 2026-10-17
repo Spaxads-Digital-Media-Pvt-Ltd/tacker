@@ -31,6 +31,7 @@
  "seed:rich-modules": "tsx scripts/seed-rich-modules.ts",
  "seed:demo-data": "tsx scripts/seed-demo-data.ts",
  "seed:test-catalog": "tsx scripts/seed-test-catalog.ts",
+ "dev:fake-24metrics": "node scripts/fake-24metrics.mjs",
  "geoip:download": "bash scripts/download-geoip.sh",
  "bootstrap:admin": "tsx scripts/bootstrap-platform-admin.ts",
  "provision:demo-admin": "tsx scripts/provision-demo-admin.ts",
