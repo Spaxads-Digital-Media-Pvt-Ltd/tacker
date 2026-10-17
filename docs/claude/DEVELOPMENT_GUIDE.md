@@ -56,12 +56,13 @@ npm run dev
 | `npm run seed` | Basic seed data |
 | `npm run seed:rich` | Rich seed data (partners, offers, etc.) |
 | `npm run seed:rich-modules` | Seed specific modules |
+| `npm run seed:test-catalog [-- <slug>]` | A test catalog on YOUR network (default `test`), through the dashboard API as its admin (needs `SUPABASE_JWT_SECRET`): 5 advertisers, 5 partners with different postbacks (one pending), 15 offers — CPA / CPL / CPI / RevShare / CPS, GEO allow / block lists with per-country payouts, device-only, 2-event goals, private / ask, caps, duplicate rules, manual approval, paused — landing on public sites with `click_id` in the URL, plus a macro-echo offer (httpbin). Registers localhost as the network's tracking domain; prints the click links. Re-runnable (keeps what exists by name) |
 | `npm run seed:demo-data` | Demo data for development |
 | `npm run bootstrap:admin` | Create platform admin |
 | `npm run provision:demo-admin` | Provision demo network admin |
 | `npm run provision:demo-portals` | Provision demo publisher/advertiser portals |
 | `npm run smoke` | Run all smoke tests |
-| `npm run tunnel` | Start ngrok tunnel |
+| `npm run tunnel [-- <slug>]` | Public ngrok URL for the tracking surface (:4002), registered as a verified tracking domain for the network (default `demo`) — for external trackers' postbacks; prints the click and postback URL formats |
 
 ### Frontend (`frontend/`)
 

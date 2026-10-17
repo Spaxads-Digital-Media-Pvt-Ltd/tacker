@@ -1,12 +1,12 @@
 /**
  * Expose the local tracking surface (port 4002) over a public ngrok URL and register that URL as a
- * verified tracking domain for the demo network — so external advertisers can hit /postback and
- * browsers can hit /click. Drives the system `ngrok` CLI (brew install ngrok) + its local 4040 API,
- * which is far more reliable than the npm wrapper. Keeps running until Ctrl-C.
+ * verified tracking domain for a network (the seeded demo one by default) — so external trackers and
+ * advertisers can hit /postback and browsers can hit /click. Drives the system `ngrok` CLI (brew install
+ * ngrok) + its local 4040 API, which is far more reliable than the npm wrapper. Keeps running until Ctrl-C.
  *
  * Auth token: NGROK_AUTHTOKEN from env (already saved to ngrok's config on first run). If ngrok is
  * not installed: `brew install ngrok`.
- * Run:  npm run tunnel
+ * Run:  npm run tunnel [-- <network-slug>]
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { query, closeDb } from '../src/lib/db/pool.js';
@@ -41,8 +41,9 @@ async function main(): Promise<void> {
   if (!url) { proc.kill(); throw new Error('ngrok did not report a tunnel URL within 30s'); }
 
   const host = new URL(url).host; // e.g. abc123.ngrok-free.dev (no port)
-  const net = (await query<{ id: string }>(`SELECT id FROM networks WHERE slug = 'demo'`)).rows[0];
-  if (!net) throw new Error('demo network not found — run npm run seed first');
+  const slug = process.argv[2] ?? 'demo';
+  const net = (await query<{ id: string }>(`SELECT id FROM networks WHERE slug = $1`, [slug])).rows[0];
+  if (!net) { proc.kill(); throw new Error(`no network "${slug}" — run: npm run tunnel -- <your-network-slug>`); }
   await query(
     `INSERT INTO tracking_domains (network_id, host, mode, status, verification_state, ssl_status, is_primary)
      VALUES ($1, $2, 'custom', 'active', 'verified', 'issued', false)
@@ -54,13 +55,15 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(`
 ✅ Public tracking URL:  ${url}
-   (registered as an active tracking domain for the demo network)
+   (registered as an active tracking domain for the "${slug}" network)
 
-Test a POSTBACK (what an external advertiser fires on conversion):
-   curl -s "${url}/postback?click_id=<CLICK_ID>&txn_id=test-123&event=purchase&status=approved"
+Tracking link (what a partner / an external tracker sends traffic to):
+   ${url}/click?offer_id=<OFFER_REF>&pub_id=<PARTNER_REF>&sub1=<THEIR_CLICK_ID>
 
-Get a <CLICK_ID> first with a click (add the header to skip ngrok's browser warning):
-   curl -sI -H 'ngrok-skip-browser-warning: 1' "${url}/click?offer_id=<OFFER_UUID>&pub_id=<PUB_UUID>&geo=US"
+Postback (what an external tracker / advertiser fires on conversion) — the code is in Settings › Security:
+   ${url}/postback?click_id=<CLICK_ID>&txn_id=<ORDER_ID>&payout=<OPTIONAL>&status=approved&secure_code=<CODE>
+
+Browsers see ngrok's warning page once; curl / server-to-server calls can add -H 'ngrok-skip-browser-warning: 1'.
 
 Keep this running. Ctrl-C to stop.
 `);
