@@ -21,6 +21,7 @@ export const QUEUE = {
  platformBilling: 'platform-billing',
  platformHealth: 'platform-health',
  platformSupport: 'platform-support',
+ platformTrust: 'platform-trust',
  email: 'email',
 } as const;
 

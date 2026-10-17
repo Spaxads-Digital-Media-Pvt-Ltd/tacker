@@ -12,7 +12,7 @@
 export const CLICK_REJECTION_REASONS = [
   'offer_not_active',
   'unknown_partner', 'partner_pending', 'partner_inactive', 'partner_blocked', 'partner_not_approved',
-  'ip_blacklisted', 'geo_not_allowed', 'device_not_allowed', 'targeting_not_matched',
+  'platform_blocked', 'ip_blacklisted', 'geo_not_allowed', 'device_not_allowed', 'targeting_not_matched',
   'traffic_control_blocked', 'traffic_blocked', 'fraud_blocked',
   'cap_exceeded', 'partner_cap_exceeded',
 ] as const;

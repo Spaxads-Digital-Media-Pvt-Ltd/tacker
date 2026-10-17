@@ -33,6 +33,7 @@ import { startUsageMeterWorker, scheduleUsageMeter } from './processors/usage-me
 import { startPlatformBillingWorker, schedulePlatformBilling } from './processors/platform-billing.js';
 import { startPlatformHealthWorker, schedulePlatformHealth } from './processors/platform-health.js';
 import { startPlatformSupportWorker, schedulePlatformSupport } from './processors/platform-support.js';
+import { startPlatformTrustWorker, schedulePlatformTrust } from './processors/platform-trust.js';
 import { startEmailWorker } from './processors/email.js';
 
 const log = surfaceLogger('workers');
@@ -63,6 +64,7 @@ const workers = [
  startPlatformBillingWorker(),
  startPlatformHealthWorker(),
  startPlatformSupportWorker(),
+ startPlatformTrustWorker(),
  startEmailWorker(),
 ];
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
@@ -79,6 +81,7 @@ void scheduleUsageMeter().catch((err) => log.error({ err }, 'failed to schedule 
 void schedulePlatformBilling().catch((err) => log.error({ err }, 'failed to schedule platform billing'));
 void schedulePlatformHealth().catch((err) => log.error({ err }, 'failed to schedule customer health'));
 void schedulePlatformSupport().catch((err) => log.error({ err }, 'failed to schedule support housekeeping'));
+void schedulePlatformTrust().catch((err) => log.error({ err }, 'failed to schedule the trust scan'));
 
 // Report only EXHAUSTED-retry failures to Sentry so transient retries don't spam it.
 for (const w of workers) {

@@ -106,6 +106,9 @@ export const Icon = {
   checklist: (p: P) => (
     <svg {...base(p)}><path d="m4 6 1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17" /><path d="M11 6h9M11 12h9M11 18h9" /></svg>
   ),
+  shield: (p: P) => (
+    <svg {...base(p)}><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6Z" /><path d="m9 12 2 2 4-4" /></svg>
+  ),
   receipt: (p: P) => (
     <svg {...base(p)}><path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21Z" /><path d="M9 8h6M9 12h6M9 16h3" /></svg>
   ),

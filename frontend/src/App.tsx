@@ -84,6 +84,9 @@ const PlatformCoupons = lazy(() => import('./pages/super-admin/money/Coupons'));
 const FeatureFlags = lazy(() => import('./pages/super-admin/platform/FeatureFlags'));
 const PlatformAnnouncements = lazy(() => import('./pages/super-admin/platform/Announcements'));
 const SystemHealth = lazy(() => import('./pages/super-admin/platform/SystemHealth'));
+const TrustOverview = lazy(() => import('./pages/super-admin/trust/TrustOverview'));
+const TrustBlocklist = lazy(() => import('./pages/super-admin/trust/Blocklist'));
+const PrivacyRequests = lazy(() => import('./pages/super-admin/trust/PrivacyRequests'));
 const RequestDemo = lazy(() => import('./pages/RequestDemo'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
@@ -208,6 +211,9 @@ export default function App() {
           <Route path="/admin/flags" element={<PlatformGate section="platform"><FeatureFlags /></PlatformGate>} />
           <Route path="/admin/announcements" element={<PlatformGate section="comms"><PlatformAnnouncements /></PlatformGate>} />
           <Route path="/admin/system" element={<PlatformGate section="platform"><SystemHealth /></PlatformGate>} />
+          <Route path="/admin/trust" element={<PlatformGate section="trust"><TrustOverview /></PlatformGate>} />
+          <Route path="/admin/trust/blocklist" element={<PlatformGate section="trust"><TrustBlocklist /></PlatformGate>} />
+          <Route path="/admin/trust/privacy" element={<PlatformGate section="trust"><PrivacyRequests /></PlatformGate>} />
         </Route>
 
         {/* Admin / Network */}

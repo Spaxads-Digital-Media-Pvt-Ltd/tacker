@@ -63,6 +63,13 @@ export const NAV: Record<Role, NavEntry[]> = {
       ],
     },
     {
+      group: 'Platform', label: 'Trust & safety', icon: 'shield', flyout: [
+        { label: 'Overview', description: 'Fraud across every network and addresses flagged in several', to: '/admin/trust', icon: Lucide.ShieldAlert, perm: 'trust' },
+        { label: 'Blocklist', description: 'IPs, user agents and referrers blocked for every network', to: '/admin/trust/blocklist', icon: Lucide.Ban, perm: 'trust' },
+        { label: 'Privacy requests', description: 'GDPR and CCPA — erase or export a person’s data', to: '/admin/trust/privacy', icon: Lucide.Fingerprint, perm: 'trust' },
+      ],
+    },
+    {
       group: 'Platform', label: 'Platform', icon: 'settings', flyout: [
         { label: 'Announcements', description: 'Banners and maintenance windows in tenant dashboards', to: '/admin/announcements', icon: Lucide.Megaphone, perm: 'comms' },
         { label: 'Feature flags', description: 'Turn features on or off per network, plan or rollout', to: '/admin/flags', icon: Lucide.Flag, perm: 'platform' },

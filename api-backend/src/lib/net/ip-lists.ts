@@ -63,6 +63,12 @@ function checkIp(list: BlockList, ip: string): boolean {
   return fam !== null && list.check(addr, fam);
 }
 
+/** A matcher for these entries (IPs, CIDRs, from–to ranges; IPv4-mapped IPv6 checked as IPv4). */
+export function compileIpMatcher(entries: Entry[]): IpMatcher {
+  const list = compile(entries);
+  return { check: (ip) => checkIp(list, ip) };
+}
+
 const memo = new Map<string, { raw: string; matcher: IpMatcher }>();
 
 async function load(key: string, sql: string, networkId: string): Promise<IpMatcher | null> {
@@ -79,8 +85,7 @@ async function load(key: string, sql: string, networkId: string): Promise<IpMatc
     if (raw === EMPTY) return null;
     const hit = memo.get(key);
     if (hit && hit.raw === raw) return hit.matcher;
-    const list = compile(JSON.parse(raw) as Entry[]);
-    const matcher: IpMatcher = { check: (ip) => checkIp(list, ip) };
+    const matcher = compileIpMatcher(JSON.parse(raw) as Entry[]);
     memo.set(key, { raw, matcher });
     return matcher;
   } catch (err) {

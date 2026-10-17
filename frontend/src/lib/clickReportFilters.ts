@@ -212,6 +212,7 @@ const CLICK_REJECTION_LABELS: Record<string, string> = {
   partner_inactive: 'Partner inactive',
   partner_blocked: 'Partner blocked on the offer',
   partner_not_approved: 'Partner not approved for the offer',
+  platform_blocked: 'Blocked platform-wide',
   ip_blacklisted: 'IP blacklisted',
   geo_not_allowed: 'Geo not allowed',
   device_not_allowed: 'Device not allowed',

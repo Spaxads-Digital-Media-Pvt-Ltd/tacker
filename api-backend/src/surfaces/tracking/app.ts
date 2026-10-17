@@ -17,6 +17,7 @@ import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
 import { getPartnerStatus } from './partner-status.js';
 import { getNetworkIpBlacklist } from '../../lib/net/ip-lists.js';
+import { getPlatformBlocklist, recordBlocklistHit } from '../../lib/platform/blocklist.js';
 import { getFraudConfigCached } from '../../lib/fraud/rules.js';
 import { tierPayout } from '../../lib/partner-tiers.js';
 import { parseUA } from '../../lib/ua.js';
@@ -217,11 +218,12 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
 
  // 2. Offer config + partner status from Redis (load-through, in parallel). No sync Postgres read
  // on the hot path — Postgres is only the cold-cache fallback.
- const [offer, partnerStatus, ipBlacklist, fraudCfg] = await Promise.all([
+ const [offer, partnerStatus, ipBlacklist, fraudCfg, platformBlocklist] = await Promise.all([
  getOfferConfig(tenant.networkId, offerId),
  requestedPublisherId ? getPartnerStatus(tenant.networkId, requestedPublisherId) : null,
  getNetworkIpBlacklist(tenant.networkId),
  getFraudConfigCached(tenant.networkId),
+ getPlatformBlocklist(),
  ]);
  if (!offer) return divert(reply, null);
 
@@ -282,7 +284,12 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  return reject('partner_not_approved');
  }
 
- // 3. Network IP blacklist (Control Center › Security, F-16): a listed address is rejected, the same
+ // 3. The platform blocklist (Super Admin › Trust & safety): an address, user agent or referrer domain the
+ // platform blocked for every network — ahead of the network's own lists. The hit is counted, not awaited.
+ const platformHit = platformBlocklist?.match({ ip, userAgent, referrer: firstStr(req.headers['referer']) ?? null });
+ if (platformHit) { recordBlocklistHit(platformHit.id); return reject('platform_blocked'); }
+
+ // 3a. Network IP blacklist (Control Center › Security, F-16): a listed address is rejected, the same
  // outcome as a blocking traffic control. req.ip is the real client (trusted-proxy aware, above).
  if (ip && ipBlacklist?.check(ip)) return reject('ip_blacklisted');
 

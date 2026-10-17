@@ -36,7 +36,7 @@ const FKLESS = ['clicks', 'conversions', 'postback_logs', 'ledger_entries'] as c
  * The platform team's own records about a network (sales leads, tasks, account notes…) reference it but
  * aren't its data: never in its export. (A purge still cascades / nulls them through their foreign keys.)
  */
-export const PLATFORM_ONLY_TABLES: readonly string[] = ['sales_leads', 'platform_tasks', 'network_accounts', 'network_health_history', 'network_notes', 'support_tickets', 'subscription_discounts'];
+export const PLATFORM_ONLY_TABLES: readonly string[] = ['sales_leads', 'platform_tasks', 'network_accounts', 'network_health_history', 'network_notes', 'support_tickets', 'subscription_discounts', 'privacy_requests'];
 /** Credentials never leave in an export. */
 const REDACT: Record<string, string[]> = {
   networks: ['postback_security_code'], api_keys: ['key_hash'], offers: ['security_code'],
