@@ -19,6 +19,8 @@ export interface TargetingContext {
   language: string | null;
   country: string | null;
   region: string | null;
+  /** The region's name when the database gives one (DB-IP gives only names; MaxMind both). */
+  regionName?: string | null;
   city: string | null;
   dma: string | null;
   mobileCarrier: string | null;
@@ -65,9 +67,10 @@ function matches(key: TargetingKey, rule: string, ctx: TargetingContext): boolea
       return ctx.language === r || (!r.includes('-') && ctx.language.split('-')[0] === r);
     }
     case 'region': {
-      if (!ctx.region) return false;
+      if (!ctx.region && !ctx.regionName) return false;
       const r = ci(rule);
-      return ci(ctx.region) === r || (ctx.country != null && `${ci(ctx.country)}-${ci(ctx.region)}` === r);
+      return [ctx.region, ctx.regionName].some((v) => v != null
+        && (ci(v) === r || (ctx.country != null && `${ci(ctx.country)}-${ci(v)}` === r)));
     }
     case 'isp': return ctx.isp != null && ci(ctx.isp).includes(ci(rule));
     default: {

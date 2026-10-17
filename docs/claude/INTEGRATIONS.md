@@ -11,14 +11,13 @@
 - **Data flow**: Browser → Backend → Supabase Auth → Backend → Browser
 - **Key point**: Browser NEVER talks to Supabase directly
 
-## MaxMind GeoIP2
-- **Purpose**: IP geolocation (country, region, city, ISP, datacenter detection)
-- **Where used**: Click path (`tracking/surfaces/`), fraud detection
-- **Files**:
- - `api-backend/src/lib/geo/geoip.ts` — GeoIP lookup + availability check
-- **Authentication**: License key (`MAXMIND_LICENSE_KEY`) for DB updates
-- **Data flow**: Redis-cached in-process at boot; fail-open if absent
-- **Dev/test**: `geo=XX` query param overrides country
+## GeoIP (MaxMind GeoLite2 / DB-IP Lite / Cloudflare)
+- **Purpose**: the visitor's country, region, city, postal / DMA, ISP / ASN, mobile carrier — GEO rules (allow / block countries and regions, per-country payouts and landing pages), geo targeting, fraud (datacenter)
+- **Without a city database, country / region rules and geo targeting are NOT enforced** (fail-open: every country passes). `/tracking/health` shows `geoip { city, asn, isp, enforced }`.
+- **Get one**: `npm run geoip:download` (`scripts/download-geoip.sh`): MaxMind GeoLite2 City + ASN with `MAXMIND_LICENSE_KEY` (free account; twice-weekly updates; codes for regions, postal codes, DMA), else DB-IP Lite City + ASN (no account; monthly; CC BY 4.0 — credit "IP Geolocation by DB-IP"; region NAMES only, no postal / DMA). Files in `data/geoip/` (git-ignored); the tracking surface reloads a new / changed file within 10 minutes (`refreshGeoIp`), no restart. Paid GeoIP2-ISP (`data/geoip/GeoIP2-ISP.mmdb`) adds the mobile carrier.
+- **Files**: `api-backend/src/lib/geo/geoip.ts` (load / reload / lookup; region code + name), `surfaces/tracking/visitor-geo.ts` (the order: dev override `geo=XX` / `geo=XX-RR` → database → Cloudflare `CF-IPCountry` from Cloudflare's edge only), `surfaces/tracking/geo-rules.ts` (most specific rule wins: country + region › country › `*`; a region matches by code or name)
+- **Client IP**: X-Forwarded-For only from trusted proxies (loopback, Cloudflare ranges, `TRUSTED_PROXIES`) — locally `curl -H 'X-Forwarded-For: <ip>'` simulates a visitor; through ngrok the real visitor IP arrives
+- **Tests**: MaxMind's official test databases in `test/fixtures/geoip/` (fixed IP → place answers) power `test/integration/offer-e2e-*.test.ts`
 
 ## Sentry
 - **Purpose**: Error tracking and monitoring

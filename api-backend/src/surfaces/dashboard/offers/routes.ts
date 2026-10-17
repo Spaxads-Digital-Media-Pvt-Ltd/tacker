@@ -33,7 +33,8 @@ import { requireRole } from '../auth.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { offerStatusChanged, offerAccessChanged } from '../../../lib/email/notifications.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
-import { mergeOfferMetadata } from '../../../lib/offer-settings/index.js';
+import { mergeOfferMetadata, type OfferTargeting } from '../../../lib/offer-settings/index.js';
+import { offerConfigWarnings } from '../../../lib/offer-settings/warnings.js';
 import {
  createOfferSchema,
  updateOfferSchema,
@@ -387,7 +388,20 @@ export function offersAdminRoutes(): Router {
  asyncHandler(async (req, res) => {
  const row = await dbForRequest(req).selectOne<OfferRow>(OFFERS, { id: req.params.id });
  if (!row) throw notFound('Offer not found');
- sendOk(res, offerDtoFor(req)(row));
+ // Settings that contradict each other so the offer can't get traffic (lib/offer-settings/warnings.ts).
+ const [geo, approved] = await Promise.all([
+ query<{ country: string; region: string | null; action: string }>(
+ 'SELECT country, region, action FROM offer_geo_rules WHERE network_id = $1 AND offer_id = $2', [row.network_id, row.id]),
+ query<{ n: number }>(
+ `SELECT COUNT(*)::int AS n FROM offer_publisher_access WHERE network_id = $1 AND offer_id = $2 AND access = 'allow' AND approval_status = 'approved'`,
+ [row.network_id, row.id]),
+ ]);
+ const configWarnings = offerConfigWarnings({
+ status: row.status, visibility: row.visibility ?? null, approvedPartners: approved.rows[0]?.n ?? 0,
+ allowedTrafficTypes: row.allowed_traffic_types ?? null,
+ targeting: (row.metadata as { targeting?: OfferTargeting } | null)?.targeting ?? null, geoRules: geo.rows,
+ });
+ sendOk(res, { ...offerDtoFor(req)(row), configWarnings });
  }),
  );
 

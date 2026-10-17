@@ -12,7 +12,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { env } from '../../config/env.js';
 import { buildHealthReport, buildLivenessReport, buildReadinessReport, errorEnvelope } from '../../lib/http/index.js';
 import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
-import { lookupGeo, geoAvailable, carrierAvailable } from '../../lib/geo/geoip.js';
+import { geoAvailable, carrierAvailable, geoStatus } from '../../lib/geo/geoip.js';
 import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
 import { getPartnerStatus } from './partner-status.js';
@@ -27,7 +27,10 @@ import { SOURCE_PARAMS, firstNonBlank } from './click-params.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
-import { evaluateGeoRules, resolveForcedGeo } from './geo-rules.js';
+import { evaluateGeoRules } from './geo-rules.js';
+import { visitorGeo } from './visitor-geo.js';
+import { COUPON_PARAMS, couponClick } from './conversions/coupon.js';
+import { deepLinkDestination, onOfferSite } from './conversions/origin.js';
 import {
  checkTrackingRateLimit, peekTrackingRateLimit, chargeTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT,
 } from '../../lib/tracking-rate-limit.js';
@@ -142,7 +145,8 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
 
  app.get('/health', async (_req, reply) => {
  const report = await buildHealthReport('tracking');
- return reply.code(report.status === 'unready' ? 503 : 200).send(report);
+ // Which GeoIP databases are loaded — without a city database, country / region rules are not enforced.
+ return reply.code(report.status === 'unready' ? 503 : 200).send({ ...report, geoip: { ...geoStatus(), enforced: geoAvailable() } });
  });
 
  // Health/liveness/readiness probes (from origin/main — combined with security branch).
@@ -237,12 +241,16 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const visitorUa = serverSideClick ? ((firstStr(q['user_agent']) ?? firstStr(q['ua']))?.trim().slice(0, 512) || null) : null;
  const ip = visitorIp ?? (req.ip || null);
  const userAgent = visitorUa ?? (req.headers['user-agent'] as string | undefined) ?? null;
- const geo = ip ? lookupGeo(ip) : null;
  const ua = parseUA(userAgent ?? undefined);
- // A `geo=XX` query param forces the country (dev/testing when no MaxMind db, or to simulate a
- // country) — geo is then treated as known so allow-list rules actually apply.
- const forcedGeo = resolveForcedGeo(env.NODE_ENV, firstStr(q['geo']), firstStr(q['test_geo']));
- const country = forcedGeo ?? geo?.country ?? null;
+ // Where the visitor is (visitor-geo.ts): the dev `geo=XX` / `geo=XX-RR` override, the GeoIP database, or
+ // Cloudflare's CF-IPCountry — `known` decides whether country rules can be judged (else they fail open).
+ const where = visitorGeo({
+ ip, socketAddress: (req.raw.socket?.remoteAddress ?? null), cfCountry: req.headers['cf-ipcountry'],
+ geoParam: firstStr(q['geo']), testGeoParam: firstStr(q['test_geo']),
+ });
+ const geo = where.geo;
+ const country = where.country;
+ const region = where.region;
 
  // A click that isn't sent to the offer is still recorded — as an INVALID click whose first fraud flag
  // is the reason (Everflow standard; lib/click-rejections.ts) — so reports show the rejected traffic
@@ -254,7 +262,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  clickId: randomUUID().replace(/-/g, ''), networkId: tenant.networkId, offerId: offer.id,
  publisherId: requestedPublisherId && partnerStatus !== null ? requestedPublisherId : null,
  ts: new Date().toISOString(), ip,
- country, region: geo?.region ?? null, city: geo?.city ?? null, isp: geo?.isp ?? null,
+ country, region, city: geo?.city ?? null, isp: geo?.isp ?? null,
  device: ua.device, os: ua.os, browser: ua.browser,
  referrer: firstStr(req.headers['referer']) ?? null, userAgent,
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
@@ -293,9 +301,9 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  // outcome as a blocking traffic control. req.ip is the real client (trusted-proxy aware, above).
  if (ip && ipBlacklist?.check(ip)) return reject('ip_blacklisted');
 
- // 4. Geo targeting.
- const geoKnown = geoAvailable() || forcedGeo != null;
- const geoDecision = evaluateGeoRules(offer.geoRules, country, geoKnown);
+ // 4. Geo targeting (country, or country + region).
+ const geoKnown = where.known;
+ const geoDecision = evaluateGeoRules(offer.geoRules, country, geoKnown, where.regionKeys);
  if (!geoDecision.allowed) return reject('geo_not_allowed');
 
  // 4a. Offer targeting (Edit Offer › Targeting). Device Type is the offer's allowed traffic types.
@@ -304,7 +312,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const targetingDecision = evaluateTargeting(offer.targeting, {
  platform: ua.osName, browser: ua.browserName, deviceBrand: ua.deviceBrand, osVersion: ua.osVersion,
  language: primaryLanguage(firstStr(req.headers['accept-language'])),
- country, region: geo?.region ?? null, city: geo?.city ?? null, dma: geo?.dma ?? null,
+ country, region, regionName: geo?.regionName ?? null, city: geo?.city ?? null, dma: geo?.dma ?? null,
  mobileCarrier: geo?.carrier ?? null, isp: geo?.isp ?? null, zip: geo?.postal ?? null, ip,
  }, { geo: geoAvailable(), country: geoKnown, carrier: carrierAvailable() });
  if (!targetingDecision.allowed) return reject('targeting_not_matched');
@@ -370,7 +378,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const job: ClickJob = {
  clickId, networkId: tenant.networkId, offerId: offer.id, publisherId,
  ts: new Date().toISOString(), ip,
- country, region: geo?.region ?? null, city: geo?.city ?? null, isp: geo?.isp ?? null,
+ country, region, city: geo?.city ?? null, isp: geo?.isp ?? null,
  device: ua.device, os: ua.os, browser: ua.browser,
  referrer: firstStr(req.headers['referer']) ?? null, userAgent,
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
@@ -400,7 +408,11 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  // 11. Build destination with macros and 302 out — the fastest exit.
  // A partner's custom landing page (Offer Custom Settings, F-12) beats a per-country destination.
  const customLanding = customFor('landing_pages').find((c) => c.landingPageUrl)?.landingPageUrl;
- const dest = customLanding ?? geoDecision.destinationOverride ?? offer.destinationUrl;
+ const baseDest = customLanding ?? geoDecision.destinationOverride ?? offer.destinationUrl;
+ // A deep link (offer's "Allow deep links"): another page of the offer's OWN site the partner asked for
+ // (&url= / &deep_link=), keeping the offer URL's parameters (the click id) — anything else is ignored.
+ const deep = offer.deepLinkEnabled ? firstStr(q['url']) ?? firstStr(q['deep_link']) : null;
+ const dest = deep && onOfferSite(deep, offer) ? deepLinkDestination(deep, baseDest) : baseDest;
  const finalUrl = substituteMacros(
  dest,
  buildMacros({ clickId, offerId: offer.id, publisherId, country: country ?? undefined, device: ua.device, subs }),
@@ -461,6 +473,8 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const src = firstNonBlank(q, SOURCE_PARAMS);
  if (src) params.set('source_id', src);
  for (const k of ['fbclid', 'gclid']) { const v = firstNonBlank(q, [k]); if (v) params.set(k, v); }
+ // The dev / test country override travels with the click (ignored in production, like at /click).
+ if (env.NODE_ENV !== 'production') for (const k of ['geo', 'test_geo']) { const v = firstStr(q[k]); if (v) params.set(k, v); }
  return reply.code(302).header('location', `/click?${params.toString()}`).header('cache-control', 'no-store').send();
  };
 
@@ -468,8 +482,11 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const catchAll = () => (link?.catchAllOfferId ? forward(link.catchAllOfferId) : reply.code(204).send());
  if (!link || link.status !== 'active') return catchAll();
 
- const geo = req.ip ? lookupGeo(req.ip) : null;
- const country = geo?.country ?? null;
+ const where = visitorGeo({
+ ip: req.ip || null, socketAddress: (req.raw.socket?.remoteAddress ?? null), cfCountry: req.headers['cf-ipcountry'],
+ geoParam: firstStr(q['geo']), testGeoParam: firstStr(q['test_geo']),
+ });
+ const country = where.country;
  const targeted = link.items.filter((i) => !i.country || i.country === country);
  if (!targeted.length) return catchAll();
 
@@ -483,7 +500,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  if (!o || o.status !== 'active' || capped[k]) return false;
  if (partner && o.deniedPublishers.includes(partner)) return false;
  if (o.visibility && o.visibility !== 'public' && !(partner && (o.approvedPublishers ?? []).includes(partner))) return false;
- return evaluateGeoRules(o.geoRules, country, geoAvailable()).allowed;
+ return evaluateGeoRules(o.geoRules, country, where.known, where.regionKeys).allowed;
  });
 
  // Priority: lowest Position wins. Weight: the configured weights. KPI: the worker's weights once
@@ -529,7 +546,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  return null;
  };
 
- const clickId = clickIdOf(req);
+ let clickId = clickIdOf(req);
  const txnId = pick('txn_id', 'transaction_id', 'tid');
  const event = pick('event', 'event_name', 'goal');
  const saleAmount = pick(...SALE_AMOUNT_PARAMS);
@@ -539,8 +556,12 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  networkId: tenant.networkId, source, method: req.method, clickId, transactionId: txnId, event, saleAmount, httpStatus,
  ip: (req.ip as string | undefined) ?? null, userAgent: firstStr(req.headers['user-agent']), params: rawParams, result,
  });
+ // No click id but a coupon (S2S only): a clickless conversion for the coupon's partner (conversions/coupon.ts).
+ const couponCode = !clickId && source === 'postback' ? pick(...COUPON_PARAMS) : null;
+ const coupon = couponCode ? await couponClick(tenant.networkId, couponCode) : null;
+ if (coupon) clickId = coupon.clickId;
  if (!clickId) {
- const missing: RecordConversionResult = { outcome: 'click_not_found', reason: 'missing_click_id' };
+ const missing: RecordConversionResult = { outcome: 'click_not_found', reason: couponCode ? 'unknown_coupon' : 'missing_click_id' };
  await log(missing, source === 'postback' ? 404 : 200);
  return { ...missing, networkResolved: true };
  }
@@ -550,6 +571,7 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  result = await recordConversion({
  networkId: tenant.networkId,
  clickId,
+ ...(coupon ? { click: coupon.click } : {}),
  txnId,
  event,
  statusHint: pick('status'),

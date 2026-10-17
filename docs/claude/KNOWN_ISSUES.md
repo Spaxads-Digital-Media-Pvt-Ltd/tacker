@@ -34,6 +34,12 @@
 **Why it matters**: If Supabase changes how it sets claims, the role resolution could break silently.
 **Mitigated**: a team member with a `users` row now gets their role (and disabled status) from that row on every request (`lib/auth/staff-state.ts`); the claim only decides for logins without a row.
 
+### GeoIP data quality depends on the provider
+- **Issue**: DB-IP Lite (the no-account fallback) has region names but no region codes, postal codes or DMA codes, and is updated monthly. Region rules still match by name; zip / DMA targeting needs MaxMind GeoLite2 (or paid GeoIP2) — set `MAXMIND_LICENSE_KEY` and re-run `npm run geoip:download`.
+
+### Offer linking type "redirect_direct" is stored but not enforced
+- **Issue**: Edit Offer › Linking type `redirect_direct` (Everflow-style direct linking) needs a JavaScript tag on the advertiser's site that registers the click; it isn't built, so offers behave as `redirect`. Deep links (`deepLinkEnabled`) ARE enforced.
+
 ## Potential Issues (Need Investigation)
 
 ### 6. Smart Link PG Read on Hot Path

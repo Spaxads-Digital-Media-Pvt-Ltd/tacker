@@ -78,6 +78,9 @@ export interface RecordConversionInput {
  /** Browser-fired sources (pixel / iframe): the page and host headers that bind the conversion to
   * the offer's own site. Ignored for postbacks. */
  requestOrigin?: RequestOrigin;
+ /** A click the caller already resolved instead of one looked up by clickId — a coupon's clickless conversion
+  *  (conversions/coupon.ts). The click-to-conversion time doesn't apply to it. */
+ click?: StoredClick;
 }
 
 /** Why a request recorded nothing (outcome duplicate / click_not_found / security_failed). */
@@ -285,7 +288,7 @@ export async function recordConversion(rawInput: RecordConversionInput): Promise
  const input = { ...rawInput, txnId: rawInput.txnId != null && rawInput.txnId.trim() !== '' ? rawInput.txnId : null };
 
  // Match the originating click (Redis fast path -> DB fallback).
- const click = await findClick(input.networkId, input.clickId);
+ const click = input.click ?? await findClick(input.networkId, input.clickId);
  if (!click) return { outcome: 'click_not_found', reason: 'unknown_click' };
 
  const offer = await getOfferConfig(input.networkId, click.offer_id);
@@ -444,7 +447,7 @@ async function recordAttributed(
  // Click-to-conversion time window (Attribution tab). Applied after postback controls so an
  // "accept" control can't approve a conversion outside the allowed window.
  const ctit = attrCfg?.clickToConversion;
- if (ctit?.enabled && status !== 'rejected') {
+ if (ctit?.enabled && status !== 'rejected' && !input.click) {
  if (ageS < ctit.minSeconds) { status = 'rejected'; reason = 'click_to_conversion_too_fast'; }
  else if (ctit.maxSeconds != null && ageS > ctit.maxSeconds) { status = 'rejected'; reason = 'click_to_conversion_too_slow'; }
  }

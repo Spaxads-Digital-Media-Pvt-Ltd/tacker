@@ -12,6 +12,7 @@
  *     macro (httpbin.org) — landing pages on public sites (Google, YouTube, Instagram, Facebook, Amazon…)
  *     carry the click id in the address bar so you can copy it into a postback
  *   • a partner revenue share (CPS 25 % of the sale) through Offer Custom Settings
+ *   • deep links on the Amazon offer and a coupon code TEST10 (Alpha) for clickless conversions
  *   • localhost / 127.0.0.1 as tracking domains, so http://localhost:4002/click works
  *
  * Re-running is safe: anything that already exists (by name) is kept, not duplicated. Names end in "(test)".
@@ -151,6 +152,7 @@ async function main(): Promise<void> {
   const api = {
     get: (p: string) => request(app).get(`/api${p}`).set('Authorization', `Bearer ${token}`),
     post: (p: string, b: Json) => request(app).post(`/api${p}`).set('Authorization', `Bearer ${token}`).send(b),
+    patch: (p: string, b: Json) => request(app).patch(`/api${p}`).set('Authorization', `Bearer ${token}`).send(b),
   };
   const existing = async (table: string) => new Map((await query<{ id: string; name: string; ref: string }>(
     `SELECT id, name, ref::text FROM ${table} WHERE network_id = $1`, [net.id])).rows.map((r) => [r.name, r]));
@@ -213,6 +215,13 @@ async function main(): Promise<void> {
     }), 'custom payout for Delta Push');
   }
 
+  // Deep links on the Amazon offer (partners may send &url=https://www.amazon.com/…), and a coupon code for
+  // Alpha on it (a postback with coupon_code=TEST10 and no click id is credited to Alpha) — kept in step.
+  await api.patch(`/offers/${amazon.id}`, { deepLinkEnabled: true }).then((r) => ok(r, 'deep links on Amazon'));
+  const alpha0 = pubsAfter.get('Alpha Media (test)')!;
+  const hasCoupon = (await query(`SELECT 1 FROM offer_coupons WHERE network_id = $1 AND lower(code) = 'test10'`, [net.id])).rows.length > 0;
+  if (!hasCoupon) ok(await api.post(`/offers/${amazon.id}/coupons`, { code: 'TEST10', publisherId: alpha0.id, description: 'Alpha Media test coupon' }), 'coupon TEST10');
+
   // Local tracking links: localhost / 127.0.0.1 → this network.
   for (const host of ['localhost', '127.0.0.1']) {
     await query(
@@ -238,6 +247,9 @@ ${lines.join('\n')}
 Force a country with &geo=US (dev only). Then fire a conversion (copy click_id from the landing page's address bar):
   http://localhost:4002/postback?click_id=<CLICK_ID>&txn_id=order-1&status=approved&secure_code=<your code: Settings › Security>
   …add &event=purchase on the Facebook offer, &sale_amount=40 on the RevShare offers.
+Coupon (no click): http://localhost:4002/postback?coupon_code=TEST10&txn_id=order-2&sale_amount=40&status=approved&secure_code=<CODE>
+Deep link (Amazon): http://localhost:4002/click?offer_id=${amazon.ref}&pub_id=${alpha.ref}&url=https%3A%2F%2Fwww.amazon.com%2Fdp%2FB0TEST
+Real GEO on localhost: add -H 'X-Forwarded-For: 49.36.0.1' (IN) / 8.8.4.4 (US) to curl, or &geo=US / &geo=US-CA
 `);
 }
 

@@ -147,3 +147,28 @@ export function conversionOriginAllowed(o: RequestOrigin | undefined, allowed: A
   if (!source) return false;
   return allowed.exact.includes(source) || allowed.site.some((h) => sameSite(source, h));
 }
+
+/** Is this URL on one of the offer's own sites (its landing pages — the default and each country's)? For deep links. */
+export function onOfferSite(url: string, offer: Pick<OfferConfig, 'destinationUrl' | 'geoRules'>): boolean {
+  const h = hostOf(url);
+  if (!h || !/^https?:\/\//i.test(url)) return false;
+  return allowedConversionHosts(offer, null).site.some((site) => sameSite(h, site));
+}
+
+/**
+ * The page a partner deep-links to (&url=…), carrying every query parameter of the offer's own URL that the
+ * deep link doesn't set itself — so the click id (and the other macros) still reach the advertiser the way the
+ * offer URL passes them. Raw string work: the template's {macros} must survive to be filled in afterwards.
+ */
+export function deepLinkDestination(deep: string, template: string): string {
+  const [base, ...hashParts] = deep.split('#');
+  const hash = hashParts.length ? `#${hashParts.join('#')}` : '';
+  const have = new Set<string>();
+  const qi = base!.indexOf('?');
+  if (qi >= 0) for (const seg of base!.slice(qi + 1).split('&')) if (seg) have.add(decodeURIComponent(seg.split('=')[0]!.replace(/\+/g, ' ')));
+  const tq = template.indexOf('?');
+  const extra = tq < 0 ? [] : template.slice(tq + 1).split('#')[0]!.split('&')
+    .filter((seg) => seg && !have.has(decodeURIComponent(seg.split('=')[0]!.replace(/\+/g, ' '))));
+  if (!extra.length) return deep;
+  return `${base}${qi >= 0 ? (base!.endsWith('?') || base!.endsWith('&') ? '' : '&') : '?'}${extra.join('&')}${hash}`;
+}

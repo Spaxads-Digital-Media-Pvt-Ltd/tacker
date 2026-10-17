@@ -33,6 +33,9 @@ coverage/
 
 # --- GeoIP local DB (downloaded at runtime, not committed) ---
 data/geoip/*.mmdb
+# The tracker's GeoIP databases (npm run geoip:download) — large, downloaded, never committed.
+api-backend/data/geoip/
+
 
 # --- Docker volumes (if bind-mounted locally) ---
 .docker-data/

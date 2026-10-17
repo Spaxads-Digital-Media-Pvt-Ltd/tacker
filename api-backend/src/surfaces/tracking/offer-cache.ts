@@ -90,6 +90,8 @@ export interface OfferConfig {
   customSettings?: CustomSettingConfig[];
   /** Targeting rules (Edit Offer › Targeting) enforced at /click. */
   targeting: OfferTargeting;
+  /** Edit Offer › "Allow deep links": a partner may send the visitor to another page of the offer's own site (&url=…). */
+  deepLinkEnabled?: boolean;
   attribution: AttributionSettings;
   revenue: RevenueSettings;
 }
@@ -262,6 +264,7 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     trafficBlockings: tbRes.rows.map((t) => ({ publisherId: t.publisher_id, filters: t.filters ?? {} })),
     firePartnerPostback: r.metadata?.['fire_partner_postback'] !== false,
     targeting: readTargeting(r.metadata),
+    deepLinkEnabled: r.metadata?.['deep_link_enabled'] === true,
     attribution: readAttribution(r.metadata),
     revenue: readRevenue(r.metadata),
     customSettings: csRes.rows.map((c): CustomSettingConfig => {

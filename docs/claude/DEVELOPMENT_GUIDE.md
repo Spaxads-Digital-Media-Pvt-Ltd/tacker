@@ -62,6 +62,7 @@ npm run dev
 | `npm run provision:demo-admin` | Provision demo network admin |
 | `npm run provision:demo-portals` | Provision demo publisher/advertiser portals |
 | `npm run smoke` | Run all smoke tests |
+| `npm run geoip:download` | GeoIP databases into `data/geoip/` (MaxMind GeoLite2 with `MAXMIND_LICENSE_KEY`, else DB-IP Lite) — without one, GEO rules are not enforced. Re-run weekly / monthly; the tracker reloads within 10 min |
 | `npm run tunnel [-- <slug>]` | Public ngrok URL for the tracking surface (:4002), registered as a verified tracking domain for the network (default `demo`) — for external trackers' postbacks; prints the click and postback URL formats |
 
 ### Frontend (`frontend/`)
@@ -111,6 +112,13 @@ npm run test:isolation # Cross-tenant/cross-owner isolation tests
 
 ### Frontend
 No test framework configured. CI runs: typecheck + lint + build.
+
+Offer end-to-end suites (every offer setting through the dashboard API → real /click, /sl, /postback, GeoIP test data, workers):
+```bash
+INTEGRATION_DB=1 REDIS_URL=redis://localhost:6379/1 DATABASE_URL=postgres://tracker:tracker_local_dev@localhost:5432/tracker_test \
+  npx vitest run test/integration/offer-e2e-clicks.test.ts test/integration/offer-e2e-conversions.test.ts
+```
+(never point DATABASE_URL at a real database — the suites create networks and traffic)
 
 ## Lint
 

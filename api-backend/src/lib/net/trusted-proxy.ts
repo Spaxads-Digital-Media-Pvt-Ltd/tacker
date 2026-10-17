@@ -85,3 +85,15 @@ export function buildTrustedProxyCheck(extra?: string, onInvalid?: (entry: strin
 /** The configured list: TRUSTED_PROXIES plus the older TRACKING_TRUSTED_PROXIES. */
 export const configuredProxies = (env: { TRUSTED_PROXIES?: string; TRACKING_TRUSTED_PROXIES?: string }): string =>
   [env.TRUSTED_PROXIES, env.TRACKING_TRUSTED_PROXIES].filter((v) => v?.trim()).join(',');
+
+let cloudflare: BlockList | null = null;
+/** Did this connection come from Cloudflare's edge (so its CF-* headers can be trusted)? */
+export function isCloudflareAddress(ip: string | null | undefined): boolean {
+  if (!ip) return false;
+  if (!cloudflare) {
+    cloudflare = new BlockList();
+    for (const cidr of [...CLOUDFLARE_IPV4, ...CLOUDFLARE_IPV6]) addEntry(cloudflare, cidr);
+  }
+  const type = family(ip);
+  return type !== null && cloudflare.check(ip, type);
+}

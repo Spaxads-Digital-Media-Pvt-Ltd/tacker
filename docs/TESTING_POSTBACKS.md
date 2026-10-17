@@ -16,6 +16,36 @@ advertisers, partners and 15 offers with different settings to test against.
 - Our click id reaches the advertiser through the offer's destination URL macro `{click_id}`. The test offers all add `click_id={click_id}`, so you can read it in the landing page's address bar.
 - Partner postbacks (Partners › a partner › Postbacks) can use these macros: `{click_id}` (ours), `{sub1}`…`{sub5}` (what the partner sent — usually **their** click id), `{payout}`, `{currency}`, `{event}`, `{txn_id}`, `{conversion_id}`, `{offer_id}`, `{publisher_id}`.
 
+## 0. GEO (countries) — set this up first
+
+Country rules (Offer › GEO allow / block lists, per-country payouts and landing pages) and geo targeting need a
+**GeoIP database** on the tracking server. Without one, the tracker can't tell where a visitor is, so it lets
+every country through. That's why allowed and blocked countries seemed to do nothing.
+
+1. Get a database. Run `cd api-backend && npm run geoip:download`. Choose one source:
+   - **MaxMind GeoLite2 (recommended for production)**: create a free account at maxmind.com, go to *Manage
+     License Keys*, create a key, and put `MAXMIND_LICENSE_KEY=…` in `api-backend/.env`. It's updated twice a
+     week and includes region codes, postal codes and US DMA codes.
+   - **DB-IP Lite (no account)**: used automatically when there's no MaxMind key. It's updated monthly, under
+     CC BY 4.0, so show the credit "IP Geolocation by DB-IP" somewhere in the product. It has region *names* but
+     no postal or DMA codes.
+   - **Behind Cloudflare** the tracker also reads Cloudflare's `CF-IPCountry` header (country only) when the
+     database doesn't know an IP.
+2. Check it's loaded: `curl -s localhost:4002/health`, then look for `"geoip": {"city": "data/geoip/…", "enforced": true}`.
+   The tracker picks up a new file within 10 minutes, without a restart.
+3. Keep it fresh: re-run the download weekly (MaxMind) or monthly (DB-IP), for example from cron.
+4. Test countries on your own machine. Your own address (127.0.0.1) has no country, so use one of these:
+   - pretend to be a visitor from somewhere:
+     `curl -sI -H 'X-Forwarded-For: 49.36.0.1' 'http://localhost:4002/click?offer_id=1&pub_id=1'`
+     Sample IPs: 49.36.0.1 India · 8.8.4.4 US · 81.2.69.142 UK · 77.88.55.88 Russia · 114.114.114.114 China;
+   - or force a country in development: `&geo=US`, or a country and region with `&geo=US-CA`;
+   - or open the tunnel URL (section 2) on a phone or through a VPN. Real visitor IPs arrive through ngrok.
+5. Countries can be set in **two places**: Offer › GEO, and Edit Offer › Targeting › Country. A click has to
+   pass both. If they don't overlap, for example GEO "allow US, CA" with Targeting "include IN", nothing gets
+   through. The offer API now returns `configWarnings` describing a conflict like this.
+6. Region rules (GEO with a region): enter the code (`CA` or `US-CA`) or the name (`California`). The most
+   specific rule wins: country + region, then country, then `*`.
+
 ## 1. Test locally (no external tracker)
 
 1. Keep `npm run dev` running in `api-backend` (it includes the workers, which save clicks and send partner postbacks).
@@ -39,6 +69,14 @@ advertisers, partners and 15 offers with different settings to test against.
    - `offer_id=2` or `offer_id=5` with `&sale_amount=40` → revenue is a percentage of the sale.
    - `offer_id=13` → the conversion arrives as pending (manual approval).
    - The **Postback tester** (`/app/aff-postback-test`) sends a sample postback to any URL and shows the reply.
+
+6. **Coupon codes (no click).** Give a partner a coupon (Partners › Coupon Codes, or Offer › Coupons). The
+   advertiser posts the sale with the coupon instead of a click id:
+   `http://localhost:4002/postback?coupon_code=TEST10&txn_id=order-2&sale_amount=40&status=approved&secure_code=<CODE>`
+   It's credited to the coupon's partner on that offer. Always send a `txn_id`, so a retry isn't counted twice.
+7. **Deep links.** On an offer with *Allow deep links*, a partner can send a visitor to another page of the
+   advertiser's site, for example `&url=https%3A%2F%2Fwww.amazon.com%2Fdp%2FB0TEST`. The click id is still added
+   the way the offer URL passes it. A page on any other site is ignored, so it can't be used as an open redirect.
 
 ## 2. Make the tracker reachable from the internet
 

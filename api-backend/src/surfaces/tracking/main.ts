@@ -2,7 +2,7 @@ import { env } from '../../config/env.js';
 import { surfaceLogger } from '../../lib/logger.js';
 import { closeDb } from '../../lib/db/pool.js';
 import { closeRedis } from '../../lib/redis.js';
-import { initGeoIp } from '../../lib/geo/geoip.js';
+import { initGeoIp, refreshGeoIp } from '../../lib/geo/geoip.js';
 import { initSentry, flushSentry } from '../../lib/observability/sentry.js';
 import { setHostResolver } from '../../middleware/host-resolver.js';
 import { DbHostResolver } from './host-resolver-db.js';
@@ -12,7 +12,9 @@ const log = surfaceLogger('tracking');
 
 async function start(): Promise<void> {
   await initSentry('tracking'); // no-op unless SENTRY_DSN is set
-  await initGeoIp(); // load the MaxMind db once (fail-open if absent)
+  await initGeoIp(); // load the GeoIP db (fail-open if absent)
+  // A downloaded or updated database (npm run geoip:download) is picked up without a restart.
+  setInterval(() => void refreshGeoIp(), 10 * 60_000).unref();
   setHostResolver(new DbHostResolver()); // real tenant resolution (Redis-cached)
 
   const app = buildTrackingApp();
