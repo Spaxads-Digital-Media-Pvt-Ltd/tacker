@@ -14,7 +14,7 @@
  *
  * An 'assigned' role only its networks.
  */
-import { Router, type Request } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
@@ -25,8 +25,8 @@ import { query, withTransaction } from '../../lib/db/pool.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { csvCell } from '../../lib/csv.js';
 import { writePlatformAudit } from '../../lib/audit.js';
-import { NETWORK_MRR_SQL } from '../../lib/billing/revenue.js';
-import { requirePerm, networkScope, assertNetworkInScope, isAssignedScope } from './auth.js';
+import { NETWORK_MRR_SQL, mrrTrend } from '../../lib/billing/revenue.js';
+import { requirePerm, assertNetworkInScope, scopedNetworkIds } from './auth.js';
 import { UUID_RE, meId, moneyText } from './fields.js';
 
 /** "Valid until 2026-12-31" means through that whole day (UTC); a full date-time is kept as given. */
@@ -71,18 +71,11 @@ const csvSchema = z.object({
   to: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 }).strict();
 
-/** Network ids an 'assigned' role may see (null = all). */
-async function scopedIds(req: Request): Promise<string[] | null> {
-  if (!isAssignedScope(req)) return null;
-  const sc = networkScope(req, 'n', 1);
-  return (await query<{ id: string }>(`SELECT n.id FROM networks n WHERE ${sc.sql}`, sc.params)).rows.map((r) => r.id);
-}
-
 export function revenueRoutes(): Router {
   const r = Router();
 
   r.get('/revenue/summary', requirePerm('revenue', 'read'), asyncHandler(async (req, res) => {
-    const ids = await scopedIds(req);
+    const ids = await scopedNetworkIds(req);
     const p = [ids];
     const inScope = (col: string) => `($1::uuid[] IS NULL OR ${col} = ANY($1::uuid[]))`;
     const months = `generate_series(date_trunc('month', now()) - interval '11 months', date_trunc('month', now()), interval '1 month')`;
@@ -100,12 +93,7 @@ export function revenueRoutes(): Router {
                     COUNT(*) FILTER (WHERE kind = 'new')::int AS new_count, COUNT(*) FILTER (WHERE kind = 'churn')::int AS churn_count
                FROM platform_mrr_movements WHERE day >= date_trunc('month', now()) - interval '1 month' AND ${inScope('network_id')}
               GROUP BY 1, currency ORDER BY 1 DESC, currency`, p),
-      // The last snapshot day of each of the last 12 months.
-      query(`SELECT to_char(mo, 'YYYY-MM') AS month, s.currency, SUM(s.mrr)::text AS mrr, COUNT(*)::int AS customers
-               FROM ${months} mo
-               JOIN LATERAL (SELECT max(day) AS d FROM platform_mrr_days WHERE day >= mo AND day < mo + interval '1 month') last ON last.d IS NOT NULL
-               JOIN platform_mrr_snapshots s ON s.day = last.d AND ${inScope('s.network_id')}
-              GROUP BY 1, s.currency ORDER BY 1, s.currency`, p),
+      mrrTrend(ids),
       // Logo churn per month (3 complete + this): customers churned ÷ paying at the month's start.
       query(`SELECT to_char(mo, 'YYYY-MM') AS month,
                     (SELECT COUNT(DISTINCT s.network_id) FROM platform_mrr_snapshots s
@@ -157,7 +145,7 @@ export function revenueRoutes(): Router {
     sendOk(res, {
       mrr: mrr.rows,
       movements: { thisMonth: moves.rows.filter((m) => m['month'] === 'this'), lastMonth: moves.rows.filter((m) => m['month'] === 'last') },
-      trend: trend.rows,
+      trend,
       churn: churnRows.map((c) => ({ ...c, rate: c.at_start ? Math.round((c.churned / c.at_start) * 1000) / 10 : null })),
       ltv,
       collected: collected.rows,
@@ -301,7 +289,7 @@ export function revenueRoutes(): Router {
 
   r.get('/credit-notes', requirePerm('billing', 'read'), validateQuery(paginationSchema.extend({ networkId: z.string().uuid().optional() }).strict()), asyncHandler(async (req, res) => {
     const f = res.locals.query as { limit: number; offset: number; networkId?: string };
-    const ids = await scopedIds(req);
+    const ids = await scopedNetworkIds(req);
     const { rows } = await query(
       `SELECT c.*, c.amount::text AS amount, i.number AS invoice_number, COALESCE(n.name, i.bill_to->>'name') AS network_name, COALESCE(pa.name, pa.email) AS created_by_name
          FROM platform_credit_notes c JOIN platform_invoices i ON i.id = c.invoice_id LEFT JOIN networks n ON n.id = c.network_id
@@ -314,7 +302,7 @@ export function revenueRoutes(): Router {
   // ---------- Invoice export ----------
   r.get('/invoices.csv', requirePerm('billing', 'read'), validateQuery(csvSchema), asyncHandler(async (req, res) => {
     const f = res.locals.query as z.infer<typeof csvSchema>;
-    const ids = await scopedIds(req);
+    const ids = await scopedNetworkIds(req);
     const { rows } = await query(
       `SELECT i.number, i.issued_at, i.due_at, COALESCE(n.name, i.bill_to->>'name') AS network, i.bill_to->>'slug' AS slug, i.description, i.currency,
               i.subtotal::text, i.tax_rate::text, i.tax::text, i.total::text, i.status, (i.status = 'open' AND i.due_at <= now()) AS overdue,

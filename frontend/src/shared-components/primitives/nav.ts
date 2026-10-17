@@ -49,7 +49,7 @@ export const NAV: Record<Role, NavEntry[]> = {
       ],
     },
     {
-      label: 'Support', icon: 'lifebuoy', flyout: [
+      group: 'Customers', label: 'Support', icon: 'lifebuoy', flyout: [
         { label: 'Tickets', description: 'The help desk queue — answer before the first-reply deadline', to: '/admin/support', icon: Lucide.LifeBuoy, perm: 'support' },
         { label: 'Saved replies', description: 'Answers the team reuses', to: '/admin/support/macros', icon: Lucide.MessagesSquare, perm: 'support' },
       ],
@@ -69,7 +69,7 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'System health', description: 'Database, Redis and the background queues', to: '/admin/system', icon: Lucide.ServerCog, perm: 'platform' },
         { label: 'Activity', description: 'What the team and billing did', to: '/admin/activity', icon: Lucide.History, perm: 'activity' },
         { label: 'Team & roles', description: 'Staff accounts and what each role may do', to: '/admin/team', icon: Lucide.Users, perm: 'team' },
-        { label: 'Settings', description: 'Billing and platform settings', to: '/admin/settings', icon: Lucide.Settings, perm: 'settings' },
+        { label: 'Settings', description: 'Billing, support, email and security', to: '/admin/settings', icon: Lucide.Settings, perm: 'settings' },
       ],
     },
   ],

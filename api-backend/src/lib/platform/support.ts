@@ -16,6 +16,41 @@ export type TicketStatus = (typeof STATUSES)[number];
 /** Still needs work (counts for assignment load and the queue). */
 export const ACTIVE_STATUSES: readonly TicketStatus[] = ['open', 'pending', 'on_hold'];
 
+/** SQL (alias `t`): the first reply is past its deadline — the SLA is breached. */
+export const BREACHED_SQL = `(t.first_response_at IS NULL AND t.status IN ('open', 'on_hold') AND t.first_response_due_at < now())`;
+
+/** A member's scope as SQL on a networks alias `n` with params from $2 ($1 is the member) — auth.ts networkScope(req, 'n', 2). */
+export interface TicketScope { sql: string; params: unknown[] }
+
+/**
+ * The queue's numbers for the tickets in `scope` — shared by the Support desk and the Overview so both always say
+ * the same: open / pending / on hold, unassigned, `mine` (assigned to `memberId`), first replies past their
+ * deadline, 30-day volume, first-reply and resolution times, SLA met % and satisfaction (90 days, 1–5).
+ */
+export async function supportCounts(memberId: string, scope: TicketScope): Promise<Record<string, number | string | null>> {
+  const c = (await query<Record<string, number | string | null>>(
+    `SELECT COUNT(*) FILTER (WHERE t.status = 'open')::int AS open,
+            COUNT(*) FILTER (WHERE t.status = 'pending')::int AS pending,
+            COUNT(*) FILTER (WHERE t.status = 'on_hold')::int AS on_hold,
+            COUNT(*) FILTER (WHERE t.status IN ('open', 'pending', 'on_hold') AND t.assignee_id IS NULL)::int AS unassigned,
+            COUNT(*) FILTER (WHERE t.status IN ('open', 'pending', 'on_hold') AND t.assignee_id = $1)::int AS mine,
+            COUNT(*) FILTER (WHERE ${BREACHED_SQL})::int AS breached,
+            COUNT(*) FILTER (WHERE t.created_at >= now() - interval '30 days')::int AS created_30d,
+            COUNT(*) FILTER (WHERE t.resolved_at >= now() - interval '30 days')::int AS resolved_30d,
+            ROUND(AVG(EXTRACT(EPOCH FROM (t.first_response_at - t.created_at)) / 60)
+              FILTER (WHERE t.first_response_at IS NOT NULL AND t.created_by_admin_id IS NULL AND t.created_at >= now() - interval '30 days'))::int AS avg_first_response_min,
+            ROUND((AVG(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 3600) FILTER (WHERE t.resolved_at >= now() - interval '30 days'))::numeric, 1)::text AS avg_resolution_hours,
+            COUNT(*) FILTER (WHERE t.created_by_admin_id IS NULL AND t.created_at >= now() - interval '30 days'
+                               AND (t.first_response_at IS NOT NULL OR t.first_response_due_at < now()))::int AS sla_total_30d,
+            COUNT(*) FILTER (WHERE t.created_by_admin_id IS NULL AND t.created_at >= now() - interval '30 days'
+                               AND t.first_response_at IS NOT NULL AND t.first_response_at <= t.first_response_due_at)::int AS sla_met_30d,
+            ROUND(AVG(t.satisfaction) FILTER (WHERE t.satisfaction IS NOT NULL AND t.resolved_at >= now() - interval '90 days'), 1)::text AS csat,
+            COUNT(*) FILTER (WHERE t.satisfaction IS NOT NULL AND t.resolved_at >= now() - interval '90 days')::int AS csat_responses
+       FROM support_tickets t JOIN networks n ON n.id = t.network_id WHERE ${scope.sql}`, [memberId, ...scope.params])).rows[0]!;
+  const slaTotal = Number(c['sla_total_30d'] ?? 0);
+  return { ...c, sla_met_pct: slaTotal ? Math.round((Number(c['sla_met_30d']) / slaTotal) * 100) : null };
+}
+
 export interface SupportSettings {
   /** Hours to a first reply, per priority (the SLA). */
   firstResponseHours: Record<Priority, number>;

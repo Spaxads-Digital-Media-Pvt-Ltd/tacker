@@ -53,3 +53,12 @@ export interface CustomerTicket {
   requester_name: string | null; agent_name: string | null; last_message: string | null; last_author: 'customer' | 'staff' | null;
   messages?: { id: string; author_kind: 'customer' | 'staff' | 'system'; author_name: string | null; body: string; created_at: string }[];
 }
+
+/** The desk's numbers (GET /platform/support/summary `counts`, also the Overview's `support`). */
+export interface SupportCounts {
+  open: number; pending: number; on_hold: number; unassigned: number; mine: number; breached: number; created_30d: number; resolved_30d: number;
+  avg_first_response_min: number | null; avg_resolution_hours: string | null; sla_met_pct: number | null; csat: string | null; csat_responses: number;
+}
+
+/** "45 min" · "2.5 h" (— when there is nothing to average). */
+export const fmtMinutes = (m: number | null) => (m === null ? '—' : m < 60 ? `${m} min` : `${Math.round((m / 60) * 10) / 10} h`);

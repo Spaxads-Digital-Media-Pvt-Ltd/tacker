@@ -17,7 +17,7 @@ import { query } from '../../lib/db/pool.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import { usageVsPlan, type UsageVsPlan } from '../../lib/usage/meter.js';
-import { NETWORK_MRR_SQL } from '../../lib/billing/revenue.js';
+import { NETWORK_MRR_SQL, mrrTrend } from '../../lib/billing/revenue.js';
 import { hashPassword, verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import { passwordSchema } from '../../lib/auth/password-policy.js';
 import { LEVELS, SECTIONS, SECTION_KEYS, normalizePermissions } from '../../lib/platform/permissions.js';
@@ -26,7 +26,11 @@ import { encryptSecret, decryptSecret } from '../../lib/crypto/secret-box.js';
 import { checkSecondFactor, securitySettings, saveSecuritySettings } from '../../lib/platform/twofactor.js';
 import { BRAND } from '../../config/branding.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
-import { requirePerm, can, networkScope } from './auth.js';
+import { salesKpis } from '../../lib/platform/sales.js';
+import { supportCounts } from '../../lib/platform/support.js';
+import { healthCounts } from '../../lib/platform/health.js';
+import { myTaskCounts } from '../../lib/platform/tasks.js';
+import { requirePerm, can, networkScope, leadScope, scopedNetworkIds } from './auth.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ident = (req: Request) => req.identity as PlatformAdminIdentity;
@@ -91,7 +95,7 @@ export function opsRoutes(): Router {
     const sc = networkScope(req, 'n', 1);
     const p = sc.params;
     const scopedNetworks = `SELECT n.id FROM networks n WHERE ${sc.sql}`;
-    const [nets, subs, mrr, billing, traffic, trials, overdue, limits, recent] = await Promise.all([
+    const [nets, subs, mrr, billing, traffic, trials, overdue, limits, recent, trend, signups, top, mrrHistory, sales, support, health, tasks] = await Promise.all([
       query(
         `SELECT COUNT(*)::int AS total,
                 COUNT(*) FILTER (WHERE status = 'active')::int AS active,
@@ -147,10 +151,47 @@ export function opsRoutes(): Router {
            FROM audit_log al LEFT JOIN platform_admins pa ON pa.id::text = al.actor_id LEFT JOIN networks n ON n.id = al.network_id
           WHERE al.actor_type = 'platform_admin' AND (${sc.sql === 'TRUE' ? 'TRUE' : `al.network_id IN (${scopedNetworks})`})
           ORDER BY al.created_at DESC LIMIT 10`, p) : null,
+      // Platform traffic per UTC day, the last 14 (usage_records — the usage meter's daily counts).
+      query<{ day: string; clicks: string; conversions: string }>(
+        `SELECT to_char(d, 'YYYY-MM-DD') AS day,
+                COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'clicks'), 0)::text AS clicks,
+                COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'conversions'), 0)::text AS conversions
+           FROM generate_series(CURRENT_DATE - 13, CURRENT_DATE, interval '1 day') d
+           LEFT JOIN usage_records u ON u.period_date = d::date AND u.network_id IN (${scopedNetworks})
+          GROUP BY d ORDER BY d`, p),
+      // New networks per month, the last 6 (this one so far).
+      query<{ month: string; created: number }>(
+        `SELECT to_char(mo, 'YYYY-MM') AS month, COUNT(n.id)::int AS created
+           FROM generate_series(date_trunc('month', now()) - interval '5 months', date_trunc('month', now()), interval '1 month') mo
+           LEFT JOIN networks n ON n.created_at >= mo AND n.created_at < mo + interval '1 month' AND ${sc.sql}
+          GROUP BY mo ORDER BY mo`, p),
+      // The busiest networks of those 14 days.
+      query<{ id: string; name: string; clicks: string; conversions: string }>(
+        `SELECT n.id, n.name,
+                COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'clicks'), 0)::text AS clicks,
+                COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'conversions'), 0)::text AS conversions
+           FROM usage_records u JOIN networks n ON n.id = u.network_id
+          WHERE u.period_date >= CURRENT_DATE - 13 AND n.status <> 'deleted' AND ${sc.sql}
+          GROUP BY n.id HAVING SUM(u.value) FILTER (WHERE u.metric = 'clicks') > 0
+          ORDER BY SUM(u.value) FILTER (WHERE u.metric = 'clicks') DESC LIMIT 6`, p),
+      // The panels' headline numbers — the same functions their own pages use, so both always agree.
+      can(req, 'revenue', 'read') ? scopedNetworkIds(req).then(mrrTrend) : null,
+      can(req, 'sales', 'read') ? salesKpis(leadScope(req, 'l', 1)) : null,
+      can(req, 'support', 'read') ? supportCounts(me(req), networkScope(req, 'n', 2)) : null,
+      can(req, 'success', 'read') ? healthCounts(me(req), networkScope(req, 'n', 2)) : null,
+      myTaskCounts(me(req)),
     ]);
     sendOk(res, {
       networks: nets.rows[0], subscriptions: subs.rows[0], mrr: mrr?.rows ?? null, billing: billing?.rows ?? null, traffic: traffic.rows[0],
       trialsEndingSoon: trials.rows, overdueInvoices: overdue?.rows ?? null, limitAlerts: limits.rows, recentActivity: recent?.rows ?? null,
+      trend: trend.rows.map((t) => ({ day: t.day, clicks: Number(t.clicks), conversions: Number(t.conversions) })),
+      signups: signups.rows,
+      topNetworks: top.rows.map((t) => ({ id: t.id, name: t.name, clicks: Number(t.clicks), conversions: Number(t.conversions) })),
+      mrrTrend: mrrHistory,
+      sales,
+      support,
+      health,
+      tasks,
     });
   }));
 

@@ -44,6 +44,30 @@ export interface Signals {
 
 export const statusOf = (score: number): HealthStatus => (score >= 70 ? 'healthy' : score >= 40 ? 'attention' : 'at_risk');
 
+/** A member's scope as SQL on a networks alias `n` with params from $2 ($1 is the member) — auth.ts networkScope(req, 'n', 2). */
+export interface AccountScope { sql: string; params: unknown[] }
+
+/**
+ * The accounts by health for the networks in `scope` (deleted ones left out) — shared by Customer health and the
+ * Overview so both always say the same: healthy / attention / at risk / not scored yet, the average score, `mine`
+ * (managed by `memberId`), without an account manager, onboarding not finished, when the scores were computed.
+ */
+export async function healthCounts(memberId: string, scope: AccountScope): Promise<Record<string, number | string | Date | null>> {
+  return (await query<Record<string, number | string | Date | null>>(
+    `SELECT COUNT(*)::int AS accounts,
+            COUNT(*) FILTER (WHERE na.health_status = 'healthy')::int AS healthy,
+            COUNT(*) FILTER (WHERE na.health_status = 'attention')::int AS attention,
+            COUNT(*) FILTER (WHERE na.health_status = 'at_risk')::int AS at_risk,
+            COUNT(*) FILTER (WHERE na.health_status IS NULL)::int AS unscored,
+            ROUND(AVG(na.health_score))::int AS avg_score,
+            COUNT(*) FILTER (WHERE n.account_manager_id = $1)::int AS mine,
+            COUNT(*) FILTER (WHERE n.account_manager_id IS NULL)::int AS unassigned,
+            COUNT(*) FILTER (WHERE na.onboarding_pct < 100)::int AS onboarding_open,
+            MAX(na.health_computed_at) AS computed_at
+       FROM networks n LEFT JOIN network_accounts na ON na.network_id = n.id WHERE n.status <> 'deleted' AND ${scope.sql}`,
+    [memberId, ...scope.params])).rows[0]!;
+}
+
 const DAY = 86_400_000;
 
 /** Each part 0–100 from the signals (pure — unit tested). */

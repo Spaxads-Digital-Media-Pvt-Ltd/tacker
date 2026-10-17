@@ -74,6 +74,20 @@ export async function snapshotMrr(now: Date = new Date()): Promise<{ paying: num
   });
 }
 
+/**
+ * MRR at the end of each of the last 12 months (this one so far), per currency — the last snapshot day of each
+ * month; months before the history began are absent. `ids` = the networks an 'assigned' role may see (null = all).
+ * The Revenue page and the Overview.
+ */
+export async function mrrTrend(ids: string[] | null): Promise<{ month: string; currency: string; mrr: string; customers: number }[]> {
+  return (await query<{ month: string; currency: string; mrr: string; customers: number }>(
+    `SELECT to_char(mo, 'YYYY-MM') AS month, s.currency, SUM(s.mrr)::text AS mrr, COUNT(*)::int AS customers
+       FROM generate_series(date_trunc('month', now()) - interval '11 months', date_trunc('month', now()), interval '1 month') mo
+       JOIN LATERAL (SELECT max(day) AS d FROM platform_mrr_days WHERE day >= mo AND day < mo + interval '1 month') last ON last.d IS NOT NULL
+       JOIN platform_mrr_snapshots s ON s.day = last.d AND ($1::uuid[] IS NULL OR s.network_id = ANY($1::uuid[]))
+      GROUP BY 1, s.currency ORDER BY 1, s.currency`, [ids])).rows;
+}
+
 /** Live MRR per network (for the pages; the same numbers the snapshot stores). */
 export async function currentMrr(): Promise<{ network_id: string; currency: string; plan_id: string; plan_name: string; status: string; mrr: string }[]> {
   return (await query<{ network_id: string; currency: string; plan_id: string; plan_name: string; status: string; mrr: string }>(

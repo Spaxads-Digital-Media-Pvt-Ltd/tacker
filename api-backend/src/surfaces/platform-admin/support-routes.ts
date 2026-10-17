@@ -25,7 +25,7 @@ import { paginationSchema } from '../../lib/http/pagination.js';
 import { query, withTransaction } from '../../lib/db/pool.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { writePlatformAudit } from '../../lib/audit.js';
-import { CATEGORIES, PRIORITIES, STATUSES, createTicket, saveSupportSettings, supportSettings } from '../../lib/platform/support.js';
+import { BREACHED_SQL, CATEGORIES, PRIORITIES, STATUSES, createTicket, saveSupportSettings, supportCounts, supportSettings } from '../../lib/platform/support.js';
 import { requirePerm, networkScope, assertNetworkInScope } from './auth.js';
 import { notifyStaffReply } from '../../lib/platform/notify.js';
 import { UUID_RE, meId, ident } from './fields.js';
@@ -46,11 +46,10 @@ const SORT: Record<z.infer<typeof listSchema>['sort'], string> = {
   oldest: 't.created_at ASC', newest: 't.created_at DESC', updated: 't.updated_at DESC',
   due: 't.first_response_due_at ASC NULLS LAST',
 };
-const BREACHED = `(t.first_response_at IS NULL AND t.status IN ('open', 'on_hold') AND t.first_response_due_at < now())`;
 const TICKET_COLS = `t.id, t.number::text AS number, t.subject, t.category, t.priority, t.status, t.network_id, n.name AS network_name, n.slug AS network_slug,
   t.requester_user_id, t.requester_email, t.requester_name, t.assignee_id, COALESCE(a.name, a.email) AS assignee_name, t.tags,
   t.first_response_due_at, t.first_response_at, t.last_customer_at, t.last_staff_at, t.resolved_at, t.closed_at,
-  t.satisfaction, t.satisfaction_comment, t.created_at, t.updated_at, ${BREACHED} AS breached,
+  t.satisfaction, t.satisfaction_comment, t.created_at, t.updated_at, ${BREACHED_SQL} AS breached,
   (SELECT left(m.body, 200) FROM support_messages m WHERE m.ticket_id = t.id AND NOT m.internal AND m.author_kind <> 'system' ORDER BY m.created_at DESC LIMIT 1) AS last_message,
   (SELECT m.author_kind FROM support_messages m WHERE m.ticket_id = t.id AND NOT m.internal AND m.author_kind <> 'system' ORDER BY m.created_at DESC LIMIT 1) AS last_author`;
 const TICKET_FROM = `support_tickets t JOIN networks n ON n.id = t.network_id LEFT JOIN platform_admins a ON a.id = t.assignee_id`;
@@ -119,25 +118,7 @@ export function supportRoutes(): Router {
     const sc1 = networkScope(req, 'n', 1);
     const from = 'support_tickets t JOIN networks n ON n.id = t.network_id';
     const [counts, byCategory, byPriority, trend, agents, oldest, overdue] = await Promise.all([
-      query<Record<string, number | string | null>>(
-        `SELECT COUNT(*) FILTER (WHERE t.status = 'open')::int AS open,
-                COUNT(*) FILTER (WHERE t.status = 'pending')::int AS pending,
-                COUNT(*) FILTER (WHERE t.status = 'on_hold')::int AS on_hold,
-                COUNT(*) FILTER (WHERE t.status IN ('open', 'pending', 'on_hold') AND t.assignee_id IS NULL)::int AS unassigned,
-                COUNT(*) FILTER (WHERE t.status IN ('open', 'pending', 'on_hold') AND t.assignee_id = $1)::int AS mine,
-                COUNT(*) FILTER (WHERE ${BREACHED})::int AS breached,
-                COUNT(*) FILTER (WHERE t.created_at >= now() - interval '30 days')::int AS created_30d,
-                COUNT(*) FILTER (WHERE t.resolved_at >= now() - interval '30 days')::int AS resolved_30d,
-                ROUND(AVG(EXTRACT(EPOCH FROM (t.first_response_at - t.created_at)) / 60)
-                  FILTER (WHERE t.first_response_at IS NOT NULL AND t.created_by_admin_id IS NULL AND t.created_at >= now() - interval '30 days'))::int AS avg_first_response_min,
-                ROUND((AVG(EXTRACT(EPOCH FROM (t.resolved_at - t.created_at)) / 3600) FILTER (WHERE t.resolved_at >= now() - interval '30 days'))::numeric, 1)::text AS avg_resolution_hours,
-                COUNT(*) FILTER (WHERE t.created_by_admin_id IS NULL AND t.created_at >= now() - interval '30 days'
-                                   AND (t.first_response_at IS NOT NULL OR t.first_response_due_at < now()))::int AS sla_total_30d,
-                COUNT(*) FILTER (WHERE t.created_by_admin_id IS NULL AND t.created_at >= now() - interval '30 days'
-                                   AND t.first_response_at IS NOT NULL AND t.first_response_at <= t.first_response_due_at)::int AS sla_met_30d,
-                ROUND(AVG(t.satisfaction) FILTER (WHERE t.satisfaction IS NOT NULL AND t.resolved_at >= now() - interval '90 days'), 1)::text AS csat,
-                COUNT(*) FILTER (WHERE t.satisfaction IS NOT NULL AND t.resolved_at >= now() - interval '90 days')::int AS csat_responses
-           FROM ${from} WHERE ${sc2.sql}`, [meId(req), ...sc2.params]),
+      supportCounts(meId(req), sc2),
       query(`SELECT t.category, COUNT(*)::int AS n FROM ${from} WHERE t.status IN ('open', 'pending', 'on_hold') AND ${sc1.sql} GROUP BY t.category ORDER BY n DESC`, sc1.params),
       query(`SELECT t.priority, COUNT(*)::int AS n FROM ${from} WHERE t.status IN ('open', 'pending', 'on_hold') AND ${sc1.sql} GROUP BY t.priority`, sc1.params),
       query(`SELECT to_char(d, 'YYYY-MM-DD') AS day,
@@ -153,12 +134,10 @@ export function supportRoutes(): Router {
               WHERE pa.status = 'active' AND (ro.permissions->>'support' = 'full' OR t.id IS NOT NULL)
               GROUP BY pa.id ORDER BY active DESC, name LIMIT 20`, sc1.params),
       query(`SELECT ${TICKET_COLS} FROM ${TICKET_FROM} WHERE t.status = 'open' AND ${sc1.sql} ORDER BY t.created_at LIMIT 5`, sc1.params),
-      query(`SELECT ${TICKET_COLS} FROM ${TICKET_FROM} WHERE ${BREACHED} AND ${sc1.sql} ORDER BY t.first_response_due_at LIMIT 8`, sc1.params),
+      query(`SELECT ${TICKET_COLS} FROM ${TICKET_FROM} WHERE ${BREACHED_SQL} AND ${sc1.sql} ORDER BY t.first_response_due_at LIMIT 8`, sc1.params),
     ]);
-    const c = counts.rows[0]!;
-    const slaTotal = Number(c['sla_total_30d'] ?? 0);
     sendOk(res, {
-      counts: { ...c, sla_met_pct: slaTotal ? Math.round((Number(c['sla_met_30d']) / slaTotal) * 100) : null },
+      counts,
       byCategory: byCategory.rows, byPriority: byPriority.rows, trend: trend.rows, agents: agents.rows, oldest: oldest.rows, overdue: overdue.rows,
     });
   }));
@@ -174,7 +153,7 @@ export function supportRoutes(): Router {
       AND ($3::text IS NULL OR ($3::text = 'unassigned' AND t.assignee_id IS NULL) OR t.assignee_id::text = $3::text)
       AND ($4::uuid IS NULL OR t.network_id = $4::uuid)
       AND ($5::text IS NULL OR t.category = $5::text)
-      AND ($6::text IS NULL OR ${BREACHED} = ($6::text = 'true'))
+      AND ($6::text IS NULL OR ${BREACHED_SQL} = ($6::text = 'true'))
       AND ($7::text IS NULL OR t.subject ILIKE $7 ESCAPE '\\' OR t.number::text = trim(both '%' from $7::text) OR n.name ILIKE $7 ESCAPE '\\' OR t.requester_email ILIKE $7 ESCAPE '\\')
       AND ${sc.sql}`;
     const [rows, count] = await Promise.all([

@@ -62,7 +62,7 @@ export default function Revenue() {
   return (
     <>
       <PageHeader title="Revenue" subtitle="Recurring revenue, how it moves, and the cash behind it."
-        action={currencies.length > 1 ? <Segmented className="!w-auto inline-flex" options={currencies} value={cur} onChange={setPicked} /> : undefined} />
+        action={currencies.length > 1 ? <Segmented className="sm:w-72" options={currencies} value={cur} onChange={setPicked} /> : undefined} />
       {s.historySince && <p className="mb-3 text-tiny text-fg-muted">MRR history since {day(s.historySince)} — the trend and movements fill in day by day.</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiTile label="MRR" icon={CircleDollarSign} tone="success" hint={`ARR ${money(mrr?.arr ?? '0', cur)}`}>{money(mrr?.amount ?? '0', cur)}</KpiTile>

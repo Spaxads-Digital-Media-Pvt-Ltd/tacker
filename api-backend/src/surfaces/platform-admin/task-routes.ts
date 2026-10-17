@@ -19,6 +19,7 @@ import { query, withTransaction } from '../../lib/db/pool.js';
 import { sectionName, type Section } from '../../lib/platform/permissions.js';
 import { logLeadActivity } from '../../lib/platform/sales.js';
 import { notifyTaskAssigned } from '../../lib/platform/notify.js';
+import { myTaskCounts } from '../../lib/platform/tasks.js';
 
 const myName = async (req: Request) => (await query<{ n: string }>('SELECT COALESCE(name, email) AS n FROM platform_admins WHERE id = $1', [meId(req)])).rows[0]?.n ?? null;
 import { can, isAssignedScope, assertNetworkInScope } from './auth.js';
@@ -134,13 +135,7 @@ export function taskRoutes(): Router {
   }));
 
   // My open tasks at a glance (the rail badge, the panels' homes).
-  r.get('/tasks/summary', asyncHandler(async (req, res) => {
-    const { rows } = await query<{ open: number; overdue: number; due_today: number }>(
-      `SELECT COUNT(*)::int AS open, COUNT(*) FILTER (WHERE due_at < now())::int AS overdue,
-              COUNT(*) FILTER (WHERE due_at >= now() AND due_at < date_trunc('day', now()) + interval '1 day')::int AS due_today
-         FROM platform_tasks WHERE assignee_id = $1 AND status = 'open'`, [meId(req)]);
-    sendOk(res, rows[0]);
-  }));
+  r.get('/tasks/summary', asyncHandler(async (req, res) => { sendOk(res, await myTaskCounts(meId(req))); }));
 
   r.post('/tasks', validateBody(createSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof createSchema>;

@@ -12,16 +12,13 @@ import { usePlatformMe } from '../../../lib/platformMe';
 import { useDebounced } from '../../admin/pagedList';
 import { relTime } from '../../../lib/relativeTime';
 import { totalOf } from '../../../lib/platformSales';
-import { TICKET_CATEGORIES, TICKET_PRIORITY, categoryLabel, type Ticket, type TicketPriority } from '../../../lib/platformSupport';
+import { TICKET_CATEGORIES, TICKET_PRIORITY, categoryLabel, fmtMinutes, type SupportCounts, type Ticket, type TicketPriority } from '../../../lib/platformSupport';
 import { PageHeader, Table, Spinner, StateBlock, Tabs, type Column } from '../../../shared-components/primitives/ui';
 import { Avatar, Empty, KpiTile, Pager, Panel, TrendChart } from '../kit';
 import { NewTicketModal, PriorityChip, SlaBadge, StatusChip } from './parts';
 
 interface Summary {
-  counts: {
-    open: number; pending: number; on_hold: number; unassigned: number; mine: number; breached: number; created_30d: number; resolved_30d: number;
-    avg_first_response_min: number | null; avg_resolution_hours: string | null; sla_met_pct: number | null; csat: string | null; csat_responses: number;
-  };
+  counts: SupportCounts;
   byCategory: { category: string; n: number }[];
   trend: { day: string; created: number; resolved: number }[];
   agents: { id: string; name: string; active: number; open: number; resolved_7d: number }[];
@@ -35,7 +32,6 @@ const VIEWS: Record<string, Record<string, string>> = {
   Closed: { status: 'closed', sort: 'updated' },
 };
 const LIMIT = 50;
-const fmtMinutes = (m: number | null) => (m === null ? '—' : m < 60 ? `${m} min` : `${Math.round((m / 60) * 10) / 10} h`);
 
 export default function SupportDesk() {
   const { can } = usePlatformMe();
@@ -78,7 +74,7 @@ export default function SupportDesk() {
         </>} />
       {summary.error ? <p className="mb-3 text-small text-danger-text">{summary.error}</p> : !c ? <StateBlock><Spinner /></StateBlock> : (
         <>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 2xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             <KpiTile label="Open" icon={Inbox} hint={`${c.on_hold} on hold · ${c.mine} yours`} to="/admin/support?view=All+open">{c.open}</KpiTile>
             <KpiTile label="Waiting on customer" icon={Clock3} tone="warning" hint="Answered — their turn">{c.pending}</KpiTile>
             <KpiTile label="First reply overdue" icon={AlarmClock} tone={c.breached ? 'danger' : 'success'} hint="Past the SLA" to="/admin/support?view=Overdue">{c.breached}</KpiTile>

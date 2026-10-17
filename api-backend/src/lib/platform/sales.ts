@@ -5,7 +5,7 @@
  * longest-standing member) and the lead timeline.
  */
 import type { PoolClient } from 'pg';
-import { pool, withTransaction } from '../db/pool.js';
+import { pool, query, withTransaction } from '../db/pool.js';
 
 export const STAGES = ['new', 'contacted', 'qualified', 'demo', 'trial', 'negotiation', 'won', 'lost'] as const;
 export type Stage = (typeof STAGES)[number];
@@ -24,6 +24,47 @@ type Db = Pick<PoolClient, 'query'>;
 /** SQL CASE giving a lead's win probability by its stage (won 1, lost 0). */
 export const probabilitySql = (alias: string): string =>
   `(CASE ${alias}.stage ${Object.entries(STAGE_PROBABILITY).map(([s, p]) => `WHEN '${s}' THEN ${p}`).join(' ')} WHEN 'won' THEN 1 ELSE 0 END)`;
+
+/** A member's scope as SQL on a sales_leads alias `l` (params from $1) — platform-admin/auth.ts leadScope. */
+export interface LeadScope { sql: string; params: unknown[] }
+
+export interface SalesKpis {
+  open: number; new_this_month: number; won_this_month: number; won_90d: number; lost_90d: number;
+  avg_cycle_days: number | null; overdue_next_steps: number; unassigned: number; win_rate_90d: number | null;
+}
+
+/**
+ * The pipeline's headline numbers for the leads in `scope` — shared by the Sales dashboard and the Overview so
+ * both always say the same. `forecast` = open value and value × the stage's chance, per currency; `wonThisMonth`
+ * = deals won since the 1st, per currency (amounts as text, never summed across currencies).
+ */
+export async function salesKpis(scope: LeadScope): Promise<{
+  kpis: SalesKpis;
+  forecast: { currency: string; pipeline: string; weighted: string }[];
+  wonThisMonth: { currency: string; amount: string; deals: number }[];
+}> {
+  const [kpis, forecast, won] = await Promise.all([
+    query<Omit<SalesKpis, 'win_rate_90d'>>(
+      `SELECT COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost'))::int AS open,
+              COUNT(*) FILTER (WHERE l.created_at >= date_trunc('month', now()))::int AS new_this_month,
+              COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()))::int AS won_this_month,
+              COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= now() - interval '90 days')::int AS won_90d,
+              COUNT(*) FILTER (WHERE l.stage = 'lost' AND l.lost_at >= now() - interval '90 days')::int AS lost_90d,
+              ROUND(AVG(EXTRACT(EPOCH FROM (l.won_at - l.created_at)) / 86400) FILTER (WHERE l.stage = 'won' AND l.won_at >= now() - interval '90 days'))::int AS avg_cycle_days,
+              COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost') AND l.next_step_at < now())::int AS overdue_next_steps,
+              COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost') AND l.owner_id IS NULL)::int AS unassigned
+         FROM sales_leads l WHERE ${scope.sql}`, scope.params),
+    query<{ currency: string; pipeline: string; weighted: string }>(
+      `SELECT l.currency, COALESCE(SUM(l.expected_mrr), 0)::text AS pipeline, ROUND(COALESCE(SUM(l.expected_mrr * ${probabilitySql('l')}), 0), 2)::text AS weighted
+         FROM sales_leads l WHERE l.stage NOT IN ('won', 'lost') AND ${scope.sql} GROUP BY l.currency ORDER BY l.currency`, scope.params),
+    query<{ currency: string; amount: string; deals: number }>(
+      `SELECT l.currency, COALESCE(SUM(l.expected_mrr), 0)::text AS amount, COUNT(*)::int AS deals
+         FROM sales_leads l WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()) AND ${scope.sql} GROUP BY l.currency ORDER BY l.currency`, scope.params),
+  ]);
+  const k = kpis.rows[0]!;
+  const closed = k.won_90d + k.lost_90d;
+  return { kpis: { ...k, win_rate_90d: closed ? Math.round((k.won_90d / closed) * 100) : null }, forecast: forecast.rows, wonThisMonth: won.rows };
+}
 
 /** The active Sales member with the fewest open leads, or null when the team has no active Sales member. */
 export async function nextSalesOwner(db: Db = pool): Promise<string | null> {

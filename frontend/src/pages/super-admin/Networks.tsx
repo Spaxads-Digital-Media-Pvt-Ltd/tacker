@@ -18,6 +18,7 @@ import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, type Colum
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import type { NetworkRow, PurgedNetworkRow } from '../../types';
 import { HealthChip } from './success/parts';
+import { billingBadge } from '../../lib/platformBilling';
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString() : '—');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -77,8 +78,8 @@ export default function Networks() {
     { header: 'Slug', cell: (n) => <span className="font-mono text-xs">{n.slug}</span> },
     { header: 'Owner', cell: (n) => n.owner_email ?? <span className="text-fg-muted">—</span> },
     { header: 'Status', cell: (n) => <Badge value={n.status} /> },
-    { header: 'Plan', cell: (n) => n.plan_code ?? <span className="text-fg-muted">—</span> },
-    { header: 'Subscription', cell: (n) => (n.subscription_status ? <Badge value={n.subscription_status} /> : <span className="text-fg-muted">none</span>) },
+    { header: 'Plan', cell: (n) => (n.plan_code ? <span title={n.plan_code}>{n.plan_name ?? n.plan_code}</span> : <span className="text-fg-muted">—</span>) },
+    { header: 'Subscription', cell: (n) => (n.subscription_status ? <Badge {...billingBadge(n.subscription_status)} /> : <span className="text-fg-muted">none</span>) },
     { header: 'Health', cell: (n) => (n.health_score == null ? <span className="text-fg-muted">—</span> : <HealthChip score={n.health_score} status={n.health_status ?? null} />) },
     { header: 'Account manager', cell: (n) => n.account_manager_name ?? <span className="text-fg-muted">—</span> },
     { header: 'Created', cell: (n) => day(n.created_at) },

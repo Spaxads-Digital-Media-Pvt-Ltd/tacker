@@ -50,6 +50,17 @@ export interface StaffMember { id: string; email: string; name: string | null; r
 
 export interface PerCurrencyAmount { currency: string; amount: string }
 
+/** The pipeline's headline numbers (GET /platform/sales/summary, also the Overview's `sales`). */
+export interface SalesKpis {
+  open: number; new_this_month: number; won_this_month: number; won_90d: number; lost_90d: number; avg_cycle_days: number | null;
+  overdue_next_steps: number; unassigned: number; win_rate_90d: number | null;
+}
+export interface SalesHeadline {
+  kpis: SalesKpis;
+  forecast: { currency: string; pipeline: string; weighted: string }[];
+  wonThisMonth: { currency: string; amount: string; deals: number }[];
+}
+
 export interface PipelineColumn { stage: Stage; count: number; mrr: PerCurrencyAmount[]; leads: Lead[] }
 
 export const TASK_KINDS: { value: PlatformTask['kind']; label: string; section: string | null }[] = [

@@ -1,7 +1,8 @@
 /**
  * Building blocks for the Super Admin panels (Overview, Sales, Customer success, Support, Revenue): KPI tiles
  * (an icon, a value, a hint, a link), panels with a "View all" link, amounts per currency (never summed
- * across currencies), a bar list, a trend chart (SVG; hover shows the values), initials avatars.
+ * across currencies), a bar list, a trend chart (hover shows the values), a sparkline, small stats, a
+ * stacked bar, a compact toggle, initials avatars.
  */
 import { useState, type ElementType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -15,8 +16,8 @@ const TONES = {
 } as const;
 export type Tone = keyof typeof TONES;
 
-export function KpiTile({ label, children, hint, to, icon: Icon, tone = 'accent' }: {
-  label: string; children: ReactNode; hint?: ReactNode; to?: string; icon?: ElementType; tone?: Tone;
+export function KpiTile({ label, children, hint, to, icon: Icon, tone = 'accent', footer }: {
+  label: string; children: ReactNode; hint?: ReactNode; to?: string; icon?: ElementType; tone?: Tone; footer?: ReactNode;
 }) {
   const body = (
     <div className="card h-full transition-colors hover:border-slate-400/50">
@@ -26,6 +27,7 @@ export function KpiTile({ label, children, hint, to, icon: Icon, tone = 'accent'
       </div>
       <div className="mt-1 text-2xl font-semibold tracking-tight text-fg">{children}</div>
       {hint && <p className="mt-1 text-tiny text-fg-muted">{hint}</p>}
+      {footer && <div className="mt-3">{footer}</div>}
     </div>
   );
   return to ? <Link to={to} className="block h-full">{body}</Link> : body;
@@ -36,7 +38,7 @@ export function Panel({ title, to, linkLabel = 'View all', action, children, cla
 }) {
   return (
     <div className={`card !p-0 ${className}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border px-4 py-3">
         <h3 className="text-h3 font-medium text-fg">{title}</h3>
         <div className="flex items-center gap-3">
           {action}
@@ -109,6 +111,75 @@ export function TrendChart({ points, series, height = 160, format = (n) => n.toL
           <span key={p.label} className="flex-1 truncate text-center text-[10px] text-fg-muted">{i % Math.ceil(points.length / 6) === 0 ? p.label : ''}</span>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** A tiny bar sparkline (no axes): the shape of a series, the latest bar solid. Hover a bar for its value. */
+export function Sparkline({ values, labels, format = (n) => n.toLocaleString(), className = 'bg-accent', height = 36 }: {
+  values: number[]; labels?: string[]; format?: (n: number) => string; className?: string; height?: number;
+}) {
+  const max = Math.max(1, ...values);
+  return (
+    <div className="flex items-end gap-[3px]" style={{ height }}>
+      {values.map((v, i) => (
+        <div key={i} title={labels ? `${labels[i]}: ${format(v)}` : format(v)}
+          className={`flex-1 rounded-t-[2px] ${className} ${i === values.length - 1 ? '' : 'opacity-50'}`}
+          style={{ height: `${v > 0 ? Math.max(8, (v / max) * 100) : 4}%` }} />
+      ))}
+    </div>
+  );
+}
+
+/** A labelled number inside a panel — lay several out in a grid; with `to` the whole cell is a link. */
+export function MiniStat({ label, value, hint, tone, to }: {
+  label: string; value: ReactNode; hint?: ReactNode; tone?: 'danger' | 'warning' | 'success'; to?: string;
+}) {
+  const color = tone === 'danger' ? 'text-danger-text' : tone === 'warning' ? 'text-warning-text' : tone === 'success' ? 'text-success-text' : 'text-fg';
+  const body = (
+    <>
+      <p className="text-tiny text-fg-muted">{label}</p>
+      <p className={`text-xl font-semibold tracking-tight ${color}`}>{value}</p>
+      {hint && <p className="break-words text-tiny text-fg-muted">{hint}</p>}
+    </>
+  );
+  const cls = 'block min-w-0 rounded-lg px-3 py-2';
+  return to ? <Link to={to} className={`${cls} transition-colors hover:bg-page`}>{body}</Link> : <div className={cls}>{body}</div>;
+}
+
+/** One bar split into parts (e.g. accounts by health), with a legend of counts unless `legend` is false. */
+export function StackedBar({ parts, legend = true }: { parts: { key: string; label: string; value: number; className: string }[]; legend?: boolean }) {
+  const total = parts.reduce((n, p) => n + p.value, 0);
+  return (
+    <div>
+      <div className="flex h-2.5 overflow-hidden rounded-full bg-page">
+        {total > 0 && parts.filter((p) => p.value > 0).map((p) => (
+          <div key={p.key} className={p.className} style={{ width: `${(p.value / total) * 100}%` }} title={`${p.label}: ${p.value.toLocaleString()}`} />
+        ))}
+      </div>
+      {legend && <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-tiny text-fg-secondary">
+        {parts.map((p) => (
+          <span key={p.key} className="inline-flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-sm ${p.className}`} />{p.label} <span className="font-medium text-fg">{p.value.toLocaleString()}</span>
+          </span>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
+/** A compact either/or switch for a panel's header (e.g. Clicks · Conversions). */
+export function Toggle<T extends string>({ options, value, onChange }: {
+  options: readonly { value: T; label: string }[]; value: T; onChange: (v: T) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-md border border-border bg-page p-0.5 text-tiny font-medium">
+      {options.map((o) => (
+        <button key={o.value} type="button" aria-pressed={value === o.value} onClick={() => onChange(o.value)}
+          className={`rounded px-2 py-0.5 transition-colors ${value === o.value ? 'bg-elevated text-fg shadow-sm' : 'text-fg-secondary hover:text-fg'}`}>
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }

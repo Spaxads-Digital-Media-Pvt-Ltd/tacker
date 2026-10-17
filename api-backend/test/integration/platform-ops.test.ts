@@ -2,7 +2,8 @@
  * Super Admin › operations — on a real Postgres (INTEGRATION_DB=1).
  *
  * - Overview: networks by status, subscriptions, MRR per currency (paying only — trials excluded; a yearly
- *   price as a twelfth), billing per currency, what needs attention.
+ *   price as a twelfth), billing per currency, what needs attention; traffic per day (14), new networks per
+ *   month (6) and each panel's headline numbers — equal to the panel's own page, null without its section.
  * - Usage across networks: each against its plan's limits, the worst state.
  * - Team: add (no duplicate email), disable (never yourself — so one active Super Admin always remains; a
  *   disabled one is refused at once), reset another's password, change your own (needs the current one);
@@ -71,6 +72,39 @@ d('Super Admin operations (live DB)', () => {
     expect(r.body.data.subscriptions.trialing).toBeGreaterThanOrEqual(1);
     expect(r.body.data.trialsEndingSoon.map((t: { network_id: string }) => t.network_id)).not.toContain(n3); // 30 days away
     expect(r.body.data.recentActivity[0]).toMatchObject({ admin_email: email });
+  });
+
+  it('overview: traffic per day, new networks per month, and each panel’s numbers — the same as its own page; a role without the section gets null', async () => {
+    const before = (await request(platform).get('/platform/summary').set(pa)).body.data;
+    expect(before.trend).toHaveLength(14);
+    expect(before.signups).toHaveLength(6);
+    const today = before.trend[13].day as string;
+    // Today's metered traffic of this file's own network (no usage rows of its own yet).
+    await query(`INSERT INTO usage_records (network_id, metric, period_date, value) VALUES ($1, 'clicks', $2::date, 7), ($1, 'conversions', $2::date, 2)`,
+      [fx.networkA, today]);
+    const s = (await request(platform).get('/platform/summary').set(pa)).body.data;
+    expect(s.trend[13].clicks - before.trend[13].clicks).toBe(7);
+    expect(s.trend[13].conversions - before.trend[13].conversions).toBe(2);
+    expect(s.signups[5]).toMatchObject({ month: today.slice(0, 7), created: expect.any(Number) });
+    expect(s.signups[5].created).toBeGreaterThanOrEqual(1); // this file's fixtures
+    expect(Array.isArray(s.mrrTrend)).toBe(true);
+    // The busiest networks of the 14 days: at most 6, busiest first.
+    const top = s.topNetworks as { id: string; clicks: number }[];
+    expect(top.length).toBeGreaterThan(0);
+    expect(top.length).toBeLessThanOrEqual(6);
+    expect(top.map((t) => t.clicks)).toEqual([...top.map((t) => t.clicks)].sort((x, y) => y - x));
+    // One definition each: the Overview says what the panel's own page says.
+    expect(s.sales.kpis).toEqual((await request(platform).get('/platform/sales/summary').set(pa)).body.data.kpis);
+    expect(s.support).toEqual((await request(platform).get('/platform/support/summary').set(pa)).body.data.counts);
+    expect(s.health).toEqual((await request(platform).get('/platform/success/summary').set(pa)).body.data.counts);
+    expect(s.tasks).toEqual((await request(platform).get('/platform/tasks/summary').set(pa)).body.data);
+
+    // Support: no Sales or Revenue — those parts are null, not empty.
+    const agent = randomUUID();
+    await query(`INSERT INTO platform_admins (id, email, status, auth_provider, password_hash, role_id) VALUES ($1, $2, 'active', 'local', $3, '00000000-0000-4000-a000-000000000005')`,
+      [agent, `agent-${agent.slice(0, 8)}@test.local`, await hashPassword(PW)]);
+    const a = (await request(platform).get('/platform/summary').set(bearer(await signPlatformAdminToken(agent)))).body.data;
+    expect(a).toMatchObject({ sales: null, mrrTrend: null, mrr: null, support: expect.objectContaining({ open: expect.any(Number) }), health: expect.objectContaining({ accounts: expect.any(Number) }) });
   });
 
   it('usage across networks: each with its plan, the limits this period and the worst state', async () => {

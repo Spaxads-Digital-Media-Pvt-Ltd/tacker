@@ -28,8 +28,8 @@ import { createNetwork } from '../../lib/networks/create.js';
 import { assignPlan } from '../../lib/billing/subscriptions.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
 import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
-import { STAGES, OPEN_STAGES, SOURCES, LOGGED_ACTIVITIES, probabilitySql, logLeadActivity } from '../../lib/platform/sales.js';
-import { requirePerm, can, isAssignedScope, networkScope } from './auth.js';
+import { STAGES, OPEN_STAGES, SOURCES, LOGGED_ACTIVITIES, logLeadActivity, salesKpis } from '../../lib/platform/sales.js';
+import { requirePerm, can, networkScope, leadScope } from './auth.js';
 import { UUID_RE, optText, optEmail, optMoney, optDateTime, meId } from './fields.js';
 
 interface LeadRow {
@@ -99,11 +99,6 @@ const SORT: Record<z.infer<typeof listSchema>['sort'], string> = {
   value: 'l.expected_mrr DESC NULLS LAST, l.updated_at DESC', company: 'lower(l.company) ASC',
 };
 
-/** SQL limiting a sales_leads alias to the member's scope: every lead, or (an 'assigned' role) the ones it owns. */
-function leadScope(req: Request, alias: string, next: number): { sql: string; params: unknown[] } {
-  return isAssignedScope(req) ? { sql: `${alias}.owner_id = $${next}`, params: [meId(req)] } : { sql: 'TRUE', params: [] };
-}
-
 async function loadLead(req: Request, id: string): Promise<LeadRow> {
   if (!UUID_RE.test(id)) throw notFound('Lead not found');
   const sc = leadScope(req, 'l', 2);
@@ -160,27 +155,12 @@ export function salesRoutes(): Router {
     const sc = leadScope(req, 'l', 1);
     const p = sc.params;
     const me = meId(req);
-    const [stages, kpis, forecast, wonMonth, sources, leaders, trend, tasks, recent] = await Promise.all([
+    const [stages, headline, sources, leaders, trend, tasks, recent] = await Promise.all([
       query<{ stage: string; currency: string; count: number; mrr: string }>(
         `SELECT l.stage, l.currency, COUNT(*)::int AS count, COALESCE(SUM(l.expected_mrr), 0)::text AS mrr
            FROM sales_leads l WHERE (l.stage NOT IN ('won', 'lost') OR COALESCE(l.won_at, l.lost_at) >= now() - interval '30 days') AND ${sc.sql}
           GROUP BY l.stage, l.currency`, p),
-      query<Record<string, number | null>>(
-        `SELECT COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost'))::int AS open,
-                COUNT(*) FILTER (WHERE l.created_at >= date_trunc('month', now()))::int AS new_this_month,
-                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()))::int AS won_this_month,
-                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= now() - interval '90 days')::int AS won_90d,
-                COUNT(*) FILTER (WHERE l.stage = 'lost' AND l.lost_at >= now() - interval '90 days')::int AS lost_90d,
-                ROUND(AVG(EXTRACT(EPOCH FROM (l.won_at - l.created_at)) / 86400) FILTER (WHERE l.stage = 'won' AND l.won_at >= now() - interval '90 days'))::int AS avg_cycle_days,
-                COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost') AND l.next_step_at < now())::int AS overdue_next_steps,
-                COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost') AND l.owner_id IS NULL)::int AS unassigned
-           FROM sales_leads l WHERE ${sc.sql}`, p),
-      query<{ currency: string; pipeline: string; weighted: string }>(
-        `SELECT l.currency, COALESCE(SUM(l.expected_mrr), 0)::text AS pipeline, ROUND(COALESCE(SUM(l.expected_mrr * ${probabilitySql('l')}), 0), 2)::text AS weighted
-           FROM sales_leads l WHERE l.stage NOT IN ('won', 'lost') AND ${sc.sql} GROUP BY l.currency ORDER BY l.currency`, p),
-      query<{ currency: string; amount: string; deals: number }>(
-        `SELECT l.currency, COALESCE(SUM(l.expected_mrr), 0)::text AS amount, COUNT(*)::int AS deals
-           FROM sales_leads l WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()) AND ${sc.sql} GROUP BY l.currency ORDER BY l.currency`, p),
+      salesKpis(sc),
       query<{ source: string; leads: number; won: number }>(
         `SELECT l.source, COUNT(*)::int AS leads, COUNT(*) FILTER (WHERE l.stage = 'won')::int AS won
            FROM sales_leads l WHERE l.created_at >= now() - interval '180 days' AND ${sc.sql} GROUP BY l.source ORDER BY leads DESC`, p),
@@ -224,13 +204,11 @@ export function salesRoutes(): Router {
       s.count += row.count;
       if (Number(row.mrr) > 0) s.mrr.push({ currency: row.currency, amount: row.mrr });
     }
-    const k = kpis.rows[0]!;
-    const closed = (k['won_90d'] ?? 0) + (k['lost_90d'] ?? 0);
     sendOk(res, {
-      kpis: { ...k, win_rate_90d: closed ? Math.round(((k['won_90d'] ?? 0) / closed) * 100) : null },
+      kpis: headline.kpis,
       stages: [...byStage.values()],
-      forecast: forecast.rows,
-      wonThisMonth: wonMonth.rows,
+      forecast: headline.forecast,
+      wonThisMonth: headline.wonThisMonth,
       sources: sources.rows,
       leaderboard: leaders.rows,
       trend: trend.rows,

@@ -42,7 +42,7 @@ export default function Tasks() {
       <PageHeader title="Tasks" subtitle="Follow-ups and to-dos across sales, customer success, support and billing."
         action={<button className="btn-primary" onClick={() => setAdding(true)}>New task</button>} />
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Segmented className="sm:max-w-sm" options={[{ value: 'me', label: 'Mine' }, { value: 'all', label: 'Team' }, { value: 'unassigned', label: 'Unassigned' }, { value: 'member', label: 'Member…' }]}
+        <Segmented className="sm:max-w-md" options={[{ value: 'me', label: 'Mine' }, { value: 'all', label: 'Team' }, { value: 'unassigned', label: 'Unassigned' }, { value: 'member', label: 'Member…' }]}
           value={who} onChange={setWho} />
         {who === 'member' && <StaffSelect staff={staff.data} value={member} onChange={setMember} noneLabel="Choose a member" className="input !w-auto" ariaLabel="Member" />}
         <Segmented className="sm:max-w-[15rem]" options={[{ value: 'open', label: 'Open' }, { value: 'done', label: 'Done' }, { value: 'all', label: 'All' }]} value={status} onChange={setStatus} />

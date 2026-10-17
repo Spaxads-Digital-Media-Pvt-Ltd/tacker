@@ -9,18 +9,12 @@ import { useQuery } from '../../../lib/useApi';
 import { usePlatformMe } from '../../../lib/platformMe';
 import { money, day } from '../../../lib/platformBilling';
 import { relTime, isOverdue } from '../../../lib/relativeTime';
-import { STAGES, sourceLabel, stageOf, type PerCurrencyAmount } from '../../../lib/platformSales';
+import { STAGES, sourceLabel, stageOf, type PerCurrencyAmount, type SalesHeadline } from '../../../lib/platformSales';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { Avatar, BarList, Empty, KpiTile, Panel, PerCurrency, TrendChart } from '../kit';
 
-interface Summary {
-  kpis: {
-    open: number; new_this_month: number; won_this_month: number; won_90d: number; lost_90d: number; avg_cycle_days: number | null;
-    overdue_next_steps: number; unassigned: number; win_rate_90d: number | null;
-  };
+interface Summary extends SalesHeadline {
   stages: { stage: string; count: number; mrr: PerCurrencyAmount[] }[];
-  forecast: { currency: string; pipeline: string; weighted: string }[];
-  wonThisMonth: { currency: string; amount: string; deals: number }[];
   sources: { source: string; leads: number; won: number }[];
   leaderboard: { id: string; name: string; open: number; won_this_month: number; won_this_quarter: number; won_mrr_quarter: PerCurrencyAmount[] }[];
   trend: { week: string; created: number; won: number }[];

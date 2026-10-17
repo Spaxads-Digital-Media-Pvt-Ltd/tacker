@@ -108,8 +108,10 @@ export default function Team() {
           {members.loading ? <StateBlock><Spinner /></StateBlock>
             : members.error ? <StateBlock>{members.error}</StateBlock>
             : <Table columns={memberCols} rows={members.data ?? []} rowKey={(m) => m.id} />}
-          <OwnPassword onDone={() => setNotice('Your password was changed. Use it at your next sign-in.')} />
-          <div className="mt-6"><TwoFactorCard onChanged={() => members.refetch()} /></div>
+          <div className="mt-6 grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
+            <OwnPassword onDone={() => setNotice('Your password was changed. Use it at your next sign-in.')} />
+            <TwoFactorCard onChanged={() => members.refetch()} />
+          </div>
         </>
       ) : roles.loading ? <StateBlock><Spinner /></StateBlock>
         : roles.error ? <StateBlock>{roles.error}</StateBlock>
@@ -297,7 +299,7 @@ function OwnPassword({ onDone }: { onDone: () => void }) {
     if (await m.run({ currentPassword: current, newPassword: pw })) { setCurrent(''); setPw(''); setPw2(''); onDone(); }
   };
   return (
-    <form onSubmit={submit} className="card mt-6 max-w-2xl space-y-4">
+    <form onSubmit={submit} className="card max-w-2xl space-y-4">
       <h3 className="text-h3 font-medium text-fg">Your account · change password</h3>
       {(m.error || mismatch) && <p className="text-small text-danger-text">{mismatch ? 'The new passwords don’t match.' : m.error}</p>}
       <Field label="Current password"><input className="input max-w-sm" type="password" required autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>

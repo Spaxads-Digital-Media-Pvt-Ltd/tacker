@@ -13,14 +13,14 @@ import { usePlatformMe } from '../../../lib/platformMe';
 import { useDebounced } from '../../admin/pagedList';
 import { relTime, isOverdue } from '../../../lib/relativeTime';
 import { totalOf, useStaff } from '../../../lib/platformSales';
-import { HEALTH, trendPct, type AccountRow, type HealthStatus } from '../../../lib/platformSuccess';
+import { HEALTH, trendPct, type AccountRow, type HealthCounts, type HealthStatus } from '../../../lib/platformSuccess';
 import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
 import { KpiTile, Panel, Empty, Pager } from '../kit';
 import { StaffSelect } from '../sales/parts';
 import { HealthBar, HealthChip, ScoreDelta } from './parts';
 
 interface Summary {
-  counts: { accounts: number; healthy: number; attention: number; at_risk: number; unscored: number; avg_score: number | null; mine: number; unassigned: number; onboarding_open: number; computed_at: string | null };
+  counts: HealthCounts;
   atRisk: { id: string; name: string; health_score: number; account_manager_name: string | null }[];
   drops: { id: string; name: string; health_score: number; score_7d_ago: number }[];
   stalled: { id: string; name: string; created_at: string; onboarding_pct: number }[];
@@ -93,7 +93,7 @@ export default function HealthBoard() {
       {(recalc.error || error) && <p className="mb-3 text-small text-danger-text">{recalc.error ?? error}</p>}
       {summary.loading && !summary.data ? <StateBlock><Spinner /></StateBlock> : summary.error ? <StateBlock>{summary.error}</StateBlock> : c && summary.data && (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <KpiTile label="Healthy" icon={ShieldCheck} tone="success" hint={`${c.accounts} account(s) · scored ${c.computed_at ? relTime(c.computed_at) : 'not yet'}`}>{c.healthy}</KpiTile>
             <KpiTile label="Needs attention" icon={Gauge} tone="warning" hint="Score 40–69">{c.attention}</KpiTile>
             <KpiTile label="At risk" icon={AlertTriangle} tone="danger" hint="Score under 40">{c.at_risk}</KpiTile>

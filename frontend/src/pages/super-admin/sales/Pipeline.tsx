@@ -90,7 +90,7 @@ export default function Pipeline() {
             const closed = col.stage === 'won' || col.stage === 'lost';
             return (
               <div key={col.stage}
-                className={`flex w-[17rem] shrink-0 flex-col rounded-card border bg-page/60 transition-colors ${over === col.stage ? 'border-accent bg-accent-subtle/40' : 'border-border'}`}
+                className={`flex w-[12.5rem] shrink-0 flex-col rounded-card border bg-page/60 transition-colors ${over === col.stage ? 'border-accent bg-accent-subtle/40' : 'border-border'}`}
                 onDragOver={(e) => { if (canEdit && dragging) { e.preventDefault(); setOver(col.stage); } }}
                 onDragLeave={() => setOver((o) => (o === col.stage ? null : o))}
                 onDrop={drop(col.stage)}>

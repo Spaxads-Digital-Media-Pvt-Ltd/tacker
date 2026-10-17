@@ -108,6 +108,20 @@ export function networkScope(req: Request, alias: string, next: number): { sql: 
  return { sql: `(${alias}.account_manager_id = $${next} OR ${alias}.sales_owner_id = $${next})`, params: [id.platformAdminId] };
 }
 
+/** SQL limiting a sales_leads alias to the member's scope: every lead, or (an 'assigned' role) the ones it owns. */
+export function leadScope(req: Request, alias: string, next: number): { sql: string; params: unknown[] } {
+ const id = platformIdentity(req);
+ if (id?.role?.scope !== 'assigned') return { sql: 'TRUE', params: [] };
+ return { sql: `${alias}.owner_id = $${next}`, params: [id.platformAdminId] };
+}
+
+/** The network ids an 'assigned' role may see (null = every network) — for queries over tables without a networks join. */
+export async function scopedNetworkIds(req: Request): Promise<string[] | null> {
+ if (!isAssignedScope(req)) return null;
+ const sc = networkScope(req, 'n', 1);
+ return (await query<{ id: string }>(`SELECT n.id FROM networks n WHERE ${sc.sql}`, sc.params)).rows.map((r) => r.id);
+}
+
 /** 404 (never "forbidden" — it doesn't say the network exists) when the network is outside an 'assigned' scope. */
 export async function assertNetworkInScope(req: Request, networkId: string): Promise<void> {
  const id = platformIdentity(req);

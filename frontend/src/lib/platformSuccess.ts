@@ -11,6 +11,12 @@ export const HEALTH: Record<HealthStatus, { label: string; chip: string; bar: st
   at_risk: { label: 'At risk', chip: 'bg-danger-bg text-danger-text', bar: 'bg-danger', text: 'text-danger-text' },
 };
 
+/** Accounts by health (GET /platform/success/summary `counts`, also the Overview's `health`). */
+export interface HealthCounts {
+  accounts: number; healthy: number; attention: number; at_risk: number; unscored: number; avg_score: number | null;
+  mine: number; unassigned: number; onboarding_open: number; computed_at: string | null;
+}
+
 export const PARTS: { key: 'usage' | 'trend' | 'engagement' | 'billing' | 'onboarding'; label: string; weight: number; hint: string }[] = [
   { key: 'usage', label: 'Usage', weight: 30, hint: 'Clicks and conversions in the last 7 days' },
   { key: 'trend', label: 'Trend', weight: 15, hint: 'Clicks in the last 7 days against the 7 before' },

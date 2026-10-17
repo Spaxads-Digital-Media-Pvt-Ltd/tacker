@@ -21,7 +21,7 @@ import { paginationSchema } from '../../lib/http/pagination.js';
 import { query } from '../../lib/db/pool.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { writePlatformAudit } from '../../lib/audit.js';
-import { computeHealth, MILESTONES } from '../../lib/platform/health.js';
+import { computeHealth, healthCounts, MILESTONES } from '../../lib/platform/health.js';
 import { requirePerm, networkScope, assertNetworkInScope, isAssignedScope } from './auth.js';
 import { UUID_RE, meId } from './fields.js';
 
@@ -80,23 +80,10 @@ export function successRoutes(): Router {
     // The counts take me as $1 (then the scope); the lists only the scope.
     const sc2 = networkScope(req, 'n', 2);
     const sc1 = networkScope(req, 'n', 1);
-    const p2 = [meId(req), ...sc2.params];
     const p = sc1.params;
-    const live2 = `n.status <> 'deleted' AND ${sc2.sql}`;
     const live = `n.status <> 'deleted' AND ${sc1.sql}`;
     const [counts, atRisk, drops, stalled, trials, notes, tasks] = await Promise.all([
-      query<Record<string, number | string | null>>(
-        `SELECT COUNT(*)::int AS accounts,
-                COUNT(*) FILTER (WHERE na.health_status = 'healthy')::int AS healthy,
-                COUNT(*) FILTER (WHERE na.health_status = 'attention')::int AS attention,
-                COUNT(*) FILTER (WHERE na.health_status = 'at_risk')::int AS at_risk,
-                COUNT(*) FILTER (WHERE na.health_status IS NULL)::int AS unscored,
-                ROUND(AVG(na.health_score))::int AS avg_score,
-                COUNT(*) FILTER (WHERE n.account_manager_id = $1)::int AS mine,
-                COUNT(*) FILTER (WHERE n.account_manager_id IS NULL)::int AS unassigned,
-                COUNT(*) FILTER (WHERE na.onboarding_pct < 100)::int AS onboarding_open,
-                MAX(na.health_computed_at) AS computed_at
-           FROM networks n LEFT JOIN network_accounts na ON na.network_id = n.id WHERE ${live2}`, p2),
+      healthCounts(meId(req), sc2),
       query(`SELECT n.id, n.name, na.health_score, COALESCE(am.name, am.email) AS account_manager_name, na.health_components
                FROM networks n JOIN network_accounts na ON na.network_id = n.id LEFT JOIN platform_admins am ON am.id = n.account_manager_id
               WHERE ${live} AND na.health_status = 'at_risk' ORDER BY na.health_score, n.name LIMIT 8`, p),
@@ -118,7 +105,7 @@ export function successRoutes(): Router {
                FROM platform_tasks t LEFT JOIN networks n ON n.id = t.network_id
               WHERE t.assignee_id = $1 AND t.status = 'open' AND t.kind = 'success' ORDER BY t.due_at ASC NULLS LAST LIMIT 8`, [meId(req)]),
     ]);
-    sendOk(res, { counts: counts.rows[0], atRisk: atRisk.rows, drops: drops.rows, stalled: stalled.rows, trials: trials.rows, notes: notes.rows, myTasks: tasks.rows });
+    sendOk(res, { counts, atRisk: atRisk.rows, drops: drops.rows, stalled: stalled.rows, trials: trials.rows, notes: notes.rows, myTasks: tasks.rows });
   }));
 
   r.get('/success/accounts', requirePerm('success', 'read'), validateQuery(accountsSchema), asyncHandler(async (req, res) => {
