@@ -601,6 +601,10 @@ export interface TrackingDomain {
   verificationState: 'unverified' | 'pending' | 'verified' | 'failed';
   sslStatus: 'none' | 'pending' | 'issued' | 'error';
   isPrimary: boolean;
+  /** The domain links use when an offer / smart link has none of its own — set by the API (backend
+   * lib/tracking-domains/default-host.ts): the primary if active, else the domain the tracking server is live
+   * on, else another real domain; localhost / 127.0.0.1 last. */
+  isDefault?: boolean;
   /** Custom hosts: the DNS TXT record that verifies them (F-15). */
   dnsRecord?: { type: string; name: string; value: string } | null;
   createdAt: string;

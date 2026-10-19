@@ -16,6 +16,7 @@ import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitiv
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { fmtDateTime, fmtMoney, REDIRECT_MECHANISMS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
 import type { Offer, TrackingDomain } from '../../types';
+import { resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
 
 const PAGE_SIZE = 25;
 const STATUSES = ['active', 'paused', 'deleted'] as const;
@@ -39,11 +40,9 @@ function useLinkItems(links: SmartLink[] | null): Record<string, SmartLinkItem[]
   return byLink;
 }
 
-function trackBase(domains: TrackingDomain[] | null): string {
-  const active = (domains ?? []).filter((d) => d.status === 'active');
-  const primary = active.find((d) => d.isPrimary) ?? active[0];
-  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  return isLocal ? 'http://localhost:4002' : `https://${primary?.host ?? 'your-tracking-domain.com'}`;
+/** A smart link's base URL: its own tracking domain, else the network's default (lib/trackingLinks). */
+function trackBase(domains: TrackingDomain[] | null, trackingDomainId: string | null = null): string {
+  return trackingBase(resolveTrackingHost(domains, trackingDomainId)) || 'https://your-tracking-domain.com';
 }
 
 function TableActionsMenu({ rows, offerName }: { rows: SmartLink[]; offerName: (id: string | null) => string }) {
@@ -139,7 +138,6 @@ export default function SmartLinks() {
     [offers],
   );
   const offerName = (id: string | null) => (id ? offerLabel(id) : '—');
-  const base = trackBase(domains ?? null);
 
   // Data-driven option lists so the drawer only offers values that actually exist in the list.
   const catchAllOptions = useMemo(
@@ -242,7 +240,7 @@ export default function SmartLinks() {
                           <div className="flex items-center gap-1.5">
                             <button className="font-medium text-accent-text hover:underline" onClick={() => nav(`/app/smart-links/${r.id}`)}>{r.name}</button>
                             {r.showToPartners && (
-                              <a href={`${base}/sl?id=${r.id}`} target="_blank" rel="noreferrer" title="Open Smart Link"
+                              <a href={`${trackBase(domains ?? null, r.trackingDomainId)}/sl?id=${r.id}`} target="_blank" rel="noreferrer" title="Open Smart Link"
                                 className="text-fg-muted opacity-0 hover:text-accent-text group-hover:opacity-100"><ExternalLink size={13} /></a>
                             )}
                           </div>
@@ -253,7 +251,7 @@ export default function SmartLinks() {
                               {items.slice(0, 2).map((it) => (
                                 <p key={it.id} className="flex items-center gap-1 text-tiny text-fg">
                                   - {offerLabel(it.offerId)}
-                                  {r.showToPartners && <a href={`${base}/sl?id=${r.id}`} target="_blank" rel="noreferrer" className="text-fg-muted hover:text-accent-text"><ExternalLink size={11} /></a>}
+                                  {r.showToPartners && <a href={`${trackBase(domains ?? null, r.trackingDomainId)}/sl?id=${r.id}`} target="_blank" rel="noreferrer" className="text-fg-muted hover:text-accent-text"><ExternalLink size={11} /></a>}
                                 </p>
                               ))}
                               {items.length > 2 && (

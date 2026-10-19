@@ -14,6 +14,8 @@ import { imageAccept, imageTypesText, uploadImage } from '../../lib/imageUpload'
 import { loadSession, saveSession, updateToken } from '../../auth/session';
 import { PageHeader, Badge, Modal, Field, Tabs } from '../../shared-components/primitives/ui';
 import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
+import { resolveTrackingHost } from '../../lib/trackingLinks';
+import type { TrackingDomain } from '../../types';
 
 const ACCOUNT_TABS = ['General', 'Logins'] as const;
 const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Portuguese'];
@@ -89,7 +91,7 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
 
 export default function ProfilePage() {
   const { session } = useAuth();
-  const domains = useQuery<{ id: string; host: string; isPrimary?: boolean; status?: string }[]>('/api/tracking-domains');
+  const domains = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const account = useQuery<MyAccount>('/api/me/account');
   const settings = useQuery<NetworkSettings>('/api/settings');
   const logins = useQuery<LoginRow[]>('/api/me/logins');
@@ -140,8 +142,7 @@ export default function ProfilePage() {
   if (!session) return null;
   const roleLabel = ROLE_LABELS[session.role] ?? account.data?.role ?? session.role;
 
-  const active = (domains.data ?? []).filter((d) => d.status === 'active');
-  const host = active.find((d) => d.isPrimary)?.host ?? active[0]?.host ?? 'your-tracking-domain.com';
+  const host = resolveTrackingHost(domains.data) ?? 'your-tracking-domain.com';
   const affiliateSignup = `https://${host}/pub-signup`;
   const advertiserSignup = `https://${host}/adv-signup`;
 

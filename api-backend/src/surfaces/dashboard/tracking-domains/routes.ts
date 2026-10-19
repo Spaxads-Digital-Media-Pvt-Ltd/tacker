@@ -23,11 +23,18 @@ import { toDTO } from './dto.js';
 import { invalidateHost } from '../../tracking/host-resolver-db.js';
 import { verifyTrackingDomain } from '../../../lib/tracking-domains/verify.js';
 import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
+import { networkDomains, pickDefaultDomain } from '../../../lib/tracking-domains/default-host.js';
 
 /** Explicit status transitions (F-15): a verified host can be switched off and on again. */
 const patchSchema = z.object({ status: z.enum(['active', 'disabled']) });
 
 const TABLE = 'tracking_domains';
+
+/** Which of the network's domains links use by default (lib/tracking-domains/default-host.ts). */
+async function defaultDomainId(networkId: string): Promise<string | null> {
+  const { rows, liveHost } = await networkDomains(networkId);
+  return pickDefaultDomain(rows, liveHost)?.id ?? null;
+}
 
 export function trackingDomainsAdminRoutes(): Router {
   const r = Router();
@@ -39,11 +46,12 @@ export function trackingDomainsAdminRoutes(): Router {
     asyncHandler(async (req, res) => {
       const { limit, offset } = res.locals.query as PaginationQuery;
       const db = dbForRequest(req);
-      const [rows, total] = await Promise.all([
+      const [rows, total, defaultId] = await Promise.all([
         db.selectMany<TrackingDomainRow>(TABLE, { limit, offset, orderBy: 'created_at' }),
         db.count(TABLE),
+        defaultDomainId(db.scope.networkId),
       ]);
-      sendOk(res, rows.map(toDTO), { limit, offset, total });
+      sendOk(res, rows.map((r) => toDTO(r, defaultId)), { limit, offset, total });
     }),
   );
 
@@ -92,16 +100,17 @@ export function trackingDomainsAdminRoutes(): Router {
         throw err;
       }
       await writeAudit(req, { action: 'tracking_domain.create', entityType: 'tracking_domain', entityId: row.id, after: row });
-      sendOk(res, toDTO(row), undefined, 201);
+      sendOk(res, toDTO(row, await defaultDomainId(db.scope.networkId)), undefined, 201);
     }),
   );
 
   r.get(
     '/:id',
     asyncHandler(async (req, res) => {
-      const row = await dbForRequest(req).selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
+      const db = dbForRequest(req);
+      const row = await db.selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
       if (!row) throw notFound('Tracking domain not found');
-      sendOk(res, toDTO(row));
+      sendOk(res, toDTO(row, await defaultDomainId(db.scope.networkId)));
     }),
   );
 
@@ -116,7 +125,7 @@ export function trackingDomainsAdminRoutes(): Router {
       if (!result) throw notFound('Tracking domain not found');
       const row = await db.selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
       await writeAudit(req, { action: 'tracking_domain.verify', entityType: 'tracking_domain', entityId: req.params.id, after: result });
-      sendOk(res, { ...result, domain: row ? toDTO(row) : null });
+      sendOk(res, { ...result, domain: row ? toDTO(row, await defaultDomainId(db.scope.networkId)) : null });
     }),
   );
 
@@ -137,7 +146,7 @@ export function trackingDomainsAdminRoutes(): Router {
       const [row] = await db.update<TrackingDomainRow>(TABLE, { status }, { id: before.id });
       await invalidateHost(before.host);
       await writeAudit(req, { action: 'tracking_domain.update', entityType: 'tracking_domain', entityId: before.id, before, after: row });
-      sendOk(res, toDTO(row ?? before));
+      sendOk(res, toDTO(row ?? before, await defaultDomainId(db.scope.networkId)));
     }),
   );
 

@@ -1,6 +1,9 @@
 /**
  * Shared tracking-link helpers so every link generator builds the same URL:
- * - host = the offer's own assigned tracking domain (network primary only if the offer has none)
+ * - host = the offer's (smart link's) own tracking domain while it can serve clicks, else the network's
+ *   default domain (`isDefault` from the API — backend lib/tracking-domains/default-host.ts: the primary if
+ *   active, else the domain the tracking server is live on, else another real domain; a tunnel, then
+ *   localhost / 127.0.0.1 only when nothing else is active)
  * - local hosts (localhost / 127.0.0.1) point at the dev tracking server on :4002 over http
  * - offer_id / pub_id use the short numeric ref when available (/click resolves both forms)
  */
@@ -24,14 +27,27 @@ export function groupTrackingDomains(domains: TrackingDomain[] | null | undefine
   return { production, devOnly };
 }
 
+const usable = (d: TrackingDomain) => d.status === 'active' && d.verificationState === 'verified';
+const LOOPBACK = /^(localhost|127\.0\.0\.1)$/i;
+
+/** The network's default link domain: the one the API marks `isDefault`; for a list without the flag, the same
+ * ranking — primary, real domains (oldest first), a tunnel (newest), localhost last. */
+export function defaultTrackingDomain(domains: TrackingDomain[] | null | undefined): TrackingDomain | null {
+  const all = (domains ?? []).filter(usable);
+  const flagged = all.find((d) => d.isDefault);
+  if (flagged) return flagged;
+  const rank = (d: TrackingDomain) => (d.isPrimary ? 0 : LOOPBACK.test(d.host) ? 3 : isDevOnlyHost(d.host) ? 2 : 1);
+  const t = (d: TrackingDomain) => new Date(d.createdAt).getTime();
+  return [...all].sort((a, b) => rank(a) - rank(b) || (rank(a) === 2 ? t(b) - t(a) : t(a) - t(b)))[0] ?? null;
+}
+
 export function resolveTrackingHost(domains: TrackingDomain[] | null | undefined, trackingDomainId?: string | null): string | null {
   const all = domains ?? [];
   if (trackingDomainId) {
     const own = all.find((d) => d.id === trackingDomainId);
-    if (own) return own.host;
+    if (own && usable(own)) return own.host;
   }
-  const active = all.filter((d) => d.status === 'active');
-  return (active.find((d) => d.isPrimary) ?? active[0])?.host ?? null;
+  return defaultTrackingDomain(all)?.host ?? null;
 }
 
 export function trackingBase(host: string | null): string {

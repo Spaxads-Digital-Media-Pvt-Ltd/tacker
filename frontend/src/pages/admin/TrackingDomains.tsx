@@ -36,6 +36,7 @@ export default function TrackingDomains() {
       <span className="font-mono text-xs">
         {d.host}
         {d.isPrimary && <span className="ml-2 rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 ">PRIMARY</span>}
+        {d.isDefault && <span className="ml-2 rounded bg-success-bg px-1.5 py-0.5 text-[10px] font-semibold text-success-text" title="Tracking links use this domain when an offer has none of its own">DEFAULT FOR LINKS</span>}
         {isDevOnlyHost(d.host) && <span className="ml-2 rounded bg-warning-bg px-1.5 py-0.5 text-[10px] font-semibold text-warning-text" title="Local/dev testing only — excluded from the Production group when picking an offer's tracking domain">LOCAL</span>}
       </span>
     ) },

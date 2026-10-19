@@ -32,6 +32,7 @@ import type {
 import { requireRole } from '../auth.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { sdkSnippet } from '../../tracking/sdk.js';
+import { defaultTrackingHost } from '../../../lib/tracking-domains/default-host.js';
 import { offerStatusChanged, offerAccessChanged } from '../../../lib/email/notifications.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
 import { mergeOfferMetadata, type OfferTargeting } from '../../../lib/offer-settings/index.js';
@@ -985,7 +986,7 @@ const offerPortalPaginationSchema = paginationSchema.extend(offerPortalFilterSch
 const PORTAL_JOINS = `LEFT JOIN offer_publisher_access a
  ON a.offer_id = o.id AND a.network_id = o.network_id AND a.publisher_id = $2
  LEFT JOIN tracking_domains td
- ON td.id = o.tracking_domain_id AND td.network_id = o.network_id AND td.status = 'active'`;
+ ON td.id = o.tracking_domain_id AND td.network_id = o.network_id AND td.status = 'active' AND td.verification_state = 'verified'`;
 /** Hide offers this partner was denied/rejected on; a still-pending request stays visible. */
 const PORTAL_NOT_DENIED = `NOT COALESCE(a.access = 'deny' AND a.approval_status <> 'pending', false)`;
 const PORTAL_VISIBLE = `(o.visibility IN ('public', 'ask') OR (o.visibility = 'private' AND a.access = 'allow' AND a.approval_status = 'approved'))`;
@@ -997,17 +998,16 @@ function portalCanRun(row: PortalOfferRow): boolean {
  return row.visibility === 'public' && row.access !== 'deny';
 }
 
-async function primaryTrackingHost(networkId: string): Promise<string | null> {
- const { rows } = await query<{ host: string }>(
- `SELECT host FROM tracking_domains WHERE network_id = $1 AND status = 'active'
- ORDER BY is_primary DESC, created_at ASC LIMIT 1`, [networkId]);
- return rows[0]?.host ?? null;
-}
+/** The network's default link domain (lib/tracking-domains/default-host.ts): primary › the domain the tracking
+ * server is live on › other real domains › a tunnel › localhost last. */
+const primaryTrackingHost = (networkId: string): Promise<string | null> => defaultTrackingHost(networkId);
 
+/** The offer's own tracking domain, while it can serve clicks (active and verified). */
 async function offerTrackingHost(networkId: string, trackingDomainId: string | null): Promise<string | null> {
  if (!trackingDomainId) return null;
  const { rows } = await query<{ host: string }>(
- `SELECT host FROM tracking_domains WHERE id = $1 AND network_id = $2 AND status = 'active'`, [trackingDomainId, networkId]);
+ `SELECT host FROM tracking_domains WHERE id = $1 AND network_id = $2 AND status = 'active' AND verification_state = 'verified'`,
+ [trackingDomainId, networkId]);
  return rows[0]?.host ?? null;
 }
 

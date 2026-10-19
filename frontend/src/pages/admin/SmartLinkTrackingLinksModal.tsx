@@ -8,13 +8,14 @@ import { CopyBox } from '../../shared-components/panels/CopyBox';
 import { useQuery } from '../../lib/useApi';
 import type { Publisher, TrackingDomain } from '../../types';
 import type { SmartLink } from '../../data/smartLinks';
+import { resolveTrackingHost, trackingBase } from '../../lib/trackingLinks';
 
 export function SmartLinkTrackingLinksModal({ smartLink, domains, onClose }: { smartLink: SmartLink; domains: TrackingDomain[]; onClose: () => void }) {
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
-  const activeDomains = domains.filter((d) => d.status === 'active');
-  const primary = activeDomains.find((d) => d.isPrimary) ?? activeDomains[0];
-  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  const trackBase = isLocal ? 'http://localhost:4002' : `https://${primary?.host ?? 'your-tracking-domain.com'}`;
+  // The smart link's own tracking domain, else the network's default (lib/trackingLinks).
+  const host = resolveTrackingHost(domains, smartLink.trackingDomainId);
+  const isLocal = host != null && /^(localhost|127\.0\.0\.1)$/i.test(host);
+  const trackBase = trackingBase(host) || 'https://your-tracking-domain.com';
 
   const [pubId, setPubId] = useState('');
 

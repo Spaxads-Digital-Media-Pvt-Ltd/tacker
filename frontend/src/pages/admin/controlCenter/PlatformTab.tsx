@@ -15,7 +15,7 @@ import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShel
 import { Pagination } from '../../../shared-components/primitives/ReportPageKit';
 import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField, type NotifySaved } from './shared';
 import type { TrackingDomain } from '../../../types';
-import { advertiserPostbackUrl } from '../../../lib/trackingLinks';
+import { advertiserPostbackUrl, resolveTrackingHost } from '../../../lib/trackingLinks';
 import { imageAccept, imageTypesText, uploadImage } from '../../../lib/imageUpload';
 import { CapTimeZoneSelect } from '../../../shared-components/primitives/CapTimeZoneSelect';
 import {
@@ -449,8 +449,9 @@ function GlobalPostbackCard() {
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: security } = useQuery<{ securityCode: string | null }>('/api/settings/security');
   const [copied, setCopied] = useState(false);
-  const primary = domains?.find((d) => d.isPrimary) ?? domains?.[0];
-  const url = primary ? advertiserPostbackUrl(primary.host, security?.securityCode) : null;
+  // The network's default link domain — never a disabled primary (lib/trackingLinks).
+  const host = resolveTrackingHost(domains);
+  const url = host ? advertiserPostbackUrl(host, security?.securityCode) : null;
 
   const copy = () => {
     if (!url) return;
@@ -611,7 +612,7 @@ function DomainsSub() {
     { header: 'ID', cell: (d) => <span className="tabular-nums text-fg-secondary">{d.ref}</span> },
     { header: 'URL', cell: (d) => <span className="font-mono text-xs text-accent-text">{d.host}</span> },
     { header: 'Status', cell: (d) => <Badge value={d.status} /> },
-    { header: 'Is Default', cell: (d) => (d.isPrimary ? 'Default' : '—') },
+    { header: 'Is Default', cell: (d) => (d.isDefault ? 'Default' : d.isPrimary ? 'Primary (not active)' : '—') },
   ];
   const primary = domains.find((d) => d.isPrimary) ?? domains[0];
 

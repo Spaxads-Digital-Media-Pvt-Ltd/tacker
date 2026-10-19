@@ -15,7 +15,7 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { useOfferCategories } from '../../lib/useOfferCategories';
 import { useSubmitGuard } from '../../lib/useSubmitGuard';
-import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
+import { advertiserPostbackUrl, defaultTrackingDomain, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CopyBox } from '../../shared-components/panels/CopyBox';
@@ -94,6 +94,12 @@ export default function OfferCreate() {
   });
   useEffect(() => { sessionStorage.removeItem('offerTemplatePrefill'); }, []);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+  // Start on the network's default link domain (the API's isDefault: the primary, else the domain the tracking
+  // server is live on, else another real domain — localhost last); the admin can still pick another.
+  useEffect(() => {
+    const def = defaultTrackingDomain(domains);
+    if (def) setForm((f) => (f.trackingDomainId ? f : { ...f, trackingDomainId: def.id }));
+  }, [domains]);
   const [assignGroup, setAssignGroup] = useState(false);
   const [groupId, setGroupId] = useState('');
   // Category picker: a searchable list of existing values by default; "＋ New category…" flips to a text input.

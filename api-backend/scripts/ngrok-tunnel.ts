@@ -5,12 +5,15 @@
  * ngrok) + its local 4040 API, which is far more reliable than the npm wrapper. Keeps running until Ctrl-C.
  *
  * Auth token: NGROK_AUTHTOKEN from env (already saved to ngrok's config on first run). If ngrok is
- * not installed: `brew install ngrok`.
+ * not installed: `brew install ngrok`. On Ctrl-C the domain is switched off again: a stopped tunnel can't
+ * serve clicks, so links must never default to it (lib/tracking-domains/default-host.ts).
  * Run:  npm run tunnel [-- <network-slug>]
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { query, closeDb } from '../src/lib/db/pool.js';
+import { closeRedis } from '../src/lib/redis.js';
 import { logger } from '../src/lib/logger.js';
+import { invalidateHost } from '../src/surfaces/tracking/host-resolver-db.js';
 
 const PORT = 4002;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -68,7 +71,13 @@ Browsers see ngrok's warning page once; curl / server-to-server calls can add -H
 Keep this running. Ctrl-C to stop.
 `);
 
-  const shutdown = () => { proc.kill(); void closeDb().finally(() => process.exit(0)); };
+  const shutdown = () => {
+    proc.kill();
+    void query(`UPDATE tracking_domains SET status = 'disabled' WHERE network_id = $1 AND lower(host) = lower($2)`, [net.id, host])
+      .then(() => invalidateHost(host))
+      .catch(() => undefined)
+      .finally(() => void Promise.allSettled([closeDb(), closeRedis()]).finally(() => process.exit(0)));
+  };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
