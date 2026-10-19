@@ -290,7 +290,9 @@ export function mountDetailReports(r: Router): void {
         case 'offer': return `COALESCE(${alias}.offer_id::text, '~none~')`;
         case 'publisher': return `COALESCE(${alias}.publisher_id::text, '~none~')`;
         case 'advertiser': return alias === 'c' ? `COALESCE(o.advertiser_id::text, '~none~')` : `COALESCE(v.advertiser_id::text, '~none~')`;
-        case 'day': return `to_char(date_trunc('day', ${alias}.created_at, ${dayZone}), 'YYYY-MM-DD')`;
+        // The zone's local wall-clock day. (to_char of date_trunc(.., zone) — a timestamptz — rendered
+        // it in the SESSION time zone: Kolkata's midnight read as the previous day on a UTC database.)
+        case 'day': return `to_char(${alias}.created_at AT TIME ZONE ${dayZone}, 'YYYY-MM-DD')`;
         case 'country': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.country, '—')`;
         case 'device': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.device, '—')`;
       }
