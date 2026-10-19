@@ -12,9 +12,11 @@ import { paginationSchema, type PaginationQuery } from '../../lib/http/paginatio
 import { badRequest, forbidden } from '../../lib/http/errors.js';
 import { toAdvertiserDTO } from '../dashboard/offers/dto.js';
 import type { OfferRow } from '../../domain/entities.js';
-import { recordConversion } from '../tracking/conversions/record.js';
+import { recordConversion, type RecordConversionResult } from '../tracking/conversions/record.js';
+import { logInbound, type InboundPostback } from '../tracking/conversions/inbound-log.js';
 import { reportQuerySchema, buildReportRequest } from '../../lib/reporting/request.js';
 import { getReportingProvider } from '../../lib/reporting/index.js';
+import { attachLabels } from '../../lib/reporting/labels.js';
 import { requireScope, apiIdentity } from './auth.js';
 import { getStoredClick } from '../tracking/click-store.js';
 
@@ -69,9 +71,19 @@ export function advertiserApi(): Router {
  const id = apiIdentity(req);
  const b = (req.body ?? {}) as Record<string, unknown>;
  const clickId = typeof b['click_id'] === 'string' ? b['click_id'] : null;
- if (!clickId) throw badRequest('click_id is required');
  // Idempotency-Key header or txn_id — both feed the dedup guard.
  const txnId = (typeof b['txn_id'] === 'string' ? b['txn_id'] : null) ?? req.header('idempotency-key') ?? null;
+ const event = typeof b['event'] === 'string' ? b['event'] : null;
+ // Every request goes to the inbound postback log — recorded or not, and why — as sent by this advertiser.
+ const log = (result: InboundPostback['result'], httpStatus: number) => logInbound({
+ networkId: id.networkId, source: 'api', method: req.method, clickId, transactionId: txnId, event, saleAmount: null,
+ httpStatus, ip: req.ip ?? null, userAgent: req.header('user-agent') ?? null, params: b,
+ result: { ...result, advertiserId: result.advertiserId ?? id.ownerId },
+ });
+ if (!clickId) {
+ await log({ outcome: 'click_not_found', reason: 'missing_click_id' }, 400);
+ throw badRequest('click_id is required');
+ }
 
  // Ownership: verify the click belongs to this advertiser. Check Postgres first; if the click
  // hasn't been flushed there yet, fall back to the Redis click-store (written on the hot path
@@ -90,6 +102,7 @@ export function advertiserApi(): Router {
  // Click not in Postgres — try Redis click-store (valid during async flush window).
  const stored = await getStoredClick(id.networkId, clickId);
  if (!stored) {
+ await log({ outcome: 'click_not_found', reason: 'unknown_click' }, 403);
  throw forbidden('Click not found. Cannot verify ownership for this click_id.');
  }
  // Verify the stored click's offer belongs to this network and get its advertiser.
@@ -101,14 +114,17 @@ export function advertiserApi(): Router {
  }
 
  if (clickAdvertiserId !== id.ownerId) {
+ await log({ outcome: 'security_failed', reason: 'click_not_owned' }, 403);
  throw forbidden('This click does not belong to your offers.');
  }
 
- const result = await recordConversion({
+ let result: RecordConversionResult;
+ try {
+ result = await recordConversion({
  networkId: id.networkId,
  clickId,
  txnId,
- event: typeof b['event'] === 'string' ? b['event'] : null,
+ event,
  statusHint: typeof b['status'] === 'string' ? b['status'] : 'approved',
  payoutParam: null, // advertiser never sets publisher payout
  revenueParam: null, // revenue comes from the frozen click/offer config
@@ -117,6 +133,11 @@ export function advertiserApi(): Router {
  source: 'postback',
  rawParams: b,
  });
+ } catch (err) {
+ await log({ outcome: 'error', reason: 'internal_error' }, 500);
+ throw err;
+ }
+ await log(result, result.outcome === 'duplicate' ? 200 : 201);
  res.status(result.outcome === 'duplicate' ? 200 : 201);
  sendOk(res, { status: result.outcome, conversionId: result.conversionId ?? null });
  }),
@@ -130,7 +151,7 @@ export function advertiserApi(): Router {
  asyncHandler(async (req, res) => {
  const id = apiIdentity(req);
  const request = buildReportRequest(id.networkId, res.locals.query, 'advertiser', { advertiserId: id.ownerId });
- sendOk(res, await getReportingProvider().runReport(request));
+ sendOk(res, await attachLabels(id.networkId, await getReportingProvider().runReport(request)));
  }),
  );
 

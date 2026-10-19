@@ -39,7 +39,7 @@ async function buildTestApp(
  // api_keys auth lookup (from apiKeyAuth middleware)
  if (/FROM api_keys/.test(sql) && /key_hash/.test(sql)) {
  return {
- rows: [{ id: 'key-net-a', network_id: NET_A, audience: 'network', owner_id: 'net-admin-1', scopes: ['payouts:write'], rate_limit_tier: 'default' }],
+ rows: [{ id: 'key-net-a', network_id: NET_A, audience: 'network', owner_id: 'net-admin-1', scopes: ['payouts:write'], rate_limit_tier: 'default', network_status: 'active' }],
  rowCount: 1,
  };
  }

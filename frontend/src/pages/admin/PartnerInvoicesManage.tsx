@@ -9,14 +9,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatDateOnly } from '../../lib/dateOnly';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeOff, CheckCircle2, Trash2, Download, Clock, MoreVertical } from 'lucide-react';
+import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeOff, CheckCircle2, Download, Clock, MoreVertical, Ban } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
-import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { PartnerInvoice, Publisher } from '../../types';
+import { VoidInvoiceModal } from './VoidInvoiceModal';
 
 /** Real client-side CSV/JSON export (same pattern as Offers/Publishers Table Actions) — no export
  * job queue exists server-side, so the "Exports" tab below is a browser-local history of what this
@@ -69,13 +69,14 @@ function runExport(format: 'csv' | 'json', rows: PartnerInvoice[], onDone: () =>
   onDone();
 }
 
-const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', deleted: 'bg-danger-text' };
-const STATUS_LABEL: Record<string, string> = { unpaid: 'Unpaid', paid: 'Paid', deleted: 'Deleted' };
+const STATUS_DOT: Record<string, string> = { unpaid: 'bg-warning', paid: 'bg-success', void: 'bg-fg-muted', deleted: 'bg-danger-text' };
+const STATUS_LABEL: Record<string, string> = { unpaid: 'Unpaid', paid: 'Paid', void: 'Void', deleted: 'Deleted (old)' };
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All', dot: 'bg-fg-muted' },
   { value: 'unpaid', label: 'Unpaid', dot: STATUS_DOT['unpaid']! },
   { value: 'paid', label: 'Paid', dot: STATUS_DOT['paid']! },
-  { value: 'deleted', label: 'Deleted', dot: STATUS_DOT['deleted']! },
+  { value: 'void', label: 'Void', dot: STATUS_DOT['void']! },
+  { value: 'deleted', label: 'Deleted (old)', dot: STATUS_DOT['deleted']! },
 ] as const;
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
 /** Filter value for invoices with no payment terms recorded (null / empty). */
@@ -212,30 +213,18 @@ function ApprovePayModal({ invoices, onClose, onDone }: { invoices: PartnerInvoi
 
 function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: () => void }) {
   const nav = useNavigate();
-  const del = useMutation(() => api.del(`/api/partner-invoices/${invoice.id}`));
+  const [voiding, setVoiding] = useState(false);
   const toggleVisible = useMutation((body: Record<string, unknown>) => api.patch(`/api/partner-invoices/${invoice.id}`, body));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [rowErr, setRowErr] = useState<string | null>(null);
 
-  const confirm = useConfirm();
-  const doDelete = async (menu: { close: () => void }) => {
-    menu.close();
-    void confirm({
-      title: 'Delete invoice?', message: `Are you sure you want to delete invoice ID ${invoice.ref}?`,
-      confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => {
-        setRowErr(null);
-        try { const ok = await del.run(undefined); if (ok) onChanged(); }
-        catch { setRowErr('Failed to delete invoice.'); }
-      },
-    });
-  };
+  const closed = invoice.status === 'void' || invoice.status === 'deleted';
   const doToggleVisible = async (menu: { close: () => void }) => {
     menu.close();
     setRowErr(null);
-    try { const ok = await toggleVisible.run({ visibleToPartner: !invoice.visibleToPartner }); if (ok) onChanged(); }
-    catch { setRowErr('Failed to update visibility.'); }
+    try { await toggleVisible.runOrThrow({ visibleToPartner: !invoice.visibleToPartner }); onChanged(); }
+    catch (e) { setRowErr(e instanceof Error ? e.message : 'Failed to update visibility.'); }
   };
 
   return (
@@ -243,11 +232,13 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
       <TableRowMenu>
         {(menu) => (
           <>
-            {rowErr && <p className="px-3 py-1.5 text-small text-danger-text">{rowErr}</p>}
-            <MenuItem icon={Pencil} disabled={invoice.status === 'deleted'} onSelect={() => { menu.close(); nav(`/app/aff-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
-            <MenuItem icon={invoice.visibleToPartner ? EyeOff : Eye} disabled={invoice.status === 'deleted'} onSelect={() => doToggleVisible(menu)}>{invoice.visibleToPartner ? 'Hide from Partner' : 'Show to Partner'}</MenuItem>
-            <MenuItem icon={CheckCircle2} disabled={invoice.status !== 'unpaid'} onSelect={async () => { menu.close(); try { await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); } catch { setRowErr('Failed to mark as paid.'); } }}>Mark Invoice as Paid</MenuItem>
-            <MenuItem icon={Trash2} tone="danger" disabled={invoice.status === 'deleted'} onSelect={() => doDelete(menu)}>Delete</MenuItem>
+            <MenuItem icon={Pencil} disabled={closed} onSelect={() => { menu.close(); nav(`/app/aff-invoices/${invoice.id}/edit`); }}>Edit</MenuItem>
+            <MenuItem icon={invoice.visibleToPartner ? EyeOff : Eye} disabled={closed} onSelect={() => doToggleVisible(menu)}>{invoice.visibleToPartner ? 'Hide from Partner' : 'Show to Partner'}</MenuItem>
+            <MenuItem icon={CheckCircle2} disabled={invoice.status !== 'unpaid'} onSelect={async () => { menu.close(); setRowErr(null); try { await api.post(`/api/partner-invoices/${invoice.id}/approve-pay`, {}); onChanged(); } catch (e) { setRowErr(e instanceof Error ? e.message : 'Failed to mark as paid.'); } }}>Mark Invoice as Paid</MenuItem>
+            {/* Invoices are never deleted (O8): unpaid ones are voided; paid ones are final. */}
+            <MenuItem icon={Ban} tone="danger" disabled={invoice.status !== 'unpaid'} onSelect={() => { menu.close(); setVoiding(true); }}>
+              {invoice.status === 'paid' ? 'Paid — final' : 'Void Invoice'}
+            </MenuItem>
             <div className="relative" onMouseEnter={() => setExportOpen(true)} onMouseLeave={() => setExportOpen(false)}>
               <MenuItem icon={Download} onSelect={() => setExportOpen((s) => !s)}>
                 <span className="flex-1">Export</span>
@@ -264,6 +255,8 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
           </>
         )}
       </TableRowMenu>
+      {rowErr && <p role="alert" className="mt-1 text-tiny text-danger-text">{rowErr}</p>}
+      {voiding && <VoidInvoiceModal invoiceRef={invoice.ref} endpoint={`/api/partner-invoices/${invoice.id}/void`} onClose={() => setVoiding(false)} onVoided={onChanged} />}
       {historyOpen && <HistoryModal invoiceId={invoice.id} onClose={() => setHistoryOpen(false)} />}
     </>
   );

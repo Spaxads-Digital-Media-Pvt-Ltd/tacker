@@ -4,6 +4,9 @@
  */
 import { z } from 'zod';
 import { moneySchema } from '../../../lib/money.js';
+import { isRedirectUrlSafe } from '../../../lib/url-security.js';
+import { postbackUrl } from '../../../lib/url-schemas.js';
+import { DUPLICATE_MODES } from '../../../lib/offer-settings/index.js';
 
 export const createGoalSchema = z.object({
   name: z.string().min(1).max(200),
@@ -14,19 +17,27 @@ export const createGoalSchema = z.object({
   currency: z.string().length(3).default('USD'),
   dailyConversionCap: z.number().int().min(0).nullable().optional(),
   totalConversionCap: z.number().int().min(0).nullable().optional(),
+  // This event's own duplicate rule (lib/offer-settings DuplicateMode); null = the offer's.
+  duplicateMode: z.enum(DUPLICATE_MODES).nullable().optional(),
   isDefault: z.boolean().default(false),
   status: z.enum(['active', 'paused']).default('active'),
   sortOrder: z.number().int().min(0).default(0),
 });
 export const updateGoalSchema = createGoalSchema.partial();
 
+/**
+ * A creative's file / link (F-27): an http(s) URL — a hosted asset, or the object-storage URL that
+ * POST /api/creatives/upload returned. File bytes inline as a data: URI are no longer stored.
+ */
+export const creativeUrlSchema = z.string().trim().max(2000)
+  .refine((u) => !/^data:/i.test(u), { message: 'Upload the file (POST /api/creatives/upload) and send its URL — inline data: URLs are not stored' })
+  .refine((u) => /^data:/i.test(u) || isRedirectUrlSafe(u), { message: 'Must be an http(s) URL' });
+
+/** One creative — shared by both creatives APIs (/api/creatives and /api/offers/:id/creatives). */
 export const createCreativeSchema = z.object({
   name: z.string().min(1).max(200),
   type: z.enum(['image', 'html', 'link', 'email', 'video', 'archive', 'thumbnail', 'text']).default('image'),
-  // Real uploaded files are stored as data: URIs client-side (no asset host in this app) — plain
-  // .url() rejects nothing a data: URI needs, but the length cap must fit a real small file's
-  // base64 payload, not just a link.
-  url: z.string().max(6_000_000).nullable().optional(),
+  url: creativeUrlSchema.nullable().optional(),
   html: z.string().max(100_000).nullable().optional(),
   width: z.number().int().min(0).nullable().optional(),
   height: z.number().int().min(0).nullable().optional(),
@@ -48,6 +59,26 @@ export const createCouponSchema = z.object({
   endsAt: z.string().datetime().nullable().optional(),
 });
 export const updateCouponSchema = createCouponSchema.partial();
+
+/** Price Per Product: a product's payout / revenue on the offer — fixed per unit, or a percentage of the line's
+ * amount (lib/offer-settings/products.ts). Matched by SKU, else (no SKU) by category. */
+const offerProductFields = z.object({
+  sku: z.string().trim().min(1).max(200).nullable().optional(),
+  category: z.string().trim().min(1).max(200).nullable().optional(),
+  name: z.string().trim().max(200).nullable().optional(),
+  payoutType: z.enum(['fixed', 'percent']).default('fixed'),
+  payoutValue: moneySchema.nullable().optional(),
+  revenueType: z.enum(['fixed', 'percent']).default('fixed'),
+  revenueValue: moneySchema.nullable().optional(),
+  status: z.enum(['active', 'inactive']).default('active'),
+});
+const percentOk = (p: { payoutType?: string; payoutValue?: string | null; revenueType?: string; revenueValue?: string | null }) =>
+  (p.payoutType !== 'percent' || p.payoutValue == null || Number(p.payoutValue) <= 100)
+  && (p.revenueType !== 'percent' || p.revenueValue == null || Number(p.revenueValue) <= 100);
+export const createOfferProductSchema = offerProductFields
+  .refine((p) => p.sku || p.category, { message: 'A product needs a SKU or a category', path: ['sku'] })
+  .refine(percentOk, { message: 'A percentage can be at most 100', path: ['payoutValue'] });
+export const updateOfferProductSchema = offerProductFields.partial().refine(percentOk, { message: 'A percentage can be at most 100', path: ['payoutValue'] });
 
 export const createDealSchema = z.object({
   name: z.string().min(1).max(200),
@@ -77,6 +108,9 @@ export const createScheduledActionSchema = z.object({
   scheduledTime: z.string().datetime().nullable().optional(),
   internalNotes: z.string().max(2000).nullable().optional(),
   status: z.enum(['pending', 'executed', 'cancelled']).default('pending'),
+  // cap_change (F-17a): which cap it sets, and the new value (null removes the cap).
+  capType: z.enum(['daily_click', 'daily_conversion', 'total_conversion']).nullable().optional(),
+  capValue: z.number().int().min(0).max(2_147_483_647).nullable().optional(),
 });
 export const updateScheduledActionSchema = createScheduledActionSchema.partial();
 export type CreateScheduledAction = z.infer<typeof createScheduledActionSchema>;
@@ -84,7 +118,7 @@ export type CreateScheduledAction = z.infer<typeof createScheduledActionSchema>;
 export const POSTBACK_LEVELS = ['conversion', 'event', 'cpc'] as const;
 export const createOfferPostbackSchema = z.object({
   publisherId: z.string().uuid(),
-  url: z.string().url().max(2000),
+  url: postbackUrl,
   method: z.enum(['GET', 'POST']).default('GET'),
   event: z.string().max(100).nullable().optional(),
   level: z.enum(POSTBACK_LEVELS).default('conversion'),

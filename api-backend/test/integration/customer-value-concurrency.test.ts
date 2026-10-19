@@ -104,19 +104,20 @@ d('Customer Value under concurrent conversions (live DB + Redis)', () => {
     expect((await conversionsFor(env, user)).filter((c) => c.payout === OVERRIDE)).toHaveLength(1);
   }, 60_000);
 
-  it('cap 1, two customers at once: one approved and fired; the other rejected with no firing and no ledger', async () => {
+  it('cap 1, two customers at once: one approved and fired; the other held as pending (over cap) with no firing and no ledger', async () => {
     const env = await mkEnv({}, { total: 1 });
     const [c1, c2] = await Promise.all([click(env), click(env)]);
     const users = [`cap-a-${randomUUID().slice(0, 6)}`, `cap-b-${randomUUID().slice(0, 6)}`];
     const results = await Promise.all([recordConversion(input(env, c1!, { rawParams: { user_id: users[0] } })), recordConversion(input(env, c2!, { rawParams: { user_id: users[1] } }))]);
-    expect(results.map((r) => r.outcome).sort()).toEqual(['approved', 'rejected']);
+    // Over-cap conversions are held as pending with the cap as the reason (R3), never rejected.
+    expect(results.map((r) => r.outcome).sort()).toEqual(['approved', 'pending']);
     const approvedUser = results[0]!.outcome === 'approved' ? users[0]! : users[1]!;
-    const rejectedUser = approvedUser === users[0] ? users[1]! : users[0]!;
+    const heldUser = approvedUser === users[0] ? users[1]! : users[0]!;
     expect(await firings(env, approvedUser)).toBe(1);
-    expect(await firings(env, rejectedUser)).toBe(0);
-    const rej = await conversionsFor(env, rejectedUser);
-    expect(rej.map((c) => c.status)).toEqual(['rejected']);
-    expect((await earnings(env, rej.map((c) => c.conversion_id))).size).toBe(0);
+    expect(await firings(env, heldUser)).toBe(0);
+    const held = await conversionsFor(env, heldUser);
+    expect(held.map((c) => c.status)).toEqual(['pending']);
+    expect((await earnings(env, held.map((c) => c.conversion_id))).size).toBe(0);
   }, 60_000);
 
   it('the same postback (same transaction id) sent 5 times at once → 1 conversion, 1 firing', async () => {

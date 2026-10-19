@@ -28,7 +28,7 @@ import { PageHeader, Spinner, StateBlock, PromptModal } from '../../../shared-co
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, pct, num,
   deriveRow, type DerivedRow, MiniChart, SummaryGrid, RowKebabMenu, Pagination,
   type MetricFilters, METRIC_FILTER_FIELDS, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type ReportingFiltersValue, EMPTY_REPORTING_FILTERS, reportingChips, withoutReportingChip,
@@ -36,6 +36,7 @@ import {
   fetchAllPages, useReportExport, ExportStatus,
   useGraphRows, GraphCappedNote,
 } from '../../../shared-components/primitives/ReportPageKit';
+import { useServerSavedReports } from '../../../lib/savedReports';
 import {
   readUrlFilters, writeUrlFilters, readUrlDate, readUrlMetricFilters, writeUrlMetricFilters,
   IGNORE_FAIL_PARAM, readUrlFlag,
@@ -52,6 +53,9 @@ import {
 } from '../../../lib/reportCurrency';
 import { moneyExportCells } from '../../../lib/reportExportCells';
 import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
+import { bucketLabel } from '../../../lib/reportTime';
+import { useReportZone, type ZoneDays } from '../../../lib/useReportZone';
+import { zoneRangeParams } from '../../../lib/reportZone';
 
 interface SmartLink { id: string; name: string }
 
@@ -88,7 +92,7 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'publisher') { const m = opts.pubMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
-  return uaDimensionLabel(dim, id);
+  return uaDimensionLabel(dim, bucketLabel(dim, id)); // Day / Hour: the bucket's own local day / hour
 }
 function linkFor(dim: DimKey, id: string): string | null {
   if (dim === 'offer') return `/app/offers/${id}`;
@@ -153,9 +157,9 @@ function SingleSelectDropdown({ id, value, onChange }: { id: string; value: DimK
 }
 
 function ExpandedChildRows({
-  childDim, parentFilterParam, parentRawId, from, to, opts, smartLinkMap, shown, dimParams, currency,
+  childDim, parentFilterParam, parentRawId, from, to, tz, opts, smartLinkMap, shown, dimParams, currency,
 }: {
-  childDim: DimKey; parentFilterParam: string; parentRawId: string; from: string; to: string;
+  childDim: DimKey; parentFilterParam: string; parentRawId: string; from: string; to: string; tz: string;
   dimParams: Record<string, string | number | undefined>;
   opts: Opts; smartLinkMap: Map<string, string>; shown: Set<string>; currency: string;
 }) {
@@ -165,7 +169,8 @@ function ExpandedChildRows({
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(dimParams)) if (v !== undefined && v !== '' && k !== parentFilterParam) params.set(k, String(v));
   params.set('groupBy', childDim); params.set('metrics', withCurrenciesMetric(METRICS_PARAM));
-  params.set('from', toIso(from)); params.set('to', toIso(to, true)); params.set('limit', '200');
+  for (const [k, v] of Object.entries(zoneRangeParams(from, to, tz))) params.set(k, v);
+  params.set('limit', '200');
   if (/Id$/.test(parentFilterParam)) params.set(parentFilterParam, parentRawId);
   else params.append(`${parentFilterParam}[]`, parentRawId);
   const { data, loading, error } = useQuery<AggResult>(`/api/reports?${params.toString()}`);
@@ -207,10 +212,10 @@ const ORDER_METRICS: OrderMetric[] = ['clicks', 'unique_clicks', 'invalid_clicks
 const isDimKey = (v: string | null): v is DimKey => DIM_OPTIONS.some((d) => d.key === v);
 
 /** Initial report state from the URL — what the page mirrors to the address bar. */
-function readNestedUrl() {
+function readNestedUrl(zone: ZoneDays) {
   const sp = new URLSearchParams(window.location.search);
-  let from = readUrlDate(sp, 'from', daysAgo(7));
-  const to = readUrlDate(sp, 'to', todayStr());
+  let from = readUrlDate(sp, 'from', zone.daysAgo(7));
+  const to = readUrlDate(sp, 'to', zone.today());
   if (from > to) from = to;
   const parent = sp.get('parent');
   const child = sp.get('child');
@@ -233,7 +238,10 @@ export default function DynamicNestedReport() {
   const smartLinkMap = useMemo(() => new Map(opts.smartLinks?.map((s: { value: string; label: string }) => [s.value, s.label]) ?? []), [opts.smartLinks]);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const [init] = useState(readNestedUrl);
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [init] = useState(() => readNestedUrl(zone));
   // Dates apply on their own once they form a valid range (see useAutoDateRange); Parent / Child,
   // Reporting Filters and sort apply immediately and return to page 1. `page` lives with the range,
   // so a new range and the page reset land in one render (one request).
@@ -262,6 +270,7 @@ export default function DynamicNestedReport() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [savedReports, setSavedReports] = useState(() => loadSavedReports<OrderMetric>('nested-report') as unknown as { name: string; config: SavedConfig }[]);
+  useServerSavedReports('nested-report', setSavedReports); // the server is the source of truth (F-24)
   const [showApiRequest, setShowApiRequest] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const pageMenuRef = useRef<HTMLDivElement>(null);
@@ -332,7 +341,7 @@ export default function DynamicNestedReport() {
   const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
   const currency = settings?.general?.defaultCurrency ?? 'USD';
 
-  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const summaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   const { data: summaryData, loading: summaryLoading, error: summaryError } = useQuery<AggResult>(`/api/reports?${summaryQs}`);
   const summary = useMemo(() => {
     const rows = summaryData?.rows ?? [];
@@ -352,7 +361,7 @@ export default function DynamicNestedReport() {
   const summaryBreakdown = useMemo(() => combineMoneyByCurrency((summaryData?.rows ?? []).map((r) => moneyByCurrencyOf(r.metrics))), [summaryData]);
 
   const chronological = appliedFrom !== appliedTo;
-  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams });
+  const graphQs = qs({ groupBy: chronological ? 'day' : 'hour', metrics: withCurrenciesMetric('clicks,revenue'), ...zone.range(appliedFrom, appliedTo), ...dimParams });
   // Every day in range, 200 per request up to GRAPH_DAY_CAP (useGraphRows) — one limit=200 request
   // kept only the oldest 200 active days and silently dropped the newer ones.
   const graph = useGraphRows(graphOpen ? `/api/reports?${graphQs}` : null);
@@ -370,7 +379,7 @@ export default function DynamicNestedReport() {
 
   const tableQsFor = (limit: number, offset: number) => qs({
     groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM),
-    from: toIso(appliedFrom), to: toIso(appliedTo, true), ...dimParams,
+    ...zone.range(appliedFrom, appliedTo), ...dimParams,
     orderBy, orderDir, limit, offset,
   });
   const tableQs = tableQsFor(pageSize, (page - 1) * pageSize);
@@ -398,7 +407,7 @@ export default function DynamicNestedReport() {
   // Reset dates, Parent/Child and every Reporting Filter in one render → one request per query. The
   // debounced range catches up to the same values later and is then a no-op.
   const clearAll = () => {
-    range.reset({ from: daysAgo(7), to: todayStr() });
+    range.reset({ from: zone.daysAgo(7), to: zone.today() });
     setParentDim('offer'); setChildDim('publisher'); setExpanded(new Set());
     setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
   };
@@ -514,7 +523,7 @@ export default function DynamicNestedReport() {
             )}
           </div>
         </>}>
-          <DateRangeField idPrefix="nested-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="nested-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
           <ControlField label="Parent" htmlFor="nested-report-parent" className="w-full sm:w-44">
             <SingleSelectDropdown id="nested-report-parent" value={parentDim} onChange={changeParent} />
@@ -651,7 +660,7 @@ export default function DynamicNestedReport() {
                       {expanded.has(r.raw) && (
                         <ExpandedChildRows
                           childDim={childDim} parentFilterParam={parentOpt.filterParam} parentRawId={r.raw}
-                          from={appliedFrom} to={appliedTo} opts={opts} smartLinkMap={smartLinkMap} shown={shown} dimParams={dimParams} currency={currency}
+                          from={appliedFrom} to={appliedTo} tz={zone.tz} opts={opts} smartLinkMap={smartLinkMap} shown={shown} dimParams={dimParams} currency={currency}
                         />
                       )}
                     </Fragment>

@@ -181,7 +181,7 @@ export default function Marketplace() {
   const range30 = useTodaySoFarRange(30);
   const stats7 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&${range7}&limit=200`);
   const stats30 = useQuery<AggResult>(`/api/reports?groupBy=advertiser&metrics=cr,epc&${range30}&limit=200`);
-  const { run: patchAdvertiser, busy: applying } = useMutation((id: string) => api.patch(`/api/advertisers/${id}`, { status: 'pending' }));
+  const { runOrThrow: patchAdvertiser, busy: applying } = useMutation((id: string) => api.patch(`/api/advertisers/${id}`, { status: 'pending' }));
 
   const [q, setQ] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
@@ -257,15 +257,11 @@ export default function Marketplace() {
     if (a.status !== 'inactive') return;
     setApplyingId(a.id);
     try {
-      const ok = await patchAdvertiser(a.id);
-      if (ok) {
-        setToast(`Connection request sent for ${a.name}. View it under Manage Connections.`);
-        refetch();
-      } else {
-        setToast(`Could not apply to ${a.name}. Try again.`);
-      }
-    } catch {
-      setToast(`Could not apply to ${a.name}. Try again.`);
+      await patchAdvertiser(a.id);
+      setToast(`Connection request sent for ${a.name}. View it under Manage Connections.`);
+      refetch();
+    } catch (e) {
+      setToast(`Could not apply to ${a.name}: ${e instanceof Error ? e.message : 'please try again.'}`);
     } finally {
       setApplyingId(null);
     }

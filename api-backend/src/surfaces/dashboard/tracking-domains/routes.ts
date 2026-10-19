@@ -1,11 +1,13 @@
 /**
  * Tracking domains — admin CRUD (spec §3D, §1). Subdomain mode is provisioned on our base
- * domain and activated immediately; custom mode is stored pending DNS/CNAME verification (the
- * actual verification + cert issuance is Phase 1A). Host resolution never trusts an
- * unverified/inactive host (spec §3D).
+ * domain and activated immediately; custom mode starts 'pending' with a verification token and
+ * becomes active once its DNS TXT record checks out (POST /:id/verify, or the background re-check —
+ * lib/tracking-domains/verify.ts, F-15). Host resolution never trusts an unverified/inactive host
+ * (spec §3D).
  */
 import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
+import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
@@ -19,11 +21,24 @@ import { requireRole } from '../auth.js';
 import { createTrackingDomainSchema, type CreateTrackingDomain } from './schemas.js';
 import { toDTO } from './dto.js';
 import { invalidateHost } from '../../tracking/host-resolver-db.js';
+import { verifyTrackingDomain } from '../../../lib/tracking-domains/verify.js';
+import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
+import { networkDomains, pickDefaultDomain } from '../../../lib/tracking-domains/default-host.js';
+
+/** Explicit status transitions (F-15): a verified host can be switched off and on again. */
+const patchSchema = z.object({ status: z.enum(['active', 'disabled']) });
 
 const TABLE = 'tracking_domains';
 
+/** Which of the network's domains links use by default (lib/tracking-domains/default-host.ts). */
+async function defaultDomainId(networkId: string): Promise<string | null> {
+  const { rows, liveHost } = await networkDomains(networkId);
+  return pickDefaultDomain(rows, liveHost)?.id ?? null;
+}
+
 export function trackingDomainsAdminRoutes(): Router {
   const r = Router();
+  rejectMalformedIdParams(r, 'id');
 
   r.get(
     '/',
@@ -31,11 +46,12 @@ export function trackingDomainsAdminRoutes(): Router {
     asyncHandler(async (req, res) => {
       const { limit, offset } = res.locals.query as PaginationQuery;
       const db = dbForRequest(req);
-      const [rows, total] = await Promise.all([
+      const [rows, total, defaultId] = await Promise.all([
         db.selectMany<TrackingDomainRow>(TABLE, { limit, offset, orderBy: 'created_at' }),
         db.count(TABLE),
+        defaultDomainId(db.scope.networkId),
       ]);
-      sendOk(res, rows.map(toDTO), { limit, offset, total });
+      sendOk(res, rows.map((r) => toDTO(r, defaultId)), { limit, offset, total });
     }),
   );
 
@@ -63,7 +79,7 @@ export function trackingDomainsAdminRoutes(): Router {
           host: b.host.toLowerCase(),
           mode: 'custom',
           status: 'pending',
-          verification_state: 'unverified',
+          verification_state: 'pending', // waiting for its DNS TXT record (dnsRecord in the response)
           verification_token: randomBytes(16).toString('hex'),
           ssl_status: 'none',
           is_primary: b.isPrimary,
@@ -84,16 +100,53 @@ export function trackingDomainsAdminRoutes(): Router {
         throw err;
       }
       await writeAudit(req, { action: 'tracking_domain.create', entityType: 'tracking_domain', entityId: row.id, after: row });
-      sendOk(res, toDTO(row), undefined, 201);
+      sendOk(res, toDTO(row, await defaultDomainId(db.scope.networkId)), undefined, 201);
     }),
   );
 
   r.get(
     '/:id',
     asyncHandler(async (req, res) => {
-      const row = await dbForRequest(req).selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
+      const db = dbForRequest(req);
+      const row = await db.selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
       if (!row) throw notFound('Tracking domain not found');
-      sendOk(res, toDTO(row));
+      sendOk(res, toDTO(row, await defaultDomainId(db.scope.networkId)));
+    }),
+  );
+
+  // Check the DNS TXT record now (F-15). 200 either way: the body says whether it verified and why
+  // not; a miss marks the domain 'failed' (the background re-check only retries 'pending' ones).
+  r.post(
+    '/:id/verify',
+    requireRole('admin', 'manager'),
+    asyncHandler(async (req, res) => {
+      const db = dbForRequest(req);
+      const result = await verifyTrackingDomain(db.scope.networkId, req.params.id ?? '', { onMiss: 'fail' });
+      if (!result) throw notFound('Tracking domain not found');
+      const row = await db.selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
+      await writeAudit(req, { action: 'tracking_domain.verify', entityType: 'tracking_domain', entityId: req.params.id, after: result });
+      sendOk(res, { ...result, domain: row ? toDTO(row, await defaultDomainId(db.scope.networkId)) : null });
+    }),
+  );
+
+  // Status transitions (F-15): only a verified host can go active; switching a host off (or on)
+  // takes effect on the tracking surface immediately.
+  r.patch(
+    '/:id',
+    requireRole('admin', 'manager'),
+    validateBody(patchSchema),
+    asyncHandler(async (req, res) => {
+      const db = dbForRequest(req);
+      const before = await db.selectOne<TrackingDomainRow>(TABLE, { id: req.params.id });
+      if (!before) throw notFound('Tracking domain not found');
+      const { status } = req.body as z.infer<typeof patchSchema>;
+      if (status === 'active' && before.verification_state !== 'verified') {
+        throw badRequest('Verify this domain (DNS TXT record) before activating it.');
+      }
+      const [row] = await db.update<TrackingDomainRow>(TABLE, { status }, { id: before.id });
+      await invalidateHost(before.host);
+      await writeAudit(req, { action: 'tracking_domain.update', entityType: 'tracking_domain', entityId: before.id, before, after: row });
+      sendOk(res, toDTO(row ?? before, await defaultDomainId(db.scope.networkId)));
     }),
   );
 

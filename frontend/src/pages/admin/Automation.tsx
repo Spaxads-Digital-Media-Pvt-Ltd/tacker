@@ -1,13 +1,15 @@
 /**
  * Automation — Scheduled Actions, Alerts, and Webhooks wired via EmptyShellTable (same UI, real API).
- * Execution/delivery not wired yet.
+ * The backend workers execute them (actions at their time, alert rules every few minutes, webhooks
+ * on their events) — see api-backend/src/lib/automation.
  */
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { createdByLabel } from '../../lib/createdBy';
 import { PageHeader, Tabs } from '../../shared-components/primitives/ui';
-import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
+import { EmptyShellTable, type ShellRow, type AddField } from '../../shared-components/primitives/EmptyShellTable';
 import type { Offer, Publisher } from '../../types';
 
 const TOP_TABS = ['Scheduled Actions', 'Alerts', 'Webhooks'] as const;
@@ -26,13 +28,29 @@ const TITLES: Record<string, string> = {
 };
 
 const ACTION_TYPES = new Set(['activate', 'pause', 'archive', 'cap_change']);
+const SCHEDULED_ACTION_FIELDS: AddField[] = [
+  { name: 'Type', required: true, options: [
+    { value: 'pause', label: 'Pause' }, { value: 'activate', label: 'Activate' },
+    { value: 'archive', label: 'Archive' }, { value: 'cap_change', label: 'Cap change' },
+  ] },
+  { name: 'Offers', required: true, placeholder: 'Offer name or ID' },
+  { name: 'Scheduled Time', required: true, placeholder: 'YYYY-MM-DD HH:MM (your local time)' },
+  { name: 'Partners', placeholder: 'Activate / pause only — names or IDs, comma separated' },
+  { name: 'Cap Type', options: [
+    { value: 'daily_click', label: 'Daily clicks' }, { value: 'daily_conversion', label: 'Daily conversions' },
+    { value: 'total_conversion', label: 'Total conversions' },
+  ] },
+  { name: 'Cap Value', placeholder: 'Cap change only — empty removes the cap' },
+  { name: 'Event' },
+  { name: 'Internal Notes' },
+];
 
 interface ScheduledAction {
   id: string; displayId: number | null;
   offerId: string; offerName: string | null; offerRef: number | null;
   actionType: string; partnerCount: number; event: string | null;
   scheduledTime: string | null; internalNotes: string | null;
-  createdBy: string | null; createdAt: string; updatedAt: string;
+  createdBy: string | null; createdByName: string | null; createdAt: string; updatedAt: string;
 }
 
 interface AlertRule {
@@ -108,7 +126,7 @@ function ScheduledActionsPanel() {
   );
   const { data: offers } = useQuery<Offer[]>('/api/offers?limit=200');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
-  const { run: runDelete } = useMutation((id: string) =>
+  const { runOrThrow: runDelete } = useMutation((id: string) =>
     api.del(`/api/automation/scheduled-actions/${id}`));
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
@@ -123,7 +141,7 @@ function ScheduledActionsPanel() {
       Event: r.event ?? '—',
       'Scheduled Time': fmt(r.scheduledTime),
       'Internal Notes': r.internalNotes ?? '—',
-      'Created By': r.createdBy ?? 'System',
+      'Created By': createdByLabel(r.createdBy, r.createdByName),
       Created: fmt(r.createdAt),
       Modified: fmt(r.updatedAt),
     },
@@ -139,6 +157,7 @@ function ScheduledActionsPanel() {
       onStatusFilterChange={(v) => setStatusFilter(v as StatusFilter)}
       rows={rows}
       loading={loading}
+      addFields={SCHEDULED_ACTION_FIELDS}
       onAddSubmit={async (v) => {
         const offerList = offers ?? [];
         const pubList = publishers ?? [];
@@ -147,20 +166,26 @@ function ScheduledActionsPanel() {
         const rawType = (v['Type']?.trim() || 'pause').toLowerCase().replace(/\s+/g, '_');
         const actionType = ACTION_TYPES.has(rawType) ? rawType : 'pause';
         const scheduledRaw = v['Scheduled Time']?.trim();
-        const scheduledTime = scheduledRaw ? new Date(scheduledRaw).toISOString() : null;
+        if (!scheduledRaw || Number.isNaN(Date.parse(scheduledRaw))) return 'Enter the scheduled time, e.g. 2026-11-01 09:00.';
+        const scheduledTime = new Date(scheduledRaw).toISOString();
+        const capValueRaw = v['Cap Value']?.trim() ?? '';
+        if (actionType === 'cap_change' && !v['Cap Type']) return 'Pick the Cap Type to change.';
+        if (actionType === 'cap_change' && capValueRaw !== '' && !/^\d+$/.test(capValueRaw)) return 'Cap Value must be a whole number (or empty to remove the cap).';
+        if ((actionType === 'archive' || actionType === 'cap_change') && v['Partners']?.trim()) return 'Partners apply to activate / pause only — clear the Partners field for this type.';
         await api.post('/api/automation/scheduled-actions', {
           offerId,
           actionType,
+          ...(actionType === 'cap_change' ? { capType: v['Cap Type'] || undefined, capValue: capValueRaw === '' ? null : Number(capValueRaw) } : {}),
           partnerIds: resolvePartnerIds(v['Partners'], pubList),
           event: v['Event']?.trim() || null,
-          scheduledTime: scheduledTime && !Number.isNaN(Date.parse(scheduledTime)) ? scheduledTime : null,
+          scheduledTime,
           internalNotes: v['Internal Notes']?.trim() || null,
           status: 'pending',
         });
         refetch();
         return true;
       }}
-      onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
+      onDelete={async (id) => { await runDelete(id); refetch(); }}
     />
   );
 }
@@ -170,7 +195,7 @@ function AlertsPanel() {
   const { data, loading, refetch } = useQuery<AlertRule[]>(
     `/api/automation/alert-rules?status=${ruleStatusParam(statusFilter)}`,
   );
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/automation/alert-rules/${id}`));
+  const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/automation/alert-rules/${id}`));
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
     id: r.id,
@@ -216,7 +241,7 @@ function AlertsPanel() {
           refetch();
           return true;
         }}
-        onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
+        onDelete={async (id) => { await runDelete(id); refetch(); }}
       />
     </>
   );
@@ -227,7 +252,7 @@ function WebhooksPanel() {
   const { data, loading, error, refetch } = useQuery<Webhook[]>(
     `/api/automation/webhooks?status=${ruleStatusParam(statusFilter)}`,
   );
-  const { run: runDelete } = useMutation((id: string) => api.del(`/api/automation/webhooks/${id}`));
+  const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/automation/webhooks/${id}`));
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
     id: r.id,
@@ -270,7 +295,7 @@ function WebhooksPanel() {
           refetch();
           return true;
         }}
-        onDelete={async (id) => { if (await runDelete(id)) refetch(); }}
+        onDelete={async (id) => { await runDelete(id); refetch(); }}
       />
     </>
   );

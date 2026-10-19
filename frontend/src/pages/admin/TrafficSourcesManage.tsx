@@ -25,7 +25,7 @@ function RowMenu({ source, onDeleted }: { source: TrafficSource; onDeleted: () =
     void confirm({
       title: 'Delete traffic source?', message: `Are you sure you want to delete traffic source "${source.name}"?`,
       confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+      onConfirm: async () => { await del.runOrThrow(undefined); onDeleted(); },
     });
   };
   return (

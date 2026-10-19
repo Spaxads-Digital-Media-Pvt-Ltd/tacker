@@ -3,7 +3,7 @@
  * No external query library; just enough for list/create/delete with loading + error + refetch.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError } from '../lib/api';
+import { api } from '../lib/api';
 
 interface QueryState<T> {
   data: T | null;
@@ -27,7 +27,7 @@ export function useQuery<T>(path: string | null): QueryState<T> {
     api
       .get<T>(path)
       .then((d) => alive && setData(d))
-      .catch((e) => alive && setError(e instanceof ApiError ? e.message : 'Request failed'))
+      .catch((e) => alive && setError(e instanceof Error ? e.message : 'Request failed'))
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
@@ -50,7 +50,7 @@ export function useMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult
       try {
         return await fn(args);
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : 'Request failed');
+        setError(e instanceof Error ? e.message : 'Request failed');
         return null;
       } finally {
         setBusy(false);

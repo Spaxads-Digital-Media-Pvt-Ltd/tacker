@@ -1,9 +1,13 @@
 /** Shared types/constants for Offers › Creatives, matching the reference's real "Manage Creatives"
  * (/offers/creatives): a network-wide catalog where one creative can target several offers at once
  * (stored as one row per offer), across seven asset types. */
+import { api } from '../lib/api';
+
 export interface Creative {
   id: string; ref: number; offerId: string; offerName?: string; offerRef?: number;
   name: string; type: CreativeType; url: string | null; html: string | null;
+  /** A file from before object storage (F-27), still inline: lists leave `url` null; GET /api/creatives/:id has it. */
+  urlInline?: boolean;
   width: number | null; height: number | null; language: string | null;
   status: 'active' | 'paused' | 'deleted';
   visibleToPartners: boolean; emailFrom: string | null; emailSubject: string | null;
@@ -52,21 +56,23 @@ export const MACROS = [
   { token: '{sub5}', label: 'Sub 5' },
 ];
 
-/** No asset host in this app — a real uploaded file is read client-side and stored as a data: URI,
- * capped well under the backend's 6MB column limit so the request body itself stays reasonable. */
+/** Upload size cap (the backend's too). */
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
-export function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (file.size > MAX_UPLOAD_BYTES) {
-      reject(new Error(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)}MB.`));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('Could not read file.'));
-    reader.readAsDataURL(file);
-  });
+const TYPE_BY_EXT: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', zip: 'application/zip', txt: 'text/plain',
+};
+
+/** A creative file goes to object storage (F-27): POST /api/creatives/upload → the URL the creative keeps. */
+export async function uploadCreativeFile(file: File): Promise<string> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)}MB.`);
+  }
+  // Some systems give no type for .zip / .mov — fall back to the extension.
+  const type = file.type || TYPE_BY_EXT[file.name.split('.').pop()?.toLowerCase() ?? ''] || '';
+  const res = await api.upload<{ url: string }>('/api/creatives/upload', type === file.type ? file : new Blob([file], { type }));
+  return res.url;
 }
 
 export function fmtDateTime(iso: string) {

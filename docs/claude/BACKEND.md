@@ -21,7 +21,7 @@ finalizeApp(app) → 404 handler, error envelope handler
 ```
 
 ### Shared Fastify Plumbing (tracking)
-- `trustProxy: isTrustedProxy` (Cloudflare → Nginx; `surfaces/tracking/trusted-proxy.ts`): `X-Forwarded-For` is walked from the right and only hops from a trusted proxy are skipped, so `req.ip` is the first untrusted address. Trusted = loopback (`127.0.0.1`, `::1` — Nginx on the same host), Cloudflare's **published** IPv4 + IPv6 ranges (cloudflare.com/ips-v4, /ips-v6; dated in the file) and `TRACKING_TRUSTED_PROXIES` (IPv4/IPv6 IPs or CIDRs; malformed entries are logged and ignored). In production the same check rejects any non-trusted socket peer with 403. A direct connection keeps its socket address (`127.0.0.1` locally — genuine, never replaced); because loopback is trusted, a local client can still set `X-Forwarded-For` in dev
+- `trustProxy: isTrustedProxy` (Cloudflare → load balancer; `lib/net/trusted-proxy.ts`, the same check every Express surface uses since O2): `X-Forwarded-For` is walked from the right and only hops from a trusted proxy are skipped, so `req.ip` is the first untrusted address. Trusted = loopback (`127.0.0.1`, `::1` — Nginx on the same host), Cloudflare's **published** IPv4 + IPv6 ranges (cloudflare.com/ips-v4, /ips-v6; dated in the file) and `TRUSTED_PROXIES` / `TRACKING_TRUSTED_PROXIES` (IPv4/IPv6 IPs or CIDRs, or `private`; malformed entries are logged and ignored). In production the same check rejects any non-trusted socket peer with 403. A direct connection keeps its socket address (`127.0.0.1` locally — genuine, never replaced); because loopback is trusted, a local client can still set `X-Forwarded-For` in dev
 - `disableRequestLogging: true` (hot path logs its own compact line)
 - Error handler reports to Sentry, then returns generic error
 
@@ -82,7 +82,7 @@ Each exports a function returning an Express Router.
 - `POST /api/auth/logout` — Clear cookie
 
 **50+ feature route modules** mounted in `app.ts`, all under `/api/`:
-- offers, publishers, advertisers, reports, alerts, ai, tags, custom-fields, settings, smart-links, offline, import-export, catalog, invoices, offer-templates, offer-groups, creatives, custom-metrics, marketplace-profile, communication-hub, customer-value, traffic-health, investigator, automation, audit-log, conversion-imports, traffic-controls, offer-custom-settings, smartswitch, users, postbacks, partner-tiers, business-units, offer-applications, questionnaires, traffic-blocking, traffic-sources, reporting-adjustments, coupon-codes, partner-invoices, link-templates, postback-controls, advertiser-invoices, tiered-commissions, control-center, api-keys
+- offers, publishers, advertisers, reports, alerts, ai, tags, custom-fields, settings, smart-links, offline, import-export, catalog, invoices, offer-templates, offer-groups, creatives, custom-metrics, marketplace-profile, communication-hub, customer-value, traffic-health, investigator, automation, audit-log, conversion-imports, traffic-controls, offer-custom-settings, smartswitch, users, postbacks, partner-tiers, offer-applications, questionnaires, traffic-blocking, traffic-sources, reporting-adjustments, coupon-codes, partner-invoices, link-templates, postback-controls, advertiser-invoices, tiered-commissions, control-center, api-keys
 
 Each admin route is gated by:
 ```ts
@@ -100,13 +100,17 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 ### `lib/` Modules
 | Module | Purpose |
 |---|---|
-| `ai/` | Anthropic SDK integration, tool definitions |
+| `ai/` | Anthropic SDK integration, tool definitions, quota.ts (per-network daily chat / token budget in Redis → 429) |
 | `analytics/` | Analytics writer (ClickHouse interface, deferred) |
 | `apikeys/` | API key generation (`adv_live_*`/`pub_live_*`/`net_live_*`), sha256 hashing |
 | `auth/` | JWT verification via jose (JWKS ES256 + HS256 fallback) |
 | `customer-value/` | Customer value rule evaluation |
 | `db/` | Pool, ScopedDb, from-request, table registry |
-| `fraud/` | Fraud rules, fraud scan, alerts |
+| `fraud/` | Fraud rules (Redis-cached for /click), fraud scan, alerts |
+| `alerts/` | `deliverAlert` — email + webhook delivery of raised alerts (fraud scan; automation alert rules) |
+| `automation/` | Scheduled-action runner, alert-rule grammar + evaluator, SmartSwitch engine (D8: per partner × offer conditions → notify / block / redirect / payout, delay, action log, preview), webhook events (emit + delivery) |
+| `smart-links/` | KPI scoring for KPI smart links (kpiWeights + rescoreKpiSmartLinks) |
+| `partner-tiers.ts` | Tier payout (revenue × (1 − margin)) + auto-approve check |
 | `geo/` | MaxMind GeoIP2 lookup |
 | `http/` | Express app scaffolding, envelope, errors, pagination |
 | `integrations/` | Facebook CAPI, offer feed sync, PIN API |
@@ -115,8 +119,14 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `observability/` | Sentry, Prometheus metrics |
 | `postback/` | Postback test utilities |
 | `postback-controls/` | Dynamic postback control evaluation |
-| `reporting/` | Reporting aggregation |
-| `retention/` | Click/conversion pruning |
+| `reporting/` | Reporting aggregation: provider (postgres.ts — raw or rollups + raw tail), rollups.ts (worker + window), time-zone.ts (report zones), labels.ts (entity names on rows), saved-reports.ts (saved configs → report requests, CSV, scheduled runs — F-24) |
+| `networks/` | state.ts (`networkState` — active / suspended / deleted, checked by dashboardAuth; `networkStateChanged` drops the cached state + tracking hosts), lifecycle.ts (soft delete, NDJSON export, purge) — F-26 |
+| `usage/` | meter.ts — per-day usage into usage_records, usage vs plan limits, near / reached alerts (policy: flag, never block) — F-26 |
+| `creatives/` | files.ts (creative uploads to object storage, allowed types, list-safe url columns, data: URI parsing), backfill.ts (inline data: files → storage, `npm run creatives:backfill`) — F-27 |
+| `storage/` | supabase-storage.ts (public bucket uploads, backend only); images.ts (O12: branding logo / favicon + profile photo → bucket `network-images`, content-addressed; allowed types, no SVG; `imageUrlSchema` / `assertImageValue` — settings keep only the URL); images-backfill.ts (inline data: images → storage, `npm run images:backfill`) |
+| `email/` | system-emails.ts (Automated System Emails catalog + which are sent), transactional.ts (`sendTransactional`: toggle → recipients → network SMTP, never throws), templates.ts (F-24) |
+| `scheduling/` | cron.ts — 5-field cron parse + next run in a time zone (DST-safe) |
+| `retention/` | Per-network click / postback-log / conversion pruning; conversions any ledger entry references are never pruned (F-21) |
 | `tiered-commissions/` | Tiered commission calculation |
 
 ### Tracking-Specific (in `surfaces/tracking/`)
@@ -125,12 +135,13 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | `offer-cache.ts` | Redis load-through cache for offer config (no sync PG on hot path) |
 | `caps.ts` | Atomic click cap check in Redis |
 | `dedup.ts` | IP-based dedup/idempotency |
-| `fraud-presignals.ts` | Fast pre-signals (datacenter IP, velocity) |
+| `fraud-presignals.ts` | Fast pre-signals (datacenter IP, velocity, bot/headless UA, cached IPQS verdict), weighted by the network's fraud rules; /click diverts at the block score |
 | `geo-rules.ts` | Offer geo targeting rules |
 | `macros.ts` | Macro token build + substitution (click_id, offer_id, etc.) |
 | `click-job.ts` | Job definition + enqueue for click persistence |
 | `click-store.ts` | Store click in Redis for attribution |
-| `conversions/record.ts` | Conversion recording (normalizes postback/pixel/iframe) |
+| `conversions/record.ts` | Conversion recording (normalizes postback/pixel/iframe/advertiser API); per-event duplicate rules (`dedupeRule`: one per click / unique transaction ids / every postback), unusual-volume hold, a reason on every outcome |
+| `conversions/inbound-log.ts` | Inbound postback log — one `inbound_postback_logs` row per conversion request, recorded or not, and why |
 | `traffic-controls-eval.ts` | Evaluate offer traffic controls |
 | `traffic-blocking-eval.ts` | Evaluate partner traffic blocking |
 | `host-resolver-db.ts` | DB-backed tenant resolution (Redis-cached) |
@@ -146,6 +157,20 @@ authed.use('/portal/advertiser', requirePortal('advertiser'), advertiserPortalRo
 | Retention | `retention.ts` | `retention` | Scheduled |
 | Facebook CAPI | `facebook-capi.ts` | `facebook-capi` | Continuous |
 | Offer Feed Sync | `offer-feed-sync.ts` | `offer-feed-sync` | Scheduled |
+| Tracking Domain Re-check | `domain-verify.ts` | `domain-verify` | Every 10 min — DNS TXT verification of pending custom domains |
+| Scheduled Actions | `scheduled-actions.ts` | `scheduled-actions` | Every minute — applies due offer scheduled actions (lib/automation/scheduled-actions.ts) |
+| Alert Rules | `alert-rules.ts` | `alert-rules` | Every 5 min — evaluates Automation alert rules via the reporting provider (lib/automation/alert-rules.ts) |
+| SmartSwitch | `smartswitch.ts` | `smartswitch` | Every 5 min — evaluates SmartSwitch rules per partner × offer and applies notify / block / redirect / payout (lib/automation/smartswitch.ts, D8) |
+| Automation Webhooks | `automation-webhook.ts` | `automation-webhook` | Continuous — event deliveries with retries/backoff through safeRequest (lib/automation/webhooks.ts) |
+| Smart-Link KPI | `smart-link-kpi.ts` | `smart-link-kpi` | Every 10 min — re-scores due KPI smart links (lib/smart-links/kpi.ts) |
+| Reporting Rollups | `reporting-rollup.ts` | `reporting-rollup` | Every minute — freeze / dirty re-roll / backfill of the 15-min rollups (lib/reporting/rollups.ts) |
+| Usage Meter | `usage-meter.ts` | `usage-meter` | Hourly — meters each active network's clicks / conversions / events (today + yesterday, UTC) and raises plan-limit alerts (lib/usage/meter.ts) |
+| Platform Billing | `platform-billing.ts` | `platform-billing` | Every 15 min — `lib/billing/engine.ts runBilling`: ended trials → active + invoiced; ended periods → renewed + invoiced (caught up period by period) or canceled; overdue invoices → subscription `past_due`; past `suspend_at` → network suspended for billing (once per deadline; `autoSuspend`). Each subscription in its own transaction under `FOR UPDATE SKIP LOCKED` (pooler-safe); audited as system; then `lib/billing/revenue.ts snapshotMrr` (today's MRR per paying network + movements) |
+| Customer health | `platform-health.ts` | `platform-health` | Every 6 h (and once at start) — `lib/platform/health.ts computeHealth`: each network's health score (usage 30 %, trend 15 %, sign-ins 20 %, billing 20 %, onboarding 15 %; healthy ≥ 70, attention 40–69, at risk < 40), daily history, onboarding milestones; a fall to at risk → a check-in task for its account manager (once per fall); history kept ~400 days |
+| Trust scan | `platform-trust.ts` | `platform-trust` | Hourly — `lib/platform/trust.ts scanTrust`: addresses with flagged clicks in 2+ networks (or 50+ flagged) in the last 24 h → `platform_fraud_ips` (replaced each run); 24-hour totals and first-flag reasons → `platform_settings.trust_scan`. Reads raw `clicks`, so it never runs in a page request |
+| Support housekeeping | `platform-support.ts` | `platform-support` | Hourly — `lib/platform/support.ts closeResolvedTickets`: resolved tickets with no customer reply for `autoCloseDays` (default 7) → closed, with a system line on the thread |
+| Scheduled Reports | `scheduled-reports.ts` | `scheduled-reports` | Every minute — emails due scheduled saved reports as CSV (lib/reporting/saved-reports.ts) |
+| Email | `email.ts` | `email` | On demand — sends each queued email (one `email_outbox` row) through the network's SMTP; 6 attempts, exponential backoff from 30 s; SMTP problems are final (lib/email/outbox.ts, O11) |
 
 ### Queue Definitions (`surfaces/workers/queues.ts`)
 Exports `QUEUE` constant mapping queue names to BullMQ queue instances.
@@ -191,13 +216,14 @@ No ORM. All queries are raw SQL via `pool.query()` or `ScopedDb`.
 
 - **zod** schemas inline in route handlers (`validateBody(schema)`)
 - Common: email, password, pagination params, CRUD bodies
-- `validateBody` middleware returns 400 with error details
+- `validateBody` / `validateQuery` return 422 `validation_failed`; the message names each field's problem (first three, e.g. `Email: Invalid email · Password: Required`), `details` keeps the full per-field list
 
 ## Error Handling
 
 - **Express**: `notFoundHandler` (404), `errorHandler` (wraps in envelope)
 - **Fastify**: Custom error handler → Sentry → generic error response
 - Errors use the envelope: `{ ok: false, error: { code: string, message: string } }`
+- Every Express request has an id (a proxy's `X-Request-Id` if it looks like one, else a uuid), returned as `X-Request-Id` and logged. An unexpected error → 500 `internal`, message "Something went wrong on our side… quote reference <id>", `details.reference`; outside production the message also names the cause
 
 ## Database
 
@@ -256,3 +282,8 @@ No ORM. All queries are raw SQL via `pool.query()` or `ScopedDb`.
 - Click outcomes histogram
 - Queue depth gauges
 - `queueDepth` sampled every 15s
+
+## Super Admin platform modules (lib/platform)
+- `permissions.ts` — staff role sections and levels; `sales.ts` — pipeline vocabulary, lead routing, inbound leads; `health.ts` — customer health score; `support.ts` — help desk rules (settings, auto-assign, auto-close); `flags.ts` — feature flags (evaluation, `requireFeature` on gateable tenant routes); `announcements.ts` — tenant announcements; `email.ts` — platform SMTP settings + notification toggles; `notify.ts` — the platform's emails (tickets, demo requests, tasks, invoices, overdue, suspension), fail-safe, through the email queue (`enqueuePlatformEmails`, `sendPlatformEmail` in lib/mailer.ts)
+- `lib/billing/charges.ts` (invoice lines: plan, overage, discount) and `lib/billing/revenue.ts` (MRR definition, snapshots, movements); `lib/networks/create.ts` (network creation, shared by New network and lead conversion); `lib/db/pool.ts withTransaction`
+

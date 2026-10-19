@@ -1,5 +1,5 @@
 // Partner balances per currency (lib/balanceCurrency.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { balanceParts, balanceText, formatParts, requestedBalancesMessage, sumPartsByCurrency } from '../balanceCurrency.ts';
 

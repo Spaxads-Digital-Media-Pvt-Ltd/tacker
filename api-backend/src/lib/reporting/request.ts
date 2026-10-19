@@ -8,23 +8,27 @@ import { z } from 'zod';
 import { MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from '../http/pagination.js';
 import { queryBool, queryDate } from '../http/query-params.js';
 import { MONEY_FIELDS, SORT_ONLY_KEYS } from './types.js';
+import { isValidTimeZone, isUtcZone, zonedDayStart, addDays, inclusiveBefore } from './time-zone.js';
 import type { Dimension, Metric, MoneyField, OrderKey, ReportRequest, ReportFilters, FilterValue, SortOnlyKey } from './types.js';
 
 export type ReportAudience = 'admin' | 'network' | 'publisher' | 'advertiser';
 
 const ALL_DIMS: Dimension[] = ['offer', 'publisher', 'advertiser', 'smartLink', 'country', 'device', 'city', 'region', 'isp', 'browser', 'os', 'day', 'hour', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'];
-const ALL_METRICS: Metric[] = ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'invalid_clicks', 'total_conversions', 'avg_fraud_score', 'currencies', 'money_by_currency'];
+const ALL_METRICS: Metric[] = ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'invalid_clicks', 'total_conversions', 'avg_fraud_score', 'currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'invalid_impressions', 'ctr'];
 // `currencies` / `money_by_currency` describe the money columns per currency rather than being one
 // figure: returned only when asked for by name (an omitted `metrics` keeps today's set) and never a
 // sort key. `money_by_currency` only ever carries the money fields the audience may see (moneyFields).
-const OPT_IN_METRICS = new Set<Metric>(['currencies', 'money_by_currency']);
+const OPT_IN_METRICS = new Set<Metric>(['currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'invalid_impressions', 'ctr']);
 
 const METRIC_POLICY: Record<ReportAudience, Metric[]> = {
   admin: ALL_METRICS,
   network: ALL_METRICS,
-  publisher: ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'epc', 'currencies', 'money_by_currency'], // NO revenue/margin
-  advertiser: ['clicks', 'unique_clicks', 'conversions', 'cr', 'revenue', 'currencies', 'money_by_currency'],      // NO payout/margin/epc
+  publisher: ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'epc', 'currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'ctr'], // NO revenue/margin
+  advertiser: ['clicks', 'unique_clicks', 'conversions', 'cr', 'revenue', 'currencies', 'money_by_currency', 'impressions', 'unique_impressions', 'ctr'],      // NO payout/margin/epc
 };
+
+/** Portal audiences see only clicks that reached the offer (ReportFilters.excludeRejected). */
+export const excludesRejected = (audience: ReportAudience): boolean => audience === 'publisher' || audience === 'advertiser';
 
 /** The money fields an audience may see — what `money_by_currency` carries for it. */
 export function audienceMoneyFields(audience: ReportAudience): MoneyField[] {
@@ -38,6 +42,9 @@ const DIM_POLICY: Record<ReportAudience, Dimension[]> = {
   publisher: ['offer', 'country', 'device', 'city', 'region', 'isp', 'browser', 'os', 'day', 'hour', 'sub1', 'sub2', 'sub3', 'sub4', 'sub5'], // no advertiser
   advertiser: ['offer', 'country', 'device', 'city', 'region', 'isp', 'browser', 'os', 'day', 'hour'], // no publisher (identifying)
 };
+
+/** `?tz=` on report endpoints: an IANA zone name (D7 — the SPA sends the network's, or the one picked). */
+export const tzParam = z.string().max(64).refine(isValidTimeZone, { message: 'must be an IANA time zone, e.g. Asia/Kolkata' });
 
 const MAX_GROUP_BY = 4;
 const MAX_VALUES = 200;
@@ -97,6 +104,8 @@ export const reportQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
   orderBy: z.string().max(40).optional(),
   orderDir: z.enum(['asc', 'desc']).optional(),
+  // F-20: bucket `day` / `hour` (and read a plain-date from/to) in this IANA zone; default UTC.
+  tz: tzParam.optional(),
 }).refine((q) => !q.from || !q.to || Date.parse(q.from) <= Date.parse(inclusiveTo(q.to)), { message: '`from` must not be after `to`', path: ['from'] });
 
 type RawQuery = z.infer<typeof reportQuerySchema>;
@@ -119,6 +128,24 @@ export function inclusiveTo(to: string | undefined): string | undefined {
   if (to == null) return to;
   return /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59.999999Z` : to;
 }
+
+/**
+ * A report's from / to as the bounds queries compare `created_at` with: a plain date (YYYY-MM-DD) is a
+ * whole local day of `tz` — `from` its first instant, `to` its last (inclusive) — UTC when `tz` is
+ * unset; a datetime is taken as given. One rule for every report endpoint (D7).
+ */
+export function zonedRange(from: string | undefined, to: string | undefined, tz: string | undefined): { from?: string; to?: string } {
+  const zone = tz && !isUtcZone(tz) ? tz : undefined;
+  const plainDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  return {
+    ...(from ? { from: zone && plainDate(from) ? zonedDayStart(from, zone).toISOString() : utcDayStart(from)! } : {}),
+    ...(to ? { to: zone && plainDate(to) ? inclusiveBefore(zonedDayStart(addDays(to, 1), zone)) : inclusiveTo(to) } : {}),
+  };
+}
+
+/** Applies `zonedRange` to a parsed query that has from / to / tz (detail-report schemas' transform). */
+export const withZonedRange = <T extends { from?: string | undefined; to?: string | undefined; tz?: string | undefined }>(q: T): T =>
+  ({ ...q, ...zonedRange(q.from, q.to, q.tz) });
 
 function csv<T extends string>(value: string | undefined, allowed: T[]): T[] {
   if (!value) return [];
@@ -166,9 +193,13 @@ export function buildReportRequest(
   const orderBy: OrderKey | undefined = raw.orderBy && (allowedMetrics as string[]).includes(raw.orderBy) && !OPT_IN_METRICS.has(raw.orderBy as Metric)
     ? (raw.orderBy as Metric) : raw.orderBy && sortOnlyAllowed(raw.orderBy) ? raw.orderBy : undefined;
 
+  // A plain date is a day of the report's time zone (UTC unless `tz` names another); a datetime is
+  // taken as given.
+  const tz = raw.tz && !isUtcZone(raw.tz) ? raw.tz : undefined;
+  const { from, to } = zonedRange(raw.from, raw.to, tz);
   const user: ReportFilters = {
-    ...(raw.from ? { from: utcDayStart(raw.from) } : {}),
-    ...(raw.to ? { to: inclusiveTo(raw.to) } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
     offerId: multi(raw.offerId),
     publisherId: multi(raw.publisherId),
     advertiserId: multi(raw.advertiserId),
@@ -206,6 +237,9 @@ export function buildReportRequest(
   }
   // Forced owner-scope filters win (cannot be overridden by the caller).
   Object.assign(filters, forceFilters);
+  // Partners and advertisers see only the traffic that reached the offer — the clicks /click rejected
+  // (cap exceeded, geo, …) are recorded for the admin's reports only (lib/click-rejections).
+  if (excludesRejected(audience)) filters.excludeRejected = true;
 
   return {
     networkId,
@@ -219,5 +253,6 @@ export function buildReportRequest(
     // From the audience policy, never the caller's metric list: a publisher's `money_by_currency` is
     // payout-only and an advertiser's revenue-only.
     moneyFields: audienceMoneyFields(audience),
+    ...(tz ? { timeZone: tz } : {}),
   };
 }

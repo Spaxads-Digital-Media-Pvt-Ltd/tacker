@@ -11,14 +11,13 @@
 - **Data flow**: Browser → Backend → Supabase Auth → Backend → Browser
 - **Key point**: Browser NEVER talks to Supabase directly
 
-## MaxMind GeoIP2
-- **Purpose**: IP geolocation (country, region, city, ISP, datacenter detection)
-- **Where used**: Click path (`tracking/surfaces/`), fraud detection
-- **Files**:
- - `api-backend/src/lib/geo/geoip.ts` — GeoIP lookup + availability check
-- **Authentication**: License key (`MAXMIND_LICENSE_KEY`) for DB updates
-- **Data flow**: Redis-cached in-process at boot; fail-open if absent
-- **Dev/test**: `geo=XX` query param overrides country
+## GeoIP (MaxMind GeoLite2 / DB-IP Lite / Cloudflare)
+- **Purpose**: the visitor's country, region, city, postal / DMA, ISP / ASN, mobile carrier — GEO rules (allow / block countries and regions, per-country payouts and landing pages), geo targeting, fraud (datacenter)
+- **Without a city database, country / region rules and geo targeting are NOT enforced** (fail-open: every country passes). `/tracking/health` shows `geoip { city, asn, isp, enforced }`.
+- **Get one**: `npm run geoip:download` (`scripts/download-geoip.sh`): MaxMind GeoLite2 City + ASN with `MAXMIND_LICENSE_KEY` (free account; twice-weekly updates; codes for regions, postal codes, DMA), else DB-IP Lite City + ASN (no account; monthly; CC BY 4.0 — credit "IP Geolocation by DB-IP"; region NAMES only, no postal / DMA). Files in `data/geoip/` (git-ignored); the tracking surface reloads a new / changed file within 10 minutes (`refreshGeoIp`), no restart. Paid GeoIP2-ISP (`data/geoip/GeoIP2-ISP.mmdb`) adds the mobile carrier.
+- **Files**: `api-backend/src/lib/geo/geoip.ts` (load / reload / lookup; region code + name), `surfaces/tracking/visitor-geo.ts` (the order: dev override `geo=XX` / `geo=XX-RR` → database → Cloudflare `CF-IPCountry` from Cloudflare's edge only), `surfaces/tracking/geo-rules.ts` (most specific rule wins: country + region › country › `*`; a region matches by code or name)
+- **Client IP**: X-Forwarded-For only from trusted proxies (loopback, Cloudflare ranges, `TRUSTED_PROXIES`) — locally `curl -H 'X-Forwarded-For: <ip>'` simulates a visitor; through ngrok the real visitor IP arrives
+- **Tests**: MaxMind's official test databases in `test/fixtures/geoip/` (fixed IP → place answers) power `test/integration/offer-e2e-*.test.ts`
 
 ## Sentry
 - **Purpose**: Error tracking and monitoring
@@ -46,12 +45,15 @@
 - **Data flow**: Conversion recorded → queued → batch sent to Facebook CAPI
 
 ## Offer Feed Sync
-- **Purpose**: Outbound offer feed to external systems
-- **Where used**: Background worker (scheduled)
+- **Purpose**: Inbound offer feed — pull an advertiser's JSON offer list and upsert it as offers (matched by `metadata.feedExternalId`)
+- **Where used**: Background worker (scheduled) + Settings › Integrations › Feeds "Sync now" (`POST /api/settings/integrations/offer-feed/sync`)
 - **Files**:
  - `api-backend/src/lib/integrations/offer-feed-sync.ts`
  - `api-backend/src/surfaces/workers/processors/offer-feed-sync.ts`
-- **Data flow**: Scheduled scan → generate XML/CSV feed → POST to endpoint
+- **Data flow**: `offerFeedUrl` (+ optional key sent as `Authorization: Bearer` / `x-api-key`) → GET JSON (`[...]`, `{offers:[...]}` or `{data:[...]}`) → upsert offers for `offerFeedAdvertiserId`. `demo://offer-feed` returns built-in demo offers.
+- **Money (O9)**: payout / revenue are parsed exactly — the JSON number's own source text where the runtime provides it (Node 21+), exponent notation included — and rounded half-up to 4 dp (`roundMoney`, `lib/money.ts`); an offer whose amount isn't a usable decimal is skipped and reported (`skipped` in the sync result, `offerFeedLastSyncError`), never imported as 0.
+- **Re-sync**: the feed owns name / URL / status / payout / revenue / currency; the offer's other settings (targeting, notes, custom fields…) are kept — the feed keys are merged into `metadata`, not replacing it. A **copied** offer drops `feedExternalId` / `feedSource` (O7), so the feed keeps updating the original only.
+- **Security**: the URL is tenant-supplied, so it is fetched through `lib/net/safe-http.ts` `safeRequest` (audit F-06): http(s) only, no redirects, no loopback/private/link-local targets outside `NODE_ENV=development` (checked on the connected address), 30 s total deadline, 16 MB body cap. A refused URL fails the sync with `blocked_destination: …` (saved as `offerFeedLastSyncError`).
 
 ## PIN API
 - **Purpose**: Pinterest integration
@@ -62,11 +64,19 @@
 
 ## Email (Nodemailer)
 - **Purpose**: Outbound email (notifications, alerts, invitations)
-- **Where used**: Communication hub, notifications
+- **Where used**: Communication hub sends, fraud / automation alerts, and (F-24) transactional emails — portal invites, offer details shared, balance requests, invoices issued — plus scheduled reports (CSV attachment)
 - **Files**:
- - `api-backend/src/lib/mailer.ts`
-- **Authentication**: SMTP credentials (configured via env)
+ - `api-backend/src/lib/mailer.ts` (`sendNetworkEmail`, attachments)
+ - `api-backend/src/lib/email/transactional.ts` (per-event Communication Hub toggles), `templates.ts`
+- **Authentication**: each network's own SMTP settings (Settings › SMTP; password stored encrypted)
 - **Data flow**: Backend → SMTP server → recipient
+
+## Supabase Storage (files)
+- **Purpose**: Public file hosting for offer thumbnails and offer creatives (F-27)
+- **Files**: `api-backend/src/lib/storage/supabase-storage.ts` (`uploadPublicObject`, REST, service-role, backend only), `api-backend/src/lib/creatives/files.ts`
+- **Buckets**: `offer-thumbnails` (2 MB files), `offer-creatives` (5 MB bucket limit; uploads capped at 2 MB) — created public on first upload
+- **Authentication**: `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`; unset → uploads fail with a clear 400
+- **Data flow**: SPA → raw file → dashboard API → Storage → public URL stored on the row. Control Center branding logos are still stored inline (data: URLs in settings)
 
 ## Redis (BullMQ)
 - **Purpose**: Queue backend, config cache, atomic operations
@@ -92,8 +102,14 @@
  - `api-backend/src/surfaces/dashboard/automation/routes.ts`
 - **Data flow**: Event trigger → POST to configured URL
 
+## 24metrics (Clickshield)
+- **Files**: `src/lib/integrations/tracker24.ts`, worker `processors/tracker24.ts`; stand-in `scripts/fake-24metrics.mjs` (`npm run dev:fake-24metrics`)
+- **Setting**: Edit Offer › Attribution › 24metrics Tracker + the tracker ID (24metrics' integration ID — a host-name label)
+- **Endpoints** (those of 24metrics' own JavaScript SDK): `GET https://<id>.gateway.go2link.co/c?no_redirect=true&offer&publisher&sub_id…&external_transaction_id=<click id>&ip&ua&referer` → `{ data: { status: approved|rejected, reason, transaction_id } }`; conversions `GET …/api/event-tx?transaction_id&offer&publisher&event&payout&revenue&use_current_time=true`. `TRACKER24_GATEWAY_URL` (`{id}` = the tracker ID) overrides the base.
+- **Flow**: the click-persist worker checks each click before writing it (2.5 s cap, fail open). Rejected → click flags `24metrics`, `24metrics:<reason>`, score +50; its conversions held pending (`24metrics_flagged`); the address blocked for a day on the network's 24metrics offers (`/click` → `24metrics_blocked`). Approved → its approved conversions reported (queue `tracker24`, retried).
+- **To confirm with 24metrics** before production: the parameter names their gateway reads for the visitor's IP / user agent on a server-to-server call (`ip`, `ua` here — their SDK sends them implicitly from the browser).
+
 ## NOT Integrated (Not Yet)
 - No email service provider (SendGrid, Mailgun) — uses raw SMTP
 - No analytics CDN
 - No payment processor
-- No cloud storage

@@ -59,6 +59,7 @@ function LabelsEditor({ base }: { base: string }) {
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
         />
       </div>
+      {(add.error || remove.error) && <p className="mt-1 text-small text-danger-text">{add.error ?? remove.error}</p>}
     </Field>
   );
 }

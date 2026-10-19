@@ -8,6 +8,7 @@ import { sendOk } from '../../../lib/http/envelope.js';
 import { validateQuery } from '../../../lib/http/validate.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
+import { attachLabels } from '../../../lib/reporting/labels.js';
 import { mountDetailReports } from './detail-reports.js';
 
 export function adminReportsRoutes(): Router {
@@ -18,7 +19,7 @@ export function adminReportsRoutes(): Router {
     validateQuery(reportQuerySchema),
     asyncHandler(async (req, res) => {
       const request = buildReportRequest(req.scope!.networkId, res.locals.query, 'admin');
-      sendOk(res, await getReportingProvider().runReport(request));
+      sendOk(res, await attachLabels(req.scope!.networkId, await getReportingProvider().runReport(request)));
     }),
   );
   // Specialized reports: /clicks /conversions /postback-logs /goals /caps.

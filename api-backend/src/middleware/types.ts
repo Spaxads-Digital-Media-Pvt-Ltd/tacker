@@ -30,18 +30,31 @@ interface DashboardBase {
   networkId: string;
 }
 
-export interface AdminIdentity extends DashboardBase {
-  kind: 'admin';
-  role: AdminRole;
+/** Set when an admin is impersonating this portal account (audit F-10). */
+interface Impersonation {
+  /** The impersonating admin's user id — every audited write records it. */
+  impersonatedBy?: string;
+  /** Unix seconds when the impersonation session ends. */
+  impersonationExpiresAt?: number;
 }
 
-export interface PublisherPortalIdentity extends DashboardBase {
+/**
+ * A network admin — or a Super Admin support session acting as one (`platformSupport`): then `userId`
+ * and `impersonatedBy` are the platform admin's id, and every write is audited to that platform admin.
+ */
+export interface AdminIdentity extends DashboardBase, Impersonation {
+  kind: 'admin';
+  role: AdminRole;
+  platformSupport?: true;
+}
+
+export interface PublisherPortalIdentity extends DashboardBase, Impersonation {
   kind: 'publisher';
   /** publisher_id — this user may only ever see their own data. */
   ownerId: string;
 }
 
-export interface AdvertiserPortalIdentity extends DashboardBase {
+export interface AdvertiserPortalIdentity extends DashboardBase, Impersonation {
   kind: 'advertiser';
   /** advertiser_id — this user may only ever see their own data. */
   ownerId: string;
@@ -65,6 +78,10 @@ export interface ApiKeyIdentity {
 export interface PlatformAdminIdentity {
   surface: 'platform-admin';
   platformAdminId: string;
+  /** Set by platformAdminAuth: the member's email, role and what it may do (lib/platform/permissions). */
+  email?: string;
+  role?: { key: string; name: string; scope: 'all' | 'assigned'; home: string };
+  permissions?: Partial<Record<string, 'none' | 'read' | 'full'>>;
 }
 
 export type Identity = DashboardIdentity | ApiKeyIdentity | PlatformAdminIdentity;

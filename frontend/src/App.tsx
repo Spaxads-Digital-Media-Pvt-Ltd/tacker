@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { PlatformMeProvider, PlatformGate } from './lib/PlatformMeProvider';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { ROLE_HOME } from './auth/roles';
@@ -10,6 +11,9 @@ import { CustomFieldsManage } from './pages/admin/CustomFieldsManage';
 // Route-level code-splitting per portal (spec §3B): each page is its own lazy chunk.
 const Login = lazy(() => import('./pages/Login'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const ChangePassword = lazy(() => import('./pages/ChangePassword'));
+const Impersonate = lazy(() => import('./pages/Impersonate'));
 const DashboardHome = lazy(() => import('./pages/DashboardHome'));
 const Advertisers = lazy(() => import('./pages/admin/Advertisers'));
 const AdvertisersBulkEdit = lazy(() => import('./pages/admin/AdvertisersBulkEdit'));
@@ -54,8 +58,37 @@ const TieredCommissionForm = lazy(() => import('./pages/admin/TieredCommissionFo
 const AdvertiserEdit = lazy(() => import('./pages/admin/AdvertiserEdit'));
 const TrackingDomains = lazy(() => import('./pages/admin/TrackingDomains'));
 const Networks = lazy(() => import('./pages/super-admin/Networks'));
-const Subscriptions = lazy(() => import('./pages/super-admin/Subscriptions'));
+const Plans = lazy(() => import('./pages/super-admin/Plans'));
+const PlatformOverview = lazy(() => import('./pages/super-admin/Overview'));
+const PlatformTeam = lazy(() => import('./pages/super-admin/Team'));
+const PlatformActivity = lazy(() => import('./pages/super-admin/Activity'));
+const PlatformBilling = lazy(() => import('./pages/super-admin/Billing'));
+const PlatformSettings = lazy(() => import('./pages/super-admin/Settings'));
+const InvoiceView = lazy(() => import('./pages/super-admin/InvoiceView'));
+const NetworkBilling = lazy(() => import('./pages/admin/NetworkBilling'));
+const NetworkBillingInvoice = lazy(() => import('./pages/admin/NetworkBillingInvoice'));
 const Usage = lazy(() => import('./pages/super-admin/Usage'));
+const SalesDashboard = lazy(() => import('./pages/super-admin/sales/SalesDashboard'));
+const SalesLeads = lazy(() => import('./pages/super-admin/sales/Leads'));
+const SalesPipeline = lazy(() => import('./pages/super-admin/sales/Pipeline'));
+const LeadDetail = lazy(() => import('./pages/super-admin/sales/LeadDetail'));
+const PlatformTasks = lazy(() => import('./pages/super-admin/Tasks'));
+const HealthBoard = lazy(() => import('./pages/super-admin/success/HealthBoard'));
+const SupportDesk = lazy(() => import('./pages/super-admin/support/SupportDesk'));
+const TicketView = lazy(() => import('./pages/super-admin/support/TicketView'));
+const SupportMacros = lazy(() => import('./pages/super-admin/support/Macros'));
+const TenantSupport = lazy(() => import('./pages/admin/Support'));
+const TenantSupportTicket = lazy(() => import('./pages/admin/SupportTicket'));
+const PlatformRevenue = lazy(() => import('./pages/super-admin/money/Revenue'));
+const PlatformCoupons = lazy(() => import('./pages/super-admin/money/Coupons'));
+const FeatureFlags = lazy(() => import('./pages/super-admin/platform/FeatureFlags'));
+const PlatformAnnouncements = lazy(() => import('./pages/super-admin/platform/Announcements'));
+const SystemHealth = lazy(() => import('./pages/super-admin/platform/SystemHealth'));
+const TrustOverview = lazy(() => import('./pages/super-admin/trust/TrustOverview'));
+const TrustBlocklist = lazy(() => import('./pages/super-admin/trust/Blocklist'));
+const PrivacyRequests = lazy(() => import('./pages/super-admin/trust/PrivacyRequests'));
+const RequestDemo = lazy(() => import('./pages/RequestDemo'));
+const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
 const AdvertiserOffers = lazy(() => import('./pages/portal/AdvertiserOffers'));
 const PublisherOfferDetail = lazy(() => import('./pages/portal/PublisherOfferDetail'));
@@ -146,13 +179,41 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/request-demo" element={<RequestDemo />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/change-password" element={<ChangePassword />} />
+        <Route path="/impersonate" element={<Impersonate />} />
 
         {/* Super Admin */}
-        <Route element={<ProtectedRoute allow="super_admin"><AppShell /></ProtectedRoute>}>
-          <Route path="/admin" element={<DashboardHome />} />
-          <Route path="/admin/networks" element={<Networks />} />
-          <Route path="/admin/subscriptions" element={<Subscriptions />} />
-          <Route path="/admin/usage" element={<Usage />} />
+        <Route element={<ProtectedRoute allow="super_admin"><PlatformMeProvider><AppShell /></PlatformMeProvider></ProtectedRoute>}>
+          <Route path="/admin" element={<PlatformGate section="dashboard"><PlatformOverview /></PlatformGate>} />
+          <Route path="/admin/networks" element={<PlatformGate section="networks"><Networks /></PlatformGate>} />
+          <Route path="/admin/networks/:id" element={<PlatformGate section="networks"><NetworkDetail /></PlatformGate>} />
+          <Route path="/admin/plans" element={<PlatformGate section="plans"><Plans /></PlatformGate>} />
+          <Route path="/admin/subscriptions" element={<Navigate to="/admin/plans" replace />} />
+          <Route path="/admin/billing" element={<PlatformGate section="billing"><PlatformBilling /></PlatformGate>} />
+          <Route path="/admin/invoices/:id" element={<PlatformGate section="billing"><InvoiceView /></PlatformGate>} />
+          <Route path="/admin/settings" element={<PlatformGate section="settings"><PlatformSettings /></PlatformGate>} />
+          <Route path="/admin/team" element={<PlatformGate section="team"><PlatformTeam /></PlatformGate>} />
+          <Route path="/admin/activity" element={<PlatformGate section="activity"><PlatformActivity /></PlatformGate>} />
+          <Route path="/admin/usage" element={<PlatformGate section="networks"><Usage /></PlatformGate>} />
+          <Route path="/admin/sales" element={<PlatformGate section="sales"><SalesDashboard /></PlatformGate>} />
+          <Route path="/admin/sales/leads" element={<PlatformGate section="sales"><SalesLeads /></PlatformGate>} />
+          <Route path="/admin/sales/leads/:id" element={<PlatformGate section="sales"><LeadDetail /></PlatformGate>} />
+          <Route path="/admin/sales/pipeline" element={<PlatformGate section="sales"><SalesPipeline /></PlatformGate>} />
+          <Route path="/admin/tasks" element={<PlatformGate><PlatformTasks /></PlatformGate>} />
+          <Route path="/admin/success" element={<PlatformGate section="success"><HealthBoard /></PlatformGate>} />
+          <Route path="/admin/support" element={<PlatformGate section="support"><SupportDesk /></PlatformGate>} />
+          <Route path="/admin/support/macros" element={<PlatformGate section="support"><SupportMacros /></PlatformGate>} />
+          <Route path="/admin/support/:id" element={<PlatformGate section="support"><TicketView /></PlatformGate>} />
+          <Route path="/admin/revenue" element={<PlatformGate section="revenue"><PlatformRevenue /></PlatformGate>} />
+          <Route path="/admin/coupons" element={<PlatformGate section="billing"><PlatformCoupons /></PlatformGate>} />
+          <Route path="/admin/flags" element={<PlatformGate section="platform"><FeatureFlags /></PlatformGate>} />
+          <Route path="/admin/announcements" element={<PlatformGate section="comms"><PlatformAnnouncements /></PlatformGate>} />
+          <Route path="/admin/system" element={<PlatformGate section="platform"><SystemHealth /></PlatformGate>} />
+          <Route path="/admin/trust" element={<PlatformGate section="trust"><TrustOverview /></PlatformGate>} />
+          <Route path="/admin/trust/blocklist" element={<PlatformGate section="trust"><TrustBlocklist /></PlatformGate>} />
+          <Route path="/admin/trust/privacy" element={<PlatformGate section="trust"><PrivacyRequests /></PlatformGate>} />
         </Route>
 
         {/* Admin / Network */}
@@ -285,6 +346,10 @@ export default function App() {
           <Route path="/app/investigator/:id" element={<InvestigatorDetail />} />
           <Route path="/app/control-center" element={<ControlCenter />} />
           <Route path="/app/control-center/:tab" element={<ControlCenter />} />
+          <Route path="/app/billing" element={<NetworkBilling />} />
+          <Route path="/app/support" element={<TenantSupport />} />
+          <Route path="/app/support/:id" element={<TenantSupportTicket />} />
+          <Route path="/app/billing/invoices/:id" element={<NetworkBillingInvoice />} />
           <Route path="/app/ai" element={<AiOps />} />
           <Route path="/app/profile" element={<ProfilePage />} />
           <Route path="/app/profile/notifications" element={<NotificationPreferences />} />

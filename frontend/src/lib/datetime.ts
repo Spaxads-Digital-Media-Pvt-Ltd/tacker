@@ -48,6 +48,14 @@ export function formatDateTime(iso: string | Date, tz: string): string {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
 }
 
+/** "10/08/2026 14:32:10" (MM/DD/YYYY) in the given zone — the log reports' date column. Invalid input is returned unchanged. */
+export function formatMdyDateTime(iso: string | Date, tz: string): string {
+  const d = iso instanceof Date ? iso : new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const p = parts(d, tz);
+  return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute}:${p.second}`;
+}
+
 /** "14:32:10" in the given zone. */
 export function formatTime(d: Date, tz: string): string {
   const p = parts(d, tz);

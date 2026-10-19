@@ -19,6 +19,8 @@ import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { mbcJsonSql } from '../../../lib/reporting/money-by-currency.js';
 import type { MoneyByCurrency } from '../../../lib/reporting/types.js';
+import { rejectedClickSql } from '../../../lib/click-rejections.js';
+import { networkCapTimeZone } from '../../../lib/reporting/network-zone.js';
 
 const TABLE = 'offer_groups';
 
@@ -75,34 +77,42 @@ async function networkDefaultCurrency(networkId: string): Promise<string> {
  * a total with more than one currency is not a meaningful single figure.
  */
 interface TodayStats {
-  clicks: number; cv: number; payout: string; revenue: string;
+  clicks: number; cv: number; payout: string; revenue: string; margin: string;
   currencies: string[]; moneyByCurrency: MoneyByCurrency;
 }
 async function todayStatsForOffers(networkId: string, offerIds: string[]): Promise<TodayStats> {
-  if (offerIds.length === 0) return { clicks: 0, cv: 0, payout: '0', revenue: '0', currencies: [], moneyByCurrency: {} };
-  const { rows } = await query<{ clicks: string; cv: string; payout: string; revenue: string; money_by_currency: MoneyByCurrency | null }>(
+  if (offerIds.length === 0) return { clicks: 0, cv: 0, payout: '0.0000', revenue: '0.0000', margin: '0.0000', currencies: [], moneyByCurrency: {} };
+  // "Today" is the network's cap time zone's day (Settings › General — when daily caps reset).
+  const capTz = await networkCapTimeZone(networkId);
+  const { rows } = await query<{ clicks: string; cv: string; payout: string; revenue: string; margin: string; money_by_currency: MoneyByCurrency | null }>(
     `WITH j AS (
        SELECT cl.id AS click_row, c.id AS conv_row, c.status, c.payout, c.revenue, c.currency
          FROM clicks cl
          LEFT JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
-        WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at::date = CURRENT_DATE
+        WHERE cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[]) AND cl.created_at >= date_trunc('day', now(), $3)
+          AND NOT ${rejectedClickSql('cl')}
      ), cm AS (
        SELECT currency AS cur, COALESCE(SUM(payout), 0) AS p, COALESCE(SUM(revenue), 0) AS r
-         FROM j WHERE conv_row IS NOT NULL AND currency IS NOT NULL GROUP BY currency
+         FROM j WHERE conv_row IS NOT NULL AND status = 'approved' AND currency IS NOT NULL GROUP BY currency
      )
+     -- Money: APPROVED conversions only (like the conversion count and the dashboard — a rejected or
+     -- pending conversion earns nothing), summed + subtracted as numeric, returned as 4dp text.
      SELECT
        COUNT(DISTINCT j.click_row)::text AS clicks,
        COUNT(DISTINCT j.conv_row) FILTER (WHERE j.status = 'approved')::text AS cv,
-       COALESCE(SUM(j.payout), 0)::text AS payout,
-       COALESCE(SUM(j.revenue), 0)::text AS revenue,
+       round(COALESCE(SUM(j.payout) FILTER (WHERE j.status = 'approved'), 0), 4)::text AS payout,
+       round(COALESCE(SUM(j.revenue) FILTER (WHERE j.status = 'approved'), 0), 4)::text AS revenue,
+       round(COALESCE(SUM(j.revenue) FILTER (WHERE j.status = 'approved'), 0)
+        - COALESCE(SUM(j.payout) FILTER (WHERE j.status = 'approved'), 0), 4)::text AS margin,
        (SELECT ${mbcJsonSql('cm')} FROM cm) AS money_by_currency
      FROM j`,
-    [networkId, offerIds],
+    [networkId, offerIds, capTz],
   );
   const r = rows[0];
   const moneyByCurrency = r?.money_by_currency ?? {};
   return {
-    clicks: Number(r?.clicks ?? 0), cv: Number(r?.cv ?? 0), payout: r?.payout ?? '0', revenue: r?.revenue ?? '0',
+    clicks: Number(r?.clicks ?? 0), cv: Number(r?.cv ?? 0),
+    payout: r?.payout ?? '0.0000', revenue: r?.revenue ?? '0.0000', margin: r?.margin ?? '0.0000',
     currencies: Object.keys(moneyByCurrency).sort(), moneyByCurrency,
   };
 }
@@ -131,13 +141,11 @@ export function offerGroupsRoutes(): Router {
     const group = await db.selectOne<Row>(TABLE, { id: req.params.id });
     if (!group) throw notFound('Offer group not found');
     const offerIds = group.offer_ids;
-    if (offerIds.length === 0) return sendOk(res, { revenue: '0', payout: '0', margin: '0', clicks: 0, cv: 0, cvr: 0, currencies: [], moneyByCurrency: {} });
     const s = await todayStatsForOffers(req.scope!.networkId, offerIds);
     const { clicks, cv } = s;
-    const payout = Number(s.payout);
-    const revenue = Number(s.revenue);
+    // Money as numeric(14,4) text from SQL (F-22) — formatted at the UI edge, never float math here.
     sendOk(res, {
-      revenue: revenue.toFixed(2), payout: payout.toFixed(2), margin: (revenue - payout).toFixed(2),
+      revenue: s.revenue, payout: s.payout, margin: s.margin,
       clicks, cv, cvr: clicks > 0 ? cv / clicks : 0,
       currencies: s.currencies, moneyByCurrency: s.moneyByCurrency,
     });

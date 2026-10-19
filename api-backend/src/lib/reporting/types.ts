@@ -18,7 +18,12 @@ export type Metric =
   // The same approved conversions' money split by currency: { [currency]: { payout?, revenue?, margin? } }
   // (numeric(14,4) text; only the fields the audience may see; NULL currency excluded; {} when none).
   // Opt-in only, never an orderBy.
-  | 'money_by_currency';
+  | 'money_by_currency'
+  // Ad impressions (/impression — the impressions table): all, unique, invalid (flagged / rejected), and
+  // CTR = clicks ÷ impressions. Opt-in only (a report without them never reads impressions), never an orderBy.
+  | 'impressions' | 'unique_impressions' | 'invalid_impressions' | 'ctr';
+
+export const IMPRESSION_METRICS: readonly Metric[] = ['impressions', 'unique_impressions', 'invalid_impressions', 'ctr'];
 
 /** One currency's share of a row's money — numeric(14,4) text, only the fields the audience may see. */
 export interface CurrencyMoney { payout?: string; revenue?: string; margin?: string }
@@ -80,6 +85,11 @@ export interface ReportFilters {
   // "Others › Ignore Fail Traffic" — drop fraud-flagged clicks from click-side metrics entirely,
   // rather than just counting them separately (which invalid_clicks already does).
   excludeInvalid?: boolean;
+  /** Leave out the clicks /click rejected (never sent to the offer — lib/click-rejections): partner /
+   * advertiser reports and the automation see only traffic that reached the offer. Admin reports keep
+   * them, as invalid clicks. Set by the server (buildReportRequest for the portal audiences), never a
+   * query param. */
+  excludeRejected?: boolean;
 }
 
 export interface ReportRequest {
@@ -97,6 +107,8 @@ export interface ReportRequest {
    * metrics this request itself lists (fail-closed).
    */
   moneyFields?: MoneyField[];
+  /** IANA time zone the `day` / `hour` dimensions bucket in (F-20); absent = UTC. */
+  timeZone?: string;
 }
 
 export type MetricValue = string | number | string[] | MoneyByCurrency;
@@ -104,6 +116,9 @@ export type MetricValue = string | number | string[] | MoneyByCurrency;
 export interface ReportRow {
   dimensions: Record<string, string | null>;
   metrics: Record<string, MetricValue>;
+  /** Names for the entity dimensions (offer / publisher / advertiser / smartLink) — F-20; set by the
+   * report endpoints (lib/reporting/labels.ts) so pages needn't load whole entity lists to map ids. */
+  labels?: Record<string, { ref: number | null; name: string } | null>;
 }
 
 export interface ReportResult {

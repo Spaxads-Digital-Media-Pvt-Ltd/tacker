@@ -1,5 +1,5 @@
 // Customer Value rule form / list rules (lib/customerValueRules.ts) — the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { toDateInput, formatRuleDate, ruleAmountField, formatRuleAmount, conditionError, groupingLabel, SEPARATELY_BY_LABEL, SEPARATELY_BY_HINT, deleteFailureMeansGone } from '../customerValueRules.ts';
 

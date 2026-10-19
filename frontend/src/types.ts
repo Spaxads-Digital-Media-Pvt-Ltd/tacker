@@ -52,6 +52,8 @@ export interface DashboardUser {
   id: string; ref?: number; name: string; email: string; role: string; status: string;
   businessUnit?: string | null; partnerManager?: boolean; advertiserManager?: boolean;
   primaryPhone?: string | null; title?: string | null; superUser?: boolean;
+  /** A login exists for them (Resend invite / password reset act on it). */
+  hasLogin?: boolean;
   createdAt: string; updatedAt: string;
 }
 
@@ -62,7 +64,7 @@ export interface Offer {
   name: string;
   status: 'draft' | 'active' | 'paused' | 'archived';
   destinationUrl: string;
-  payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+  payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
   defaultPayout: string;
   defaultRevenue: string;
   currency: string;
@@ -75,13 +77,21 @@ export interface Offer {
   dailyConversionCap?: number | null;
   totalConversionCap?: number | null;
   dailyClickCap?: number | null;
+  /** When this offer's daily caps reset (IANA zone); null = the network's cap time zone. */
+  capTimezone?: string | null;
   allowedTrafficTypes?: string[];
   fallbackUrl?: string | null;
   description?: string | null;
   notes?: string[];
   securityCode?: string | null;
+  /** A per-offer security code exists (shown to every role). */
+  securityCodeSet?: boolean;
+  /** The caller's role can't see security codes (finance / read-only, O5): `securityCode` is null. */
+  securityCodeHidden?: boolean;
   trackingDomainId?: string | null;
   linkingType?: 'redirect' | 'redirect_direct' | null;
+  /** The advertiser's / MMP's impression URL: /impression sends the browser there with {imp_id}; null = a pixel. */
+  impressionUrl?: string | null;
   deepLinkEnabled?: boolean | null;
   firePartnerPostback?: boolean | null;
   appIdentifier?: string | null;
@@ -130,14 +140,28 @@ export interface OfferAttributionSettings {
   throttle: { enabled: boolean; ratePct: number };
   clickToConversion: { enabled: boolean; minSeconds: number; maxSeconds: number | null };
   emailOwnership: boolean;
+  /** Email Ownership: 'first' partner keeps the customer, or the 'last' converting partner takes it over. */
+  emailOwnershipMethod?: 'first' | 'last';
+  /** Ownership ends this many days after it began ('static') or after the latest conversion ('dynamic'); null = never. */
+  emailOwnershipWindowDays?: number | null;
+  emailOwnershipWindowMode?: 'static' | 'dynamic';
   viewThrough: boolean;
+  /** How long after an impression a click-less conversion is credited to it (hours, default 24). */
+  viewThroughWindowHours?: number;
   serverSideClick: boolean;
 }
+
+/** How many conversions one click may produce for an event (backend lib/offer-settings DuplicateMode). */
+export type DuplicateMode = 'one_per_click' | 'unique_txn' | 'every_postback';
 
 export interface OfferRevenueSettings {
   baseEventName: string | null;
   manualApproval: boolean;
+  /** Kept in step with duplicateMode (false ⇔ 'one_per_click') for older API clients. */
   allowDuplicates: boolean;
+  duplicateMode: DuplicateMode;
+  /** More conversions than this from one click within 10 minutes are held as pending for review; null / 0 = no limit. */
+  clickConversionLimit: number | null;
   revenueAction: 'impression' | 'click' | 'conversion';
   revenueType: 'fixed' | 'percentage' | 'mixed';
   revenuePct: number | null;
@@ -224,7 +248,7 @@ export interface PublisherOffer {
  id: string;
  name: string;
  status: 'draft' | 'active' | 'paused' | 'archived';
- payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+ payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
  payout: string;
  currency: string;
  trackingUrl: string | null;
@@ -252,7 +276,7 @@ export interface AdvertiserOffer {
  ref?: number;
  name: string;
  status: 'draft' | 'active' | 'paused' | 'archived';
- payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+ payoutModel: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
  revenue: string;
  currency: string;
  destinationUrl: string;
@@ -418,7 +442,8 @@ export interface PartnerInvoice {
   publisherId: string;
   publisherRef?: number;
   publisherName: string;
-  status: 'unpaid' | 'paid' | 'deleted';
+  /** 'void' = voided unpaid invoice (O8); 'deleted' only on rows soft-deleted before that. */
+  status: 'unpaid' | 'paid' | 'void' | 'deleted';
   visibleToPartner: boolean;
   paymentTerms: string | null;
   paymentMethod: string | null;
@@ -431,11 +456,18 @@ export interface PartnerInvoice {
   paidAt: string | null;
   publicNotes: string | null;
   internalNotes: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface PartnerInvoiceSummary { currency: string; billedAmount: string; paymentsAmount: string; balance: string; otherCurrencies: string[] }
+export interface PartnerInvoiceSummary {
+  currency: string; billedAmount: string; paymentsAmount: string; balance: string; otherCurrencies: string[];
+  /** Every currency's own totals (O4). */
+  byCurrency?: { currency: string; billedAmount: string; paymentsAmount: string; balance: string }[];
+}
 
 export interface PartnerInvoiceLedgerEntry {
   id: string;
@@ -486,7 +518,8 @@ export interface AdvertiserInvoice {
   advertiserId: string;
   advertiserRef?: number;
   advertiserName: string;
-  status: 'unpaid' | 'paid' | 'deleted';
+  /** 'void' = voided unpaid invoice (O8); 'deleted' only on rows soft-deleted before that. */
+  status: 'unpaid' | 'paid' | 'void' | 'deleted';
   visibleToAdvertiser: boolean;
   paymentTerms: string | null;
   currency: string;
@@ -497,11 +530,18 @@ export interface AdvertiserInvoice {
   balance: string;
   paidAt: string | null;
   notes: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
+  voidReason?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface AdvertiserInvoiceSummary { currency: string; billedAmount: string; paidAmount: string; balance: string; otherCurrencies: string[] }
+export interface AdvertiserInvoiceSummary {
+  currency: string; billedAmount: string; paidAmount: string; balance: string; otherCurrencies: string[];
+  /** Every currency's own totals (O4). */
+  byCurrency?: { currency: string; billedAmount: string; paidAmount: string; balance: string }[];
+}
 
 export interface AdvertiserInvoiceLedgerEntry {
   id: string;
@@ -561,6 +601,12 @@ export interface TrackingDomain {
   verificationState: 'unverified' | 'pending' | 'verified' | 'failed';
   sslStatus: 'none' | 'pending' | 'issued' | 'error';
   isPrimary: boolean;
+  /** The domain links use when an offer / smart link has none of its own — set by the API (backend
+   * lib/tracking-domains/default-host.ts): the primary if active, else the domain the tracking server is live
+   * on, else another real domain; localhost / 127.0.0.1 last. */
+  isDefault?: boolean;
+  /** Custom hosts: the DNS TXT record that verifies them (F-15). */
+  dnsRecord?: { type: string; name: string; value: string } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -574,6 +620,69 @@ export interface NetworkRow {
   subscription_status: string | null;
   plan_code: string | null;
   created_at: string;
+  /** Soft delete (D3): when it was deleted, and from when it can be purged (until then: restorable). */
+  deleted_at?: string | null;
+  purge_after?: string | null;
+  /** Last full export (Super Admin › Export) — a purge wants one taken since the delete. */
+  exported_at?: string | null;
+  plan_name?: string | null;
+  /** The network's first admin (its owner). */
+  owner_email?: string | null;
+  /** Why it is suspended: an unpaid invoice ('billing') or a Super Admin ('manual'). */
+  suspended_reason?: 'manual' | 'billing' | null;
+  /** Customer success: who looks after it, and its health (null until first computed). */
+  account_manager_id?: string | null;
+  account_manager_name?: string | null;
+  health_score?: number | null;
+  health_status?: 'healthy' | 'attention' | 'at_risk' | null;
+}
+
+/** A plan limit this billing period (lib/usage/meter.ts): used vs limit, ok | near (≥ 80 %) | over. */
+export interface PlanLimitStatus { key: string; used: number; limit: number; pct: number; state: 'ok' | 'near' | 'over' }
+
+/** GET /platform/networks/:id — one network as the Super Admin console shows it. */
+export interface NetworkDetail {
+  id: string;
+  ref: string;
+  name: string;
+  slug: string;
+  status: 'active' | 'suspended' | 'deleted';
+  default_currency: string;
+  created_at: string;
+  deleted_at: string | null;
+  exported_at: string | null;
+  purge_after: string | null;
+  suspended_reason: 'manual' | 'billing' | null;
+  subscription: {
+    id: string; status: string; plan_id: string; plan_code: string; plan_name: string; price_cents: number; currency: string;
+    billing_interval: 'month' | 'year';
+    current_period_start: string | null; current_period_end: string | null; renews_at: string | null; created_at: string;
+    trial_ends_at: string | null; cancel_at_period_end: boolean; canceled_at: string | null;
+    limits: Record<string, number | string | boolean>;
+  } | null;
+  owner: { id: string; email: string; name: string | null; status: string; has_login: boolean; last_sign_in_at: string | null } | null;
+  counts: { users: number; offers: number; partners: number; advertisers: number };
+  trackingDomains: { host: string; mode: string; status: string; is_primary: boolean }[];
+  usage: { plan: { code: string; name: string } | null; period: { start: string; end: string }; limits: PlanLimitStatus[] };
+}
+
+/** GET /platform/networks/:id/users — a network's team, as the Super Admin sees it. */
+export interface NetworkTeamMember {
+  id: string; email: string; name: string | null; role: string; status: string; created_at: string;
+  has_login: boolean; last_sign_in_at: string | null;
+}
+
+/** GET /platform/networks/:id/activity — what Super Admins did to a network. */
+export interface PlatformActivityRow {
+  id: string; created_at: string; action: string; entity_type: string | null; entity_id: string | null;
+  after: unknown; in_support_session: boolean; admin_email: string | null;
+}
+
+/** A purged network's tombstone (D3): who it was, when it went — its money ledger is kept. */
+export interface PurgedNetworkRow {
+  id: string; name: string; slug: string; default_currency: string | null;
+  created_at: string | null; deleted_at: string | null; exported_at: string | null; purged_at: string;
+  purged_by_email: string | null; ledger_entries_retained: number; auth_users_deleted: number;
 }
 
 export interface MarketplaceAdvertiser {

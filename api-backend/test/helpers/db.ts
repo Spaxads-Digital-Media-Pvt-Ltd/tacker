@@ -59,6 +59,9 @@ export async function resetDb(): Promise<void> {
 export interface Fixture {
   networkA: string;
   networkB: string;
+  /** Each network's postback secure_code — /postback rejects requests without it (F-01). */
+  secureCodeA: string;
+  secureCodeB: string;
   advA: string;
   advB: string;
   pubA1: string;
@@ -74,12 +77,15 @@ async function insertReturningId(sql: string, params: unknown[]): Promise<string
 
 export async function seedFixture(suffix?: string): Promise<Fixture> {
   const sfx = suffix ?? 's' + String(nextSuffix());
+  // Known postback secure_codes (>= 8 chars, the timing-safe compare's minimum) so tests can send them.
+  const secureCodeA = 'FixtureCodeA' + sfx;
+  const secureCodeB = 'FixtureCodeB' + sfx;
   const networkA = await insertReturningId(
-    `INSERT INTO networks (name, slug) VALUES ($1, $2) RETURNING id`,
-    ['Net A ' + sfx, 'net-a-' + sfx]);
+    `INSERT INTO networks (name, slug, postback_security_code) VALUES ($1, $2, $3) RETURNING id`,
+    ['Net A ' + sfx, 'net-a-' + sfx, secureCodeA]);
   const networkB = await insertReturningId(
-    `INSERT INTO networks (name, slug) VALUES ($1, $2) RETURNING id`,
-    ['Net B ' + sfx, 'net-b-' + sfx]);
+    `INSERT INTO networks (name, slug, postback_security_code) VALUES ($1, $2, $3) RETURNING id`,
+    ['Net B ' + sfx, 'net-b-' + sfx, secureCodeB]);
 
   const advA = await insertReturningId(
     `INSERT INTO advertisers (network_id, name) VALUES ($1, $2) RETURNING id`,
@@ -108,5 +114,5 @@ export async function seedFixture(suffix?: string): Promise<Fixture> {
      VALUES ($1, $2, $3, 'allow', 'approved')`,
     [networkA, offerA, pubA1]);
 
-  return { networkA, networkB, advA, advB, pubA1, pubA2, pubB1, offerA };
+  return { networkA, networkB, secureCodeA, secureCodeB, advA, advB, pubA1, pubA2, pubB1, offerA };
 }

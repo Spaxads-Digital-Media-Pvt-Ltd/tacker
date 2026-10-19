@@ -50,7 +50,7 @@ export default function TagsManage() {
               <span key={t.id} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-small">
                 <span className="h-3 w-3 rounded-full" style={{ background: t.color ?? '#94a3b8' }} />
                 {t.name}
-                <button className="text-fg-muted hover:text-danger-text" aria-label={`Delete tag ${t.name}`} onClick={() => confirm({ title: 'Delete tag?', message: `Are you sure you want to delete tag "${t.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await del.run(t.id); refetch(); } })}>×</button>
+                <button className="text-fg-muted hover:text-danger-text" aria-label={`Delete tag ${t.name}`} onClick={() => confirm({ title: 'Delete tag?', message: `Are you sure you want to delete tag "${t.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await del.runOrThrow(t.id); refetch(); } })}>×</button>
               </span>
             ))}
           </div>

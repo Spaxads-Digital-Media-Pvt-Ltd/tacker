@@ -31,6 +31,7 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   offer_publisher_access: { tenantColumn: 'network_id' },
   tracking_domains: { tenantColumn: 'network_id' },
   audit_log: { tenantColumn: 'network_id' },
+  email_outbox: { tenantColumn: 'network_id' },
 
   // Phase 1A per-network platform data (admins may read their own; platform admins access any
   // network's rows via raw queries in the platform surface, spec §3C). platform_admins and
@@ -46,6 +47,8 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   conversions: { tenantColumn: 'network_id' },
   publisher_postbacks: { tenantColumn: 'network_id' },
   postback_logs: { tenantColumn: 'network_id' },
+  // Every inbound conversion request (postback / pixel / iframe / API) and what happened to it.
+  inbound_postback_logs: { tenantColumn: 'network_id' },
 
   // Phase 4 (money). ledger_entries is append-only (DB trigger blocks UPDATE/DELETE).
   ledger_entries: { tenantColumn: 'network_id' },
@@ -68,6 +71,8 @@ export const TABLE_SCOPES: Record<string, TableScope> = {
   offer_creatives: { tenantColumn: 'network_id' },
   offer_coupons: { tenantColumn: 'network_id' },
   offer_deals: { tenantColumn: 'network_id' },
+  // Price Per Product rules (lib/offer-settings/products.ts).
+  offer_products: { tenantColumn: 'network_id' },
   offer_forwarding_rules: { tenantColumn: 'network_id' },
   offer_scheduled_actions: { tenantColumn: 'network_id' },
   tags: { tenantColumn: 'network_id' },

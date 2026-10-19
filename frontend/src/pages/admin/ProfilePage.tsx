@@ -4,14 +4,18 @@
  * compliance anonymize via /api/me/anonymize.
  */
 import { useEffect, useState, type ReactNode, type FormEvent, type ChangeEvent } from 'react';
+import { PASSWORD_MIN, PASSWORD_HINT } from '../../auth/passwordPolicy';
 import { Copy, Check, Shield, Pencil, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { ROLE_LABELS } from '../../auth/roles';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
-import { loadSession, saveSession } from '../../auth/session';
+import { imageAccept, imageTypesText, uploadImage } from '../../lib/imageUpload';
+import { loadSession, saveSession, updateToken } from '../../auth/session';
 import { PageHeader, Badge, Modal, Field, Tabs } from '../../shared-components/primitives/ui';
 import { EmptyShellTable, type ShellRow } from '../../shared-components/primitives/EmptyShellTable';
+import { resolveTrackingHost } from '../../lib/trackingLinks';
+import type { TrackingDomain } from '../../types';
 
 const ACCOUNT_TABS = ['General', 'Logins'] as const;
 const LANGUAGES = ['English', 'Spanish', 'French', 'German', 'Portuguese'];
@@ -87,7 +91,7 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
 
 export default function ProfilePage() {
   const { session } = useAuth();
-  const domains = useQuery<{ id: string; host: string; isPrimary?: boolean; status?: string }[]>('/api/tracking-domains');
+  const domains = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const account = useQuery<MyAccount>('/api/me/account');
   const settings = useQuery<NetworkSettings>('/api/settings');
   const logins = useQuery<LoginRow[]>('/api/me/logins');
@@ -138,8 +142,7 @@ export default function ProfilePage() {
   if (!session) return null;
   const roleLabel = ROLE_LABELS[session.role] ?? account.data?.role ?? session.role;
 
-  const active = (domains.data ?? []).filter((d) => d.status === 'active');
-  const host = active.find((d) => d.isPrimary)?.host ?? active[0]?.host ?? 'your-tracking-domain.com';
+  const host = resolveTrackingHost(domains.data) ?? 'your-tracking-domain.com';
   const affiliateSignup = `https://${host}/pub-signup`;
   const advertiserSignup = `https://${host}/adv-signup`;
 
@@ -341,22 +344,23 @@ function EditProfileModal({ initial, onClose, onSaved }: {
 }) {
   const [form, setForm] = useState(initial);
   const [editError, setEditError] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const { run, busy, error } = useMutation((body: Record<string, unknown>) =>
     api.patch('/api/me/profile', body));
 
   const set = (key: keyof ProfileForm, value: string | null) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  const onPhoto = (e: ChangeEvent<HTMLInputElement>) => {
+  // O12: the photo goes to object storage now; the form keeps its URL and Save stores that.
+  const onPhoto = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
-    if (file.size > 2_000_000) {
-      setEditError('Photo must be under 2 MB');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => set('photoUrl', typeof reader.result === 'string' ? reader.result : null);
-    reader.readAsDataURL(file);
+    setEditError(null);
+    setUploadingPhoto(true);
+    try { set('photoUrl', await uploadImage('/api/me/photo', file)); }
+    catch (err) { setEditError(err instanceof Error ? err.message : 'Upload failed.'); }
+    finally { setUploadingPhoto(false); }
   };
 
   const submit = async (e: FormEvent) => {
@@ -369,7 +373,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
       businessUnit: form.businessUnit.trim() || null,
       language: form.language || 'English',
       timezone: form.timezone.trim() || null,
-      photoUrl: form.photoUrl,
+      ...(form.photoUrl !== initial.photoUrl ? { photoUrl: form.photoUrl } : {}),
       phone: form.phone.trim() || null,
       address: form.address.trim() || null,
       apartment: form.apartment.trim() || null,
@@ -402,7 +406,8 @@ function EditProfileModal({ initial, onClose, onSaved }: {
               <div className="grid h-14 w-14 place-items-center rounded-card border border-dashed border-border text-tiny text-fg-muted">—</div>
             )}
             <div className="flex flex-col gap-1">
-              <input type="file" accept="image/*" onChange={onPhoto} className="text-tiny" />
+              <input type="file" accept={imageAccept()} onChange={(e) => void onPhoto(e)} disabled={uploadingPhoto} className="text-tiny" />
+              <span className="text-tiny text-fg-muted">{uploadingPhoto ? 'Uploading…' : `${imageTypesText()}, up to 2 MB.`}</span>
               {form.photoUrl && (
                 <button type="button" className="text-tiny text-accent-text hover:underline text-left" onClick={() => set('photoUrl', null)}>Remove photo</button>
               )}
@@ -427,7 +432,7 @@ function EditProfileModal({ initial, onClose, onSaved }: {
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+          <button type="submit" className="btn-primary" disabled={busy || uploadingPhoto}>{busy ? 'Saving…' : 'Save changes'}</button>
         </div>
       </form>
     </Modal>
@@ -502,12 +507,17 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [confirm, setConfirm] = useState('');
   const [done, setDone] = useState(false);
   const [mismatch, setMismatch] = useState(false);
-  const { run, busy, error } = useMutation((password: string) => api.patch('/api/me/password', { password }));
+  const { run, busy, error } = useMutation((password: string) =>
+    api.patch<{ accessToken?: string; expiresAt?: number | null }>('/api/me/password', { password }));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (pw !== confirm) { setMismatch(true); return; }
     setMismatch(false);
-    if (await run(pw)) { setDone(true); setTimeout(onClose, 1200); }
+    const res = await run(pw);
+    if (!res) return;
+    // Supabase signed this login out everywhere; the answer is this tab's new session (its refresh cookie is set).
+    if (res.accessToken) updateToken(res.accessToken, res.expiresAt ?? null);
+    setDone(true); setTimeout(onClose, 1200);
   };
   return (
     <Modal open onClose={onClose} title="Change password">
@@ -517,7 +527,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
         <form onSubmit={submit} className="space-y-4">
           {error && <p className="text-small text-danger-text">{error}</p>}
           {mismatch && <p className="text-small text-danger-text">Passwords don't match.</p>}
-          <Field label="New password"><input type="password" className="input" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={8} placeholder="At least 8 characters" /></Field>
+          <Field label="New password"><input type="password" className="input" value={pw} onChange={(e) => setPw(e.target.value)} required minLength={PASSWORD_MIN} placeholder={PASSWORD_HINT} /></Field>
           <Field label="Confirm new password"><input type="password" className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} required /></Field>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>

@@ -58,13 +58,15 @@ export interface OfferRow {
   name: string;
   status: 'draft' | 'active' | 'paused' | 'archived';
   destination_url: string;
-  payout_model: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'RevShare';
+  payout_model: 'CPA' | 'CPL' | 'CPC' | 'CPI' | 'CPM' | 'RevShare';
   default_payout: string; // numeric arrives as string from pg — keep as string, never float
   default_revenue: string;
   currency: string;
   daily_conversion_cap: number | null;
   total_conversion_cap: number | null;
   daily_click_cap: number | null;
+  /** When this offer's daily caps reset (IANA zone); null = the network's cap time zone. */
+  cap_timezone?: string | null;
   attribution_window_s: number;
   dedup_window_s: number;
   allowed_traffic_types: string[];

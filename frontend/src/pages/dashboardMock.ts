@@ -1,7 +1,8 @@
 /**
  * Dev-only sample data for the admin dashboard. Used ONLY when a request errors AND the app is
- * running in dev (`import.meta.env.DEV`, stripped from production builds) — lets the redesigned
- * dashboard be previewed without a live api-backend. Real data always wins once the API responds.
+ * running in dev (`import.meta.env.DEV`; DashboardHome passes it only under that flag, so production
+ * builds don't include this module) — lets the redesigned dashboard be previewed without a live
+ * api-backend. Real data always wins once the API responds.
  */
 
 function seededRandom(seed: number): () => number {

@@ -6,8 +6,14 @@
  * as one row per offer, all sharing the same name/content, which is what "+ Creative" fans out into
  * here. Tenant-scoped by network_id (spec §3A); every selected offer is verified to belong to the
  * caller's network before any write.
+ *
+ * Files (F-27): POST /upload takes the raw file, puts it in object storage and returns its URL; a
+ * creative stores only that URL (or a hosted asset's URL) — the same body rules as the per-offer API
+ * (createCreativeSchema). Lists never carry file bytes: a not-yet-migrated inline (data:) file is
+ * `url: null, urlInline: true` there, and only GET /:id returns it (lib/creatives/files.ts).
  */
-import { Router } from 'express';
+import express, { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
@@ -18,6 +24,9 @@ import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
+import { createCreativeSchema } from '../offers/asset-schemas.js';
+import { CREATIVE_MAX_BYTES, CREATIVE_TYPES_TEXT, CREATIVE_UPLOAD_TYPES, isInlineData, listUrlColumns, uploadCreativeFile } from '../../../lib/creatives/files.js';
+import { notifyNewCreative, creativeIsPartnerVisible } from '../../../lib/email/notifications.js';
 
 const TABLE = 'offer_creatives';
 
@@ -27,27 +36,15 @@ interface Row {
   visible_to_partners: boolean; email_from: string | null; email_subject: string | null;
   created_at: string; updated_at: string;
 }
-const dto = (r: Row & { offer_name?: string; offer_ref?: string }) => ({
+const dto = (r: Row & { offer_name?: string; offer_ref?: string; url_inline?: boolean }) => ({
   id: r.id, ref: Number(r.ref), offerId: r.offer_id, offerName: r.offer_name, offerRef: r.offer_ref != null ? Number(r.offer_ref) : undefined,
-  name: r.name, type: r.type, url: r.url, html: r.html, width: r.width, height: r.height, language: r.language,
+  name: r.name, type: r.type, url: r.url, urlInline: r.url_inline ?? isInlineData(r.url),
+  html: r.html, width: r.width, height: r.height, language: r.language,
   status: r.status, visibleToPartners: r.visible_to_partners, emailFrom: r.email_from, emailSubject: r.email_subject,
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
-const bodySchema = z.object({
-  name: z.string().min(1).max(200),
-  type: z.enum(['image', 'html', 'link', 'email', 'video', 'archive', 'thumbnail', 'text']).default('image'),
-  url: z.string().max(6_000_000).nullable().optional(),
-  html: z.string().max(100_000).nullable().optional(),
-  width: z.number().int().min(0).nullable().optional(),
-  height: z.number().int().min(0).nullable().optional(),
-  language: z.string().max(20).nullable().optional(),
-  status: z.enum(['active', 'paused', 'deleted']).default('active'),
-  visibleToPartners: z.boolean().default(true),
-  emailFrom: z.string().max(2000).nullable().optional(),
-  emailSubject: z.string().max(2000).nullable().optional(),
-  offerIds: z.array(z.string().uuid()).min(1).max(100),
-});
+const bodySchema = createCreativeSchema.extend({ offerIds: z.array(z.string().uuid()).min(1).max(100) });
 const updateBodySchema = bodySchema.partial().extend({ offerIds: z.array(z.string().uuid()).max(100).optional() });
 
 function columns(b: Partial<z.infer<typeof bodySchema>>) {
@@ -69,9 +66,12 @@ function columns(b: Partial<z.infer<typeof bodySchema>>) {
 export function creativesRoutes(): Router {
   const r = Router();
 
+  // Explicit columns, never c.* — the url of an inline file is withheld (see the header).
   r.get('/', asyncHandler(async (req, res) => {
-    const { rows } = await query<Row & { offer_name: string; offer_ref: string }>(
-      `SELECT c.*, o.name AS offer_name, o.ref AS offer_ref
+    const { rows } = await query<Row & { offer_name: string; offer_ref: string; url_inline: boolean }>(
+      `SELECT c.id, c.ref, c.offer_id, c.name, c.type, ${listUrlColumns('c')}, c.html, c.width, c.height, c.language,
+              c.status, c.visible_to_partners, c.email_from, c.email_subject, c.created_at, c.updated_at,
+              o.name AS offer_name, o.ref AS offer_ref
          FROM offer_creatives c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
         WHERE c.network_id = $1 ORDER BY c.created_at DESC LIMIT ${LIST_CAP}`,
       [req.scope!.networkId],
@@ -79,6 +79,29 @@ export function creativesRoutes(): Router {
     warnIfCapped(rows, LIST_CAP, 'creatives.list');
     sendOk(res, rows.map(dto));
   }));
+
+  // Upload a creative file → object storage → its URL, to send as `url` on create / edit. The raw
+  // file is the body, its type the Content-Type (≤ 2 MB). Storage not configured → a clear 400, as
+  // for offer thumbnails.
+  r.post(
+    '/upload',
+    requireRole('admin', 'manager'),
+    express.raw({ type: Object.keys(CREATIVE_UPLOAD_TYPES), limit: CREATIVE_MAX_BYTES }),
+    asyncHandler(async (req, res) => {
+      const type = String(req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
+      if (!CREATIVE_UPLOAD_TYPES[type] || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+        throw badRequest(`Upload a ${CREATIVE_TYPES_TEXT} file up to 2 MB`);
+      }
+      let url: string;
+      try {
+        url = await uploadCreativeFile(req.scope!.networkId, req.body, type, randomUUID());
+      } catch (e) {
+        throw badRequest(e instanceof Error ? e.message : 'Upload failed');
+      }
+      await writeAudit(req, { action: 'offer.creative.upload', entityType: TABLE, after: { url, contentType: type, bytes: req.body.length } });
+      sendOk(res, { url, contentType: type, bytes: req.body.length }, undefined, 201);
+    }),
+  );
 
   r.get('/:id', asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
@@ -118,6 +141,8 @@ export function creativesRoutes(): Router {
       if (!offer) throw badRequest('offerIds contains an offer outside this network');
       const row = await db.insert<Row>(TABLE, { offer_id: offerId, ...columns(b) });
       await writeAudit(req, { action: 'offer.creative.create', entityType: TABLE, entityId: row.id, after: row });
+      // New Offer Creative Available → the partners running the offer (O11).
+      if (creativeIsPartnerVisible(row)) void notifyNewCreative(db.scope.networkId, offerId, row.name || 'New creative');
       created.push(row);
     }
     sendOk(res, created.map(dto), undefined, 201);

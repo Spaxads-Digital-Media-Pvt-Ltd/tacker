@@ -13,11 +13,16 @@ import { AppError, forbidden, unauthorized } from '../../lib/http/errors.js';
 import { query } from '../../lib/db/pool.js';
 import { hashKey } from '../../lib/apikeys/keys.js';
 import { checkRateLimit } from '../../lib/apikeys/rate-limit.js';
+import { getNetworkApiWhitelist } from '../../lib/net/ip-lists.js';
 import type { ApiAudience, ApiKeyIdentity } from '../../middleware/types.js';
+import { inactiveNetworkMessage, type NetworkState } from '../../lib/networks/state.js';
+import { portalAccessAllowed, inactiveAccountMessage } from '../../lib/auth/portal-state.js';
 
 interface KeyRow {
  id: string; network_id: string; audience: ApiAudience; owner_id: string;
- scopes: string[]; rate_limit_tier: string;
+ scopes: string[]; rate_limit_tier: string; network_status: NetworkState;
+ /** Advertiser / publisher keys: their account's status (null = the account was deleted). */
+ owner_status: string | null;
 }
 
 function extractKey(req: Request): string | null {
@@ -33,15 +38,37 @@ export function apiKeyAuth(req: Request, res: Response, next: NextFunction): voi
  if (!key) return next(unauthorized('Invalid or missing API key.'));
 
  query<KeyRow>(
- `SELECT id, network_id, audience, owner_id, scopes, rate_limit_tier
- FROM api_keys
- WHERE key_hash = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > now())
+ `SELECT k.id, k.network_id, k.audience, k.owner_id, k.scopes, k.rate_limit_tier, n.status AS network_status,
+ CASE k.audience
+ WHEN 'publisher' THEN (SELECT p.status FROM publishers p WHERE p.network_id = k.network_id AND p.id = k.owner_id)
+ WHEN 'advertiser' THEN (SELECT a.status FROM advertisers a WHERE a.network_id = k.network_id AND a.id = k.owner_id)
+ END AS owner_status
+ FROM api_keys k JOIN networks n ON n.id = k.network_id
+ WHERE k.key_hash = $1 AND k.status = 'active' AND (k.expires_at IS NULL OR k.expires_at > now())
  LIMIT 1`,
  [hashKey(key)],
  )
  .then(async ({ rows }) => {
  const row = rows[0];
  if (!row) return next(unauthorized('Invalid or missing API key.'));
+ // A suspended or (soft-)deleted network's keys stop working (F-26).
+ if (row.network_status !== 'active') return next(forbidden(inactiveNetworkMessage(row.network_status)));
+ // A deleted or inactive partner's / advertiser's keys stop working with its portal (O6).
+ if (row.audience !== 'network') {
+ if (row.owner_status === null) return next(unauthorized('Invalid or missing API key.'));
+ if (!portalAccessAllowed(row.owner_status)) return next(forbidden(inactiveAccountMessage(row.audience)));
+ }
+
+ // Control Center › Security › API IP whitelist (F-16): when the network has one, its NETWORK keys
+ // only work from those addresses. (Advertiser/publisher keys are called from the partners' own
+ // servers, which the network's list doesn't describe.) req.ip is the real client — the app
+ // trusts the same proxies as the tracking surface.
+ if (row.audience === 'network') {
+ const allowed = await getNetworkApiWhitelist(row.network_id);
+ if (allowed && !allowed.check(req.ip ?? '')) {
+ return next(forbidden('This API key can only be used from the network\'s whitelisted IP addresses.'));
+ }
+ }
 
  const rate = await checkRateLimit(row.id, row.rate_limit_tier);
  res.setHeader('X-RateLimit-Limit', String(rate.limit));

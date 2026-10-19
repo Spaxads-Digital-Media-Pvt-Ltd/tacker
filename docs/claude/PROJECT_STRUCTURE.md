@@ -53,7 +53,7 @@ tacker/
 │ ├── src/
 │ │ ├── main.tsx Entry point — providers (BrowserRouter, Theme, Auth)
 │ │ ├── App.tsx Route definitions (lazy-loaded)
-│ │ ├── index.css Design tokens (Sora + Space Mono fonts)
+│ │ ├── index.css Design tokens (Inter + Space Mono fonts)
 │ │ ├── types.ts Frontend TypeScript interfaces (DTO mirrors)
 │ │ ├── vite-env.d.ts Vite env types
 │ │ ├── auth/ Authentication context + session management
@@ -61,18 +61,12 @@ tacker/
 │ │ │ ├── ProtectedRoute.tsx Role-gated route wrapper
 │ │ │ ├── roles.ts Role type + ROLE_HOME landing routes
 │ │ │ └── session.ts localStorage session persistence
-│ │ ├── components/ Shared UI components (40+)
-│ │ │ ├── AppShell.tsx Layout shell (sidebar + header + flyouts)
-│ │ │ ├── NavFlyout.tsx Everflow-style rail flyout
-│ │ │ ├── nav.ts Per-role navigation definition (4 roles)
-│ │ │ ├── icons.tsx Lucide icon map
-│ │ │ ├── PageTitle.tsx Page title context provider
-│ │ │ ├── ReportPageKit.tsx Shared report page scaffold
-│ │ │ ├── StatCards.tsx KPI stat cards
-│ │ │ ├── PerformanceChart.tsx Sparkline charts
-│ │ │ ├── PostbackTester.tsx Postback testing UI
-│ │ │ ├── TrackingLinkGeneratorModal.tsx
-│ │ │ └── ... more shared components
+│ │ ├── shared-components/ Shared UI components (40+)
+│ │ │ ├── shell/ AppShell.tsx (sidebar + header + flyouts), NavFlyout.tsx, ProfileMenu, SearchModal, …
+│ │ │ ├── primitives/ ui.tsx, nav.ts (per-role navigation), icons.tsx, PageTitle.tsx, ReportPageKit.tsx,
+│ │ │ │               TableActionsKit, SearchFilterDrawer, EmptyShellTable, …
+│ │ │ ├── panels/ CollectionTab, DualListPicker, TrackingLinkGeneratorModal, …
+│ │ │ └── charts/ PerformanceChart, Sparkline, Interactive* charts
 │ │ ├── pages/ Route-level page components
 │ │ │ ├── DashboardHome.tsx Dashboard overview
 │ │ │ ├── Login.tsx / ForgotPassword.tsx
@@ -160,7 +154,6 @@ dashboard/
 ├── users/
 ├── postbacks/
 ├── partner-tiers/
-├── business-units/
 ├── offer-applications/
 ├── questionnaires/
 ├── traffic-blocking/
@@ -183,5 +176,5 @@ Each route in `App.tsx` maps to a lazy-loaded page here. Pages are colocated by 
 - Reports: `OfferReport.tsx`, `PartnerReport.tsx`, `DailyReport.tsx`, etc. (12 types)
 - Section tabs: `NetworkListPage.tsx` (offers-deals)
 
-### `frontend/src/components/`
+### `frontend/src/shared-components/`
 Shared UI primitives used across pages. No business logic — presentation only.

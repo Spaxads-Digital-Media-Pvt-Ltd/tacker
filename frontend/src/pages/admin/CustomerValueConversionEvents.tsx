@@ -18,15 +18,17 @@ import { useMemo, useState } from 'react';
 import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, EXPORT_ROW_CAP, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, EXPORT_ROW_CAP, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
 import { useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { conversionMoney } from '../../lib/conversionReport';
-import { eventExportRow, formatEventTime, loadAllEvents, type ConversionEvent } from '../../lib/conversionEvents';
+import { eventExportRow, loadAllEvents, type ConversionEvent } from '../../lib/conversionEvents';
 import { useDebounced } from './pagedList';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
+import { formatMdyDateTime } from '../../lib/datetime';
+import { useReportZone } from '../../lib/useReportZone';
 
 interface Report { userId: string; events: ConversionEvent[] }
 
@@ -42,7 +44,10 @@ function MoneyCell({ value, currency }: { value: string | null; currency: string
 export default function CustomerValueConversionEvents() {
   // No Run Report: the date range commits on its own once valid (useAutoDateRange) and the User ID
   // once typing settles; there is nothing to fetch until a User ID is entered.
-  const range = useAutoDateRange(daysAgo(30), todayStr());
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const range = useAutoDateRange(zone.daysAgo(30), zone.today());
   const { appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
   const [userIdInput, setUserIdInput] = useState('');
   const userId = useDebounced(userIdInput.trim(), 500);
@@ -59,7 +64,7 @@ export default function CustomerValueConversionEvents() {
     return params.toString();
   };
   const tableQs = qs({
-    userId, from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    userId, ...zone.range(appliedFrom, appliedTo),
     limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE,
   });
   const { data, loading, error } = useQuery<Report>(userId ? `/api/customer-value/conversion-events?${tableQs}` : null);
@@ -73,7 +78,7 @@ export default function CustomerValueConversionEvents() {
     return [e.offerName, e.eventName, e.ruleName, e.conversionId].some((v) => (v ?? '').toLowerCase().includes(needle));
   }), [pageEvents, q]);
 
-  const clearAll = () => { setUserIdInput(''); range.reset({ from: daysAgo(30), to: todayStr() }); setQ(''); };
+  const clearAll = () => { setUserIdInput(''); range.reset({ from: zone.daysAgo(30), to: zone.today() }); setQ(''); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   // Export every event matching the applied User ID + date range (all pages, newest first, exact
@@ -82,13 +87,14 @@ export default function CustomerValueConversionEvents() {
   const reportExport = useReportExport();
   const runExport = (format: 'csv' | 'xlsx') => {
     if (!userId) return;
-    const exportUserId = userId, exportFrom = toIso(appliedFrom), exportTo = toIso(appliedTo, true);
+    const exportUserId = userId, exportRange = zone.range(appliedFrom, appliedTo), exportTz = zone.tz;
     void reportExport.run(format, 'conversion-events-report', async () => {
       const r = await loadAllEvents(
-        async (limit, offset) => (await api.get<Report>(`/api/customer-value/conversion-events?${qs({ userId: exportUserId, from: exportFrom, to: exportTo, limit, offset })}`)).events,
+        async (limit, offset) => (await api.get<Report>(`/api/customer-value/conversion-events?${qs({ userId: exportUserId, ...exportRange, limit, offset })}`)).events,
         EXPORT_ROW_CAP,
       );
-      return { rows: r.rows.map(eventExportRow), capped: r.capped };
+      // Timestamps in the report's zone, like the table (eventExportRow's own are UTC).
+      return { rows: r.rows.map((e) => ({ ...eventExportRow(e), created: formatMdyDateTime(e.createdAt, exportTz) })), capped: r.capped };
     });
   };
 
@@ -102,7 +108,7 @@ export default function CustomerValueConversionEvents() {
             <input id="cv-events-user-id" className={`input ${CONTROL}`} placeholder="e.g. cust_778" value={userIdInput}
               onChange={(e) => { setUserIdInput(e.target.value); toFirstPage(); }} />
           </ControlField>
-          <DateRangeField idPrefix="cv-events-report" label="Date range" from={range.from} to={range.to} max={todayStr()}
+          <DateRangeField idPrefix="cv-events-report" label="Date range" from={range.from} to={range.to} max={zone.today()} zone={zone}
             invalid={range.problem !== null} onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
@@ -149,7 +155,7 @@ export default function CustomerValueConversionEvents() {
               <table className="premium-table">
                 <thead>
                   <tr>
-                    <th >Created</th>
+                    <th title={zone.tz}>Created <span className="font-normal normal-case opacity-80">({zone.label})</span></th>
                     {shown.has('Conversion ID') && <th >Conversion ID</th>}
                     {shown.has('Offer') && <th >Offer</th>}
                     {shown.has('Event') && <th >Event</th>}
@@ -163,7 +169,7 @@ export default function CustomerValueConversionEvents() {
                 <tbody>
                   {rows.map((e) => (
                     <tr key={e.conversionId} className="hover:bg-accent-subtle/40">
-                      <td className="font-medium text-fg">{formatEventTime(e.createdAt)}</td>
+                      <td className="font-medium text-fg">{formatMdyDateTime(e.createdAt, zone.tz)}</td>
                       {shown.has('Conversion ID') && <td className="font-mono text-tiny text-fg-secondary" title={e.conversionId}>{e.conversionId.slice(0, 12)}…</td>}
                       {shown.has('Offer') && <td className="px-4 py-3">{e.offerName}</td>}
                       {shown.has('Event') && <td className="px-4 py-3">{e.eventName ?? DASH}</td>}

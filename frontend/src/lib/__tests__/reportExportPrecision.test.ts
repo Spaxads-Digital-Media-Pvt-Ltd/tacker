@@ -1,7 +1,7 @@
 // Export precision (lib/reportMath `exportRatio`, lib/reportExportCells `moneyExportCells`, the Offer /
 // Flex ratio cells) — the real modules, against the real on-screen formatter (reportMath `money`) and
 // the real mixed-currency blanking (reportCurrency `withRowCurrency`).
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { exportRatio, money, deriveRow } from '../reportMath.ts';
 import { moneyExportCells } from '../reportExportCells.ts';

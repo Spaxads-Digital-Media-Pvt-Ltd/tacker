@@ -24,10 +24,18 @@ import { isProd } from '../../config/env.js';
 import { recordLoginEvent } from './control-center/routes.js';
 import {
  checkLoginRateLimit,
+ loginRateLimitMessage,
  recordLoginFailure,
  resetLoginCounter,
 } from '../../lib/auth/login-rate-limit.js';
 import { passwordSchema } from '../../lib/auth/password-policy.js';
+import { query } from '../../lib/db/pool.js';
+import { forgetStaffState } from '../../lib/auth/staff-state.js';
+import { logger } from '../../lib/logger.js';
+import {
+ sendPasswordReset, completePasswordReset, resetRequestLimited, resetRedeemLimited,
+} from '../../lib/auth/password-reset.js';
+import { networkAccessError } from '../../lib/networks/state.js';
 
 const REFRESH_COOKIE = 'tracker_rt';
 const COOKIE_PATH = '/api/auth';
@@ -38,6 +46,8 @@ const loginSchema = z.object({
  email: z.string().email(),
  password: passwordSchema,
 });
+const forgotSchema = z.object({ email: z.string().email().max(200) });
+const resetSchema = z.object({ token: z.string().min(10).max(512), password: passwordSchema });
 
 function clientIp(req: { ip?: unknown; socket?: { remoteAddress?: string } }): string {
  return typeof req.ip === 'string' ? req.ip : (req.socket?.remoteAddress ?? 'unknown');
@@ -67,10 +77,12 @@ function identityFrom(user: User, fallbackEmail: string) {
  name: umeta['name'] ? String(umeta['name']) : (email.split('@')[0] ?? email),
  // Per-user UI accent theme (Section 6); default Theme F (Teal).
  theme: umeta['theme'] ? String(umeta['theme']) : 'F',
+ // Signed in with a temporary password (an invite): choose a new one before anything else (O1).
+ mustChangePassword: meta['must_change_password'] === true,
  };
 }
 
-function respondWithSession(res: Response, session: Session, user: User, fallbackEmail: string): void {
+export function respondWithSession(res: Response, session: Session, user: User, fallbackEmail: string): void {
  setRefreshCookie(res, session.refresh_token);
  sendOk(res, {
  accessToken: session.access_token,
@@ -91,13 +103,7 @@ export function authRoutes(): Router {
  const ip = clientIp(req);
 
  const preCheck = await checkLoginRateLimit(ip, normalizedEmail);
- if (preCheck.limited) {
- const reason =
- preCheck.reason === 'account'
- ? 'Too many failed attempts for this account.'
- : 'Too many login attempts from this network.';
- throw tooMany(reason, { retryAfter: preCheck.retryAfterSeconds });
- }
+ if (preCheck.limited) throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
 
  // Cap the wait on Supabase Auth so a hung upstream can't leave the login request (and the
  // user) spinning indefinitely. A timeout is the auth service's fault, not a wrong password, so
@@ -125,7 +131,16 @@ export function authRoutes(): Router {
  const meta = (data.user.app_metadata ?? {}) as Record<string, unknown>;
  const umeta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
  const networkId = meta['network_id'] ? String(meta['network_id']) : null;
+ // A suspended, deleted or purged network: say so at sign-in (the right password still gets nowhere).
+ if (networkId) {
+ const refused = await networkAccessError(networkId);
+ if (refused) throw refused;
+ }
  if (networkId && meta['kind'] === 'admin') {
+ // An invited team member's first sign-in: they're active from now on (O1).
+ void query(`UPDATE users SET status = 'active' WHERE network_id = $1 AND auth_user_id = $2 AND status = 'invited'`, [networkId, data.user.id])
+ .then((r) => { if (r.rowCount) forgetStaffState(networkId, data.user.id); })
+ .catch((err: unknown) => logger.warn({ err }, 'login: could not mark the invited member active'));
  recordLoginEvent({
  networkId,
  userId: data.user.id,
@@ -150,7 +165,51 @@ export function authRoutes(): Router {
  res.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
  throw unauthorized('Session expired. Please sign in again.');
  }
+ // The network was suspended / deleted / purged since sign-in: no new token, and the reason why.
+ const networkId = (data.user.app_metadata as Record<string, unknown> | undefined)?.['network_id'];
+ if (networkId) {
+ const refused = await networkAccessError(String(networkId));
+ if (refused) {
+ res.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
+ throw refused;
+ }
+ }
  respondWithSession(res, data.session, data.user, data.user.email ?? '');
+ }),
+ );
+
+ // "Forgot password?" (O1): email a one-time reset link if the address has a usable login. The
+ // answer is the same either way and doesn't wait for the work, so it never reveals whether an
+ // address has an account (only the rate limit can refuse).
+ r.post(
+ '/forgot-password',
+ validateBody(forgotSchema),
+ asyncHandler(async (req, res) => {
+ const { email } = req.body as z.infer<typeof forgotSchema>;
+ if (await resetRequestLimited(clientIp(req), email)) {
+ throw tooMany('Too many reset requests. Wait a few minutes and try again.', { retryAfter: 15 * 60 });
+ }
+ void sendPasswordReset(email)
+ .then((r) => { if (r.email && !r.email.sent) logger.warn({ skipped: r.email.skipped }, 'password reset email not sent'); })
+ .catch((err: unknown) => logger.warn({ err }, 'password reset request failed'));
+ sendOk(res, { ok: true });
+ }),
+ );
+
+ // The reset page posts the link's token with the new password.
+ r.post(
+ '/reset-password',
+ validateBody(resetSchema),
+ asyncHandler(async (req, res) => {
+ if (await resetRedeemLimited(clientIp(req))) throw tooMany('Too many attempts. Wait a few minutes and try again.', { retryAfter: 15 * 60 });
+ const { token, password } = req.body as z.infer<typeof resetSchema>;
+ try {
+ await completePasswordReset(token, password);
+ } catch (err) {
+ if (err instanceof Error && /requires SUPABASE_URL/.test(err.message)) throw serviceUnavailable('Password resets are unavailable: Supabase Auth is not configured on this server.');
+ throw err;
+ }
+ sendOk(res, { ok: true });
  }),
  );
 

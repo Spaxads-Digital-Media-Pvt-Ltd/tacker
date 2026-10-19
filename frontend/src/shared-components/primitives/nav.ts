@@ -4,8 +4,10 @@ import type { Role } from '../../auth/roles';
 import { Icon } from './icons';
 import * as Lucide from 'lucide-react';
 
-export interface NavLeaf { to: string; label: string; icon?: keyof typeof Icon }
-export interface FlyoutItem { label: string; description: string; to?: string; icon?: React.ElementType }
+/** `perm` (Super Admin only): the platform section a role must be able to read to see the item. */
+/** `feature` (network staff): hidden when the platform turned that feature off for the network (Super Admin › Feature flags). */
+export interface NavLeaf { to: string; label: string; icon?: keyof typeof Icon; perm?: string; feature?: string }
+export interface FlyoutItem { label: string; description: string; to?: string; icon?: React.ElementType; perm?: string; feature?: string }
 export interface NavEntry {
   label: string;
   icon: keyof typeof Icon;
@@ -13,6 +15,8 @@ export interface NavEntry {
   children?: NavLeaf[];     // expandable group (drives the in-page SectionTabs bar)
   flyout?: FlyoutItem[];    // Everflow-style rail flyout — opens on click instead of navigating directly
   group?: string;           // section header shown above this item in the expanded rail (undefined = ungrouped)
+  perm?: string;            // Super Admin: the platform section a role must read to see it (flyouts: per item)
+  feature?: string;         // network staff: a feature flag key — hidden when it's off for the network
 }
 
 /**
@@ -26,11 +30,55 @@ export interface NavEntry {
  * same convention used everywhere else in this app for backend-less features.
  */
 export const NAV: Record<Role, NavEntry[]> = {
+  // The platform team's console — each item shows only for roles that may read its section (lib/platformMe).
   super_admin: [
-    { to: '/admin', label: 'Overview', icon: 'dashboard' },
-    { to: '/admin/networks', label: 'Networks', icon: 'building' },
-    { to: '/admin/subscriptions', label: 'Subscriptions', icon: 'wallet' },
-    { to: '/admin/usage', label: 'Usage', icon: 'chart' },
+    { to: '/admin', label: 'Overview', icon: 'dashboard', perm: 'dashboard' },
+    { to: '/admin/tasks', label: 'Tasks', icon: 'checklist' },
+    {
+      group: 'Growth', label: 'Sales', icon: 'target', flyout: [
+        { label: 'Sales dashboard', description: 'Pipeline, forecast, win rate and the leaderboard', to: '/admin/sales', icon: Lucide.Target, perm: 'sales' },
+        { label: 'Leads', description: 'Every prospective network — search, filter, export', to: '/admin/sales/leads', icon: Lucide.Contact, perm: 'sales' },
+        { label: 'Pipeline', description: 'Deals by stage — drag a card to move it', to: '/admin/sales/pipeline', icon: Lucide.SquareKanban, perm: 'sales' },
+      ],
+    },
+    {
+      group: 'Customers', label: 'Networks', icon: 'building', flyout: [
+        { label: 'All networks', description: 'Every tenant network — search, open, manage', to: '/admin/networks', icon: Lucide.Building2, perm: 'networks' },
+        { label: 'Customer health', description: 'Health scores, at-risk accounts, onboarding, account managers', to: '/admin/success', icon: Lucide.HeartPulse, perm: 'success' },
+        { label: 'Usage', description: 'Each network against its plan limits', to: '/admin/usage', icon: Lucide.Gauge, perm: 'networks' },
+      ],
+    },
+    {
+      group: 'Customers', label: 'Support', icon: 'lifebuoy', flyout: [
+        { label: 'Tickets', description: 'The help desk queue — answer before the first-reply deadline', to: '/admin/support', icon: Lucide.LifeBuoy, perm: 'support' },
+        { label: 'Saved replies', description: 'Answers the team reuses', to: '/admin/support/macros', icon: Lucide.MessagesSquare, perm: 'support' },
+      ],
+    },
+    {
+      group: 'Money', label: 'Billing', icon: 'receipt', flyout: [
+        { label: 'Revenue', description: 'MRR, growth, churn, LTV and cash collected', to: '/admin/revenue', icon: Lucide.TrendingUp, perm: 'revenue' },
+        { label: 'Invoices', description: 'Record payments, give more time, void, credit', to: '/admin/billing', icon: Lucide.Receipt, perm: 'billing' },
+        { label: 'Plans', description: 'Prices, trials, limits and overage', to: '/admin/plans', icon: Lucide.Layers, perm: 'plans' },
+        { label: 'Coupons', description: 'Discounts on networks’ subscriptions', to: '/admin/coupons', icon: Lucide.BadgePercent, perm: 'billing' },
+      ],
+    },
+    {
+      group: 'Platform', label: 'Trust & safety', icon: 'shield', flyout: [
+        { label: 'Overview', description: 'Fraud across every network and addresses flagged in several', to: '/admin/trust', icon: Lucide.ShieldAlert, perm: 'trust' },
+        { label: 'Blocklist', description: 'IPs, user agents and referrers blocked for every network', to: '/admin/trust/blocklist', icon: Lucide.Ban, perm: 'trust' },
+        { label: 'Privacy requests', description: 'GDPR and CCPA — erase or export a person’s data', to: '/admin/trust/privacy', icon: Lucide.Fingerprint, perm: 'trust' },
+      ],
+    },
+    {
+      group: 'Platform', label: 'Platform', icon: 'settings', flyout: [
+        { label: 'Announcements', description: 'Banners and maintenance windows in tenant dashboards', to: '/admin/announcements', icon: Lucide.Megaphone, perm: 'comms' },
+        { label: 'Feature flags', description: 'Turn features on or off per network, plan or rollout', to: '/admin/flags', icon: Lucide.Flag, perm: 'platform' },
+        { label: 'System health', description: 'Database, Redis and the background queues', to: '/admin/system', icon: Lucide.ServerCog, perm: 'platform' },
+        { label: 'Activity', description: 'What the team and billing did', to: '/admin/activity', icon: Lucide.History, perm: 'activity' },
+        { label: 'Team & roles', description: 'Staff accounts and what each role may do', to: '/admin/team', icon: Lucide.Users, perm: 'team' },
+        { label: 'Settings', description: 'Billing, support, email and security', to: '/admin/settings', icon: Lucide.Settings, perm: 'settings' },
+      ],
+    },
   ],
   admin: [
     { to: '/app', label: 'Dashboard', icon: 'dashboard' },
@@ -44,7 +92,7 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Creatives', description: 'Manage creative assets', to: '/app/offers-creatives', icon: Lucide.Image },
         { label: 'Traffic Controls', description: 'Block or redirect specific clicks', to: '/app/offers-traffic-controls', icon: Lucide.Shield },
         { label: 'Custom Settings', description: 'Per-offer payout, caps & pages', to: '/app/offers-custom-settings', icon: Lucide.Sliders },
-        { label: 'SmartSwitch', description: 'Auto-optimization & fraud protection', to: '/app/offers-smartswitch', icon: Lucide.ToggleRight },
+        { label: 'SmartSwitch', description: 'Rules that act on partners per offer', to: '/app/offers-smartswitch', icon: Lucide.ToggleRight, feature: 'smartswitch' },
       ],
     },
     {
@@ -107,7 +155,7 @@ export const NAV: Record<Role, NavEntry[]> = {
       ],
     },
     {
-      group: 'Connect', label: 'Marketplace', icon: 'marketplace', flyout: [
+      group: 'Connect', label: 'Marketplace', icon: 'marketplace', feature: 'marketplace', flyout: [
         { label: 'Discover Advertisers', description: 'Connect with Partners that drive revenue', to: '/app/marketplace', icon: Lucide.Search },
         { label: 'Your Profile(s)', description: 'Edit your public profile', to: '/app/marketplace/profile', icon: Lucide.UserCircle },
         { label: 'Manage Connections', description: 'View, manage and edit your connections, invitations or pending connections', to: '/app/marketplace/connections', icon: Lucide.Users },
@@ -122,10 +170,10 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Conversion Events Report', description: 'Events by customer ID', to: '/app/customer-value/conversion-events', icon: Lucide.Activity },
       ],
     },
-    { group: 'Tools', to: '/app/traffic-health', label: 'Traffic Health', icon: 'pulse' },
-    { group: 'More', to: '/app/investigator', label: 'Investigator', icon: 'investigator' },
+    { group: 'Tools', to: '/app/traffic-health', label: 'Traffic Health', icon: 'pulse', feature: 'traffic_health' },
+    { group: 'More', to: '/app/investigator', label: 'Investigator', icon: 'investigator', feature: 'fraud_investigator' },
     {
-      group: 'More', label: 'Automation', icon: 'automation', flyout: [
+      group: 'More', label: 'Automation', icon: 'automation', feature: 'automation', flyout: [
         { label: 'Scheduled Actions', description: 'Schedule status, caps & payout', to: '/app/automation?tab=scheduled-actions', icon: Lucide.CalendarClock },
         { label: 'Alerts', description: 'Notify on KPI thresholds', to: '/app/automation?tab=alerts', icon: Lucide.Bell },
         { label: 'Webhooks', description: 'Send data to 3rd parties', to: '/app/automation?tab=webhooks', icon: Lucide.Webhook },
@@ -138,7 +186,9 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Partner Configurations', description: 'Sign up, notices & terms', to: '/app/control-center/partners', icon: Lucide.UserCog },
         { label: 'Advertiser Configurations', description: 'Sign up & dashboard setup', to: '/app/control-center/advertisers', icon: Lucide.Briefcase },
         { label: 'Security', description: 'API keys & IP whitelist', to: '/app/control-center/security', icon: Lucide.ShieldCheck },
+        { label: 'Tracking Domains', description: 'Custom tracking hosts & DNS verification', to: '/app/domains', icon: Lucide.Globe },
         { label: 'Usage', description: 'Account usage per month', to: '/app/control-center/usage', icon: Lucide.Activity },
+        { label: 'Billing', description: 'Plan, invoices & how to pay', to: '/app/billing', icon: Lucide.Receipt },
         { label: 'Documents', description: 'Contracts & resources', to: '/app/control-center/documents', icon: Lucide.File },
         { label: 'Segmentation Options', description: 'Categories, labels & channels', to: '/app/control-center/segmentations', icon: Lucide.Tags },
       ],

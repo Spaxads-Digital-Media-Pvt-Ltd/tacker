@@ -23,7 +23,7 @@ export function CustomFieldsManage({ entityType }: { entityType: 'publisher' | '
     { header: 'Key', cell: (d) => <span className="font-mono text-xs">{d.key}</span> },
     { header: 'Type', cell: (d) => d.fieldType },
     { header: 'Required', cell: (d) => (d.required ? <Badge value="active" /> : '—') },
-    { header: '', className: 'text-right', cell: (d) => <button className="text-tiny font-medium text-danger-text hover:underline" onClick={() => confirm({ title: 'Delete custom field?', message: `Are you sure you want to delete "${d.label}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await del.run(d.id); refetch(); } })}>Delete</button> },
+    { header: '', className: 'text-right', cell: (d) => <button className="text-tiny font-medium text-danger-text hover:underline" onClick={() => confirm({ title: 'Delete custom field?', message: `Are you sure you want to delete "${d.label}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await del.runOrThrow(d.id); refetch(); } })}>Delete</button> },
   ];
 
   return (

@@ -49,14 +49,22 @@ function defaultAllowPrivate(): boolean {
   return env.NODE_ENV === 'development';
 }
 
-export interface SafeResponse { status: number; body: string }
+export interface SafeResponse {
+  status: number;
+  body: string;
+  /** The body was longer than maxBodyBytes: `body` is its first maxBodyBytes and the rest was not read. */
+  truncated?: boolean;
+}
 
 export interface SafeRequestOptions {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: string;
   headers?: Record<string, string>;
+  /** Socket inactivity timeout. */
   timeoutMs: number;
-  /** Max response bytes kept (the rest is discarded). */
+  /** Hard cap on the whole exchange (connect → last byte); the request is aborted when it passes. */
+  deadlineMs?: number;
+  /** Max response bytes kept; a longer body is cut off there (not downloaded) and flagged `truncated`. */
   maxBodyBytes?: number;
   /** Override the environment default (tests). */
   allowPrivate?: boolean;
@@ -95,6 +103,12 @@ export function safeRequest(raw: string, opts: SafeRequestOptions): Promise<Safe
   };
 
   return new Promise<SafeResponse>((resolve, reject) => {
+    let deadline: NodeJS.Timeout | undefined;
+    let timedOut = false;
+    const timeoutError = () => Object.assign(new Error('timeout'), { name: 'AbortError' });
+    const ok = (r: SafeResponse) => { clearTimeout(deadline); resolve(r); };
+    // Once we abort for time, whichever error surfaces first (request or half-read response) is a timeout.
+    const fail = (err: unknown) => { clearTimeout(deadline); reject(timedOut ? timeoutError() : err); };
     const req = lib.request(url, {
       method: opts.method,
       headers: opts.headers,
@@ -103,12 +117,28 @@ export function safeRequest(raw: string, opts: SafeRequestOptions): Promise<Safe
     }, (res) => {
       const chunks: Buffer[] = [];
       let size = 0;
-      res.on('data', (c: Buffer) => { if (size < maxBytes) { chunks.push(c); size += c.length; } });
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8') }));
-      res.on('error', reject);
+      const finish = (truncated: boolean) => ok({
+        status: res.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString('utf8'),
+        ...(truncated ? { truncated } : {}),
+      });
+      res.on('data', (c: Buffer) => {
+        if (size + c.length > maxBytes) {
+          chunks.push(c.subarray(0, maxBytes - size));
+          finish(true);
+          res.destroy(); // don't download the rest of an oversize body
+          return;
+        }
+        chunks.push(c);
+        size += c.length;
+      });
+      res.on('end', () => finish(false));
+      res.on('error', fail);
     });
-    req.on('timeout', () => req.destroy(Object.assign(new Error('timeout'), { name: 'AbortError' })));
-    req.on('error', reject);
+    const abort = () => { timedOut = true; req.destroy(timeoutError()); };
+    if (opts.deadlineMs) deadline = setTimeout(abort, opts.deadlineMs);
+    req.on('timeout', abort);
+    req.on('error', fail);
     if (opts.body != null) req.write(opts.body);
     req.end();
   });

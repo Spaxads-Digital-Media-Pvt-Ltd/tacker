@@ -13,6 +13,32 @@ import { NotificationsBell, AccountLink, HelpMenu } from './SidebarUtilityMenu';
 import { SectionTabs } from './SectionTabs';
 import { NavFlyout } from './NavFlyout';
 import { SearchModal } from './SearchModal';
+import { PlatformSearchModal } from './PlatformSearchModal';
+import { ImpersonationBanner } from './ImpersonationBanner';
+import { OverdueInvoiceBanner } from './OverdueInvoiceBanner';
+import { AnnouncementBanner } from './AnnouncementBanner';
+import { useNetworkBranding } from '../../lib/useNetworkBranding';
+import { usePlatformMe } from '../../lib/platformMe';
+
+/** Drop what `can` doesn't allow; a flyout left empty goes too. */
+function permittedNav(entries: NavEntry[], can: (section: string) => boolean): NavEntry[] {
+  return entries.flatMap((e) => {
+    if (e.perm && !can(e.perm)) return [];
+    if (!e.flyout) return [e];
+    const flyout = e.flyout.filter((f) => !f.perm || can(f.perm));
+    return flyout.length ? [{ ...e, flyout }] : [];
+  });
+}
+
+/** Network staff: drop what the platform turned off for the network (a flag answered false; no flag = on). */
+function featuredNav(entries: NavEntry[], features: Record<string, boolean>): NavEntry[] {
+  return entries.flatMap((e) => {
+    if (e.feature && features[e.feature] === false) return [];
+    if (!e.flyout) return [e];
+    const flyout = e.flyout.filter((f) => !f.feature || features[f.feature] !== false);
+    return flyout.length ? [{ ...e, flyout }] : [];
+  });
+}
 
 /** Flatten a role's nav (groups + leaves) to {to,label} pairs for route→title resolution. */
 function flattenNav(role: Role): { to: string; label: string }[] {
@@ -39,10 +65,10 @@ function routeTitle(pathname: string, role: Role): string {
 
 /** Slim top header (Section 1) — page title on the left (Section 2), global search + profile menu
  * on the right. Below `md` the persistent rail is a hidden drawer, so the header also carries the
- * menu trigger + brand mark. Search opens the global SearchModal (⌘K is a visual affordance only —
- * no keyboard handler is wired anywhere in the app today). */
-function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSearch }: {
-  role: Role; initials: string; displayName: string; email: string; onSignOut: () => void; onMenu: () => void; onSearch: () => void;
+ * menu trigger + brand mark. Search (or ⌘K / Ctrl+K) opens the global SearchModal — the Super Admin
+ * console's PlatformSearchModal. */
+function TopHeader({ role, initials, displayName, email, logoUrl, onSignOut, onMenu, onSearch }: {
+  role: Role; initials: string; displayName: string; email: string; logoUrl: string | null; onSignOut: () => void; onMenu: () => void; onSearch: () => void;
 }) {
   const loc = useLocation();
   const { title, subtitle } = usePageTitleValue();
@@ -62,7 +88,7 @@ function TopHeader({ role, initials, displayName, email, onSignOut, onMenu, onSe
         </button>
         {/* Brand chip: skip on the smallest screens so the page title + header search fit; the
             hamburger already carries the nav affordance there. */}
-        <div className="hidden shrink-0 sm:block md:hidden"><Brandmark compact /></div>
+        <div className="hidden shrink-0 sm:block md:hidden"><Brandmark compact logoUrl={logoUrl} /></div>
         <div className="min-w-0">
           <h1 className="truncate text-h2 font-semibold leading-tight text-white">{heading}</h1>
           {subtitle && <p className="truncate text-tiny text-white/60">{subtitle}</p>}
@@ -214,6 +240,16 @@ export function AppShell() {
   const [expanded, setExpanded] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  // O12: the network's logo / favicon (staff and portals; the Super Admin console has no network).
+  const { logoUrl, overdueInvoice, features, announcements } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
+  const platform = usePlatformMe();
+
+  // ⌘K / Ctrl+K opens the search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Off-canvas drawer (< md): close on navigation and on Escape.
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
@@ -230,7 +266,8 @@ export function AppShell() {
 
   if (!session) return null;
 
-  const items = NAV[session.role];
+  // Super Admin: only what the member's role may read (an item's / flyout item's `perm`).
+  const items = session.role === 'super_admin' ? permittedNav(NAV.super_admin, platform.can) : featuredNav(NAV[session.role], features);
   const initials = session.displayName
     .split(' ')
     .map((w) => w[0])
@@ -282,7 +319,7 @@ export function AppShell() {
             aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
             className={`text-[rgb(var(--sidebar-fg-strong))] text-left outline-none ${labeled ? 'min-w-0 flex-1' : 'grid h-11 w-11 place-items-center'}`}
           >
-            <Brandmark compact={!labeled} />
+            <Brandmark compact={!labeled} logoUrl={logoUrl} />
           </button>
           {/* mobile: close the drawer */}
           <button
@@ -316,7 +353,9 @@ export function AppShell() {
         {openEntry && <NavFlyout entry={openEntry} expanded={labeled} topOffset={flyoutTop} onClose={() => setOpenFlyout(null)} />}
 
         <div className={labeled ? 'w-full space-y-1 border-t border-[rgb(var(--sidebar-accent))]/20 px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[rgb(var(--sidebar-accent))]/20 pt-2'}>
-          <NotificationsBell expanded={labeled} />
+          {/* N1: the bell is network staff's (their audit feed + notification preferences); partner /
+              advertiser portals and the Super Admin console have neither, so they don't show it. */}
+          {session.role === 'admin' && <NotificationsBell expanded={labeled} />}
           <HelpMenu expanded={labeled} />
           <AccountLink expanded={labeled} />
         </div>
@@ -324,8 +363,16 @@ export function AppShell() {
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col bg-page">
+        {session.impersonatedBy && <ImpersonationBanner session={session} />}
+        {session.role === 'admin' && overdueInvoice && <OverdueInvoiceBanner invoice={overdueInvoice} />}
+        {session.role !== 'super_admin' && <AnnouncementBanner announcements={announcements} />}
         <TopHeader role={session.role} initials={initials} displayName={session.displayName}
-          email={session.email} onSignOut={async () => { await signOut(); navigate('/login'); }}
+          email={session.email} logoUrl={logoUrl} onSignOut={async () => {
+            // Signing out of an impersonation tab only ends the impersonation (see auth/session.ts).
+            const impersonating = Boolean(session.impersonatedBy);
+            await signOut();
+            navigate(impersonating ? '/impersonate?ended=1' : '/login');
+          }}
           onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
         <main className="flex-1 overflow-auto px-12 pt-4 pb-12">
           <div className="w-full animate-fade-in">
@@ -335,7 +382,9 @@ export function AppShell() {
         </main>
       </div>
     </div>
-    {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} />}
+    {searchOpen && (session.role === 'super_admin'
+      ? <PlatformSearchModal onClose={() => setSearchOpen(false)} />
+      : <SearchModal onClose={() => setSearchOpen(false)} />)}
     </PageTitleProvider>
   );
 }

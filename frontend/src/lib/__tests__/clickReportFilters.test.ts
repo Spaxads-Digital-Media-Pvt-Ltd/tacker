@@ -1,7 +1,8 @@
 // Click Report filter modal logic (lib/clickReportFilters.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import {
+  clickRejection,
   CLICK_FIELDS, DEFAULT_FIELDS, EMPTY_CLICK_FILTERS, GROUPED_CONVERSIONS_NOTE, MAX_CLICK_IDS, groupDimensionHeader, partitionFields, untrackedToggleLabel, TABLE_ORDER, appliedFilterCount, chipValues,
   clickIdsError, draftErrors, draftFromApplied, exportRecord, fieldByKey, fieldsFromUrl, filtersFromDraft,
   filtersFromUrl, ipError, isIpAddress, isSelectable, parseClickIds, searchFields, selectAllState, setAllFields,
@@ -211,9 +212,10 @@ describe('chips', () => {
 });
 
 describe('Group By mode labels', () => {
-  it('Day groups are labelled as UTC days (the API buckets by UTC day); other dimensions keep their label', () => {
+  it("Day groups are labelled with the report's zone (the API buckets by its days); other dimensions keep their label", () => {
     assert.deepStrictEqual(groupDimensionHeader('day', 'Day').label, 'Day (UTC)');
-    assert.match(groupDimensionHeader('day', 'Day').title ?? '', /UTC calendar day/);
+    assert.deepStrictEqual(groupDimensionHeader('day', 'Day', 'IST').label, 'Day (IST)');
+    assert.match(groupDimensionHeader('day', 'Day', 'IST').title ?? '', /calendar day in the report's time zone \(IST\)/);
     for (const [g, l] of [['offer', 'Offer'], ['publisher', 'Partner'], ['country', 'Country'], ['device', 'Device']] as const) {
       assert.deepStrictEqual(groupDimensionHeader(g, l), { label: l });
     }
@@ -261,5 +263,18 @@ describe('fields list layout — untracked fields behind a collapsed toggle (dis
     const sp = new URLSearchParams(); writeFieldsToUrl(sp, prefs);
     assert.deepStrictEqual(fieldsFromUrl(sp), visibleColumns(prefs));
     assert.deepStrictEqual(fieldsFromUrl(new URLSearchParams({ cols: 'gaid,clickId' })), ['clickId']); // old links: untracked keys dropped as before
+  });
+});
+
+describe('rejected clicks (recorded with the reason, never sent to the offer)', () => {
+  it('Is Rejected and Rejection Reason are real fields now', () => {
+    for (const k of ['isRejected', 'rejectionReason']) assert.strictEqual(isSelectable(k), true, k);
+  });
+  it('reads the reason from the first fraud flag; a click sent to the offer has none', () => {
+    assert.strictEqual(clickRejection(['cap_exceeded']), 'Cap has been exceeded');
+    assert.strictEqual(clickRejection(['fraud_blocked', 'datacenter_ip']), 'Blocked as fraud');
+    assert.strictEqual(clickRejection(['partner_inactive']), 'Partner inactive');
+    // A fraud-FLAGGED click was still sent on: not rejected.
+    for (const flags of [['datacenter_ip'], ['traffic_control'], [], null]) assert.strictEqual(clickRejection(flags), null);
   });
 });

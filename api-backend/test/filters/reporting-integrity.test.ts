@@ -182,14 +182,16 @@ describe('/grouped rejects unknown params', () => {
 describe('/pacing', () => {
   const pacingCall = (fragment: RegExp) => calls().find((x) => fragment.test(x.sql));
 
-  it('counts conversion-cap usage like enforcement: non-rejected, UTC day, network-scoped subqueries', async () => {
+  it('counts conversion-cap usage like enforcement: non-rejected, the cap time zone\'s day, network-scoped subqueries', async () => {
     const res = await request(reportsApp()).get('/pacing?category=conversion');
     expect(res.status).toBe(200);
     const conv = pacingCall(/AS conversions_total/)!;
     expect(conv.sql).not.toMatch(/status = 'approved'/);
     expect(conv.sql.match(/c\.status <> 'rejected'/g)).toHaveLength(2);
     expect(conv.sql.match(/c\.network_id = o\.network_id AND c\.offer_id = o\.id/g)).toHaveLength(2);
-    expect(conv.sql).toContain(`date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`);
+    // Each offer's cap time zone, else the network's ($2 — UTC when the network has none).
+    expect(conv.sql).toContain(`date_trunc('day', now(), COALESCE(o.cap_timezone, $2))`);
+    expect(conv.params?.[1]).toBe('UTC');
     const click = pacingCall(/clicks_today/)!;
     expect(click.sql).toMatch(/cl\.network_id = o\.network_id AND cl\.offer_id = o\.id/);
     const detail = pacingCall(/GROUP BY 1, 2 ORDER BY 1 DESC/)!;
@@ -215,7 +217,7 @@ describe('/pacing', () => {
   it('/caps subqueries are tenant-scoped and count non-rejected conversions', async () => {
     const res = await request(reportsApp()).get('/caps');
     expect(res.status).toBe(200);
-    const { sql } = calls()[0]!;
+    const { sql } = calls().find((x) => /AS clicks_today/.test(x.sql))!;
     expect(sql.match(/c\.network_id = o\.network_id/g)).toHaveLength(2);
     expect(sql).toMatch(/cl\.network_id = o\.network_id/);
     expect(sql).not.toMatch(/status = 'approved'/);
@@ -255,7 +257,7 @@ describe('/pacing and /caps never cast an unvalidated cap', () => {
 
   it('/caps reads non-positive offer caps as NULL and lists only offers with a positive cap', async () => {
     await request(reportsApp()).get('/caps');
-    const { sql } = calls()[0]!;
+    const { sql } = calls().find((x) => /AS clicks_today/.test(x.sql))!;
     expect(sql).toContain('CASE WHEN o.daily_click_cap > 0 THEN o.daily_click_cap END AS daily_click_cap');
     expect(sql).toMatch(/\(o\.daily_conversion_cap > 0 OR o\.total_conversion_cap > 0 OR o\.daily_click_cap > 0\)/);
   });
@@ -571,7 +573,9 @@ describe('/click-to-conversion-time status', () => {
     const { sql, params } = calls()[0]!;
     expect(sql).toContain('c.status = $2');
     expect(params.slice(0, 2)).toEqual([NET, 'approved']);
-    expect(sql).not.toMatch(/source/);
+    // Paid clicks (CPC billing rows) are left out of the timing; no other source filter.
+    expect(sql).toContain("NOT (c.source IN ('click', 'impression'))");
+    expect(sql.replace("NOT (c.source IN ('click', 'impression'))", '')).not.toMatch(/source/);
   });
   it.each(['approved', 'pending', 'rejected'])('status=%s binds that status', async (s) => {
     await request(reportsApp()).get(`/click-to-conversion-time?status=${s}`);
@@ -737,7 +741,7 @@ describe('`money_by_currency` metric (reporting provider)', () => {
     expect(sql).toMatch(/cm AS \(\s+SELECT c\.offer_id AS d0, c\.currency AS cur,/);
     expect(sql).toContain("AND c.status = 'approved' AND c.currency IS NOT NULL");
     expect(sql).toMatch(/GROUP BY d0, cur/);
-    expect(sql).toContain("jsonb_object_agg(cm.cur, jsonb_build_object('payout', cm.p::numeric(14,4)::text, 'revenue', cm.r::numeric(14,4)::text, 'margin', (cm.r - cm.p)::numeric(14,4)::text)) AS mbc");
+    expect(sql).toContain("jsonb_object_agg(cm.cur, jsonb_build_object('payout', round(cm.p, 4)::text, 'revenue', round(cm.r, 4)::text, 'margin', round(cm.r - cm.p, 4)::text)) AS mbc");
     expect(sql).toContain("LEFT JOIN cmj ON COALESCE(COALESCE(cl.d0, cv.d0)::text, '~NULL~') = COALESCE(cmj.d0::text, '~NULL~')");
     expect(sql).toContain("COALESCE(cmj.mbc, '{}'::jsonb) AS money_by_currency");
     expect(calls()[0]!.params).toEqual([NET]);
@@ -747,12 +751,12 @@ describe('`money_by_currency` metric (reporting provider)', () => {
     const req = build({ metrics: 'money_by_currency' }, 'publisher');
     await pg().runReport(req);
     const sql = pageSql();
-    expect(sql).toContain("jsonb_build_object('payout', cm.p::numeric(14,4)::text)");
+    expect(sql).toContain("jsonb_build_object('payout', round(cm.p, 4)::text)");
     expect(sql).not.toMatch(/'revenue'|'margin'/);
     // Without an explicit moneyFields only the money metrics the request itself lists are carried.
     queryMock.mockClear();
     await pg().runReport({ networkId: NET, groupBy: ['offer'], metrics: ['revenue', 'money_by_currency'], filters: {}, limit: 1, offset: 0 });
-    expect(pageSql()).toContain("jsonb_build_object('revenue', cm.r::numeric(14,4)::text)");
+    expect(pageSql()).toContain("jsonb_build_object('revenue', round(cm.r, 4)::text)");
   });
 
   it('Postgres groupBy=none: one row, CROSS JOIN, {} when there is no money', async () => {
@@ -803,7 +807,8 @@ describe('money sort never compares currencies', () => {
     expect(sql).toContain(`ORDER BY s.money_bucket ASC, s.money_currency ASC NULLS LAST, CASE WHEN s.money_bucket = 0 THEN ${col} END DESC NULLS LAST, s.d0::text LIMIT $2 OFFSET $3`);
     expect(sql).toContain("COUNT(DISTINCT c.currency) FILTER (WHERE c.status = 'approved') AS cur_n");
     expect(sql).toContain("COUNT(*) FILTER (WHERE c.status = 'approved' AND c.currency IS NULL) AS cur_null");
-    expect(sql).toMatch(/CASE WHEN COALESCE\(cv\.conversions, 0\) = 0 THEN 1\s+WHEN cv\.cur_n = 1 AND cv\.cur_null = 0 THEN 0 ELSE 2 END AS money_bucket/);
+    // money_rows = approved rows incl. CPC / CPM billing rows (money, not conversions).
+    expect(sql).toMatch(/CASE WHEN COALESCE\(cv\.money_rows, 0\) = 0 THEN 1\s+WHEN cv\.cur_n = 1 AND cv\.cur_null = 0 THEN 0 ELSE 2 END AS money_bucket/);
     expect(params).toEqual([NET, 10, 20]);
     // The count query sees the same groups (classification columns don't change the row set).
     expect(calls()[0]!.sql).toMatch(/^SELECT COUNT\(\*\)::int AS total FROM \(WITH cl AS/);
@@ -834,7 +839,7 @@ describe('money sort never compares currencies', () => {
     expect(out.sortedWithinCurrency).toBe(true);
     const sql = (querySpy.mock.calls[1]![0] as { query: string }).query;
     expect(sql).toContain("uniqExactIf(k.currency, k.status = 'approved' AND isNotNull(k.currency)) AS cur_n");
-    expect(sql).toContain('multiIf(COALESCE(cv.conversions, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket');
+    expect(sql).toContain('multiIf(COALESCE(cv.money_rows, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket');
     expect(sql).toMatch(/ORDER BY money_bucket ASC, money_currency ASC, if\(money_bucket = 0, margin, NULL\) DESC NULLS LAST, d0 LIMIT/);
   });
 });
@@ -845,28 +850,47 @@ describe('`moneyByCurrency` on /summary, /dashboard, /grouped, /goals, Pacing, /
     const res = await request(reportsApp()).get('/summary');
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ payout: '1.0000', currencies: ['USD'], moneyByCurrency: { USD: { payout: '1.0000', revenue: '3.0000', margin: '2.0000' } } });
-    expect(calls()[1]!.sql).toContain("jsonb_build_object('payout', cm.p::numeric(14,4)::text, 'revenue', cm.r::numeric(14,4)::text, 'margin', (cm.r - cm.p)::numeric(14,4)::text)");
+    expect(calls()[1]!.sql).toContain("jsonb_build_object('payout', round(cm.p, 4)::text, 'revenue', round(cm.r, 4)::text, 'margin', round(cm.r - cm.p, 4)::text)");
   });
 
-  it('/dashboard: per period, only currencies with conversions in that period', async () => {
-    queryMock.mockImplementation(async (sql: string) => {
-      if (sql.includes('GROUP BY currency')) return { rows: [
-        { currency: 'EUR', n_today: 0, p_today: '0.0000', r_today: '0.0000', m_today: '0.0000', n_yesterday: 1, p_yesterday: '2.0000', r_yesterday: '5.0000', m_yesterday: '3.0000', n_month: 1, p_month: '2.0000', r_month: '5.0000', m_month: '3.0000', n_last_month: 0, p_last_month: '0.0000', r_last_month: '0.0000', m_last_month: '0.0000' },
-        { currency: 'USD', n_today: 2, p_today: '1.5000', r_today: '4.0000', m_today: '2.5000', n_yesterday: 0, p_yesterday: '0.0000', r_yesterday: '0.0000', m_yesterday: '0.0000', n_month: 2, p_month: '1.5000', r_month: '4.0000', m_month: '2.5000', n_last_month: 0, p_last_month: '0.0000', r_last_month: '0.0000', m_last_month: '0.0000' },
-      ] };
-      return { rows: [{}] };
+  it('/dashboard: per period, only currencies with conversions in that period (one provider report per period)', async () => {
+    // F-20: /dashboard reads one grand-total provider report per period (+ one by hour for today);
+    // each period's per-currency money is that period's own money_by_currency.
+    const day = (offset: number) => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() + offset); return d; };
+    const today = day(0).toISOString();
+    const yesterday = day(-1).toISOString();
+    const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const lastMonthStart = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() - 1, 1)).toISOString();
+    const MBC: Record<string, unknown> = {
+      [today]: { USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
+      [yesterday]: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } },
+      [monthStart.toISOString()]: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' }, USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
+      [lastMonthStart]: {},
+    };
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("settings->'general'->>'timezone'")) return { rows: [{ tz: null }] };
+      if (sql.startsWith('SELECT COUNT(*)::int AS total')) return { rows: [{ total: 1 }] };
+      if (sql.includes("date_trunc('hour'")) return { rows: [] };
+      return { rows: [{ clicks: 0, conversions: 0, payout: '0.0000', revenue: '0.0000', margin: '0.0000', currencies: [], money_by_currency: MBC[String(params[1])] ?? {} }] };
     });
     const res = await request(reportsApp()).get('/dashboard');
     expect(res.status).toBe(200);
+    expect(res.body.data.timeZone).toBe('UTC');
     expect(res.body.data.moneyByCurrency).toEqual({
       today: { USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
       yesterday: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } },
       month: { EUR: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' }, USD: { payout: '1.5000', revenue: '4.0000', margin: '2.5000' } },
       lastMonth: {},
     });
-    const q = calls().find((x) => x.sql.includes('GROUP BY currency'))!;
-    expect(q.sql).toContain("network_id = $1 AND status = 'approved' AND currency IS NOT NULL");
-    expect(q.params).toEqual([NET]);
+    // Network-scoped, the periods' UTC bounds (yesterday / last month end where the next one begins).
+    const pages = calls().filter((x) => x.sql.startsWith('SELECT s.* FROM') && !x.sql.includes("date_trunc('hour'"));
+    expect(pages.map((x) => x.params.slice(0, 3)).sort((a, b) => String(a[1]).localeCompare(String(b[1])))).toEqual([
+      [NET, lastMonthStart, new Date(monthStart.getTime() - 1).toISOString().replace('Z', '999Z')],
+      [NET, monthStart.toISOString(), 1],
+      [NET, yesterday, new Date(day(0).getTime() - 1).toISOString().replace('Z', '999Z')],
+      [NET, today, 1],
+    ].sort((a, b) => String(a[1]).localeCompare(String(b[1]))));
+    for (const p of pages) expect(p.sql).toContain("COALESCE(SUM(c.payout) FILTER (WHERE c.status = 'approved'), 0) AS payout");
   });
 
   it('/grouped rows carry moneyByCurrency and totals merge it per currency (exact decimals)', async () => {
@@ -955,18 +979,19 @@ describe('`moneyByCurrency` on /summary, /dashboard, /grouped, /goals, Pacing, /
 
 describe('offer-group stats split money by currency', () => {
   const group = { id: A, ref: '1', name: 'G', advertiser_id: null, offer_ids: [A], currency: 'USD', labels: null, notes: null, status: 'active', caps_enabled: false, caps: {}, created_at: 't', updated_at: 't' };
-  const stats = { clicks: '4', cv: '2', payout: '3.0000', revenue: '9.0000', money_by_currency: { EUR: { payout: '1.0000', revenue: '4.0000', margin: '3.0000' }, USD: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } } };
+  const stats = { clicks: '4', cv: '2', payout: '3.0000', revenue: '9.0000', margin: '6.0000', money_by_currency: { EUR: { payout: '1.0000', revenue: '4.0000', margin: '3.0000' }, USD: { payout: '2.0000', revenue: '5.0000', margin: '3.0000' } } };
   const mock = () => queryMock.mockImplementation(async (sql: string) => (sql.includes('WITH j AS') ? { rows: [stats] } : { rows: [group] }));
 
   it('/:id/stats keeps its fields and adds currencies + moneyByCurrency', async () => {
     mock();
     const res = await request(groupsApp()).get(`/${A}/stats`);
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ revenue: '9.00', payout: '3.00', margin: '6.00', clicks: 4, cv: 2, cvr: 0.5, currencies: ['EUR', 'USD'], moneyByCurrency: stats.money_by_currency });
+    // Money is 4dp text from SQL (F-22) — formatted at the UI edge, not rounded to 2dp here.
+    expect(res.body.data).toEqual({ revenue: '9.0000', payout: '3.0000', margin: '6.0000', clicks: 4, cv: 2, cvr: 0.5, currencies: ['EUR', 'USD'], moneyByCurrency: stats.money_by_currency });
     const q = calls().find((x) => x.sql.includes('WITH j AS'))!;
     expect(q.sql).toContain('cl.network_id = $1 AND cl.offer_id = ANY($2::uuid[])');
     expect(q.sql).toContain("jsonb_object_agg(cm.cur, jsonb_build_object('payout'");
-    expect(q.params).toEqual([NET, [A]]);
+    expect(q.params).toEqual([NET, [A], 'UTC']); // today = the network's cap time zone's day (UTC by default)
   });
 
   it('list rows: today keeps clicks/payout/revenue and adds currencies + moneyByCurrency', async () => {
@@ -979,7 +1004,7 @@ describe('offer-group stats split money by currency', () => {
   it('a group with no offers → empty currencies / {}', async () => {
     queryMock.mockResolvedValue({ rows: [{ ...group, offer_ids: [] }] });
     const res = await request(groupsApp()).get(`/${A}/stats`);
-    expect(res.body.data).toMatchObject({ payout: '0', currencies: [], moneyByCurrency: {} });
+    expect(res.body.data).toMatchObject({ payout: '0.0000', margin: '0.0000', currencies: [], moneyByCurrency: {} });
   });
 });
 

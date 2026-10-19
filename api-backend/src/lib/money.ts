@@ -85,6 +85,15 @@ export function percentOfMoney(amount: string, pct: string | number): string {
   return fromUnits(divRound(toUnits(amount) * pctScaled, 100n * 1_000_000n));
 }
 
+/** `amount` × `times` / `per`, rounded half away from zero to 4 dp — e.g. a unit price × quantity, or a rate
+ * per 1000 impressions × impressions (`per` = 1000). `times` / `per` are whole numbers. */
+export function scaleMoney(amount: string, times: number | bigint, per: number | bigint = 1): string {
+  const t = BigInt(times);
+  const p = BigInt(per);
+  if (p <= 0n) throw new Error(`Invalid divisor: ${String(per)}`);
+  return fromUnits(divRound(toUnits(amount) * t, p));
+}
+
 /** A currency code as the ledger accepts it: exactly 3 upper-case letters (e.g. USD). */
 export const CURRENCY_RE = /^[A-Z]{3}$/;
 
@@ -95,3 +104,51 @@ export const moneySchema = z
     message: 'Must be a decimal with up to 4 fractional digits',
   })
   .transform((v) => normalizeMoney(v));
+
+// ---- Amounts from outside (offer feeds, O9): exact parse + round, never a float. ----
+
+/** An external amount that isn't a usable decimal (not a number, an exponent too large, > 10 digits). */
+export class MoneyFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MoneyFormatError';
+  }
+}
+
+/** "1.5e-3" → "0.0015", exactly (string shifting, no float). */
+function expandExponent(raw: string): string {
+  const m = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(raw);
+  if (!m) return raw;
+  const [, sign, int, frac = '', expStr] = m as unknown as [string, string, string, string | undefined, string];
+  const exp = Number(expStr);
+  if (!Number.isInteger(exp) || Math.abs(exp) > 40) throw new MoneyFormatError(`Money value out of range: "${raw}"`);
+  const digits = int + frac;
+  const point = int.length + exp; // where the decimal point lands in `digits`
+  const whole = point <= 0 ? '0' : digits.slice(0, point).padEnd(point, '0');
+  const fraction = point <= 0 ? '0'.repeat(-point) + digits : digits.slice(point);
+  return `${sign}${whole}${fraction ? `.${fraction}` : ''}`;
+}
+
+/**
+ * An amount from outside the app — a decimal string, or a JSON number as it was written (pass the
+ * source text when you have it: a parsed number has already lost digits past ~15) — rounded half away
+ * from zero to 4 dp exactly. Anything that isn't a plain or exponent decimal, or doesn't fit
+ * numeric(14,4), throws MoneyFormatError.
+ */
+export function roundMoney(input: string | number): string {
+  let raw: string;
+  if (typeof input === 'number') {
+    if (!Number.isFinite(input)) throw new MoneyFormatError(`Invalid money value: "${String(input)}"`);
+    raw = String(input);
+  } else {
+    raw = input.trim();
+  }
+  raw = expandExponent(raw);
+  const m = /^(-?)(\d+)(?:\.(\d*))?$/.exec(raw);
+  if (!m) throw new MoneyFormatError(`Invalid money value: "${String(input)}"`);
+  const [, sign, intPart, frac = ''] = m as unknown as [string, string, string, string | undefined];
+  let units = BigInt(intPart) * SCALE + BigInt((frac + '0000').slice(0, 4));
+  if ((frac[4] ?? '0') >= '5') units += 1n; // the 5th decimal decides: half away from zero
+  if (units >= 10n ** 14n) throw new MoneyFormatError(`Money value too large: "${String(input)}"`);
+  return units === 0n ? '0.0000' : fromUnits(sign ? -units : units);
+}

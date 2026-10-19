@@ -164,14 +164,24 @@ function TableActionsMenu({ columns, visibleColumns, onColumnsChange, resourceNa
   );
 }
 
+/** An add-form field when the form isn't just the table's columns as text inputs. */
+export interface AddField {
+  name: string;
+  /** Renders a select (a required one starts on its first option). */
+  options?: { value: string; label: string }[];
+  placeholder?: string;
+  required?: boolean;
+}
+
 function AddEntityForm({
-  title, columns, onCancel, onSubmit,
+  title, columns, addFields, onCancel, onSubmit,
 }: {
-  title: string; columns: string[]; onCancel: () => void;
+  title: string; columns: string[]; addFields?: AddField[]; onCancel: () => void;
   onSubmit?: (values: Record<string, string>) => Promise<boolean | string>;
 }) {
-  const fields = columns.filter((c) => !SYSTEM_COLUMNS.has(c));
-  const [v, setV] = useState<Record<string, string>>({});
+  const fields: AddField[] = addFields ?? columns.filter((c) => !SYSTEM_COLUMNS.has(c)).map((name, i) => ({ name, required: i < 2 }));
+  const [v, setV] = useState<Record<string, string>>(() => Object.fromEntries(
+    fields.filter((f) => f.required && f.options?.length).map((f) => [f.name, f.options![0]!.value])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -200,9 +210,16 @@ function AddEntityForm({
       <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><Info size={13} className="text-fg-muted" /> Fields with an asterisk (*) are mandatory.</p>
       {error && <p className="text-small text-danger-text">{error}</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {fields.map((f, i) => (
-          <Field key={f} label={i < 2 ? `${f} *` : f}>
-            <input className="input" value={v[f] ?? ''} onChange={(e) => setV((s) => ({ ...s, [f]: e.target.value }))} />
+        {fields.map((f) => (
+          <Field key={f.name} label={f.required ? `${f.name} *` : f.name}>
+            {f.options ? (
+              <select className="input" value={v[f.name] ?? ''} onChange={(e) => setV((s) => ({ ...s, [f.name]: e.target.value }))}>
+                {!f.required && <option value="">—</option>}
+                {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            ) : (
+              <input className="input" value={v[f.name] ?? ''} placeholder={f.placeholder} onChange={(e) => setV((s) => ({ ...s, [f.name]: e.target.value }))} />
+            )}
           </Field>
         ))}
       </div>
@@ -225,7 +242,7 @@ export interface ShellRow {
 
 export function EmptyShellTable({
   columns, addLabel, entityName, search = true, status, statusFilter, onStatusFilterChange, statusOptions, left,
-  rows, loading, error: tableError, onAddSubmit, onDelete,
+  rows, loading, error: tableError, onAddSubmit, onDelete, addFields,
 }: {
   columns: string[]; addLabel?: string; entityName?: string; search?: boolean; status?: string; left?: ReactNode;
   statusFilter?: string;
@@ -236,9 +253,12 @@ export function EmptyShellTable({
   error?: string | null;
   onAddSubmit?: (values: Record<string, string>) => Promise<boolean | string>;
   onDelete?: (id: string) => Promise<void>;
+  /** The add form's fields, when they aren't simply the columns as text inputs. */
+  addFields?: AddField[];
 }) {
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [visibleColumns, setVisibleColumns] = useState(columns);
   const shown = visibleColumns.length ? visibleColumns : columns;
   const wired = Boolean(onAddSubmit || rows);
@@ -263,6 +283,7 @@ export function EmptyShellTable({
         <AddEntityForm
           title={`Add ${entityName ?? addLabel}`}
           columns={columns}
+          addFields={addFields}
           onCancel={() => setAdding(false)}
           onSubmit={onAddSubmit}
         />
@@ -289,6 +310,7 @@ export function EmptyShellTable({
           </div>
         )}
       </div>
+      {deleteError && <p role="alert" className="mb-2 text-small text-danger-text">{deleteError}</p>}
       <TableScroll>
         {tableError ? (
           <p className="text-small text-danger-text">{tableError}</p>
@@ -310,7 +332,7 @@ export function EmptyShellTable({
                   {onDelete && (
                     <td className="text-right">
                       <button type="button" className="text-tiny text-danger-text hover:underline"
-                        onClick={() => onDelete(row.id)}>Delete</button>
+                        onClick={() => { setDeleteError(null); onDelete(row.id).catch((e: unknown) => setDeleteError(e instanceof Error ? e.message : 'Delete failed')); }}>Delete</button>
                     </td>
                   )}
                 </tr>

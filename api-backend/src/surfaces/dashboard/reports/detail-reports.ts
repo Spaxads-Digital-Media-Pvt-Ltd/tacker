@@ -15,18 +15,25 @@ import { summary24h } from '../../../lib/reporting/summary.js';
 import { badRequest } from '../../../lib/http/errors.js';
 import { csvList, queryDate } from '../../../lib/http/query-params.js';
 import { addMoney } from '../../../lib/money.js';
-import { inclusiveTo, utcDayStart } from '../../../lib/reporting/request.js';
+import { tzParam, withZonedRange, zonedRange } from '../../../lib/reporting/request.js';
 import { redactRawParams, redactUrl } from '../../../lib/reporting/redact.js';
+import { capCountedSql, heldOverCapSql } from '../../../lib/conversion-caps.js';
+import { rejectedClickSql } from '../../../lib/click-rejections.js';
 import { mbcJsonSql, mergeMoneyByCurrency } from '../../../lib/reporting/money-by-currency.js';
-import { money4, type MoneyByCurrency } from '../../../lib/reporting/types.js';
+import { money4, MONEY_FIELDS, type MoneyByCurrency } from '../../../lib/reporting/types.js';
+import { getReportingProvider } from '../../../lib/reporting/index.js';
+import { networkCapTimeZone, networkTimeZone } from '../../../lib/reporting/network-zone.js';
+import { isUtcZone, localDate, zonedDayStart, addDays, inclusiveBefore, formatInZone } from '../../../lib/reporting/time-zone.js';
+import { billingRowSql } from '../../../lib/offer-settings/billing.js';
 
 /** Admin endpoints: every money field per currency (CTE alias `cm` with columns cur / p / r). */
 const MBC_JSON = mbcJsonSql('cm');
 
-// Date bounds: a date-only `from` is the start of that UTC day and a date-only `to` the END of it
-// (inclusive) — as a bare date `to` meant midnight and silently dropped the last day.
-const fromDate = queryDate.transform((s) => utcDayStart(s)!);
-const toDate = queryDate.transform((s) => inclusiveTo(s));
+// Date bounds (D7): `from` / `to` are plain dates or datetimes, and `?tz=` makes a plain date that
+// zone's local day (else UTC); each schema's `.transform(withZonedRange)` turns them into the instants
+// the queries compare with — a date-only `to` is the END of its day, inclusive (as a bare date it
+// meant midnight and silently dropped the last day).
+const rangeKeys = { from: queryDate.optional(), to: queryDate.optional(), tz: tzParam.optional() };
 const uuid = z.string().uuid().optional();
 const DETAIL_PAGE_MAX = 500;
 const pageKeys = {
@@ -87,7 +94,7 @@ function conversionStatusSql(s: ConversionStatus, clickId: string, networkId: st
 // turns any other key into a 422 — a filter that's accepted but silently ignored reads as "applied"
 // to the caller while returning unfiltered data.
 const clicksSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid, advertiserId: uuid,
   ...clickAttrKeys,
   isUnique: z.enum(['true', 'false']).optional(),
@@ -97,31 +104,65 @@ const clicksSchema = z.object({
   ip: ipParam,
   ...clickCaptureKeys,
   ...pageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type ClicksFilters = z.infer<typeof clicksSchema>;
 
+// Impressions (tracking/impression.ts) — same shape as clicks, minus the smart link; plus the creative.
+const { smartLinkId: _noSmartLink, ...impressionAttrKeys } = clickAttrKeys;
+const impressionsSchema = z.object({
+  ...rangeKeys,
+  offerId: uuid, publisherId: uuid, advertiserId: uuid,
+  ...impressionAttrKeys,
+  isUnique: z.enum(['true', 'false']).optional(),
+  /** true = only flagged / rejected impressions; false = only valid ones. */
+  invalid: z.enum(['true', 'false']).optional(),
+  ip: ipParam,
+  sourceId: z.string().max(200).optional(),
+  creativeId: z.string().max(200).optional(),
+  ...pageKeys,
+}).strict().transform(withZonedRange);
+type ImpressionsFilters = z.infer<typeof impressionsSchema>;
+
 const conversionsSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid, advertiserId: uuid,
   status: z.enum(['pending', 'approved', 'rejected']).optional(),
   event: z.string().max(100).optional(),
   source: CONV_SOURCE.optional(),
   // e.g. the Advertiser Postback report = every source except admin-entered 'manual' conversions.
   excludeSource: CONV_SOURCE.optional(),
+  // true = only the conversions held over caps (pending, a cap as the reason) — to approve or reject.
+  overCaps: z.enum(['true']).optional(),
   currency: z.string().max(3).optional(),
   // Applied to the originating click (LEFT JOIN clicks k) — a conversion with no click can't match.
   ...clickAttrKeys,
   ...pageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type ConversionsFilters = z.infer<typeof conversionsSchema>;
 
 const postbackLogsSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid,
   success: z.enum(['true', 'false']).optional(),
   ...pageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type PostbackLogsFilters = z.infer<typeof postbackLogsSchema>;
+
+const INBOUND_SOURCE = z.enum(['postback', 'pixel', 'iframe', 'api']);
+const INBOUND_OUTCOME = z.enum(['approved', 'pending', 'rejected', 'duplicate', 'click_not_found', 'security_failed', 'error']);
+const inboundPostbacksSchema = z.object({
+  ...rangeKeys,
+  offerId: uuid, publisherId: uuid, advertiserId: uuid,
+  outcome: INBOUND_OUTCOME.optional(),
+  // true = became a conversion (approved / pending / rejected); false = recorded nothing (duplicate,
+  // unknown click, wrong security code, error).
+  recorded: z.enum(['true', 'false']).optional(),
+  source: INBOUND_SOURCE.optional(),
+  clickId: z.string().trim().min(1).max(200).optional(),
+  transactionId: z.string().trim().min(1).max(500).optional(),
+  ...pageKeys,
+}).strict().transform(withZonedRange);
+type InboundPostbacksFilters = z.infer<typeof inboundPostbacksSchema>;
 
 /** Aggregated endpoints page their groups; default = the max so the common case is one request. */
 const groupPageKeys = {
@@ -129,10 +170,10 @@ const groupPageKeys = {
   offset: z.coerce.number().int().min(0).default(0),
 };
 const goalsSchema = z.object({
-  from: fromDate.optional(), to: toDate.optional(),
+  ...rangeKeys,
   offerId: uuid, publisherId: uuid,
   ...groupPageKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 
 /** One filter → SQL column mapping. `op` defaults to '='; `bool` coerces 'true'/'false'. */
 interface FilterSpec<F> { key: keyof F & string; col: string; op?: '=' | '<>' | '>=' | '<='; bool?: boolean }
@@ -162,8 +203,7 @@ function pagedGroups<T>(rows: T[], total: number, f: { offset: number }) {
 // `.strict()` like the row-level schemas: an unknown filter is a 422, never silently ignored.
 const groupedSchema = z.object({
   groupBy: z.enum(['offer', 'publisher', 'advertiser', 'day', 'country', 'device']).default('offer'),
-  from: fromDate.optional(),
-  to: toDate.optional(),
+  ...rangeKeys,
   // Comma lists (or repeated params). `offerId`/`publisherId`/… singular aliases are what the
   // row-level Click report sends, so the same query string works for both modes.
   offerIds: csvList(z.string().uuid()), offerId: csvList(z.string().uuid()),
@@ -178,7 +218,7 @@ const groupedSchema = z.object({
   ip: ipParam,
   isUnique: z.enum(['true', 'false']).optional(),
   ...clickCaptureKeys,
-}).strict();
+}).strict().transform(withZonedRange);
 type Grouped = z.infer<typeof groupedSchema>;
 const merge = (...lists: (string[] | undefined)[]) => Array.from(new Set(lists.flatMap((l) => l ?? [])));
 
@@ -221,18 +261,38 @@ function groupedFilters(networkId: string, f: Grouped, isClicks: boolean) {
   return { where: where.join(' AND '), params };
 }
 
+const dashboardSchema = z.object({
+  tz: tzParam.optional(),
+});
+
+/** The report time zone: `?tz=` → the network's (Settings › General) → UTC. */
+async function reportTimeZone(networkId: string, param: string | undefined): Promise<string> {
+  return param ?? networkTimeZone(networkId);
+}
+
+/** The first day of the month before `date`'s (YYYY-MM-DD). */
+function previousMonthFirst(date: string): string {
+  const y = Number(date.slice(0, 4));
+  const m = Number(date.slice(5, 7));
+  return m === 1 ? `${y - 1}-12-01` : `${y}-${String(m - 1).padStart(2, '0')}-01`;
+}
+
 export function mountDetailReports(r: Router): void {
   r.get('/grouped', validateQuery(groupedSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as Grouped;
 
-    // Aggregate clicks + conversions keyed by the group dimension, then merge in SQL.
+    // Aggregate clicks + conversions keyed by the group dimension, then merge in SQL. Days are the
+    // report zone's (`?tz=`, D7), UTC when unset.
+    let dayZone = `'UTC'`;
     const dim = (alias: string): string => {
       switch (f.groupBy) {
         case 'offer': return `COALESCE(${alias}.offer_id::text, '~none~')`;
         case 'publisher': return `COALESCE(${alias}.publisher_id::text, '~none~')`;
         case 'advertiser': return alias === 'c' ? `COALESCE(o.advertiser_id::text, '~none~')` : `COALESCE(v.advertiser_id::text, '~none~')`;
-        case 'day': return `to_char(date_trunc('day', ${alias}.created_at, 'UTC'), 'YYYY-MM-DD')`;
+        // The zone's local wall-clock day. (to_char of date_trunc(.., zone) — a timestamptz — rendered
+        // it in the SESSION time zone: Kolkata's midnight read as the previous day on a UTC database.)
+        case 'day': return `to_char(${alias}.created_at AT TIME ZONE ${dayZone}, 'YYYY-MM-DD')`;
         case 'country': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.country, '—')`;
         case 'device': return `COALESCE(${alias === 'c' ? 'c' : 'k'}.device, '—')`;
       }
@@ -250,6 +310,7 @@ export function mountDetailReports(r: Router): void {
     const vWhere = vf.where.replace(/\$(\d+)/g, (_, n) => { const k = Number(n); return k === 1 ? '$1' : `$${k + shift - 1}`; });
     const vParams = vf.params.slice(1); // drop duplicate networkId
     const params = [...cf.params, ...vParams];
+    if (f.groupBy === 'day' && !isUtcZone(f.tz)) { params.push(f.tz); dayZone = `$${params.length}::text`; }
 
     const sql = `
       WITH cl AS (
@@ -257,8 +318,8 @@ export function mountDetailReports(r: Router): void {
         FROM clicks c ${clicksJoin} WHERE ${cf.where} GROUP BY 1
       ), cv AS (
         SELECT ${dim('v')} AS k, COUNT(*)::int AS conversions,
-               COALESCE(SUM(v.payout),0)::numeric(14,4) AS payout,
-               COALESCE(SUM(v.revenue),0)::numeric(14,4) AS revenue,
+               round(COALESCE(SUM(v.payout),0), 4) AS payout,
+               round(COALESCE(SUM(v.revenue),0), 4) AS revenue,
                -- Currencies of the (approved) conversions summed above; >1 = a mixed-currency sum.
                array_agg(DISTINCT v.currency ORDER BY v.currency) FILTER (WHERE v.currency IS NOT NULL) AS currencies
         FROM conversions v ${convJoin} WHERE ${vWhere} GROUP BY 1
@@ -335,95 +396,75 @@ export function mountDetailReports(r: Router): void {
   }));
 
   // ── Full "Today's Stats" dashboard: per-period totals + today's hourly series (Everflow-style) ──
-  r.get('/dashboard', asyncHandler(async (req, res) => {
+  // F-20: read through the reporting provider — the 15-minute rollups plus the raw tail — instead of
+  // scanning two months of raw rows per load; the periods and the hourly series are in the network's
+  // time zone (Settings › General), `?tz=` overrides, UTC when neither is set.
+  r.get('/dashboard', validateQuery(dashboardSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
-    // Period buckets via FILTER (one scan each over the current+previous month window).
-    const PERIOD: [string, string][] = [
-      ['today', `created_at >= date_trunc('day', now(), 'UTC')`],
-      ['yesterday', `created_at >= date_trunc('day', now(), 'UTC') - interval '1 day' AND created_at < date_trunc('day', now(), 'UTC')`],
-      ['month', `created_at >= date_trunc('month', now(), 'UTC')`],
-      ['last_month', `created_at >= date_trunc('month', now(), 'UTC') - interval '1 month' AND created_at < date_trunc('month', now(), 'UTC')`],
-    ];
-    const P = (col: string) => PERIOD.map(([k, cond]) => `
-      COALESCE(${col} FILTER (WHERE ${cond}),0) AS ${k}`).join(',');
-    const since = `created_at >= date_trunc('month', now(), 'UTC') - interval '1 month'`;
-
-    const [clk, cv, ser, byCur] = await Promise.all([
-      query<Record<string, string>>(`SELECT ${P('COUNT(*)')} FROM clicks WHERE network_id = $1 AND ${since}`, [nid]),
-      query<Record<string, string>>(
-        `SELECT ${P('COUNT(*)')},
-                ${P('SUM(payout)').replace(/AS (\w+)/g, 'AS p_$1')},
-                ${P('SUM(revenue)').replace(/AS (\w+)/g, 'AS r_$1')},
-                -- Per period: currencies of the approved conversions behind the money sums (>1 = mixed).
-                ${P(`array_agg(DISTINCT currency ORDER BY currency)`)
-                  .replace(/FILTER \(WHERE /g, 'FILTER (WHERE currency IS NOT NULL AND ')
-                  .replace(/,0\) AS (\w+)/g, `,'{}'::text[]) AS c_$1`)}
-           FROM conversions WHERE network_id = $1 AND status = 'approved' AND ${since}`, [nid]),
-      query<{ h: number; clicks: number; conversions: number; revenue: string; payout: string }>(
-        `SELECT date_part('hour', h.created_at)::int AS h,
-                COUNT(*) FILTER (WHERE src = 'click')::int AS clicks,
-                COUNT(*) FILTER (WHERE src = 'conv')::int AS conversions,
-                COALESCE(SUM(revenue),0)::text AS revenue,
-                COALESCE(SUM(payout),0)::text AS payout
-           FROM (
-             SELECT created_at, 'click' AS src, 0::numeric revenue, 0::numeric payout FROM clicks
-              WHERE network_id = $1 AND created_at >= date_trunc('day', now(), 'UTC')
-             UNION ALL
-             SELECT created_at, 'conv' AS src, revenue, payout FROM conversions
-              WHERE network_id = $1 AND status = 'approved' AND created_at >= date_trunc('day', now(), 'UTC')
-           ) h GROUP BY 1`, [nid]),
-      // Per period, the same approved conversions' money per currency (NULL currency excluded).
-      query<Record<string, string | number>>(
-        `SELECT currency,${PERIOD.map(([k, cond]) => `
-                COUNT(*) FILTER (WHERE ${cond})::int AS n_${k},
-                COALESCE(SUM(payout) FILTER (WHERE ${cond}),0)::numeric(14,4)::text AS p_${k},
-                COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0)::numeric(14,4)::text AS r_${k},
-                (COALESCE(SUM(revenue) FILTER (WHERE ${cond}),0) - COALESCE(SUM(payout) FILTER (WHERE ${cond}),0))::numeric(14,4)::text AS m_${k}`).join(',')}
-           FROM conversions WHERE network_id = $1 AND status = 'approved' AND currency IS NOT NULL AND ${since}
-          GROUP BY currency ORDER BY currency`, [nid]),
+    const tz = await reportTimeZone(nid, (res.locals.query as z.infer<typeof dashboardSchema>).tz);
+    const today = localDate(new Date(), tz);
+    const todayStart = zonedDayStart(today, tz);
+    const monthStart = zonedDayStart(`${today.slice(0, 7)}-01`, tz);
+    const PERIODS = {
+      today: { from: todayStart.toISOString() },
+      yesterday: { from: zonedDayStart(addDays(today, -1), tz).toISOString(), to: inclusiveBefore(todayStart) },
+      month: { from: monthStart.toISOString() },
+      lastMonth: { from: zonedDayStart(previousMonthFirst(today), tz).toISOString(), to: inclusiveBefore(monthStart) },
+    } as const;
+    const provider = getReportingProvider();
+    const base = { networkId: nid, offset: 0, moneyFields: [...MONEY_FIELDS], ...(isUtcZone(tz) ? {} : { timeZone: tz }) };
+    const [periodRows, hourly] = await Promise.all([
+      Promise.all((Object.keys(PERIODS) as (keyof typeof PERIODS)[]).map(async (k) => {
+        const r = await provider.runReport({
+          ...base, groupBy: [], filters: PERIODS[k], limit: 1,
+          metrics: ['clicks', 'conversions', 'payout', 'revenue', 'margin', 'currencies', 'money_by_currency'],
+        });
+        return [k, r.rows[0]?.metrics ?? {}] as const;
+      })),
+      provider.runReport({
+        ...base, groupBy: ['hour'], filters: { from: todayStart.toISOString() }, limit: 100,
+        metrics: ['clicks', 'conversions', 'payout', 'revenue', 'margin'],
+      }),
     ]);
-    const mbcFor = (k: string): MoneyByCurrency => Object.fromEntries(byCur.rows
-      .filter((r) => Number(r[`n_${k}`] ?? 0) > 0)
-      .map((r) => [String(r['currency']), { payout: String(r[`p_${k}`]), revenue: String(r[`r_${k}`]), margin: String(r[`m_${k}`]) }]));
+    const m = Object.fromEntries(periodRows) as Record<keyof typeof PERIODS, Record<string, unknown>>;
+    const per = <T>(fn: (x: Record<string, unknown>) => T) =>
+      ({ today: fn(m.today), yesterday: fn(m.yesterday), month: fn(m.month), lastMonth: fn(m.lastMonth) });
+    // Counts are integers; money stays the 4dp text SQL produced (never JS float arithmetic — F-22).
+    const clicks = per((x) => Number(x['clicks'] ?? 0));
+    const conversions = per((x) => Number(x['conversions'] ?? 0));
+    const money = (k: string) => per((x) => String(x[k] ?? '0.0000'));
+    const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 10_000) / 100 : 0); // a rate, not money
+    const cr = { today: pct(conversions.today, clicks.today), yesterday: pct(conversions.yesterday, clicks.yesterday),
+      month: pct(conversions.month, clicks.month), lastMonth: pct(conversions.lastMonth, clicks.lastMonth) };
 
-    const c = clk.rows[0]!; const v = cv.rows[0]!;
-    const periods = (o: Record<string, string>, pfx = '') => ({
-      today: Number(o[`${pfx}today`] ?? 0), yesterday: Number(o[`${pfx}yesterday`] ?? 0),
-      month: Number(o[`${pfx}month`] ?? 0), lastMonth: Number(o[`${pfx}last_month`] ?? 0),
-    });
-    const clicks = periods(c);
-    const conversions = periods(v);
-    const payout = periods(v, 'p_');
-    const revenue = periods(v, 'r_');
-    const money = (n: number) => n.toFixed(4);
-    const curr = (o: Record<string, unknown>, k: string): string[] => (Array.isArray(o[`c_${k}`]) ? (o[`c_${k}`] as string[]) : []);
-    const mk = (fn: (k: 'today' | 'yesterday' | 'month' | 'lastMonth') => number) =>
-      ({ today: fn('today'), yesterday: fn('yesterday'), month: fn('month'), lastMonth: fn('lastMonth') });
-    const margin = mk((k) => revenue[k] - payout[k]);
-    const cr = mk((k) => (clicks[k] > 0 ? Number(((conversions[k] / clicks[k]) * 100).toFixed(2)) : 0));
-
-    const mkSeries = (fn: (row: typeof ser.rows[number]) => number) => {
-      const a = Array<number>(24).fill(0);
-      for (const row of ser.rows) a[row.h] = fn(row);
+    // Today's 24 hourly slots, by each row's local hour — the provider returns only the hours that
+    // have data, so a series is never filled by row position.
+    const series = <T>(empty: T, fn: (x: Record<string, unknown>) => T): T[] => {
+      const a = Array<T>(24).fill(empty);
+      for (const row of hourly.rows) {
+        const h = Number((row.dimensions['hour'] ?? '').slice(11, 13));
+        if (Number.isInteger(h) && h >= 0 && h < 24) a[h] = fn(row.metrics);
+      }
       return a;
     };
-    const clicksSeries = mkSeries((r) => r.clicks);
-    const crSeries = clicksSeries.map((clicks, h) => (clicks > 0 ? Number(((ser.rows[h]?.conversions ?? 0) / clicks) * 100).toFixed(2) : 0));
+    const clicksSeries = series(0, (x) => Number(x['clicks'] ?? 0));
+    const conversionsSeries = series(0, (x) => Number(x['conversions'] ?? 0));
     sendOk(res, {
+      timeZone: tz,
       clicks, conversions,
-      revenue: { today: money(revenue.today), yesterday: money(revenue.yesterday), month: money(revenue.month), lastMonth: money(revenue.lastMonth) },
-      payout: { today: money(payout.today), yesterday: money(payout.yesterday), month: money(payout.month), lastMonth: money(payout.lastMonth) },
-      margin: { today: money(margin.today), yesterday: money(margin.yesterday), month: money(margin.month), lastMonth: money(margin.lastMonth) },
-      currencies: { today: curr(v, 'today'), yesterday: curr(v, 'yesterday'), month: curr(v, 'month'), lastMonth: curr(v, 'last_month') },
-      moneyByCurrency: { today: mbcFor('today'), yesterday: mbcFor('yesterday'), month: mbcFor('month'), lastMonth: mbcFor('last_month') },
+      revenue: money('revenue'),
+      payout: money('payout'),
+      margin: money('margin'),
+      currencies: per((x) => (Array.isArray(x['currencies']) ? (x['currencies'] as string[]) : [])),
+      moneyByCurrency: per((x) => (x['money_by_currency'] ?? {}) as MoneyByCurrency),
       cr,
       series: {
         clicks: clicksSeries,
-        conversions: mkSeries((r) => r.conversions),
-        revenue: mkSeries((r) => Number(r.revenue)),
-        payout: mkSeries((r) => Number(r.payout)),
-        margin: mkSeries((r) => Number(r.revenue) - Number(r.payout)),
-        cr: crSeries,
+        conversions: conversionsSeries,
+        revenue: series('0.0000', (x) => String(x['revenue'])),
+        payout: series('0.0000', (x) => String(x['payout'])),
+        margin: series('0.0000', (x) => String(x['margin'])),
+        cr: clicksSeries.map((n, h) => pct(conversionsSeries[h]!, n)),
       },
     });
   }));
@@ -474,6 +515,40 @@ export function mountDetailReports(r: Router): void {
     sendOk(res, rows.map((r) => ({ ...r, referrer: r.referrer == null ? null : redactUrl(r.referrer) })), { limit: f.limit, offset: f.offset });
   }));
 
+  // ── Impression report — row-level impression log (accepted and rejected — the first flag is the reason).
+  r.get('/impressions', validateQuery(impressionsSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as ImpressionsFilters;
+    const { where, params } = buildWhere<ImpressionsFilters>(req.scope!.networkId, f, [
+      { key: 'from', col: 'created_at', op: '>=' }, { key: 'to', col: 'created_at', op: '<=' },
+      { key: 'offerId', col: 'offer_id' }, { key: 'publisherId', col: 'publisher_id' },
+      { key: 'country', col: 'country' }, { key: 'region', col: 'region' }, { key: 'city', col: 'city' },
+      { key: 'device', col: 'device' }, { key: 'os', col: 'os' }, { key: 'browser', col: 'browser' },
+      { key: 'sub1', col: 'sub1' }, { key: 'sub2', col: 'sub2' }, { key: 'sub3', col: 'sub3' },
+      { key: 'sub4', col: 'sub4' }, { key: 'sub5', col: 'sub5' },
+      { key: 'isUnique', col: 'is_unique', bool: true },
+      { key: 'sourceId', col: 'source_id' }, { key: 'creativeId', col: 'creative_id' },
+    ]);
+    let impWhere = where;
+    if (f.advertiserId) {
+      params.push(f.advertiserId);
+      impWhere += ` AND offer_id IN (SELECT id FROM offers WHERE network_id = $1 AND advertiser_id = $${params.length})`;
+    }
+    if (f.invalid === 'true') impWhere += ' AND array_length(fraud_flags, 1) > 0';
+    if (f.invalid === 'false') impWhere += ' AND array_length(fraud_flags, 1) IS NULL';
+    if (f.ip) { params.push(f.ip); impWhere += ` AND ip = $${params.length}::inet`; }
+    params.push(f.limit, f.offset);
+    const { rows } = await query<{ referrer: string | null }>(
+      `SELECT impression_id, created_at, offer_id, publisher_id, host(ip) AS ip, country, region, city, isp,
+              device, os, browser, is_unique, fraud_score, fraud_flags, sub1, sub2, sub3, sub4, sub5,
+              source_id, creative_id, referrer, user_agent, currency,
+              resolved_payout::text AS resolved_payout, resolved_revenue::text AS resolved_revenue
+         FROM impressions WHERE ${impWhere}
+        ORDER BY created_at DESC, impression_id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+    sendOk(res, rows.map((r) => ({ ...r, referrer: r.referrer == null ? null : redactUrl(r.referrer) })), { limit: f.limit, offset: f.offset });
+  }));
+
   // ── Conversions report — row-level conversion log, incl. click-time context (geo/device/subs)
   // for the originating click via a LEFT JOIN on click_id. Filtering runs on the `conversions`-only
   // subquery first (avoids column-name ambiguity with `clicks` on the outer join) before joining.
@@ -486,11 +561,13 @@ export function mountDetailReports(r: Router): void {
       { key: 'event', col: 'event_name' }, { key: 'source', col: 'source' }, { key: 'currency', col: 'currency' },
       { key: 'excludeSource', col: 'source', op: '<>' },
     ]);
+    const convWhere = f.overCaps ? `${where} AND ${heldOverCapSql()}` : where;
     // Click-side filters run on the joined originating click (same numbering as `params`).
     const { where: clickWhere } = buildWhere<ConversionsFilters>(req.scope!.networkId, f, [
       { key: 'smartLinkId', col: 'k.smart_link_id' },
-      { key: 'country', col: 'k.country' }, { key: 'region', col: 'k.region' }, { key: 'city', col: 'k.city' },
-      { key: 'device', col: 'k.device' }, { key: 'os', col: 'k.os' }, { key: 'browser', col: 'k.browser' },
+      // A conversion with no click row (view-through, a CPM booking) has its own country / device.
+      { key: 'country', col: 'COALESCE(k.country, v.country)' }, { key: 'region', col: 'k.region' }, { key: 'city', col: 'k.city' },
+      { key: 'device', col: 'COALESCE(k.device, v.device)' }, { key: 'os', col: 'k.os' }, { key: 'browser', col: 'k.browser' },
       { key: 'sub1', col: 'k.sub1' }, { key: 'sub2', col: 'k.sub2' }, { key: 'sub3', col: 'k.sub3' },
       { key: 'sub4', col: 'k.sub4' }, { key: 'sub5', col: 'k.sub5' },
     ], params, '');
@@ -498,14 +575,14 @@ export function mountDetailReports(r: Router): void {
     const { rows } = await query<{ raw_params: unknown }>(
       `SELECT v.conversion_id, v.created_at, v.click_id, v.offer_id, v.publisher_id, v.advertiser_id,
               v.event_name, v.goal_id, og.name AS goal_name, v.status, v.reason, v.payout, v.revenue,
-              v.currency, v.transaction_id, v.source, v.fraud_score, v.raw_params,
-              k.created_at AS click_created_at, k.country, k.region, k.city, k.isp,
-              k.device, k.os, k.browser, k.sub1, k.sub2, k.sub3, k.sub4, k.sub5,
+              v.currency, v.transaction_id, v.source, v.attribution, v.products, v.fraud_score, v.raw_params,
+              k.created_at AS click_created_at, COALESCE(k.country, v.country) AS country, k.region, k.city, k.isp,
+              COALESCE(k.device, v.device) AS device, k.os, k.browser, k.sub1, k.sub2, k.sub3, k.sub4, k.sub5,
               EXTRACT(EPOCH FROM (v.created_at - k.created_at))::int AS delta_seconds
          FROM (SELECT conversion_id, network_id, created_at, click_id, offer_id, publisher_id, advertiser_id,
                       event_name, goal_id, status, reason, payout, revenue, currency, transaction_id, source,
-                      fraud_score, raw_params
-                 FROM conversions WHERE ${where}) v
+                      attribution, products, country, device, fraud_score, raw_params
+                 FROM conversions WHERE ${convWhere}) v
          LEFT JOIN clicks k ON k.click_id = v.click_id AND k.network_id = v.network_id
          LEFT JOIN offer_goals og ON og.id = v.goal_id AND og.network_id = v.network_id
         ${clickWhere ? `WHERE ${clickWhere}` : ''}
@@ -546,6 +623,31 @@ export function mountDetailReports(r: Router): void {
     sendOk(res, rows.map((r) => ({ ...r, url: redactUrl(r.url), error: r.error == null ? r.error : redactUrl(r.error) })), { limit: f.limit, offset: f.offset });
   }));
 
+  // ── Inbound postback log (Advertiser Postback report) — every conversion request received (postback /
+  // pixel / iframe / API) and what happened to it: recorded, with its conversion, or not — and why.
+  r.get('/inbound-postbacks', validateQuery(inboundPostbacksSchema), asyncHandler(async (req, res) => {
+    const f = res.locals.query as InboundPostbacksFilters;
+    const { where, params } = buildWhere<InboundPostbacksFilters>(req.scope!.networkId, f, [
+      { key: 'from', col: 'created_at', op: '>=' }, { key: 'to', col: 'created_at', op: '<=' },
+      { key: 'offerId', col: 'offer_id' }, { key: 'publisherId', col: 'publisher_id' }, { key: 'advertiserId', col: 'advertiser_id' },
+      { key: 'outcome', col: 'outcome' }, { key: 'source', col: 'source' },
+      { key: 'clickId', col: 'click_id' }, { key: 'transactionId', col: 'transaction_id' },
+    ]);
+    const recorded = f.recorded ? ` AND outcome ${f.recorded === 'true' ? '' : 'NOT '}IN ('approved', 'pending', 'rejected')` : '';
+    params.push(f.limit, f.offset);
+    const { rows } = await query<{ params: unknown }>(
+      `SELECT id, created_at, source, method, click_id, transaction_id, event_name, offer_id, publisher_id, advertiser_id,
+              outcome, reason, conversion_id, payout, revenue, currency, sale_amount, http_status, host(ip) AS ip,
+              user_agent, params
+         FROM inbound_postback_logs WHERE ${where}${recorded}
+        -- id breaks created_at ties so offset pages (table + paged export) never repeat or skip a row.
+        ORDER BY created_at DESC, id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params,
+    );
+    // Stored redacted already; masked again on the way out in case an older row predates a new secret key.
+    sendOk(res, rows.map((r) => ({ ...r, params: redactRawParams(r.params) })), { limit: f.limit, offset: f.offset });
+  }));
+
   // ── Goals/Event report — approved conversions aggregated per offer goal, plus each offer's real
   // click count (clicks aren't tied to a specific goal, so it's queried per-offer and merged in) —
   // together these back CVR (Total (from Clicks) / Clicks) on the Event Report.
@@ -572,8 +674,8 @@ export function mountDetailReports(r: Router): void {
                 (c.goal_id IS NULL) AS unmatched,
                 (CASE WHEN c.goal_id IS NULL THEN c.event_name END) AS event_key,
                 COUNT(*)::int AS conversions,
-                COALESCE(SUM(c.payout),0)::numeric(14,4) AS payout,
-                COALESCE(SUM(c.revenue),0)::numeric(14,4) AS revenue,
+                round(COALESCE(SUM(c.payout),0), 4) AS payout,
+                round(COALESCE(SUM(c.revenue),0), 4) AS revenue,
                 (COALESCE(SUM(c.revenue),0) - COALESCE(SUM(c.payout),0))::numeric(14,4) AS margin,
                 -- The row's money is in its offer's currency (network default if the offer is gone).
                 COALESCE((SELECT o.currency FROM offers o WHERE o.id = c.offer_id AND o.network_id = $1),
@@ -606,7 +708,7 @@ export function mountDetailReports(r: Router): void {
       // Real group count, so a page that stops at `limit` is reported as such (never a silent cap).
       query<{ total: number }>(`SELECT COUNT(*)::int AS total FROM (${groupsSql}) g`, params),
       query<{ offer_id: string; clicks: number }>(
-        `SELECT offer_id, COUNT(*)::int AS clicks FROM clicks WHERE ${clickWhere.join(' AND ')} GROUP BY 1`,
+        `SELECT offer_id, COUNT(*)::int AS clicks FROM clicks WHERE ${clickWhere.join(' AND ')} AND NOT ${rejectedClickSql()} GROUP BY 1`,
         clickParams,
       ),
     ]);
@@ -628,7 +730,8 @@ export function mountDetailReports(r: Router): void {
   r.get('/smart-links', asyncHandler(async (req, res) => {
     const { rows } = await query(
       `SELECT sl.id, sl.name, sl.status,
-              (SELECT COUNT(*) FROM clicks c WHERE c.network_id = sl.network_id AND c.smart_link_id = sl.id)::int AS clicks,
+              (SELECT COUNT(*) FROM clicks c WHERE c.network_id = sl.network_id AND c.smart_link_id = sl.id
+                 AND NOT ${rejectedClickSql('c')})::int AS clicks,
               (SELECT COUNT(*) FROM conversions cv WHERE cv.network_id = sl.network_id AND cv.click_id IN
                  (SELECT click_id FROM clicks c2 WHERE c2.network_id = sl.network_id AND c2.smart_link_id = sl.id)
                  AND cv.status = 'approved')::int AS conversions
@@ -646,18 +749,25 @@ export function mountDetailReports(r: Router): void {
   // omitted rather than faked). Summary is a network-wide snapshot (today + all-time); Detail is a
   // real per-day, per-entity breakdown for the requested date range and category.
   const pacingSchema = z.object({
-    from: fromDate.optional(),
-    to: toDate.optional(),
+    // Plain dates are days of the network's cap time zone (the handler turns them into instants).
+    from: queryDate.optional(),
+    to: queryDate.optional(),
     category: z.enum(['click', 'conversion', 'payout', 'revenue']).default('conversion'),
     // Detail rows for one offer (payout/revenue: the offer groups that contain it).
     offerId: uuid,
   }).strict();
   // Conversion-cap USAGE mirrors enforcement (surfaces/tracking/conversions/record.ts →
-  // conversionCapReached): every NON-REJECTED conversion counts (pending ones consume the cap too),
-  // and "today" starts at the UTC day boundary. Payout/revenue cap usage stays APPROVED-only — that's
-  // money actually earned. Money (caps + actuals) is returned as numeric(14,4) text; percentages are numbers.
-  const CAP_COUNTED = `status <> 'rejected'`;
-  const UTC_TODAY = `date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`;
+  // conversionCapReached, lib/conversion-caps): every conversion that isn't rejected counts (pending ones
+  // consume the cap too) except those held over caps, and "today" / a day is the CAP TIME ZONE's — each
+  // offer's (`offers.cap_timezone`), else the network's (Settings › General; $2 below), else UTC.
+  // Payout/revenue cap usage stays APPROVED-only — that's money actually earned. Money (caps + actuals)
+  // is returned as numeric(14,4) text; percentages are numbers.
+  const CAP_COUNTED = capCountedSql('c');
+  // Click-cap usage: clicks sent to the offer. Rejected clicks (recorded with the reason — cap
+  // exceeded, geo, …) never reached it and never used up its cap (lib/click-rejections).
+  const REJECTED_CLICK = rejectedClickSql('cl');
+  // An offer's cap time zone, with the network's as $2.
+  const OFFER_TZ = `COALESCE(o.cap_timezone, $2)`;
   // A cap only counts when it is POSITIVE: enforcement treats null and <= 0 as unlimited
   // (tracking/caps.ts isClickCapped, conversions/record.ts conversionCapReached), so a zero/negative
   // cap is "no cap" here too — excluded exactly like a NULL one, never shown as a 0 denominator.
@@ -674,43 +784,45 @@ export function mountDetailReports(r: Router): void {
   r.get('/pacing', validateQuery(pacingSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof pacingSchema>;
+    const capTz = await networkCapTimeZone(nid);
+    const range = zonedRange(f.from, f.to, capTz);
 
     const [clickCap, convCap, groupCap] = await Promise.all([
       query<{ id: string; name: string; daily_click_cap: number; clicks_today: number }>(
         `SELECT o.id, o.name, o.daily_click_cap,
                 (SELECT COUNT(*) FROM clicks cl WHERE cl.network_id = o.network_id AND cl.offer_id = o.id
-                   AND cl.created_at >= date_trunc('day', now(), 'UTC'))::int AS clicks_today
+                   AND cl.created_at >= date_trunc('day', now(), ${OFFER_TZ}) AND NOT ${REJECTED_CLICK})::int AS clicks_today
            FROM offers o WHERE o.network_id = $1 AND o.daily_click_cap > 0`,
-        [nid],
+        [nid, capTz],
       ),
       query<{ id: string; name: string; daily_conversion_cap: number | null; total_conversion_cap: number | null; conversions_today: number; conversions_total: number }>(
         `SELECT o.id, o.name, ${offerCap('daily_conversion_cap')} AS daily_conversion_cap,
                 ${offerCap('total_conversion_cap')} AS total_conversion_cap,
                 (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id
-                   AND c.${CAP_COUNTED} AND c.created_at >= ${UTC_TODAY})::int AS conversions_today,
+                   AND ${CAP_COUNTED} AND c.created_at >= date_trunc('day', now(), ${OFFER_TZ}))::int AS conversions_today,
                 (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id
-                   AND c.${CAP_COUNTED})::int AS conversions_total
+                   AND ${CAP_COUNTED})::int AS conversions_total
            FROM offers o WHERE o.network_id = $1 AND (o.daily_conversion_cap > 0 OR o.total_conversion_cap > 0)`,
-        [nid],
+        [nid, capTz],
       ),
       query<{ id: string; name: string; daily_payout_cap: string | null; daily_revenue_cap: string | null; payout_today: string; revenue_today: string; cap_currency: string | null; currencies_today: string[] | null }>(
         // Approved-only: payout/revenue caps track money actually earned.
         `SELECT og.id, og.name, gc.daily_payout_cap, gc.daily_revenue_cap,
                 COALESCE((SELECT SUM(c.payout) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS payout_today,
+                   AND c.created_at >= date_trunc('day', now(), $2) AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS payout_today,
                 COALESCE((SELECT SUM(c.revenue) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS revenue_today,
+                   AND c.created_at >= date_trunc('day', now(), $2) AND og.offer_ids ? c.offer_id::text), 0)::numeric(14,4) AS revenue_today,
                 -- Currency check for the pooled summary: the cap's currency + the currencies of the
                 -- conversions summed above (same rows).
                 COALESCE(NULLIF(og.currency, ''), (SELECT n.default_currency FROM networks n WHERE n.id = $1)) AS cap_currency,
                 (SELECT array_agg(DISTINCT c.currency) FROM conversions c WHERE c.network_id = og.network_id AND c.status = 'approved'
-                   AND c.created_at >= date_trunc('day', now(), 'UTC') AND og.offer_ids ? c.offer_id::text AND c.currency IS NOT NULL) AS currencies_today
+                   AND c.created_at >= date_trunc('day', now(), $2) AND og.offer_ids ? c.offer_id::text AND c.currency IS NOT NULL) AS currencies_today
            FROM offer_groups og
            CROSS JOIN LATERAL (SELECT ${groupDailyCap('payout')}::text AS daily_payout_cap,
                                       ${groupDailyCap('revenue')}::text AS daily_revenue_cap) gc
           WHERE og.network_id = $1 AND og.caps_enabled
             AND (gc.daily_payout_cap IS NOT NULL OR gc.daily_revenue_cap IS NOT NULL)`,
-        [nid],
+        [nid, capTz],
       ),
     ]);
 
@@ -742,9 +854,9 @@ export function mountDetailReports(r: Router): void {
 
     const dateWhereFor = (alias: string) => {
       const where: string[] = ['1=1'];
-      const params: unknown[] = [nid];
-      if (f.from) { params.push(f.from); where.push(`${alias}.created_at >= $${params.length}`); }
-      if (f.to) { params.push(f.to); where.push(`${alias}.created_at <= $${params.length}`); }
+      const params: unknown[] = [nid, capTz];
+      if (range.from) { params.push(range.from); where.push(`${alias}.created_at >= $${params.length}`); }
+      if (range.to) { params.push(range.to); where.push(`${alias}.created_at <= $${params.length}`); }
       if (f.offerId) {
         params.push(f.offerId);
         where.push(f.category === 'payout' || f.category === 'revenue'
@@ -759,9 +871,9 @@ export function mountDetailReports(r: Router): void {
     if (f.category === 'click') {
       const { where, params } = dateWhereFor('cl');
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
-        `SELECT date_trunc('day', cl.created_at, 'UTC') AS day, cl.offer_id, COUNT(*)::int AS actual
+        `SELECT to_char((cl.created_at AT TIME ZONE ${OFFER_TZ})::date, 'YYYY-MM-DD') AS day, cl.offer_id, COUNT(*)::int AS actual
            FROM clicks cl JOIN offers o ON o.id = cl.offer_id AND o.network_id = cl.network_id
-          WHERE cl.network_id = $1 AND o.daily_click_cap > 0 AND ${where}
+          WHERE cl.network_id = $1 AND o.daily_click_cap > 0 AND NOT ${REJECTED_CLICK} AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
         params,
       );
@@ -773,9 +885,9 @@ export function mountDetailReports(r: Router): void {
     } else if (f.category === 'conversion') {
       const { where, params } = dateWhereFor('c');
       const { rows } = await query<{ day: string; offer_id: string; actual: number }>(
-        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, c.offer_id, COUNT(*)::int AS actual
+        `SELECT to_char((c.created_at AT TIME ZONE ${OFFER_TZ})::date, 'YYYY-MM-DD') AS day, c.offer_id, COUNT(*)::int AS actual
            FROM conversions c JOIN offers o ON o.id = c.offer_id AND o.network_id = c.network_id
-          WHERE c.network_id = $1 AND c.${CAP_COUNTED} AND o.daily_conversion_cap > 0 AND ${where}
+          WHERE c.network_id = $1 AND ${CAP_COUNTED} AND o.daily_conversion_cap > 0 AND ${where}
           GROUP BY 1, 2 ORDER BY 1 DESC`,
         params,
       );
@@ -789,7 +901,7 @@ export function mountDetailReports(r: Router): void {
       const { where, params } = dateWhereFor('c');
       // Groups whose cap isn't a valid positive decimal are dropped by the join (see groupDailyCap).
       const [{ rows }, byCur] = await Promise.all([query<{ day: string; group_id: string; group_name: string; cap: string; actual: string; currency: string; currencies: string[] }>(
-        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, og.id AS group_id, og.name AS group_name,
+        `SELECT to_char((c.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day, og.id AS group_id, og.name AS group_name,
                 ${groupDailyCap(col)}::text AS cap,
                 COALESCE(SUM(c.${col}),0)::numeric(14,4)::text AS actual,
                 -- cap/actual are in the group's currency (network default when unset) — the UI formats with it.
@@ -805,7 +917,7 @@ export function mountDetailReports(r: Router): void {
       ),
       // The same rows' `actual` split per conversion currency (NULL currency excluded).
       query<{ day: string; group_id: string; cur: string; amount: string }>(
-        `SELECT date_trunc('day', c.created_at, 'UTC') AS day, og.id AS group_id, c.currency AS cur,
+        `SELECT to_char((c.created_at AT TIME ZONE $2)::date, 'YYYY-MM-DD') AS day, og.id AS group_id, c.currency AS cur,
                 COALESCE(SUM(c.${col}),0)::numeric(14,4)::text AS amount
            FROM conversions c
            JOIN offer_groups og ON og.network_id = c.network_id AND og.offer_ids ? c.offer_id::text
@@ -827,7 +939,8 @@ export function mountDetailReports(r: Router): void {
       }));
     }
 
-    sendOk(res, { summary, category: f.category, rows: detailRows });
+    // Days are local dates (YYYY-MM-DD) of each offer's cap time zone (offer groups: the network's).
+    sendOk(res, { summary, category: f.category, capTimeZone: capTz, rows: detailRows });
   }));
 
   // ── Cohort report — real per-day-of-click "aging" breakdown: for each cohort day (the day a click
@@ -836,8 +949,9 @@ export function mountDetailReports(r: Router): void {
   // nonzero) and a cell renders as "—" (not 0) when day N hasn't happened yet relative to today —
   // e.g., a cohort from yesterday can only ever show a real Day 1 value so far.
   const cohortSchema = z.object({
-    from: fromDate,
-    to: toDate,
+    from: queryDate,
+    to: queryDate,
+    tz: tzParam.optional(),
     topLevelMetric: z.enum(['clicks', 'unique_clicks']).default('clicks'),
     metric: z.enum(['conversions', 'payout', 'revenue']).default('conversions'),
     offerId: z.string().uuid().optional(),
@@ -846,7 +960,7 @@ export function mountDetailReports(r: Router): void {
     smartLinkId: z.string().uuid().optional(),
     country: z.string().max(3).optional(),
     device: z.string().max(30).optional(),
-  });
+  }).transform(withZonedRange);
   r.get('/cohort', validateQuery(cohortSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof cohortSchema>;
@@ -858,9 +972,13 @@ export function mountDetailReports(r: Router): void {
     add(f.smartLinkId, 'cl.smart_link_id'); add(f.country, 'cl.country'); add(f.device, 'cl.device');
     let advertiserJoin = '';
     if (f.advertiserId) { advertiserJoin = 'JOIN offers o ON o.id = cl.offer_id AND o.network_id = cl.network_id'; params.push(f.advertiserId); clickWhere.push(`o.advertiser_id = $${params.length}`); }
+    // Cohort days are the report zone's (`?tz=`, D7), UTC when unset — every query below uses it.
+    const zone = isUtcZone(f.tz) ? 'UTC' : f.tz!;
+    params.push(zone);
+    const tzRef = `$${params.length}::text`;
 
     const { rows: clickRows } = await query<{ cohort_day: string; clicks: number; unique_clicks: number }>(
-      `SELECT date_trunc('day', cl.created_at, 'UTC') AS cohort_day, COUNT(*)::int AS clicks,
+      `SELECT date_trunc('day', cl.created_at, ${tzRef}) AS cohort_day, COUNT(*)::int AS clicks,
               COUNT(*) FILTER (WHERE cl.is_unique)::int AS unique_clicks
          FROM clicks cl ${advertiserJoin}
         WHERE ${clickWhere.join(' AND ')}
@@ -874,7 +992,7 @@ export function mountDetailReports(r: Router): void {
         WHERE c.status = 'approved' AND c.created_at >= k.created_at AND ${clickWhere.join(' AND ').replace(/cl\./g, 'k.')}`;
     const moneyMetric = f.metric === 'payout' || f.metric === 'revenue' ? f.metric : null;
     const [{ rows: convRows }, curRows] = await Promise.all([query<{ cohort_day: string; day_offset: number; value: string; currencies: string[] | null }>(
-      `SELECT date_trunc('day', k.created_at, 'UTC') AS cohort_day,
+      `SELECT date_trunc('day', k.created_at, ${tzRef}) AS cohort_day,
               (floor(EXTRACT(EPOCH FROM (c.created_at - k.created_at)) / 86400)::int + 1) AS day_offset,
               COALESCE(${convCol}, 0)::numeric(14,4) AS value,
               array_agg(DISTINCT c.currency) FILTER (WHERE c.currency IS NOT NULL) AS currencies
@@ -886,7 +1004,7 @@ export function mountDetailReports(r: Router): void {
     // money can be read per currency instead of as one mixed sum.
     moneyMetric
       ? query<{ cohort_day: string; day_offset: number; cur: string; amount: string }>(
-        `SELECT date_trunc('day', k.created_at, 'UTC') AS cohort_day,
+        `SELECT date_trunc('day', k.created_at, ${tzRef}) AS cohort_day,
                 (floor(EXTRACT(EPOCH FROM (c.created_at - k.created_at)) / 86400)::int + 1) AS day_offset,
                 c.currency AS cur, COALESCE(SUM(c.${moneyMetric}), 0)::numeric(14,4)::text AS amount
            ${convFrom} AND c.currency IS NOT NULL
@@ -934,7 +1052,9 @@ export function mountDetailReports(r: Router): void {
         const m = moneyByDay.get(cohortMs)?.get(n);
         if (elapsed && m) cellMoney.push(m);
       }
-      return { date: new Date(cohortMs).toISOString(), topLevel: f.topLevelMetric === 'unique_clicks' ? r.unique_clicks : r.clicks, days, currencies: [...currencies].sort(), moneyByCurrency: mergeMoneyByCurrency(cellMoney) };
+      // The cohort's day as local wall time with its offset in a non-UTC zone ('2026-10-13T00:00:00+05:30').
+      const date = zone === 'UTC' ? new Date(cohortMs).toISOString() : formatInZone(new Date(cohortMs), zone);
+      return { date, topLevel: f.topLevelMetric === 'unique_clicks' ? r.unique_clicks : r.clicks, days, currencies: [...currencies].sort(), moneyByCurrency: mergeMoneyByCurrency(cellMoney) };
     });
 
     sendOk(res, {
@@ -949,20 +1069,21 @@ export function mountDetailReports(r: Router): void {
   // (INNER JOIN on click_id) — an offline/manual conversion has no click to measure a delta from,
   // so it's honestly excluded rather than bucketed as instant.
   const mttiSchema = z.object({
-    from: fromDate.optional(),
-    to: toDate.optional(),
+    ...rangeKeys,
     groupBy: z.enum(['offer', 'publisher']).default('offer'),
     offerId: z.string().uuid().optional(),
     // Conversion status measured; absent = approved (the original behaviour), `all` = every status.
     // No source filter: a manual/offline conversion with a resolvable click is measured like any other.
     status: z.enum(['approved', 'pending', 'rejected', 'all']).optional(),
     ...groupPageKeys,
-  }).strict();
+  }).strict().transform(withZonedRange);
   r.get('/click-to-conversion-time', validateQuery(mttiSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof mttiSchema>;
     const where = ['c.network_id = $1'];
     const params: unknown[] = [nid];
+    // Paid clicks (CPC billing rows) are booked the moment their click is — not conversions, no conversion time.
+    where.push(`NOT ${billingRowSql('c')}`);
     const status = f.status ?? 'approved';
     if (status !== 'all') { params.push(status); where.push(`c.status = $${params.length}`); }
     if (f.from) { params.push(f.from); where.push(`c.created_at >= $${params.length}`); }
@@ -1025,14 +1146,14 @@ export function mountDetailReports(r: Router): void {
   const funnelSchema = z.object({
     offerId: z.string().uuid(),
     goalIds: z.string().min(1).refine((v) => v.split(',').map((s) => s.trim()).filter(Boolean).every((s) => z.string().uuid().safeParse(s).success), { message: 'must be comma-separated event UUIDs' }),
-    from: fromDate, to: toDate,
+    from: queryDate, to: queryDate, tz: tzParam.optional(),
     childDim: z.enum(funnelChildDims).optional(),
     publisherId: z.string().uuid().optional(),
     country: z.string().max(3).optional(),
     device: z.string().max(40).optional(),
     sub1: z.string().max(200).optional(), sub2: z.string().max(200).optional(), sub3: z.string().max(200).optional(),
     sub4: z.string().max(200).optional(), sub5: z.string().max(200).optional(),
-  });
+  }).transform(withZonedRange);
   r.get('/funnel', validateQuery(funnelSchema), asyncHandler(async (req, res) => {
     const nid = req.scope!.networkId;
     const f = res.locals.query as z.infer<typeof funnelSchema>;
@@ -1075,21 +1196,22 @@ export function mountDetailReports(r: Router): void {
   // ── Cap report — offers with caps and their current usage (counted like enforcement — see /pacing;
   // a zero/negative cap is unlimited there, so it reads as NULL and an offer with no positive cap is left out) ──
   r.get('/caps', asyncHandler(async (req, res) => {
+    const capTz = await networkCapTimeZone(req.scope!.networkId);
     const { rows } = await query(
-      `SELECT o.id, o.name, o.status, o.currency,
+      `SELECT o.id, o.name, o.status, o.currency, ${OFFER_TZ} AS cap_timezone,
               ${offerCap('daily_conversion_cap')} AS daily_conversion_cap,
               ${offerCap('total_conversion_cap')} AS total_conversion_cap,
               ${offerCap('daily_click_cap')} AS daily_click_cap,
-              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND c.${CAP_COUNTED}
-                 AND c.created_at >= ${UTC_TODAY})::int AS conversions_today,
-              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND c.${CAP_COUNTED})::int AS conversions_total,
+              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND ${CAP_COUNTED}
+                 AND c.created_at >= date_trunc('day', now(), ${OFFER_TZ}))::int AS conversions_today,
+              (SELECT COUNT(*) FROM conversions c WHERE c.network_id = o.network_id AND c.offer_id = o.id AND ${CAP_COUNTED})::int AS conversions_total,
               (SELECT COUNT(*) FROM clicks cl WHERE cl.network_id = o.network_id AND cl.offer_id = o.id
-                 AND cl.created_at >= date_trunc('day', now(), 'UTC'))::int AS clicks_today
+                 AND cl.created_at >= date_trunc('day', now(), ${OFFER_TZ}) AND NOT ${REJECTED_CLICK})::int AS clicks_today
          FROM offers o
         WHERE o.network_id = $1
           AND (o.daily_conversion_cap > 0 OR o.total_conversion_cap > 0 OR o.daily_click_cap > 0)
         ORDER BY o.name`,
-      [req.scope!.networkId],
+      [req.scope!.networkId, capTz],
     );
     sendOk(res, rows);
   }));

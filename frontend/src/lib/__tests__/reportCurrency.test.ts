@@ -1,5 +1,5 @@
 // Mixed-currency handling of the report pages (lib/reportCurrency.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import {
   resolveCurrency, currenciesOf, combineCurrencies, withRowCurrency, comparableTo, isMoneyMetricKey,

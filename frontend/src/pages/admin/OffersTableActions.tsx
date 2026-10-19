@@ -120,11 +120,15 @@ function AddFromTemplateModal({ onClose }: { onClose: () => void }) {
  * reference's own layout. */
 function ShareDetailsSubmenu({ offerIds, onDone }: { offerIds: string[]; onDone: (message: string) => void }) {
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
-  const { run, busy } = useMutation((publisherId: string) => api.post<{ shared: boolean; count: number; publisherName: string }>('/api/offers/share-details', { offerIds, publisherId }));
+  const { runOrThrow, busy } = useMutation((publisherId: string) => api.post<{ shared: boolean; count: number; publisherName: string }>('/api/offers/share-details', { offerIds, publisherId }));
 
   const share = async (publisherId: string) => {
-    const res = await run(publisherId);
-    if (res) onDone(`Recorded: shared ${res.count} offer${res.count === 1 ? '' : 's'} with ${res.publisherName}.`);
+    try {
+      const res = await runOrThrow(publisherId);
+      onDone(`Recorded: shared ${res.count} offer${res.count === 1 ? '' : 's'} with ${res.publisherName}.`);
+    } catch (e) {
+      onDone(`Could not record the share: ${e instanceof Error ? e.message : 'please try again.'}`);
+    }
   };
 
   return (

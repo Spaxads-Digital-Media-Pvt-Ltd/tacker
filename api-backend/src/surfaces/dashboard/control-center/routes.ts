@@ -2,12 +2,14 @@
  * Control Center — unified API for all 8 tabs (Accounts extras, Platform config, Partners,
  * Advertisers, Security lists, Usage, Documents, Segmentations).
  */
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound, badRequest } from '../../../lib/http/errors.js';
+import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
+import { forgetStaffState } from '../../../lib/auth/staff-state.js';
+import { syncLogin } from '../../../lib/auth/login-sync.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { getTableScope } from '../../../lib/db/table-registry.js';
@@ -15,12 +17,14 @@ import { writeAudit } from '../../../lib/audit.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
-import { getSupabaseAdmin } from '../../../lib/supabase.js';
+import { IMAGE_MAX_BYTES, IMAGE_UPLOAD_CONTENT_TYPES, imageTypesFor, imageTypesText, uploadContentType, uploadImage } from '../../../lib/storage/images.js';
+import { validIpEntry, invalidateNetworkIpBlacklist, invalidateNetworkApiWhitelist } from '../../../lib/net/ip-lists.js';
 import {
   getControlCenterConfig,
   putControlCenterConfig,
   getFullControlCenterConfig,
   loadNetworkSettings,
+  mergeBranding,
   type ConfigSection,
 } from './config.js';
 
@@ -29,6 +33,7 @@ const CONFIG_SECTIONS = ['platform', 'partners', 'advertisers', 'security'] as c
 export interface UserRow {
   id: string; ref: string; name: string | null; email: string; role: string; status: string;
   metadata: Record<string, unknown> | string; created_at: string; updated_at: string;
+  auth_user_id?: string | null;
 }
 
 function parseMeta(v: Record<string, unknown> | string): Record<string, unknown> {
@@ -45,6 +50,8 @@ const userDto = (r: UserRow) => {
     email: r.email,
     role: r.role,
     status: r.status,
+    /** A login exists for them (Resend invite / password reset need one). */
+    hasLogin: Boolean(r.auth_user_id),
     businessUnit: (m['businessUnit'] as string) ?? null,
     partnerManager: Boolean(m['partnerManager']),
     advertiserManager: Boolean(m['advertiserManager']),
@@ -104,62 +111,71 @@ export function controlCenterRoutes(): Router {
     asyncHandler(async (req, res) => {
       const section = req.params.section as ConfigSection;
       if (!CONFIG_SECTIONS.includes(section as typeof CONFIG_SECTIONS[number])) throw badRequest('Invalid section');
-      const merged = await putControlCenterConfig(req.scope!.networkId, section, req.body as Record<string, unknown>);
+      let body = req.body as Record<string, unknown>;
+      // Branding images are stored files' URLs, never the files (O12) — checked and merged per field.
+      if (section === 'platform' && body['branding'] !== undefined) {
+        const stored = getControlCenterConfig(await loadNetworkSettings(req.scope!.networkId), 'platform')['branding'];
+        body = { ...body, branding: mergeBranding(stored, body['branding']) };
+      }
+      const merged = await putControlCenterConfig(req.scope!.networkId, section, body);
       await writeAudit(req, { action: 'control_center.config.update', entityType: 'network', entityId: req.scope!.networkId, after: { section } });
       sendOk(res, merged);
     }),
   );
 
-  // --- Accounts: extended user CRUD ---
+  // Branding image upload (O12): the raw file (≤ 2 MB; logo PNG / JPEG / WebP / GIF, favicon also ICO —
+  // no SVG) → object storage → its URL, which Save then sends as branding.logoUrl / faviconUrl.
   r.post(
-    '/users',
-    requireRole('admin'),
-    validateBody(createUserSchema),
+    '/branding/:kind',
+    requireRole('admin', 'manager'),
+    express.raw({ type: IMAGE_UPLOAD_CONTENT_TYPES, limit: IMAGE_MAX_BYTES }),
     asyncHandler(async (req, res) => {
-      const db = dbForRequest(req);
-      const b = req.body as z.infer<typeof createUserSchema>;
-      const networkId = req.scope!.networkId;
-      const metadata = {
-        businessUnit: b.businessUnit ?? null,
-        partnerManager: b.partnerManager ?? false,
-        advertiserManager: b.advertiserManager ?? false,
-        primaryPhone: b.primaryPhone ?? null,
-        title: b.title ?? null,
-        superUser: b.superUser ?? false,
-      };
-      const tempPassword = `Tmp${Math.random().toString(36).slice(2)}!9Aa`;
-      const sb = getSupabaseAdmin();
-      const { data: authData, error } = await sb.auth.admin.createUser({
-        email: b.email,
-        password: tempPassword,
-        email_confirm: true,
-        app_metadata: { kind: 'admin', network_id: networkId, role: b.role },
-        user_metadata: { name: b.name },
-      });
-      if (error || !authData.user) throw badRequest(error?.message ?? 'Failed to create auth user');
-      const row = await db.insert<UserRow>('users', {
-        auth_user_id: authData.user.id,
-        email: b.email,
-        name: b.name,
-        role: b.role,
-        status: 'invited',
-        metadata: JSON.stringify(metadata),
-      });
-      await writeAudit(req, { action: 'user.create', entityType: 'users', entityId: row.id, after: row });
-      sendOk(res, userDto(row), undefined, 201);
+      const kind = req.params.kind;
+      if (kind !== 'logo' && kind !== 'favicon') throw notFound('Unknown branding image (logo or favicon)');
+      const type = uploadContentType(req.headers['content-type']);
+      if (!imageTypesFor(kind)[type] || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+        throw badRequest(`Upload a ${imageTypesText(kind)} image up to 2 MB`);
+      }
+      let url: string;
+      try {
+        url = await uploadImage(req.scope!.networkId, kind, req.body, type);
+      } catch (e) {
+        throw badRequest(e instanceof Error ? e.message : 'Upload failed');
+      }
+      await writeAudit(req, { action: 'control_center.branding.upload', entityType: 'network', entityId: req.scope!.networkId, after: { kind, url, contentType: type, bytes: req.body.length } });
+      sendOk(res, { url }, undefined, 201);
     }),
   );
 
+  // --- Accounts: user edits. Creating a team user is POST /api/users (users/routes.ts) — this file
+  // had a second, identical create (F-25·F-28: collapsed). Role and status take effect on the
+  // person's next request (dashboardAuth reads the users row — lib/auth/staff-state.ts); the login
+  // is updated too (role claim; disabled = banned from signing in / refreshing). Nobody can disable
+  // or demote themselves, and the network always keeps an active admin.
   r.patch(
     '/users/:id',
     requireRole('admin'),
     validateBody(updateUserSchema),
     asyncHandler(async (req, res) => {
       const db = dbForRequest(req);
+      const networkId = req.scope!.networkId;
       const id = req.params.id ?? '';
       const before = await db.selectOne<UserRow>('users', { id });
       if (!before) throw notFound('User not found');
       const b = req.body as z.infer<typeof updateUserSchema>;
+      const losesAdmin = before.role === 'admin' && before.status !== 'disabled'
+        && (b.status === 'disabled' || (b.role !== undefined && b.role !== 'admin'));
+      const callerId = req.identity?.surface === 'dashboard' ? req.identity.userId : null;
+      if (losesAdmin || b.status === 'disabled') {
+        if (before.auth_user_id && before.auth_user_id === callerId) {
+          throw badRequest("You can't disable your own account or remove your own admin role — ask another admin.");
+        }
+      }
+      if (losesAdmin) {
+        const others = await query<{ n: string }>(
+          `SELECT COUNT(*)::text AS n FROM users WHERE network_id = $1 AND id <> $2 AND role = 'admin' AND status <> 'disabled'`, [networkId, id]);
+        if (Number(others.rows[0]?.n ?? 0) === 0) throw conflict("This is the network's only active admin — make someone else an admin first.");
+      }
       const patch: Record<string, unknown> = {};
       if (b.name !== undefined) patch['name'] = b.name;
       if (b.role !== undefined) patch['role'] = b.role;
@@ -170,8 +186,14 @@ export function controlCenterRoutes(): Router {
       }
       patch['metadata'] = JSON.stringify(meta);
       const [updated] = await db.update<UserRow>('users', patch, { id });
+      forgetStaffState(networkId, before.auth_user_id);
+      // The login follows (role claim; a ban while disabled) — lib/auth/login-sync.ts.
+      const loginSync = await syncLogin(before.auth_user_id, {
+        ...(b.role !== undefined && b.role !== before.role ? { role: b.role } : {}),
+        ...(b.status !== undefined && b.status !== before.status ? { blocked: b.status === 'disabled' } : {}),
+      });
       await writeAudit(req, { action: 'user.update', entityType: 'users', entityId: id, before, after: updated });
-      sendOk(res, userDto(updated ?? before));
+      sendOk(res, { ...userDto(updated ?? before), loginSync });
     }),
   );
 
@@ -256,16 +278,22 @@ export function controlCenterRoutes(): Router {
     sendOk(res, rows.map((row) => ({ id: row.id, ipAddress: row.ip_address, createdAt: row.created_at })));
   }));
 
-  r.post('/api-whitelist', requireRole('admin'), validateBody(z.object({ ipAddress: z.string().min(1).max(100) })), asyncHandler(async (req, res) => {
+  // Enforced on the Public API for this network's keys (F-16): writes bust the cached list.
+  r.post('/api-whitelist', requireRole('admin'), validateBody(z.object({
+    ipAddress: z.string().trim().min(1).max(100).refine((v) => validIpEntry(v), 'Must be an IP address or CIDR (e.g. 203.0.113.7 or 203.0.113.0/24)'),
+  })), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as { ipAddress: string };
     const row = await db.insert('network_api_whitelist', { ip_address: b.ipAddress });
+    await invalidateNetworkApiWhitelist(db.scope.networkId);
     sendOk(res, { id: row.id, ipAddress: b.ipAddress, createdAt: row.created_at }, undefined, 201);
   }));
 
   r.delete('/api-whitelist/:id', requireRole('admin'), asyncHandler(async (req, res) => {
-    const n = await dbForRequest(req).delete('network_api_whitelist', { id: req.params.id });
+    const db = dbForRequest(req);
+    const n = await db.delete('network_api_whitelist', { id: req.params.id });
     if (n === 0) throw notFound('Entry not found');
+    await invalidateNetworkApiWhitelist(db.scope.networkId);
     sendOk(res, { deleted: true });
   }));
 
@@ -276,8 +304,11 @@ export function controlCenterRoutes(): Router {
     sendOk(res, rows.map((row) => ({ id: row.id, from: row.ip_from, to: row.ip_to || row.ip_from })));
   }));
 
+  // Enforced at /click (F-16): every entry must be an IP, CIDR or same-family range; the PUT busts
+  // the tracking surface's cached list.
   r.put('/ip-blacklist', requireRole('admin', 'manager'), validateBody(z.object({
-    ranges: z.array(z.object({ from: z.string().min(1), to: z.string().optional() })),
+    ranges: z.array(z.object({ from: z.string().trim().min(1), to: z.string().trim().optional() })
+      .refine((r) => validIpEntry(r.from, r.to), 'Each entry must be an IP address, a CIDR, or a from–to range of the same IP version')),
   })), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const b = req.body as { ranges: { from: string; to?: string }[] };
@@ -290,6 +321,7 @@ export function controlCenterRoutes(): Router {
       });
       out.push({ id: row.id, from: row.ip_from, to: row.ip_to });
     }
+    await invalidateNetworkIpBlacklist(db.scope.networkId);
     sendOk(res, out);
   }));
 

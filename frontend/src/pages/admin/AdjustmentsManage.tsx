@@ -43,7 +43,7 @@ function RowMenu({ adj, onDeleted }: { adj: ReportingAdjustment; onDeleted: () =
     void confirm({
       title: 'Delete adjustment?', message: 'Are you sure you want to delete this reporting adjustment?',
       confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+      onConfirm: async () => { await del.runOrThrow(undefined); onDeleted(); },
     });
   };
 

@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { isValidPostal, normalizePostal } from './postal.js';
 import { isValidExactIp, isValidIpRange } from './ip-match.js';
+import { redirectUrlWithMax } from '../url-schemas.js';
 
 export const TARGETING_KEYS = [
   'platform', 'browser', 'deviceBrand', 'osVersion', 'language',
@@ -65,8 +66,20 @@ export interface AttributionSettings {
   ipqs: { enabled: boolean };
   throttle: { enabled: boolean; ratePct: number };
   clickToConversion: { enabled: boolean; minSeconds: number; maxSeconds: number | null };
+  /** Email Ownership (Everflow's term): the partner behind a conversion carrying `email=` owns that customer
+   * on this offer, and a later postback with the email and no click id is credited to them
+   * (tracking/conversions/email-ownership.ts). */
   emailOwnership: boolean;
+  /** 'first' — the first partner keeps the customer; 'last' — ownership moves to the latest converting partner. */
+  emailOwnershipMethod: 'first' | 'last';
+  /** Ownership ends this many days after it began ('static') or after the customer's latest conversion
+   * ('dynamic'); null = never. */
+  emailOwnershipWindowDays: number | null;
+  emailOwnershipWindowMode: 'static' | 'dynamic';
+  /** View-through: a conversion with no click is credited to the partner whose impression the visitor saw
+   * within `viewThroughWindowHours` (tracking/conversions/view-through.ts). */
   viewThrough: boolean;
+  viewThroughWindowHours: number;
   serverSideClick: boolean;
 }
 
@@ -76,7 +89,11 @@ export const DEFAULT_ATTRIBUTION: AttributionSettings = {
   throttle: { enabled: false, ratePct: 0 },
   clickToConversion: { enabled: false, minSeconds: 5, maxSeconds: 21600 },
   emailOwnership: false,
+  emailOwnershipMethod: 'first',
+  emailOwnershipWindowDays: null,
+  emailOwnershipWindowMode: 'static',
   viewThrough: false,
+  viewThroughWindowHours: 24,
   serverSideClick: false,
 };
 
@@ -92,14 +109,41 @@ export const attributionSettingsSchema = z.object({
     message: 'Max click-to-conversion time must be greater than the minimum', path: ['maxSeconds'],
   }),
   emailOwnership: z.boolean(),
+  // Optional for clients that don't send them yet (the stored value, else the default, applies).
+  emailOwnershipMethod: z.enum(['first', 'last']).optional(),
+  emailOwnershipWindowDays: z.number().int().min(1).max(3650).nullable().optional(),
+  emailOwnershipWindowMode: z.enum(['static', 'dynamic']).optional(),
   viewThrough: z.boolean(),
+  viewThroughWindowHours: z.number().int().min(1).max(720).optional(),
   serverSideClick: z.boolean(),
 });
+
+/**
+ * How many conversions one click may produce for an event (Everflow's per-event "Allow duplicate
+ * conversion", Trackier's "Track multiple conversions"):
+ * - `one_per_click` — one per click per event, whatever the transaction id.
+ * - `unique_txn` (default) — many, each with its own transaction id (upsells, renewals, rev-share
+ *   sales); without a transaction id, one per click per event.
+ * - `every_postback` — every postback counts (recurring billing that sends no transaction id); a
+ *   transaction id seen before for the event is still a duplicate, and an identical repeat within
+ *   60 seconds is taken as the advertiser's retry.
+ * Set on the offer; an offer goal (event) can override it.
+ */
+export const DUPLICATE_MODES = ['one_per_click', 'unique_txn', 'every_postback'] as const;
+export type DuplicateMode = (typeof DUPLICATE_MODES)[number];
+
+/** Conversions one click may send within this window before the next ones are held for review. */
+export const CLICK_CONVERSION_WINDOW_S = 600;
 
 export interface RevenueSettings {
   baseEventName: string | null;
   manualApproval: boolean;
+  /** Kept for API compatibility: false ⇔ duplicateMode 'one_per_click' (readRevenue keeps them in step). */
   allowDuplicates: boolean;
+  duplicateMode: DuplicateMode;
+  /** More conversions than this from one click within CLICK_CONVERSION_WINDOW_S are held as pending
+   * ("Unusual volume") for review — never dropped. null / 0 = no limit. */
+  clickConversionLimit: number | null;
   revenueAction: 'impression' | 'click' | 'conversion';
   revenueType: 'fixed' | 'percentage' | 'mixed';
   revenuePct: number | null;
@@ -110,22 +154,37 @@ export const DEFAULT_REVENUE: RevenueSettings = {
   baseEventName: null,
   manualApproval: false,
   allowDuplicates: true,
+  duplicateMode: 'unique_txn',
+  clickConversionLimit: 10,
   revenueAction: 'conversion',
   revenueType: 'fixed',
   revenuePct: null,
   pricePerProduct: false,
 };
 
+/** The offer's duplicate rule: `duplicateMode`, else (settings saved before it existed, or by an older
+ * client) derived from `allowDuplicates`. */
+export function duplicateModeOf(r: Partial<Pick<RevenueSettings, 'duplicateMode' | 'allowDuplicates'>> | null | undefined): DuplicateMode {
+  if (r?.duplicateMode && (DUPLICATE_MODES as readonly string[]).includes(r.duplicateMode)) return r.duplicateMode;
+  return r?.allowDuplicates === false ? 'one_per_click' : 'unique_txn';
+}
+
 export const revenueSettingsSchema = z.object({
   baseEventName: z.string().trim().max(100).nullable(),
   manualApproval: z.boolean(),
   allowDuplicates: z.boolean(),
+  // Optional for clients that only know allowDuplicates; when sent, it decides (and allowDuplicates follows).
+  duplicateMode: z.enum(DUPLICATE_MODES).optional(),
+  clickConversionLimit: z.number().int().min(0).max(1_000_000).nullable().optional(),
   revenueAction: z.enum(['impression', 'click', 'conversion']),
   revenueType: z.enum(['fixed', 'percentage', 'mixed']),
   revenuePct: z.number().min(0).max(100).nullable(),
   pricePerProduct: z.boolean(),
 }).refine((r) => r.revenueType === 'fixed' || r.revenuePct != null, {
   message: 'Revenue percentage is required for Percentage / Mixed revenue', path: ['revenuePct'],
+}).transform((r) => {
+  const duplicateMode = duplicateModeOf(r);
+  return { ...r, duplicateMode, allowDuplicates: duplicateMode !== 'one_per_click' };
 });
 
 export interface EmailSettings {
@@ -161,6 +220,9 @@ export const offerSettingsFields = {
   productId: z.string().trim().max(255).nullable().optional(),
   thumbnailUrl: z.string().trim().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL').nullable().optional(),
   targeting: targetingSchema.nullable().optional(),
+  /** The advertiser's (or their MMP's) impression URL: /impression sends the visitor's browser there with
+   * {imp_id} and the other macros filled, instead of answering with a pixel. */
+  impressionUrl: redirectUrlWithMax(2000).nullable().optional(),
   attributionSettings: attributionSettingsSchema.nullable().optional(),
   revenueSettings: revenueSettingsSchema.nullable().optional(),
   emailSettings: emailSettingsSchema.nullable().optional(),
@@ -179,6 +241,7 @@ const METADATA_FIELDS: Record<string, string> = {
   productId: 'product_id',
   thumbnailUrl: 'thumbnail_url',
   targeting: 'targeting',
+  impressionUrl: 'impression_url',
   attributionSettings: 'attribution_settings',
   revenueSettings: 'revenue_settings',
   emailSettings: 'email_settings',
@@ -192,7 +255,12 @@ const METADATA_FIELDS: Record<string, string> = {
 export function mergeOfferMetadata(before: Record<string, unknown> | null | undefined, body: Record<string, unknown>): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {};
   for (const [bodyKey, metaKey] of Object.entries(METADATA_FIELDS)) {
-    if (body[bodyKey] !== undefined) patch[metaKey] = body[bodyKey];
+    if (body[bodyKey] === undefined) continue;
+    // Attribution settings merge over the stored ones, so a client that doesn't send the newer keys (email
+    // ownership method / window, view-through window) keeps what was saved rather than resetting them.
+    const stored = metaKey === 'attribution_settings' ? obj(before?.[metaKey]) : null;
+    const value = obj(body[bodyKey]);
+    patch[metaKey] = stored && value ? { ...stored, ...value } : body[bodyKey];
   }
   return Object.keys(patch).length ? { ...(before ?? {}), ...patch } : null;
 }
@@ -227,8 +295,15 @@ function deepDefaults<T>(defaults: T, stored: unknown): T {
 
 export const readAttribution = (meta: Record<string, unknown> | null | undefined): AttributionSettings =>
   deepDefaults(DEFAULT_ATTRIBUTION, meta?.['attribution_settings']);
-export const readRevenue = (meta: Record<string, unknown> | null | undefined): RevenueSettings =>
-  deepDefaults(DEFAULT_REVENUE, meta?.['revenue_settings']);
+export const readRevenue = (meta: Record<string, unknown> | null | undefined): RevenueSettings => {
+  const stored = obj(meta?.['revenue_settings']);
+  const r = deepDefaults(DEFAULT_REVENUE, stored);
+  // The duplicate rule comes from what was stored (not the defaults), so an offer saved with only
+  // allowDuplicates: false keeps one conversion per click.
+  r.duplicateMode = duplicateModeOf(stored as Partial<RevenueSettings> | null);
+  r.allowDuplicates = r.duplicateMode !== 'one_per_click';
+  return r;
+};
 export const readEmail = (meta: Record<string, unknown> | null | undefined): EmailSettings =>
   deepDefaults(DEFAULT_EMAIL, meta?.['email_settings']);
 

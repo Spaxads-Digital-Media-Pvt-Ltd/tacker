@@ -11,36 +11,50 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { env } from '../../config/env.js';
 import { buildHealthReport, buildLivenessReport, buildReadinessReport, errorEnvelope } from '../../lib/http/index.js';
 import { resolveHostToNetwork } from '../../middleware/host-resolver.js';
-import { lookupGeo, geoAvailable, carrierAvailable } from '../../lib/geo/geoip.js';
+import { geoAvailable, carrierAvailable, geoStatus } from '../../lib/geo/geoip.js';
 import { evaluateTargeting, primaryLanguage } from './targeting-eval.js';
 import { resolveEntityId } from './ref-resolver.js';
+import { getPartnerStatus } from './partner-status.js';
+import { getNetworkIpBlacklist } from '../../lib/net/ip-lists.js';
+import { getPlatformBlocklist, recordBlocklistHit } from '../../lib/platform/blocklist.js';
+import { getFraudConfigCached } from '../../lib/fraud/rules.js';
+import { tierPayout } from '../../lib/partner-tiers.js';
 import { parseUA } from '../../lib/ua.js';
 import { logger } from '../../lib/logger.js';
-import { buildTrustedProxyCheck } from './trusted-proxy.js';
-import { SOURCE_PARAMS, firstNonBlank, isSpeculativeLoad } from './click-params.js';
+import { buildTrustedProxyCheck, configuredProxies } from '../../lib/net/trusted-proxy.js';
+import { SOURCE_PARAMS, firstNonBlank, firstStr, asIp, isSpeculativeLoad } from './click-params.js';
 import { getOfferConfig } from './offer-cache.js';
 import { evaluateTrafficControls } from './traffic-controls-eval.js';
 import { isTrafficBlocked } from './traffic-blocking-eval.js';
-import { evaluateGeoRules, resolveForcedGeo } from './geo-rules.js';
-import { checkTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT } from '../../lib/tracking-rate-limit.js';
-import { isClickCapped } from './caps.js';
+import { evaluateGeoRules } from './geo-rules.js';
+import { visitorGeo } from './visitor-geo.js';
+import { COUPON_PARAMS, couponClick } from './conversions/coupon.js';
+import { IMPRESSION_ID_PARAMS, parseCookies, viewThroughClick } from './conversions/view-through.js';
+import { emailHashOf, emailOwnerClick } from './conversions/email-ownership.js';
+import { parseProductLines } from '../../lib/offer-settings/products.js';
+import type { StoredClick } from './click-store.js';
+import { deepLinkDestination, onOfferSite, sdkOrigin } from './conversions/origin.js';
+import { PIXEL_GIF, registerImpressionRoutes } from './impression.js';
+import { registerSdkRoutes } from './sdk.js';
+import {
+ checkTrackingRateLimit, peekTrackingRateLimit, chargeTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT,
+} from '../../lib/tracking-rate-limit.js';
+import { isClickCapped, isCustomClickCapped, clickCapReached } from './caps.js';
+import { getSmartLinkConfig } from './smart-link-cache.js';
+import { applicableSettings } from '../../lib/offer-settings/custom-settings.js';
+import { actionPricing } from '../../lib/offer-settings/billing.js';
+import { isAddressBlocked } from '../../lib/integrations/tracker24.js';
+import type { ClickRejectionReason } from '../../lib/click-rejections.js';
 import { markUnique } from './dedup.js';
 import { fraudPreSignals } from './fraud-presignals.js';
 import { buildMacros, substituteMacros } from './macros.js';
 import { enqueueClick, type ClickJob } from './click-job.js';
 import { storeClickForAttribution } from './click-store.js';
-import { recordConversion, type RecordConversionResult } from './conversions/record.js';
+import { recordConversion, secureCodeFailure, SALE_AMOUNT_PARAMS, type RecordConversionResult } from './conversions/record.js';
+import { logInbound, type InboundPostback } from './conversions/inbound-log.js';
 import { clicksTotal, redirectLatency, metricsText, metricsContentType } from '../../lib/metrics.js';
 import { captureError } from '../../lib/observability/sentry.js';
-import { query } from '../../lib/db/pool.js';
 import { isRedirectUrlSafe, getRedirectUrlRejectReason } from '../../lib/url-security.js';
-
-// 1x1 transparent GIF for the pixel endpoint.
-const PIXEL_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
-
-function firstStr(v: unknown): string | null {
- return typeof v === 'string' ? v : Array.isArray(v) && typeof v[0] === 'string' ? v[0] : null;
-}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Return the value only if it's a valid UUID (else null) — guards uuid columns downstream. */
@@ -80,25 +94,22 @@ function pickByPriority(items: { offer_id: string; position: number | null }[]):
 
 // A smart link with no eligible offer diverts to its Catch-All Offer (via /click, so the normal
 // caps/macros/attribution pipeline still applies) — or a neutral 204 if none is configured.
-function divertToCatchAll(reply: FastifyReply, catchAllOfferId: string | null): FastifyReply {
- if (catchAllOfferId) return reply.code(302).header('location', `/click?offer_id=${catchAllOfferId}`).header('cache-control', 'no-store').send();
- return reply.code(204).send();
-}
-
 
 // Defense-in-depth (M-1): the tracking surface has no per-request auth, so the Host and
 // X-Forwarded-For headers cannot be trusted unless the immediate socket peer is a known proxy.
 // Cloudflare + nginx must be the only direct front-ends. A direct-connect attacker who bypasses
 // them hits this check regardless of host-header spoofing. Skipped in dev/test for local work.
-// Loopback, Cloudflare's published ranges (IPv4 + IPv6) and TRACKING_TRUSTED_PROXIES — see trusted-proxy.ts.
-const isTrustedProxy = buildTrustedProxyCheck(env.TRACKING_TRUSTED_PROXIES, (entry) =>
- logger.warn({ entry }, 'TRACKING_TRUSTED_PROXIES: ignoring malformed entry (not an IP or CIDR)'));
+// Loopback, Cloudflare's published ranges (IPv4 + IPv6) and TRUSTED_PROXIES — see lib/net/trusted-proxy.ts.
+const isTrustedProxy = buildTrustedProxyCheck(configuredProxies(env), (entry) =>
+ logger.warn({ entry }, 'TRUSTED_PROXIES: ignoring malformed entry (not an IP, CIDR or "private")'));
 
-export function buildTrackingApp(): FastifyInstance {
+/** `rateLimits`: the per-IP / per-click limits (default: on, except in development and tests). */
+export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyInstance {
+ const rateLimits = opts.rateLimits ?? (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test');
  const app = Fastify({
  logger: { level: env.LOG_LEVEL },
- // Cloudflare → Nginx → us. X-Forwarded-For is walked from the RIGHT and only hops from a trusted
- // proxy (isTrustedProxy: loopback, Cloudflare, TRACKING_TRUSTED_PROXIES) are skipped, so req.ip is
+ // Cloudflare → load balancer → us. X-Forwarded-For is walked from the RIGHT and only hops from a trusted
+ // proxy (isTrustedProxy: loopback, Cloudflare, TRUSTED_PROXIES) are skipped, so req.ip is
  // the first untrusted address — the real client. `true` trusted every hop and took the LEFTMOST
  // entry, which the client itself can write (a spoofed "X-Forwarded-For: 1.2.3.4" became the click IP).
  // A direct connection (no trusted proxy in front) keeps its socket address — e.g. 127.0.0.1 locally.
@@ -128,7 +139,8 @@ export function buildTrackingApp(): FastifyInstance {
 
  app.get('/health', async (_req, reply) => {
  const report = await buildHealthReport('tracking');
- return reply.code(report.status === 'unready' ? 503 : 200).send(report);
+ // Which GeoIP databases are loaded — without a city database, country / region rules are not enforced.
+ return reply.code(report.status === 'unready' ? 503 : 200).send({ ...report, geoip: { ...geoStatus(), enforced: geoAvailable() } });
  });
 
  // Health/liveness/readiness probes (from origin/main — combined with security branch).
@@ -159,6 +171,18 @@ export function buildTrackingApp(): FastifyInstance {
  done();
  });
 
+ // Certificate "ask" hook for the edge (F-15): an on-demand-TLS proxy (Caddy `on_demand_tls ask`,
+ // and similar) calls this before issuing a certificate for an incoming hostname. 200 only for a host
+ // that is active + verified — exactly the hosts /click serves — so nobody can make the edge mint
+ // certificates for arbitrary names. See lib/tracking-domains/verify.ts.
+ app.get('/_tls/ask', async (req, reply) => {
+ const domain = firstStr((req.query as Record<string, unknown>)['domain'])?.trim().toLowerCase() ?? '';
+ if (!domain || domain.length > 253) return reply.code(400).send(errorEnvelope('bad_request', 'domain is required', 400));
+ return (await resolveHostToNetwork(domain))
+ ? reply.code(200).send({ ok: true, data: { domain } })
+ : reply.code(404).send(errorEnvelope('not_found', 'unknown_or_unverified_host', 404));
+ });
+
  app.get('/click', async (req, reply) => {
  const started = process.hrtime.bigint();
 
@@ -171,7 +195,7 @@ export function buildTrackingApp(): FastifyInstance {
  }
 
  // 0. Rate limit (AP-1): fail fast before any infra work. Skipped in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'click', CLICK_LIMIT);
  if (rl.limited) {
@@ -193,75 +217,163 @@ export function buildTrackingApp(): FastifyInstance {
  if (!offerId) return divert(reply, null);
  // publisher_id is a UUID column downstream (clicks/conversions). Ignore a malformed value rather
  // than 500 the conversion later — a bad pub_id shouldn't break attribution or the redirect.
- const publisherId = await resolveEntityId('publisher', tenant.networkId, firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
+ const requestedPublisherId = await resolveEntityId('publisher', tenant.networkId, firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']));
  const smartLinkId = asUuid(firstStr(q['sl'])); // set when a smart link routed this click
  const subs = [1, 2, 3, 4, 5].map((i) => firstStr(q[`sub${i}`]));
  // Blank / whitespace-only → null, and a blank alias falls through (source_id → source → src).
  const sourceId = firstNonBlank(q, SOURCE_PARAMS);
 
- // 2. Offer config from Redis (load-through). No sync Postgres read on the hot path.
- const offer = await getOfferConfig(tenant.networkId, offerId);
- if (!offer || offer.status !== 'active') {
- return divert(reply, offer?.fallbackUrl ?? null, offer?.id);
- }
+ // 2. Offer config + partner status from Redis (load-through, in parallel). No sync Postgres read
+ // on the hot path — Postgres is only the cold-cache fallback.
+ const [offer, partnerStatus, ipBlacklist, fraudCfg, platformBlocklist] = await Promise.all([
+ getOfferConfig(tenant.networkId, offerId),
+ requestedPublisherId ? getPartnerStatus(tenant.networkId, requestedPublisherId) : null,
+ getNetworkIpBlacklist(tenant.networkId),
+ getFraudConfigCached(tenant.networkId),
+ getPlatformBlocklist(),
+ ]);
+ if (!offer) return divert(reply, null);
 
- // 2b. Affiliate blocking — a publisher explicitly denied on this offer never gets traffic.
- if (publisherId && offer.deniedPublishers.includes(publisherId)) {
+ // 2a. Who the visitor is (D2). A server-to-server click (format=json on an offer that allows it)
+ // comes from the partner's server, so the connection's IP and user agent describe that server. When
+ // it passes the VISITOR's (`ip` / `user_ip`, `user_agent` / `ua`), those are what geo, the IP lists,
+ // dedup, fraud checks and the stored click use — and a fraud block then applies like to any click;
+ // without the visitor's IP it is scored on the server but never blocked.
+ // Direct linking (Click Tracking Type "Redirect + Direct"): the JavaScript tag on the advertiser's page
+ // (/sdk.js) registers the click with format=json from the VISITOR's browser — so the connection is the
+ // visitor's — and only from the offer's own site (Origin, else Referer). It answers the click id as JSON
+ // (CORS for that origin), and the visitor's referrer is the one the tag reports (the partner's page).
+ const directOrigin = offer.linkingType === 'redirect_direct' && firstStr(q['format']) === 'json'
+ ? sdkOrigin(firstStr(req.headers['origin']) ?? firstStr(req.headers['referer']), offer) : null;
+ const serverSideClick = !directOrigin && Boolean(offer.attribution?.serverSideClick) && firstStr(q['format']) === 'json';
+ const visitorIp = serverSideClick ? asIp(firstStr(q['ip']) ?? firstStr(q['user_ip']) ?? firstStr(q['visitor_ip'])) : null;
+ const visitorUa = serverSideClick ? ((firstStr(q['user_agent']) ?? firstStr(q['ua']))?.trim().slice(0, 512) || null) : null;
+ const ip = visitorIp ?? (req.ip || null);
+ const userAgent = visitorUa ?? (req.headers['user-agent'] as string | undefined) ?? null;
+ const ua = parseUA(userAgent ?? undefined);
+ // Where the visitor is (visitor-geo.ts): the dev `geo=XX` / `geo=XX-RR` override, the GeoIP database, or
+ // Cloudflare's CF-IPCountry — `known` decides whether country rules can be judged (else they fail open).
+ const where = visitorGeo({
+ ip, socketAddress: (req.raw.socket?.remoteAddress ?? null), cfCountry: req.headers['cf-ipcountry'],
+ geoParam: firstStr(q['geo']), testGeoParam: firstStr(q['test_geo']),
+ });
+ const geo = where.geo;
+ const country = where.country;
+ const region = where.region;
+ const referrer = directOrigin
+ ? ((firstStr(q['referrer']) ?? firstStr(q['ref']))?.trim().slice(0, 2000) || null)
+ : firstStr(req.headers['referer']) ?? null;
+
+ // A click that isn't sent to the offer is still recorded — as an INVALID click whose first fraud flag
+ // is the reason (Everflow standard; lib/click-rejections.ts) — so reports show the rejected traffic
+ // and why, on the partner when they're one of this network's (D1). Nobody is credited: no payout,
+ // never stored for attribution, and its id never leaves — the visitor goes to the fallback (the
+ // offer's, else the network's, else a neutral 204), never to the advertiser.
+ const reject = async (reason: ClickRejectionReason, fraud?: { score: number; flags: string[] }) => {
+ await enqueueClick({
+ clickId: randomUUID().replace(/-/g, ''), networkId: tenant.networkId, offerId: offer.id,
+ publisherId: requestedPublisherId && partnerStatus !== null ? requestedPublisherId : null,
+ ts: new Date().toISOString(), ip,
+ country, region, city: geo?.city ?? null, isp: geo?.isp ?? null,
+ device: ua.device, os: ua.os, browser: ua.browser,
+ referrer, userAgent,
+ sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
+ isUnique: false, fraudScore: fraud?.score ?? 0, fraudFlags: [reason, ...(fraud?.flags ?? [])],
+ resolvedPayout: '0.0000', resolvedRevenue: '0.0000', currency: offer.currency, smartLinkId,
+ sourceId, fbclid: firstNonBlank(q, ['fbclid']), gclid: firstNonBlank(q, ['gclid']),
+ });
+ req.log.info({ offerId: offer.id, pubId: requestedPublisherId, reason }, 'click_rejected');
  return divert(reply, offer.fallbackUrl, offer.id);
+ };
+
+ if (offer.status !== 'active') return reject('offer_not_active');
+
+ // 2b. Only an active partner of this network can run traffic (F-08, D1): a pending, inactive or
+ // unknown pub_id is rejected.
+ if (requestedPublisherId && partnerStatus !== 'active') {
+ return reject(partnerStatus === null ? 'unknown_partner' : partnerStatus === 'pending' ? 'partner_pending' : 'partner_inactive');
  }
- // 2c. Private / Request-access offers only run for partners an admin approved (allow + approved).
+ const publisherId = requestedPublisherId;
+
+ // 2c. Affiliate blocking — a publisher explicitly denied on this offer never gets traffic.
+ if (publisherId && offer.deniedPublishers.includes(publisherId)) return reject('partner_blocked');
+ // 2d. Private / Request-access offers only run for partners an admin approved (allow + approved).
  // `visibility` is undefined only on a config cached before this check existed (≤ cache TTL).
  if (offer.visibility && offer.visibility !== 'public'
  && !(publisherId && (offer.approvedPublishers ?? []).includes(publisherId))) {
- return divert(reply, offer.fallbackUrl, offer.id);
+ return reject('partner_not_approved');
  }
 
- // 3. Enrich geo + device in-process.
- const ip = req.ip || null;
- const geo = ip ? lookupGeo(ip) : null;
- const ua = parseUA(req.headers['user-agent']);
+ // 3. The platform blocklist (Super Admin › Trust & safety): an address, user agent or referrer domain the
+ // platform blocked for every network — ahead of the network's own lists. The hit is counted, not awaited.
+ const platformHit = platformBlocklist?.match({ ip, userAgent, referrer });
+ if (platformHit) { recordBlocklistHit(platformHit.id); return reject('platform_blocked'); }
 
- // 4. Geo targeting. A `geo=XX` query param forces the country (dev/testing when no MaxMind db,
- // or to simulate a country) — geo is then treated as known so allow-list rules actually apply.
- const forcedGeo = resolveForcedGeo(env.NODE_ENV, firstStr(q['geo']), firstStr(q['test_geo']));
- const country = forcedGeo ?? geo?.country ?? null;
- const geoKnown = geoAvailable() || forcedGeo != null;
- const geoDecision = evaluateGeoRules(offer.geoRules, country, geoKnown);
- if (!geoDecision.allowed) return divert(reply, offer.fallbackUrl, offer.id);
+ // 3a. Network IP blacklist (Control Center › Security, F-16): a listed address is rejected, the same
+ // outcome as a blocking traffic control. req.ip is the real client (trusted-proxy aware, above).
+ if (ip && ipBlacklist?.check(ip)) return reject('ip_blacklisted');
+ // 3b. 24metrics rejected a click from this address in the last day (lib/integrations/tracker24.ts) — on an
+ // offer with 24metrics on. One Redis read, only for those offers.
+ if (ip && offer.attribution?.tracker24?.enabled && await isAddressBlocked(tenant.networkId, ip)) return reject('24metrics_blocked');
+
+ // 4. Geo targeting (country, or country + region).
+ const geoKnown = where.known;
+ const geoDecision = evaluateGeoRules(offer.geoRules, country, geoKnown, where.regionKeys);
+ if (!geoDecision.allowed) return reject('geo_not_allowed');
 
  // 4a. Offer targeting (Edit Offer › Targeting). Device Type is the offer's allowed traffic types.
  const allowedTypes = offer.allowedTrafficTypes ?? [];
- if (allowedTypes.length > 0 && !(ua.device && allowedTypes.includes(ua.device))) {
- return divert(reply, offer.fallbackUrl, offer.id);
- }
+ if (allowedTypes.length > 0 && !(ua.device && allowedTypes.includes(ua.device))) return reject('device_not_allowed');
  const targetingDecision = evaluateTargeting(offer.targeting, {
  platform: ua.osName, browser: ua.browserName, deviceBrand: ua.deviceBrand, osVersion: ua.osVersion,
  language: primaryLanguage(firstStr(req.headers['accept-language'])),
- country, region: geo?.region ?? null, city: geo?.city ?? null, dma: geo?.dma ?? null,
+ country, region, regionName: geo?.regionName ?? null, city: geo?.city ?? null, dma: geo?.dma ?? null,
  mobileCarrier: geo?.carrier ?? null, isp: geo?.isp ?? null, zip: geo?.postal ?? null, ip,
  }, { geo: geoAvailable(), country: geoKnown, carrier: carrierAvailable() });
- if (!targetingDecision.allowed) return divert(reply, offer.fallbackUrl, offer.id);
+ if (!targetingDecision.allowed) return reject('targeting_not_matched');
 
  // 4b. Traffic Controls — real Blacklist/Whitelist rules on sub-values, geo, device, etc.
- // (Offers › Traffic Controls). "Block" diverts like any other rule; "Fail Traffic" lets the
+ // (Offers › Traffic Controls). "Block" rejects like any other rule; "Fail Traffic" lets the
  // click through but flags it, so it already shows up as invalid in existing fraud reporting.
  const tcFields = {
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
- referrer: firstStr(req.headers['referer']) ?? null, ip, country,
- device: ua.device, os: ua.os, browser: ua.browser, userAgent: (req.headers['user-agent'] as string) ?? null,
+ referrer, ip, country,
+ device: ua.device, os: ua.os, browser: ua.browser, userAgent,
  };
  const tcMatch = evaluateTrafficControls(offer.trafficControls, tcFields, publisherId);
- if (tcMatch?.action === 'block') return divert(reply, offer.fallbackUrl, offer.id);
+ if (tcMatch?.action === 'block') return reject('traffic_control_blocked');
 
  // 4c. Traffic Blocking — per Partner+Offer rules on sub placements / Source ID (Partners ›
  // Traffic Blocking). A matching rule rejects the click, same outcome as a blacklist control.
  if (isTrafficBlocked(offer.trafficBlockings ?? [], publisherId, {
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
  sourceId,
- })) return divert(reply, offer.fallbackUrl, offer.id);
+ })) return reject('traffic_blocked');
 
- // 5. Cap check (atomic).
- if (await isClickCapped(offer.id, offer.dailyClickCap)) return divert(reply, offer.fallbackUrl, offer.id);
+ // 4d. Cheap fraud pre-signals (datacenter, velocity, bot user agent, the IP's cached IPQS verdict),
+ // weighted by the network's fraud rules. DECISION (F-23): at or over the network's block score the
+ // click is rejected — not attributed, not sent on — instead of only flagged. It's opt-in (no block
+ // score = flag only, as before) and runs ahead of the caps and dedup, so blocked traffic can't use up
+ // a cap. A server-side click (format=json on an offer that allows it) comes from the partner's
+ // server, so its IP and user agent describe that server, not the visitor: it's scored, never blocked.
+ const fraud = await fraudPreSignals({
+ networkId: tenant.networkId, ip, isDatacenter: geo?.isDatacenter ?? false,
+ userAgent, ipqs: offer.attribution?.ipqs?.enabled ?? false,
+ }, fraudCfg);
+ if (fraudCfg.enabled && fraudCfg.blockScore != null && fraud.score >= fraudCfg.blockScore && !(serverSideClick && !visitorIp)) {
+ req.log.info({ offerId: offer.id, fraud: fraud.score, flags: fraud.flags }, 'click_blocked');
+ return reject('fraud_blocked', fraud);
+ }
+
+ // 5. Cap check (atomic). Over the cap: rejected — "Cap has been exceeded".
+ if (await isClickCapped(offer.id, offer.dailyClickCap, offer.capTimeZone)) return reject('cap_exceeded');
+
+ // 5b. Offer Custom Settings for this partner (F-12): their click caps, and (step 11) landing page.
+ const clickAttrs = { country, device: ua.device, os: ua.os, browser: ua.browser };
+ const customFor = (category: 'caps' | 'landing_pages') =>
+ (publisherId && offer.customSettings?.length ? applicableSettings(offer.customSettings, category, publisherId, clickAttrs, new Date()) : []);
+ const customCaps = customFor('caps');
+ if (customCaps.length && await isCustomClickCapped(customCaps, publisherId!, offer.capTimeZone)) return reject('partner_cap_exceeded');
 
  // 6. Unique / dedup.
  const isUnique = ip ? await markUnique(offer.id, ip, offer.dedupWindowS) : true;
@@ -269,22 +381,25 @@ export function buildTrackingApp(): FastifyInstance {
  // 7. Unguessable click id.
  const clickId = randomUUID().replace(/-/g, '');
 
- // 8/9. Cheap fraud pre-signals (datacenter + velocity).
- const fraud = await fraudPreSignals(ip, geo?.isDatacenter ?? false);
-
  // Resolve payout/revenue (frozen onto the click for later attribution). A partner's own payout
- // override on this offer is the most specific rate, then the country override, then the default.
+ // override on this offer is the most specific rate, then their tier's margin off the revenue (Partner
+ // Tiers, F-17b), then the country override, then the default.
  const partnerPayout = publisherId ? offer.partnerPayouts?.[publisherId] ?? null : null;
- const resolvedPayout = partnerPayout ?? geoDecision.payoutOverride ?? offer.defaultPayout;
  const resolvedRevenue = geoDecision.revenueOverride ?? offer.defaultRevenue;
+ const tierRate = publisherId ? tierPayout(resolvedRevenue, offer.tierMargins?.[publisherId]) : null;
+ const resolvedPayout = partnerPayout ?? tierRate ?? geoDecision.payoutOverride ?? offer.defaultPayout;
+ // Priced per click (payout model CPC, Revenue Action "Click", or the partner's own CPC custom setting —
+ // lib/offer-settings/billing.ts): the click-persist worker books a billable click as a paid click.
+ const pricing = actionPricing(offer, publisherId, clickAttrs, new Date(), { payout: resolvedPayout, revenue: resolvedRevenue });
+ const perClick = publisherId != null && (pricing.payout.action === 'click' || pricing.revenue.action === 'click');
 
  // 10. Enqueue durable write (async) — the hot path never blocks on Postgres.
  const job: ClickJob = {
  clickId, networkId: tenant.networkId, offerId: offer.id, publisherId,
  ts: new Date().toISOString(), ip,
- country, region: geo?.region ?? null, city: geo?.city ?? null, isp: geo?.isp ?? null,
+ country, region, city: geo?.city ?? null, isp: geo?.isp ?? null,
  device: ua.device, os: ua.os, browser: ua.browser,
- referrer: firstStr(req.headers['referer']) ?? null, userAgent: req.headers['user-agent'] ?? null,
+ referrer, userAgent,
  sub1: subs[0] ?? null, sub2: subs[1] ?? null, sub3: subs[2] ?? null, sub4: subs[3] ?? null, sub5: subs[4] ?? null,
  isUnique, fraudScore: fraud.score,
  fraudFlags: tcMatch?.action === 'fail_traffic' ? [...fraud.flags, 'traffic_control'] : fraud.flags,
@@ -293,6 +408,13 @@ export function buildTrackingApp(): FastifyInstance {
  // Taken verbatim from the click URL (already parsed — no extra work on the hot path); absent → null.
  sourceId, fbclid: firstNonBlank(q, ['fbclid']), gclid: firstNonBlank(q, ['gclid']),
  ipqs: offer.attribution?.ipqs?.enabled ?? false,
+ cpc: perClick ? {
+ payout: pricing.payout.action === 'click' ? pricing.payout.rate : null,
+ revenue: pricing.revenue.action === 'click' ? pricing.revenue.rate : null,
+ advertiserId: offer.advertiserId, manualApproval: Boolean(offer.revenue?.manualApproval),
+ } : null,
+ tracker24: offer.attribution?.tracker24?.enabled && offer.attribution.tracker24.trackerId
+ ? { trackerId: offer.attribution.tracker24.trackerId } : null,
  };
  await enqueueClick(job);
 
@@ -304,19 +426,28 @@ export function buildTrackingApp(): FastifyInstance {
  offer_id: offer.id, publisher_id: publisherId, created_at: job.ts,
  resolved_payout: resolvedPayout, resolved_revenue: resolvedRevenue, currency: offer.currency,
  sub1: job.sub1, sub2: job.sub2, sub3: job.sub3, sub4: job.sub4, sub5: job.sub5,
+ ...clickAttrs,
  },
  offer.attributionWindowS,
  );
 
  // 11. Build destination with macros and 302 out — the fastest exit.
- const dest = geoDecision.destinationOverride ?? offer.destinationUrl;
+ // A partner's custom landing page (Offer Custom Settings, F-12) beats a per-country destination.
+ const customLanding = customFor('landing_pages').find((c) => c.landingPageUrl)?.landingPageUrl;
+ const baseDest = customLanding ?? geoDecision.destinationOverride ?? offer.destinationUrl;
+ // A deep link (offer's "Allow deep links"): another page of the offer's OWN site the partner asked for
+ // (&url= / &deep_link=), keeping the offer URL's parameters (the click id) — anything else is ignored.
+ const deep = offer.deepLinkEnabled ? firstStr(q['url']) ?? firstStr(q['deep_link']) : null;
+ const dest = deep && onOfferSite(deep, offer) ? deepLinkDestination(deep, baseDest) : baseDest;
  const finalUrl = substituteMacros(
  dest,
  buildMacros({ clickId, offerId: offer.id, publisherId, country: country ?? undefined, device: ua.device, subs }),
  );
 
  const micros = Number(process.hrtime.bigint() - started) / 1000;
- req.log.info({ offerId: offer.id, clickId, unique: isUnique, fraud: fraud.score, us: Math.round(micros) }, 'click');
+ req.log.info({
+ offerId: offer.id, clickId, unique: isUnique, fraud: fraud.score, us: Math.round(micros),
+ }, 'click');
 
  // AP-3 runtime guard: validate final URL after macro substitution before setting Location header.
  const urlViolation = getRedirectUrlRejectReason(finalUrl);
@@ -326,18 +457,30 @@ export function buildTrackingApp(): FastifyInstance {
  }
  // Server-side click (Attribution › Enable Server-Side Click): a server can create the click and
  // get the click_id back as JSON instead of following a redirect.
- if (offer.attribution?.serverSideClick && firstStr(q['format']) === 'json') {
+ if (serverSideClick) {
  return reply.code(200).header('cache-control', 'no-store').send({ ok: true, data: { click_id: clickId, redirect_url: finalUrl } });
+ }
+ // Direct linking: the tag on the advertiser's page keeps the click id (the visitor is already there).
+ if (directOrigin) {
+ return reply.code(200).header('cache-control', 'no-store').header('access-control-allow-origin', directOrigin).header('vary', 'Origin')
+ .send({ ok: true, data: { click_id: clickId, offer_id: offer.id, attribution_window_s: offer.attributionWindowS } });
  }
  return reply.code(302).header('location', finalUrl).header('cache-control', 'no-store').send();
  });
 
- // Smart link resolver — pick an offer by weighted rotation (geo-aware) and hand off to /click so
- // all the normal click logic (caps, macros, attribution, smart_link_id) applies. Lower volume than
- // /click, so a small Postgres read here is acceptable (documented departure from the hot-path rule).
+ // Ad impressions (CPM billing, view-through) — impression.ts. The direct-linking JavaScript tag — sdk.ts.
+ registerImpressionRoutes(app, { rateLimits });
+ registerSdkRoutes(app);
+
+ // Smart link resolver — pick an offer (Weight / Priority / KPI) and hand off to /click so all the
+ // normal click logic (caps, macros, attribution, smart_link_id) applies. F-17b: the link comes from
+ // Redis (no Postgres read per request); a visitor no item is targeted at goes to the catch-all offer
+ // (it used to get any item, ignoring their targeting); an item whose offer would only dead-end at
+ // /click — not active, today's click cap reached, geo-blocked, or this partner blocked / not
+ // approved on a non-public offer — is skipped; KPI links rotate by the worker's computed weights.
  app.get('/sl', async (req, reply) => {
  // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'sl', CLICK_LIMIT);
  if (rl.limited) {
@@ -352,34 +495,12 @@ export function buildTrackingApp(): FastifyInstance {
  const q = req.query as Record<string, unknown>;
  const slId = asUuid(firstStr(q['id']) ?? firstStr(q['sl']));
  if (!slId) return reply.code(400).send(errorEnvelope('bad_request', 'missing_smart_link_id', 400));
-
- const linkRes = await query<{ id: string; status: string; redirect_mechanism: string; catch_all_offer_id: string | null }>(
- `SELECT id, status, redirect_mechanism, catch_all_offer_id FROM smart_links WHERE id = $1 AND network_id = $2 LIMIT 1`,
- [slId, tenant.networkId],
- );
- const link = linkRes.rows[0];
- if (!link || link.status !== 'active') return divertToCatchAll(reply, link?.catch_all_offer_id ?? null);
-
- const itemsRes = await query<{ offer_id: string; weight: number; position: number | null; country: string | null }>(
- `SELECT offer_id, weight, position, country FROM smart_link_items WHERE smart_link_id = $1 AND network_id = $2`,
- [slId, tenant.networkId],
- );
- // Geo filter: keep items with no country target or one matching the visitor's country.
- const geo = req.ip ? lookupGeo(req.ip) : null;
- const country = geo?.country ?? null;
- const eligible = itemsRes.rows.filter((i) => !i.country || i.country === country);
- const pool = eligible.length ? eligible : itemsRes.rows;
- // Priority mechanism: lowest Position wins. Weight and KPI (no live performance signal on the
- // hot path) both fall back to weighted-random, matching the reference's own steady-state
- // behavior once a KPI-driven Smart Link has converged on its best-performing offer.
- const chosen = link.redirect_mechanism === 'priority'
- ? pickByPriority(pool)
- : pickWeighted(pool);
- if (!chosen) return divertToCatchAll(reply, link.catch_all_offer_id);
-
- // Forward to /click, preserving pub_id + subs and tagging the smart link.
- const params = new URLSearchParams({ offer_id: chosen, sl: slId });
  const pub = firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']);
+
+ // Forward to /click, preserving pub_id + subs and tagging the smart link — for the picked offer
+ // and for the catch-all alike (the catch-all used to lose the partner and subs).
+ const forward = (offerId: string) => {
+ const params = new URLSearchParams({ offer_id: offerId, sl: slId });
  if (pub) params.set('pub_id', pub);
  for (const i of [1, 2, 3, 4, 5]) { const s = firstStr(q[`sub${i}`]); if (s) params.set(`sub${i}`, s); }
  // Source ID too — Traffic Blocking rules can match on it at /click — and the ad click ids, so a
@@ -387,10 +508,60 @@ export function buildTrackingApp(): FastifyInstance {
  const src = firstNonBlank(q, SOURCE_PARAMS);
  if (src) params.set('source_id', src);
  for (const k of ['fbclid', 'gclid']) { const v = firstNonBlank(q, [k]); if (v) params.set(k, v); }
+ // The dev / test country override travels with the click (ignored in production, like at /click).
+ if (env.NODE_ENV !== 'production') for (const k of ['geo', 'test_geo']) { const v = firstStr(q[k]); if (v) params.set(k, v); }
  return reply.code(302).header('location', `/click?${params.toString()}`).header('cache-control', 'no-store').send();
+ };
+
+ const link = await getSmartLinkConfig(tenant.networkId, slId);
+ const catchAll = () => (link?.catchAllOfferId ? forward(link.catchAllOfferId) : reply.code(204).send());
+ if (!link || link.status !== 'active') return catchAll();
+
+ const where = visitorGeo({
+ ip: req.ip || null, socketAddress: (req.raw.socket?.remoteAddress ?? null), cfCountry: req.headers['cf-ipcountry'],
+ geoParam: firstStr(q['geo']), testGeoParam: firstStr(q['test_geo']),
+ });
+ const country = where.country;
+ const targeted = link.items.filter((i) => !i.country || i.country === country);
+ if (!targeted.length) return catchAll();
+
+ // The partner as /click will see it: only an active partner of this network counts (F-08).
+ const requestedPub = pub ? await resolveEntityId('publisher', tenant.networkId, pub) : null;
+ const partner = requestedPub && (await getPartnerStatus(tenant.networkId, requestedPub)) === 'active' ? requestedPub : null;
+ const offers = await Promise.all(targeted.map((i) => getOfferConfig(tenant.networkId, i.offerId)));
+ const capped = await Promise.all(offers.map((o) => (o ? clickCapReached(o.id, o.dailyClickCap, o.capTimeZone) : true)));
+ const eligible = targeted.filter((_, k) => {
+ const o = offers[k];
+ if (!o || o.status !== 'active' || capped[k]) return false;
+ if (partner && o.deniedPublishers.includes(partner)) return false;
+ if (o.visibility && o.visibility !== 'public' && !(partner && (o.approvedPublishers ?? []).includes(partner))) return false;
+ return evaluateGeoRules(o.geoRules, country, where.known, where.regionKeys).allowed;
+ });
+
+ // Priority: lowest Position wins. Weight: the configured weights. KPI: the worker's weights once
+ // computed (lib/smart-links/kpi.ts), an even rotation until then.
+ const chosen = link.mechanism === 'priority'
+ ? pickByPriority(eligible.map((i) => ({ offer_id: i.offerId, position: i.position })))
+ : pickWeighted(eligible.map((i) => ({ offer_id: i.offerId, weight: link.mechanism === 'kpi' ? (i.kpiWeight ?? 0) : i.weight })));
+ return chosen ? forward(chosen) : catchAll();
  });
 
  // ---- Conversion methods (spec §6) — all three normalize into recordConversion() ----
+
+ /** The click id of a conversion request, from any of its aliases (query string first, then body). */
+ function clickIdOf(req: FastifyRequest): string | null {
+ const q = req.query as Record<string, unknown>;
+ const b = (req.body ?? {}) as Record<string, unknown>;
+ for (const k of ['click_id', 'cid', 'clickid']) {
+ const v = firstStr(q[k]) ?? firstStr(b[k]);
+ if (v != null) return v;
+ }
+ return null;
+ }
+
+ /** The HTTP status /postback answers an outcome with (pixel / iframe always answer 200). */
+ const postbackHttpStatus = (outcome: RecordConversionResult['outcome']): number =>
+ outcome === 'click_not_found' ? 404 : outcome === 'security_failed' ? 403 : 200;
 
  async function handleConversion(
  req: FastifyRequest,
@@ -410,37 +581,124 @@ export function buildTrackingApp(): FastifyInstance {
  return null;
  };
 
- const clickId = pick('click_id', 'cid', 'clickid');
- if (!clickId) return { outcome: 'click_not_found', networkResolved: true };
+ let clickId = clickIdOf(req);
+ const txnId = pick('txn_id', 'transaction_id', 'tid');
+ const event = pick('event', 'event_name', 'goal');
+ const saleAmount = pick(...SALE_AMOUNT_PARAMS);
+ const rawParams = { ...q, ...b };
+ // Every processed request goes to the inbound postback log — recorded or not, and why.
+ const log = (result: InboundPostback['result'], httpStatus: number) => logInbound({
+ networkId: tenant.networkId, source, method: req.method, clickId, transactionId: txnId, event, saleAmount, httpStatus,
+ ip: (req.ip as string | undefined) ?? null, userAgent: firstStr(req.headers['user-agent']), params: rawParams, result,
+ });
+ // The customer's email (Email Ownership): recorded with the conversion's partner, or — with no click id — the owner.
+ const emailHash = emailHashOf(rawParams);
+ // No click id: a clickless conversion, matched in this order — a coupon (S2S; conversions/coupon.ts), the
+ // impression it's a view-through of (`impression_id`), the customer's owner by email (S2S, with the offer —
+ // email-ownership.ts), then the offer's impression cookie / the visitor's address (view-through.ts).
+ let virtual: { clickId: string; click: StoredClick; attribution: 'coupon' | 'email' | 'view_through' } | null = null;
+ let notFound = 'missing_click_id';
+ if (!clickId) {
+ const couponCode = source === 'postback' ? pick(...COUPON_PARAMS) : null;
+ const impressionId = pick(...IMPRESSION_ID_PARAMS);
+ const rawOffer = pick('offer_id', 'oid');
+ const offerId = rawOffer ? await resolveEntityId('offer', tenant.networkId, rawOffer) : null;
+ if (couponCode) {
+ const c = await couponClick(tenant.networkId, couponCode);
+ if (c) virtual = { ...c, attribution: 'coupon' }; else notFound = 'unknown_coupon';
+ } else if (impressionId) {
+ const v = await viewThroughClick(tenant.networkId, { impressionId, offerId, cookies: {}, ip: null });
+ if (v) virtual = { ...v, attribution: 'view_through' }; else notFound = 'unknown_impression';
+ } else if (offerId) {
+ const offer = await getOfferConfig(tenant.networkId, offerId);
+ // A postback is authenticated BEFORE its email / address is looked up, so no answer can tell a caller
+ // without the code whether the advertiser has that customer or an impression from that address.
+ const denied = source === 'postback' ? secureCodeFailure(offer, pick('secure_code', 'security_code')) : null;
+ if (denied) {
+ const failed: RecordConversionResult = { outcome: 'security_failed', reason: denied };
+ await log(failed, 403);
+ return { ...failed, networkResolved: true };
+ }
+ const owner = source === 'postback' && emailHash && offer ? await emailOwnerClick(tenant.networkId, offer, emailHash) : null;
+ if (owner) virtual = { ...owner, attribution: 'email' };
+ else {
+ // A postback names the visitor's address (`ip`); a pixel / iframe comes from the visitor's browser.
+ const ip = source === 'postback' ? asIp(pick('ip', 'user_ip')) : (req.ip || null);
+ const v = await viewThroughClick(tenant.networkId, {
+ impressionId: null, offerId, cookies: source === 'postback' ? {} : parseCookies(req.headers.cookie), ip,
+ });
+ if (v) virtual = { ...v, attribution: 'view_through' };
+ else if (emailHash && offer?.attribution?.emailOwnership) notFound = 'unknown_email';
+ }
+ }
+ if (virtual) clickId = virtual.clickId;
+ }
+ if (!clickId) {
+ const missing: RecordConversionResult = { outcome: 'click_not_found', reason: notFound };
+ await log(missing, source === 'postback' ? 404 : 200);
+ return { ...missing, networkResolved: true };
+ }
 
- const result = await recordConversion({
+ let result: RecordConversionResult;
+ try {
+ result = await recordConversion({
  networkId: tenant.networkId,
  clickId,
- txnId: pick('txn_id', 'transaction_id', 'tid'),
- event: pick('event', 'event_name', 'goal'),
+ ...(virtual ? { click: virtual.click, attribution: virtual.attribution } : {}),
+ emailHash,
+ // Price Per Product: the order's lines — priced only from the authenticated S2S postback.
+ products: source === 'postback' ? parseProductLines(rawParams, saleAmount) : null,
+ txnId,
+ event,
  statusHint: pick('status'),
- payoutParam: pick('payout', 'amount'),
+ // `payout` is the only payout override (F-02). `amount` is the sale / order value across the
+ // industry, so it joins sale_amount / order_amount as the Percentage-revenue base — never payout.
+ payoutParam: pick('payout'),
  revenueParam: pick('revenue'),
+ saleAmount,
  secureCode: pick('secure_code', 'security_code'),
  source,
- rawParams: { ...q, ...b },
+ rawParams,
+ // Pixel / iframe are browser-fired: record.ts binds them to the offer's site via these headers.
+ requestOrigin: source === 'postback' ? undefined : {
+ referer: firstStr(req.headers['referer']),
+ origin: firstStr(req.headers['origin']),
+ host,
+ },
  });
+ } catch (err) {
+ await log({ outcome: 'error', reason: 'internal_error' }, 500);
+ throw err;
+ }
+ await log(result, source === 'postback' ? postbackHttpStatus(result.outcome) : 200);
  return { ...result, networkResolved: true };
  }
 
  // A. S2S / postback (primary). GET and POST both supported.
+ // O3: an authenticated postback (a valid security code) is NEVER throttled — an advertiser's server
+ // may send thousands, and several per click (upsells, rev-share). Only FAILED postbacks (no / wrong
+ // code, unknown click, unknown host) use up the sending IP's budget and the click id's (a leaked
+ // click id can't be hammered from many IPs); an IP or click id over its budget is refused until
+ // the window moves on. Skipped in dev / tests.
  const postback = async (req: FastifyRequest, reply: FastifyReply) => {
  reply.header('cache-control', 'no-store'); // never let the edge cache a conversion ack
- // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
- const rl = await checkTrackingRateLimit(clientIp, 'postback', POSTBACK_LIMIT);
- if (rl.limited) {
- return reply.code(429).header('retry-after', String(rl.retryAfterSeconds)).send(errorEnvelope('rate_limited', 'Too many requests', 429));
+ const cid = clickIdOf(req);
+ if (rateLimits) {
+ const [ipFailures, clickFailures] = await Promise.all([
+ peekTrackingRateLimit(clientIp, 'postback'), cid ? peekTrackingRateLimit(cid, 'postback_click') : Promise.resolve(0),
+ ]);
+ if (ipFailures >= POSTBACK_LIMIT || clickFailures >= POSTBACK_PER_CLICK_LIMIT) {
+ return reply.code(429).header('retry-after', '60').send(errorEnvelope('rate_limited', 'Too many failed postbacks — check the security code and click id', 429));
  }
  }
 
  const r = await handleConversion(req, 'postback');
+ if (rateLimits && (!r.networkResolved || r.outcome === 'click_not_found' || r.outcome === 'security_failed')) {
+ await Promise.all([
+ chargeTrackingRateLimit(clientIp, 'postback'), cid ? chargeTrackingRateLimit(cid, 'postback_click') : Promise.resolve(),
+ ]);
+ }
  if (!r.networkResolved) return reply.code(404).send(errorEnvelope('not_found', 'unknown_tracking_host', 404));
  if (r.outcome === 'click_not_found') return reply.code(404).send(errorEnvelope('not_found', 'click_not_found', 404));
  if (r.outcome === 'security_failed') return reply.code(403).send(errorEnvelope('forbidden', 'invalid or missing secure_code', 403));
@@ -452,7 +710,7 @@ export function buildTrackingApp(): FastifyInstance {
  // B. Pixel / image tag — always returns the 1x1 gif so the page renders (spec §6 caveats apply).
  app.get('/pixel', async (req, reply) => {
  // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'pixel', POSTBACK_LIMIT);
  if (rl.limited) {
@@ -467,7 +725,7 @@ export function buildTrackingApp(): FastifyInstance {
  // C. Iframe — serves a tiny document; same attribution core.
  app.get('/iframe', async (req, reply) => {
  // Rate limit (AP-1): skip in dev/test.
- if (env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test') {
+ if (rateLimits) {
  const clientIp = (req.ip as string | undefined) ?? (req as { socket?: { remoteAddress?: string } }).socket?.remoteAddress ?? 'unknown';
  const rl = await checkTrackingRateLimit(clientIp, 'iframe', POSTBACK_LIMIT);
  if (rl.limited) {

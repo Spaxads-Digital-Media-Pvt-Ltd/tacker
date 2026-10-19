@@ -21,7 +21,7 @@ export function useFieldSpecs(): FieldSpec[] {
     { key: 'visibility', label: 'Visibility', group: 'General', type: 'select', options: ['public', 'private', 'ask'].map((v) => ({ value: v, label: v })) },
     { key: 'destinationUrl', label: 'Default Landing Page URL', group: 'Tracking & Controls' },
     { key: 'currency', label: 'Currency', group: 'Revenue & Payout (Events)' },
-    { key: 'payoutModel', label: 'Payout Model', group: 'Revenue & Payout (Events)', type: 'select', options: ['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((v) => ({ value: v, label: v })) },
+    { key: 'payoutModel', label: 'Payout Model', group: 'Revenue & Payout (Events)', type: 'select', options: ['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'].map((v) => ({ value: v, label: v })) },
     { key: 'defaultRevenue', label: 'Revenue Per Action', group: 'Revenue & Payout (Events)' },
     { key: 'defaultPayout', label: 'Payout Per Action', group: 'Revenue & Payout (Events)' },
   ];

@@ -37,7 +37,7 @@ import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { uaDimensionLabel } from '../../../lib/userAgentDisplay';
 import { Spinner, StateBlock } from '../../../shared-components/primitives/ui';
-import { daysAgo, todayStr, toIso, DASH, num, useGraphRows, GraphCappedNote } from '../../../shared-components/primitives/ReportPageKit';
+import { DASH, num, useGraphRows, GraphCappedNote } from '../../../shared-components/primitives/ReportPageKit';
 import { combineCurrencies, currenciesOf, mixedTitle, resolveCurrency, showSortedWithinNote, withCurrenciesMetric, type RowCurrency } from '../../../lib/reportCurrency';
 import { CurrencyNotes, Money } from '../../../shared-components/primitives/ReportMoney';
 import { METRIC_KEYS, METRIC_LABELS, type MetricKey } from '../../../lib/customMetrics';
@@ -46,6 +46,9 @@ import { countryLabel } from '../../../data/geo';
 import { useAutoDateRange } from '../reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
+import { useReportZone } from '../../../lib/useReportZone';
+import { bucketLabel } from '../../../lib/reportTime';
+import { zoneRangeParams } from '../../../lib/reportZone';
 
 interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
 interface AggResult { rows: AggRow[]; sortedWithinCurrency?: boolean }
@@ -97,7 +100,7 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
   if (dim === 'country') return countryLabel(id);
-  return uaDimensionLabel(dim, id);
+  return uaDimensionLabel(dim, bucketLabel(dim, id)); // Day / Hour: the bucket's own local day / hour
 }
 
 /** Add the query-string filter params from every OTHER dimension's active selection — a dimension
@@ -118,9 +121,9 @@ function appendOtherDimParams(params: URLSearchParams, filters: DimFilters, excl
 }
 
 function DimensionCard({
-  dim, label, opts, smartLinkMap, from, to, dimMetrics, filters, onToggleRow, onClearDim, onRemove, currency,
+  dim, label, opts, smartLinkMap, from, to, tz, dimMetrics, filters, onToggleRow, onClearDim, onRemove, currency,
 }: {
-  dim: DimKey; label: string; opts: Opts; smartLinkMap: Map<string, string>; from: string; to: string;
+  dim: DimKey; label: string; opts: Opts; smartLinkMap: Map<string, string>; from: string; to: string; tz: string;
   /** The network's default currency — for rows without money-bearing conversions (and older APIs). */
   currency: string;
   dimMetrics: MetricKey[]; filters: DimFilters;
@@ -132,7 +135,7 @@ function DimensionCard({
 
   const params = new URLSearchParams({
     groupBy: dim, metrics: withCurrenciesMetric(dimMetrics.join(',')),
-    from: toIso(from), to: toIso(to, true),
+    ...zoneRangeParams(from, to, tz),
     orderBy: sortMetric, orderDir: sortDir, limit: '200',
   });
   appendOtherDimParams(params, filters, dim);
@@ -280,7 +283,10 @@ export function DimensionalReport() {
 
   // Dates apply on their own once they form a valid range (see useAutoDateRange) — never a
   // half-typed or inverted range reaching the API; everything else applies immediately.
-  const range = useAutoDateRange(todayStr(), todayStr());
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const range = useAutoDateRange(zone.today(), zone.today());
   const { appliedFrom, appliedTo } = range;
   const [dims, setDims] = useState<DimKey[]>(['sub1', 'offer']);
   const [dimMetrics, setDimMetrics] = useState<MetricKey[]>(['payout', 'conversions']);
@@ -294,7 +300,7 @@ export function DimensionalReport() {
   const removeDim = (k: DimKey) => { setDims(dims.filter((d) => d !== k)); setFilters((f) => { const n = { ...f }; delete n[k]; return n; }); };
   // Reset dates, dimensions and row filters in one render. The debounced range catches up to the
   // same values later and is then a no-op.
-  const clearAll = () => { range.reset({ from: todayStr(), to: todayStr() }); setDims([]); setFilters({}); };
+  const clearAll = () => { range.reset({ from: zone.today(), to: zone.today() }); setDims([]); setFilters({}); };
   const clearDim = (k: DimKey) => setFilters((f) => { const n = { ...f }; delete n[k]; return n; });
   const toggleRow = (dim: DimKey, value: string) => setFilters((f) => {
     const cur = f[dim] ?? [];
@@ -310,7 +316,7 @@ export function DimensionalReport() {
   const chartGroupBy = chronological ? 'day' : 'hour';
   const chartsParams = new URLSearchParams({
     groupBy: chartGroupBy, metrics: withCurrenciesMetric(charts.join(',')),
-    from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    ...zone.range(appliedFrom, appliedTo),
   });
   appendOtherDimParams(chartsParams, filters);
   // No chart selected → nothing to request (the body says so). Every day in range, 200 per request
@@ -318,10 +324,11 @@ export function DimensionalReport() {
   const chartsQ = useGraphRows(charts.length ? `/api/reports?${chartsParams.toString()}` : null);
   const chartRows = [...chartsQ.rows].sort((a, b) => (a.dimensions[chartGroupBy] ?? '').localeCompare(b.dimensions[chartGroupBy] ?? ''));
   const chartLabels = chartRows.map((r) => {
-    const iso = r.dimensions[chartGroupBy] ?? '';
-    if (!iso) return '';
-    const d = new Date(iso);
-    return chronological ? `${d.getUTCMonth() + 1}/${d.getUTCDate()}` : `${String(d.getUTCHours()).padStart(2, '0')}:00`;
+    const bucket = r.dimensions[chartGroupBy] ?? '';
+    if (!bucket) return '';
+    // The bucket's own day / hour in the report's zone (lib/reportTime) — never shifted to UTC.
+    const label = bucketLabel(chartGroupBy, bucket);
+    return chronological ? `${Number(label.slice(5, 7))}/${Number(label.slice(8, 10))}` : label.slice(11, 16);
   });
   // One money series across points in different currencies would plot unlike amounts on one axis —
   // a money chart is drawn only when its points share one currency (labelled with it).
@@ -335,10 +342,10 @@ export function DimensionalReport() {
     <>
       <ReportCard className="mb-4">
         <ReportControls problem={range.problem} actions={<ClearButton onClick={clearAll} title="Reset dates, dimensions and row filters" />}>
-          <DateRangeField idPrefix="dimensional-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="dimensional-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
           <button type="button" className={`inline-flex items-center px-1 text-small font-medium text-accent-text hover:underline ${CONTROL}`}
-            onClick={() => range.reset({ from: daysAgo(6), to: todayStr() })}>Last 7 Days</button>
+            onClick={() => range.reset({ from: zone.daysAgo(6), to: zone.today() })}>Last 7 Days</button>
           <ControlField label="Dimension Metrics" htmlFor="dimensional-report-metrics">
             <MultiSelectDropdown id="dimensional-report-metrics" allOptions={METRIC_KEYS} optionLabels={METRIC_LABELS} selected={dimMetrics} onChange={(v) => setDimMetrics(v.length ? v : dimMetrics)} />
           </ControlField>
@@ -397,7 +404,7 @@ export function DimensionalReport() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {dims.map((d) => (
                 <DimensionCard key={d} dim={d} label={DIM_OPTIONS.find((o) => o.key === d)?.label ?? d} opts={opts} smartLinkMap={smartLinkMap}
-                  from={appliedFrom} to={appliedTo} dimMetrics={dimMetrics} filters={filters} onToggleRow={toggleRow} onClearDim={clearDim} onRemove={() => removeDim(d)} currency={currency} />
+                  from={appliedFrom} to={appliedTo} tz={zone.tz} dimMetrics={dimMetrics} filters={filters} onToggleRow={toggleRow} onClearDim={clearDim} onRemove={() => removeDim(d)} currency={currency} />
               ))}
             </div>
           )}

@@ -81,7 +81,7 @@ interface RuleRow {
   apply_offers_mode: string; apply_offer_ids: string[];
   apply_advertisers_mode: string; apply_advertiser_ids: string[];
   apply_partners_mode: string; apply_partner_ids: string[];
-  start_date: string | null; end_date: string | null;
+  start_date: string | Date | null; end_date: string | Date | null;
   goal_cycle: string; recurring_duration: string | null;
   continuous_mode: string | null; continuous_days: number | null;
   set_goal_conditions: boolean; conditions: CvCondition[];

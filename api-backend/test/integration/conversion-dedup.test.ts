@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildTrackingApp } from '../../src/surfaces/tracking/app.js';
 import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import { DbHostResolver } from '../../src/surfaces/tracking/host-resolver-db.js';
-import { recordConversion, type RecordConversionInput } from '../../src/surfaces/tracking/conversions/record.js';
+import { recordConversion, dedupeRule, type RecordConversionInput } from '../../src/surfaces/tracking/conversions/record.js';
 import { getRedis } from '../../src/lib/redis.js';
 import { pool, query } from '../../src/lib/db/pool.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
@@ -31,8 +31,9 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
     expect(r.statusCode).toBe(302);
     return new URL((r.headers.location as string).replace('{click_id}', '')).pathname.split('/').pop()!;
   };
+  // S2S postbacks must carry the network's secure_code (F-01): /postback fails closed without it.
   const postback = async (qs: string) =>
-    (await track.inject({ method: 'GET', url: `/postback?${qs}`, headers: { host } })).json() as { status: string; conversion_id: string | null };
+    (await track.inject({ method: 'GET', url: `/postback?secure_code=${fx.secureCodeA}&${qs}`, headers: { host } })).json() as { status: string; conversion_id: string | null };
   const input = (clickId: string, over: Partial<RecordConversionInput> = {}): RecordConversionInput => ({
     networkId: fx.networkA, clickId, txnId: null, event: null, statusHint: 'approved', payoutParam: null,
     revenueParam: null, secureCode: null, skipSecureCode: true, source: 'postback', rawParams: {}, ...over,
@@ -41,7 +42,10 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
   const ledgerForClick = async (clickId: string) => (await query<{ n: number }>(
     `SELECT COUNT(*)::int n FROM ledger_entries l JOIN conversions c ON c.conversion_id = l.conversion_id AND c.network_id = l.network_id WHERE c.click_id = $1`,
     [clickId])).rows[0]!.n;
-  const idemKey = (clickId: string, k = 'default') => `convidem:${clickId}:${k}`;
+  // The Redis fast-path key under the default rule (unique_txn): per transaction id, else per click + event.
+  const idemKey = (clickId: string, o: { event?: string; txnId?: string } = {}) => dedupeRule({
+    networkId: fx.networkA, offerId: fx.offerA, clickId, event: o.event ?? null, txnId: o.txnId ?? null, mode: 'unique_txn',
+  }).key;
 
   beforeAll(async () => {
     if (!(await canConnect())) throw new Error('INTEGRATION_DB=1 but Postgres is unreachable.');
@@ -72,7 +76,7 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
       const c = await click();
       const first = await postback(`click_id=${c}&event=lead&status=rejected`);
       expect(first.status).toBe('rejected');
-      await getRedis().del(idemKey(c, 'lead'));
+      await getRedis().del(idemKey(c, { event: 'lead' }));
       expect((await postback(`click_id=${c}&event=lead&status=approved`)).status).toBe('duplicate');
       expect(await convCount(c)).toBe(1);
       expect(await ledgerForClick(c)).toBe(0);
@@ -97,7 +101,7 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
       expect((await postback(`click_id=${c}&event=purchase&status=approved`)).status).toBe('approved');
       expect(await convCount(c)).toBe(3);
       // …and each is deduped on its own after the Redis keys expire.
-      for (const k of ['default', 'signup', 'purchase']) await getRedis().del(idemKey(c, k));
+      for (const event of [undefined, 'signup', 'purchase']) await getRedis().del(idemKey(c, { event }));
       expect((await postback(`click_id=${c}&event=signup&status=approved`)).status).toBe('duplicate');
       expect(await convCount(c)).toBe(3);
     });
@@ -128,7 +132,7 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
       const c = await click();
       expect((await postback(`click_id=${c}&txn_id=T-A&status=approved`)).status).toBe('approved');
       expect((await postback(`click_id=${c}&txn_id=T-A&status=approved`)).status).toBe('duplicate');
-      await getRedis().del(idemKey(c, 'T-A'));
+      await getRedis().del(idemKey(c, { txnId: 'T-A' }));
       expect((await postback(`click_id=${c}&txn_id=T-A&status=approved`)).status).toBe('duplicate');
       expect((await postback(`click_id=${c}&txn_id=T-B&status=approved`)).status).toBe('approved');
       expect(await convCount(c)).toBe(2);
@@ -177,7 +181,7 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
       const c = await click();
       failNextConversionInsert();
       await expect(recordConversion(input(c, { txnId: 'FB-1' }))).rejects.toThrow('simulated database failure');
-      expect(await getRedis().get(idemKey(c, 'FB-1'))).toBeNull();
+      expect(await getRedis().get(idemKey(c, { txnId: 'FB-1' }))).toBeNull();
       expect(await convCount(c)).toBe(0);
       vi.restoreAllMocks();
       const retry = await recordConversion(input(c, { txnId: 'FB-1' }));
@@ -191,10 +195,10 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
       const c = await click();
       failNextConversionInsert();
       await expect(recordConversion(input(c, { event: 'buy' }))).rejects.toThrow('simulated database failure');
-      expect(await getRedis().get(idemKey(c, 'buy'))).toBeNull();
+      expect(await getRedis().get(idemKey(c, { event: 'buy' }))).toBeNull();
       vi.restoreAllMocks();
       expect((await recordConversion(input(c, { event: 'buy' }))).outcome).toBe('approved');
-      await getRedis().del(idemKey(c, 'buy'));
+      await getRedis().del(idemKey(c, { event: 'buy' }));
       expect((await recordConversion(input(c, { event: 'buy' }))).outcome).toBe('duplicate');
       expect(await convCount(c)).toBe(1);
       expect(await ledgerForClick(c)).toBe(2);
@@ -202,7 +206,7 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
 
     it('never removes a key now held by a different request', async () => {
       const c = await click();
-      const key = idemKey(c, 'FB-2');
+      const key = idemKey(c, { txnId: 'FB-2' });
       failNextConversionInsert(async () => { await getRedis().set(key, 'someone-else', 'EX', 60); });
       await expect(recordConversion(input(c, { txnId: 'FB-2' }))).rejects.toThrow('simulated database failure');
       expect(await getRedis().get(key)).toBe('someone-else');
@@ -215,16 +219,16 @@ d('conversion dedup without a transaction id + idempotency-key recovery (live DB
       vi.spyOn(getRedis(), 'eval').mockRejectedValue(new Error('redis down') as never);
       await expect(recordConversion(input(c, { txnId: 'FB-3' }))).rejects.toThrow('simulated database failure');
       vi.restoreAllMocks();
-      await getRedis().del(idemKey(c, 'FB-3'));
+      await getRedis().del(idemKey(c, { txnId: 'FB-3' }));
     });
 
     it('a recorded conversion keeps its key (duplicates stay duplicates; nothing is reopened)', async () => {
       const c = await click();
       expect((await recordConversion(input(c, { txnId: 'FB-4' }))).outcome).toBe('approved');
-      const token = await getRedis().get(idemKey(c, 'FB-4'));
+      const token = await getRedis().get(idemKey(c, { txnId: 'FB-4' }));
       expect(token).toBeTruthy();
       expect((await recordConversion(input(c, { txnId: 'FB-4' }))).outcome).toBe('duplicate');
-      expect(await getRedis().get(idemKey(c, 'FB-4'))).toBe(token);
+      expect(await getRedis().get(idemKey(c, { txnId: 'FB-4' }))).toBe(token);
     });
   });
 });

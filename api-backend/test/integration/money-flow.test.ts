@@ -16,6 +16,8 @@ import { buildTrackingApp } from '../../src/surfaces/tracking/app.js';
 import { setHostResolver } from '../../src/middleware/host-resolver.js';
 import { DbHostResolver } from '../../src/surfaces/tracking/host-resolver-db.js';
 import { getRedis } from '../../src/lib/redis.js';
+import { dedupeRule } from '../../src/surfaces/tracking/conversions/record.js';
+import { capCountedSql } from '../../src/lib/conversion-caps.js';
 import { getQueue, QUEUE } from '../../src/surfaces/workers/queues.js';
 import { query } from '../../src/lib/db/pool.js';
 import { canConnect, seedFixture, type Fixture } from '../helpers/db.js';
@@ -35,8 +37,9 @@ d('money flow: click → postback → conversion → ledger (live DB + Redis)', 
     const loc = r.headers.location as string | undefined;
     return { status: r.statusCode, clickId: loc ? new URL(loc.replace('{click_id}', '')).pathname.split('/').pop()! : null, loc };
   };
+  // S2S postbacks must carry the network's secure_code (F-01): /postback fails closed without it.
   const postback = async (qs: string) => {
-    const r = await track.inject({ method: 'GET', url: `/postback?${qs}`, headers: { host } });
+    const r = await track.inject({ method: 'GET', url: `/postback?secure_code=${fx.secureCodeA}&${qs}`, headers: { host } });
     return { status: r.statusCode, body: r.json() as { status: string; conversion_id: string | null } };
   };
   const ledger = async (conversionId: string) => (await query<{ account_type: string; entry_type: string; direction: string; amount: string }>(
@@ -84,7 +87,7 @@ d('money flow: click → postback → conversion → ledger (live DB + Redis)', 
 
     // Duplicate with the same txn_id — first via the Redis guard, then with it expired (DB unique key).
     expect((await postback(`click_id=${c.clickId}&txn_id=T1&status=approved`)).body.status).toBe('duplicate');
-    await getRedis().del(`convidem:${c.clickId}:T1`);
+    await getRedis().del(dedupeRule({ networkId: fx.networkA, offerId: fx.offerA, clickId: c.clickId!, event: null, txnId: 'T1', mode: 'unique_txn' }).key);
     expect((await postback(`click_id=${c.clickId}&txn_id=T1&status=approved`)).body.status).toBe('duplicate');
     const n = (await query<{ n: number }>(`SELECT COUNT(*)::int n FROM conversions WHERE click_id = $1`, [c.clickId])).rows[0]!.n;
     expect(n).toBe(1);
@@ -135,12 +138,12 @@ d('money flow: click → postback → conversion → ledger (live DB + Redis)', 
     expect((await click(`offer_id=${fx.offerA}&pub_id=${fx.pubA2}`)).status).toBe(302);
   });
 
-  it('total conversion cap: conversions beyond the cap are rejected and never reach the ledger', async () => {
-    const counted = (await query<{ n: number }>(`SELECT COUNT(*)::int n FROM conversions WHERE offer_id = $1 AND status <> 'rejected'`, [fx.offerA])).rows[0]!.n;
+  it('total conversion cap: conversions beyond the cap are held as pending (Over caps) and never reach the ledger', async () => {
+    const counted = (await query<{ n: number }>(`SELECT COUNT(*)::int n FROM conversions WHERE offer_id = $1 AND ${capCountedSql()}`, [fx.offerA])).rows[0]!.n;
     await request(dash).patch(`/api/offers/${fx.offerA}`).set(auth).send({ totalConversionCap: counted + 1 }).expect(200);
     expect((await convert(fx.pubA1, 'CAP1')).body.status).toBe('approved');
     const over = await convert(fx.pubA1, 'CAP2');
-    expect(over.body.status).toBe('rejected');
+    expect(over.body.status).toBe('pending');
     const reason = (await query<{ reason: string }>(`SELECT reason FROM conversions WHERE conversion_id = $1`, [over.body.conversion_id])).rows[0]!.reason;
     expect(reason).toBe('total_conversion_cap_reached');
     expect(await ledger(over.body.conversion_id!)).toHaveLength(0);

@@ -31,7 +31,7 @@ import { useQuery } from '../../../lib/useApi';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import {
-  DASH, DEVICE_OPTIONS, toIso, daysAgo, todayStr,
+  DASH, DEVICE_OPTIONS,
   dimCount, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS,
 } from '../../../shared-components/primitives/ReportPageKit';
 import { readUrlFilters, readUrlDate, writeUrlFilters } from '../../../lib/reportFilterState';
@@ -44,6 +44,7 @@ import { ReportCard, ReportControls, ControlField, DateRangeField, FiltersButton
 import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 import { resolveCurrency, type RowCurrency } from '../../../lib/reportCurrency';
 import { Money } from '../../../shared-components/primitives/ReportMoney';
+import { useReportZone, type ZoneDays } from '../../../lib/useReportZone';
 
 interface SmartLink { id: string; name: string }
 /**
@@ -77,10 +78,10 @@ function CohortCell({ v, metric, rc }: { v: number | null; metric: MetricKey; rc
 }
 
 /** Initial report state from the URL (reload / shared link) — what the address-bar sync writes. */
-function readCohortUrl() {
+function readCohortUrl(zone: ZoneDays) {
   const sp = new URLSearchParams(window.location.search);
-  let from = readUrlDate(sp, 'from', daysAgo(6));
-  const to = readUrlDate(sp, 'to', todayStr());
+  let from = readUrlDate(sp, 'from', zone.daysAgo(6));
+  const to = readUrlDate(sp, 'to', zone.today());
   if (from > to) from = to;
   const tl = TOP_LEVEL_OPTIONS.find((o) => o.key === sp.get('topLevelMetric'))?.key ?? 'clicks';
   const m = METRIC_OPTIONS.find((o) => o.key === sp.get('metric'))?.key ?? 'conversions';
@@ -92,7 +93,10 @@ function readCohortUrl() {
 
 export default function CohortReport() {
   useReportOpts();
-  const [init] = useState(readCohortUrl);
+  // D7: the report's time zone — the network's unless one is picked beside the dates: its days,
+  // "today" and the presets; requests send plain dates + tz.
+  const zone = useReportZone();
+  const [init] = useState(() => readCohortUrl(zone));
   const [searchParams, setSearchParams] = useSearchParams();
   // Dates apply on their own once they form a valid range (see useAutoDateRange); everything else
   // applies immediately.
@@ -130,7 +134,7 @@ export default function CohortReport() {
     return params.toString();
   };
   const tableQs = qs({
-    from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    ...zone.range(appliedFrom, appliedTo),
     topLevelMetric: topLevel, metric,
     offerId: filters['offer']?.[0], advertiserId: filters['advertiser']?.[0],
     publisherId: filters['partner']?.[0], smartLinkId: filters['smartLink']?.[0],
@@ -156,7 +160,7 @@ export default function CohortReport() {
   // Reset dates, metrics and filters in one render → one request. The debounced range catches up to
   // the same values later and is then a no-op.
   const clearAll = () => {
-    range.reset({ from: daysAgo(6), to: todayStr() });
+    range.reset({ from: zone.daysAgo(6), to: zone.today() });
     setTopLevel('clicks'); setMetric('conversions'); setFilters({});
   };
 
@@ -183,7 +187,7 @@ export default function CohortReport() {
             )}
           </FiltersButton>
         </>}>
-          <DateRangeField idPrefix="cohort-report" from={range.from} to={range.to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="cohort-report" from={range.from} to={range.to} max={zone.today()} zone={zone} invalid={range.problem !== null}
             onFrom={range.setFrom} onTo={range.setTo} />
           <ControlField label="Top-level Metric" htmlFor="cohort-report-top-level" className="w-full sm:w-48">
             <select id="cohort-report-top-level" className={`input ${CONTROL}`} value={topLevel} onChange={(e) => setTopLevel(e.target.value as TopLevelKey)}>
@@ -226,7 +230,7 @@ export default function CohortReport() {
                     const shade = !(isMoneyMetric(metric) && rc.kind === 'mixed');
                     return (
                       <tr key={r.date}>
-                        <td className="font-medium text-fg">{new Date(r.date).toISOString().slice(0, 10)}</td>
+                        <td className="font-medium text-fg">{r.date.slice(0, 10)}</td>
                         <td className="px-4 py-3 text-right text-fg-secondary">{r.topLevel.toLocaleString()}</td>
                         {dayHeaders.map((n, i) => {
                           const v = r.days[i] ?? null;

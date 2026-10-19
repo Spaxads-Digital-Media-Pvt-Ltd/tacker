@@ -19,7 +19,8 @@ docker compose up -d redis postgres
 # 3. Backend
 cd api-backend
 cp .env.example .env
-# Edit .env: fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET
+# Edit .env: fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET,
+# and SETTINGS_ENC_KEY (openssl rand -hex 32)
 npm install
 npm run migrate
 npm run dev
@@ -55,12 +56,14 @@ npm run dev
 | `npm run seed` | Basic seed data |
 | `npm run seed:rich` | Rich seed data (partners, offers, etc.) |
 | `npm run seed:rich-modules` | Seed specific modules |
+| `npm run seed:test-catalog [-- <slug>]` | A test catalog on YOUR network (default `test`), through the dashboard API as its admin (needs `SUPABASE_JWT_SECRET`): 5 advertisers, 5 partners with different postbacks (one pending), 15 offers — CPA / CPL / CPI / RevShare / CPS, GEO allow / block lists with per-country payouts, device-only, 2-event goals, private / ask, caps, duplicate rules, manual approval, paused — landing on public sites with `click_id` in the URL, plus a macro-echo offer (httpbin). Registers localhost as the network's tracking domain; prints the click links. Re-runnable (keeps what exists by name) |
 | `npm run seed:demo-data` | Demo data for development |
 | `npm run bootstrap:admin` | Create platform admin |
 | `npm run provision:demo-admin` | Provision demo network admin |
 | `npm run provision:demo-portals` | Provision demo publisher/advertiser portals |
 | `npm run smoke` | Run all smoke tests |
-| `npm run tunnel` | Start ngrok tunnel |
+| `npm run geoip:download` | GeoIP databases into `data/geoip/` (MaxMind GeoLite2 with `MAXMIND_LICENSE_KEY`, else DB-IP Lite) — without one, GEO rules are not enforced. Re-run weekly / monthly; the tracker reloads within 10 min |
+| `npm run tunnel [-- <slug>]` | Public ngrok URL for the tracking surface (:4002), registered as a verified tracking domain for the network (default `demo`) — for external trackers' postbacks; prints the click and postback URL formats |
 
 ### Frontend (`frontend/`)
 
@@ -110,6 +113,13 @@ npm run test:isolation # Cross-tenant/cross-owner isolation tests
 ### Frontend
 No test framework configured. CI runs: typecheck + lint + build.
 
+Offer end-to-end suites (every offer setting through the dashboard API → real /click, /sl, /postback, GeoIP test data, workers):
+```bash
+INTEGRATION_DB=1 REDIS_URL=redis://localhost:6379/1 DATABASE_URL=postgres://tracker:tracker_local_dev@localhost:5432/tracker_test \
+  npx vitest run test/integration/offer-e2e-clicks.test.ts test/integration/offer-e2e-conversions.test.ts
+```
+(never point DATABASE_URL at a real database — the suites create networks and traffic)
+
 ## Lint
 
 ```bash
@@ -127,9 +137,10 @@ Required:
 - `DATABASE_URL` — Postgres connection string
 - `REDIS_URL` — Redis connection string
 - `SUPABASE_URL` — Supabase project URL (for JWKS)
-- `SUPABASE_SERVICE_ROLE_KEY` — Supabase admin key
+- `SUPABASE_SERVICE_ROLE_KEY` — Supabase admin key (also file storage for offer thumbnails / creatives). With storage configured, run `npm run creatives:backfill` once (`-- --dry-run` to preview) to move creatives stored inline before F-27 into storage, and `npm run images:backfill` (same flags) for branding logos / favicons and profile photos stored inline before O12
 - `SUPABASE_JWT_SECRET` — For HS256 test token verification
 - `PLATFORM_ADMIN_JWT_SECRET` — Super admin JWT secret
+- `SETTINGS_ENC_KEY` — Encryption key for settings secrets (32 bytes hex/base64). After first deploying it, run `npm run settings:secrets -- encrypt` once to encrypt values stored before (`decrypt` undoes it)
 
 Optional:
 - `SENTRY_DSN` — Error tracking
@@ -148,6 +159,30 @@ Optional:
 - **Per-surface containers** — each of the 5 surfaces is independently scalable
 - **Local dev**: Docker Compose (Redis + Postgres)
 - **Staging/prod**: Supabase Postgres (via pooler), hosted Redis
+
+### Behind Cloudflare + AWS (client IPs)
+Set `TRUSTED_PROXIES=private` on every surface so the visitor's IP (not the load balancer's) is used for
+login rate limits, the API IP whitelist, audit logs, login history and click geo / fraud — Cloudflare's
+ranges are trusted already. Allow only Cloudflare's ranges into the load balancer's security group.
+Details: `api-backend/docs/cloudflare-edge.md` › "Client IP at the origin".
+
+### Deploy checklist (each release)
+1. **Secrets / env** (per surface; values never in git): `DATABASE_URL`, `REDIS_URL`, `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY` (logins, invites, password resets, file storage), `SUPABASE_JWT_SECRET`,
+   `PLATFORM_ADMIN_JWT_SECRET`, `SETTINGS_ENC_KEY` (32 bytes — `openssl rand -hex 32`; keep it: settings
+   secrets can't be read without it), `IMPERSONATION_JWT_SECRET` (admin "Impersonate"; unset → 503),
+   `DASHBOARD_ORIGINS` (CORS — and its first origin is the app address in invite / reset emails), SMTP per
+   network (Settings), and behind Cloudflare + an AWS load balancer `TRUSTED_PROXIES=private` (next section).
+2. **Migrate**: `npm run migrate` (node-pg-migrate, forward-only in production).
+3. **One-off data steps** — idempotent, safe to re-run; preview each with `-- --dry-run` first:
+   - `npm run settings:secrets -- encrypt` — encrypts integration credentials / SMTP passwords stored in
+     plaintext before `SETTINGS_ENC_KEY` was set (D6; `decrypt` undoes it, e.g. before rotating the key).
+   - `npm run creatives:backfill` and `npm run images:backfill` — move creatives (F-27) and branding
+     logos / favicons / profile photos (O12) stored inline into object storage.
+4. **Run every surface**, including **workers** (`start:workers`): emails, postbacks, scheduled reports,
+   alert rules, SmartSwitch, rollups and retention all run there.
+5. **After deploy**: sign in, send a test email (Communication Hub › Email Log shows it), check
+   `/health` on each surface, and that a test click lands with the visitor's real IP (not the load balancer's).
 
 ### Surface Ports
 | Surface | Port |

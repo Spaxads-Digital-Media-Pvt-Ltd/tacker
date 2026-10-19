@@ -164,7 +164,7 @@ describe('AUTH-1: dashboard auth end-to-end (mocked app)', () => {
  pool: { connect: async () => ({ query: async () => ({ rows: [], rowCount: 0 }), release: () => {} }) },
  // dashboardAuth confirms the network_id claim names an existing network.
  query: async (sql: string) => (/FROM networks WHERE id/.test(sql)
- ? { rows: [{ '?column?': 1 }], rowCount: 1 }
+ ? { rows: [{ status: 'active' }], rowCount: 1 }
  : { rows: [], rowCount: 0 }),
  }));
  const { buildDashboardApp } = await import('../../src/surfaces/dashboard/app.js');

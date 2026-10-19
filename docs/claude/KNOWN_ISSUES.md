@@ -32,8 +32,19 @@
 **Severity**: Low
 **Issue**: Supabase sets `role: "authenticated"` at the top level of JWTs, which would shadow the admin role. The code explicitly falls back from `app_metadata.role` to top-level `role` for test tokens.
 **Why it matters**: If Supabase changes how it sets claims, the role resolution could break silently.
+**Mitigated**: a team member with a `users` row now gets their role (and disabled status) from that row on every request (`lib/auth/staff-state.ts`); the claim only decides for logins without a row.
 
-## Potential Issues (Need Investigation)
+### GeoIP data quality depends on the provider
+- **Issue**: DB-IP Lite (the no-account fallback) has region names but no region codes, postal codes or DMA codes, and is updated monthly. Region rules still match by name; zip / DMA targeting needs MaxMind GeoLite2 (or paid GeoIP2) — set `MAXMIND_LICENSE_KEY` and re-run `npm run geoip:download`.
+
+### CPC / CPM billing rows in a few secondary views
+- **Issue**: Paid clicks and CPM bookings are conversions (source `click` / `impression`) so their money reaches the ledger, invoices, balances and every report. The aggregate reports, conversion caps and the click-to-conversion report leave them out of conversion COUNTS; some secondary views (AI tools, offer groups, tiered-commission volume, smart-link KPI conversion counts) still count them as conversions.
+
+### Impressions are not in ClickHouse
+- **Issue**: `impressions` is Postgres-only (no rollup, no ClickHouse table): impression metrics read the raw table (indexed by network + time), and the ClickHouse provider returns 0 for them.
+
+### Mixed custom pricing models (CPA_CPS*) are not applied
+- **Issue**: Offer Custom Settings models CPA_CPS / CPA_CPS_PPP need two amounts (fixed + %) and a setting holds one value — they are stored but not applied. CPA, CPS, PRV, the _PPP variants, CPC and CPM are applied.
 
 ### 6. Smart Link PG Read on Hot Path
 **Location**: `api-backend/src/surfaces/tracking/app.ts:241-251`
@@ -42,10 +53,10 @@
 **Why it matters**: Lower volume than `/click`, but under high smart-link traffic, this could be a latency issue.
 
 ### 7. Tracking Surface Trust Proxy
-**Location**: `api-backend/src/surfaces/tracking/trusted-proxy.ts` (used by `trustProxy` and the production direct-connection guard in `tracking/app.ts`)
+**Location**: `api-backend/src/lib/net/trusted-proxy.ts` (tracking `trustProxy` + its production direct-connection guard, and — since O2 — `trust proxy` on the dashboard, public API and platform admin, so login rate limits, audit logs and login history get the visitor's IP too)
 **Severity**: Info (fixed) / deployment assumption
 **Status**: Fixed. `trustProxy: true` (took the client-writable LEFTMOST `X-Forwarded-For` entry as the click IP) became a trust check that walks the chain from the right and stops at the first untrusted hop; the hand-made Cloudflare list (bogus ranges such as `173.0.0.0/8`, `141.0.0.0/9`, TEST-NET-2, no IPv6) was replaced by Cloudflare's published IPv4 + IPv6 ranges (tests: `test/isolation/trusted-proxy.test.ts`, `test/integration/click-capture.test.ts`).
-**Docs**: `api-backend/docs/cloudflare-edge.md` › "Client IP at the origin" describes the real behaviour (X-Forwarded-For only — `CF-Connecting-IP` is not read) and the Nginx setups that work. **Remaining**: (1) Cloudflare's ranges are pinned in code — re-check https://www.cloudflare.com/ips-v4/ and /ips-v6/ when they change. (2) The repo has no Nginx config, so the topology is assumed: Nginx on the same host (loopback) appending to `X-Forwarded-For` (`proxy_add_x_forwarded_for`). If Nginx/a load balancer runs on another host, add its address to `TRACKING_TRUSTED_PROXIES`, or every click IP will be that proxy (and the production guard will reject it). If Nginx overwrites `X-Forwarded-For` with `$remote_addr`, the click IP becomes the Cloudflare edge. (3) Loopback is trusted, so in local dev a client on loopback can set `X-Forwarded-For`.
+**Docs**: `api-backend/docs/cloudflare-edge.md` › "Client IP at the origin" describes the real behaviour (X-Forwarded-For only — `CF-Connecting-IP` is not read) and the Nginx setups that work. **Remaining**: (1) Cloudflare's ranges are pinned in code — re-check https://www.cloudflare.com/ips-v4/ and /ips-v6/ when they change. (2) The repo has no Nginx config, so the topology is assumed: Nginx on the same host (loopback) appending to `X-Forwarded-For` (`proxy_add_x_forwarded_for`). If Nginx/a load balancer runs on another host (e.g. an AWS ALB), set `TRUSTED_PROXIES=private` (or its address), or every client IP will be that proxy (and the tracking production guard will reject it). If Nginx overwrites `X-Forwarded-For` with `$remote_addr`, the click IP becomes the Cloudflare edge. (3) Loopback is trusted, so in local dev a client on loopback can set `X-Forwarded-For`.
 **Why it matters**: IP-based geo lookups, fraud checks and IP filters depend on `req.ip`.
 
 ### 8. Redis Cache Staleness
@@ -85,10 +96,25 @@ The entire application is based on the Phase 0 scaffold specification. Some infr
 Some of the 50+ dashboard route modules have minimal implementations. As phases advance, these will grow significantly.
 
 ### 15. Frontend Mock Data
-`frontend/src/pages/dashboardMock.ts` contains mock data. This should be removed once real endpoints are fully populated.
+`frontend/src/pages/dashboardMock.ts` holds dev-only sample data for the admin dashboard (shown in dev when a dashboard request errors, or with `VITE_DEMO_DATA=true`). DashboardHome passes it only under `import.meta.env.DEV`, so production builds don't include it (F-25·F-28).
 
 ### 17. Stored-but-not-enforced settings (labelled in the UI)
-Saved and shown, but not acted on by the tracker yet — each page says so: Scheduled Actions (no executor), Link Templates, Coupon Codes (no coupon-based attribution), Reporting Adjustments (not applied to ledger/reports), Partner Tier margin / auto-approve, invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), SmartSwitch rules, group-level shared caps, CPC-level postbacks.
+Saved and shown, but not acted on by the tracker yet — each page says so: Link Templates, Reporting Adjustments (not applied to ledger/reports), invoice "visible to advertiser" (no advertiser invoice portal), partner default attribution/dedup windows, postback `delay` and Meta/TikTok/Snapchat/Rumble delivery methods (fired as a plain URL), group-level shared caps. (Coupon codes credit clickless postbacks, and CPC-level postbacks fire for paid clicks — both enforced now; some pages' wording may still say otherwise until the frontend is redone.)
 
 ### 16. Schema Uses Serial Ref Numbers
 The `ref` column on entities (offers, publishers, advertisers, etc.) is a `serial` (auto-increment integer). This is visible to users as display IDs. Consider if this should remain sequential.
+
+### 18. Report time zones and entity lists (F-20 follow-ups)
+D7 (done): every report page now works in the network's time zone (or the one picked) — plain dates + `tz` on every report endpoint, local day / hour buckets, "today" in that zone. Caps (round 3): daily caps reset at midnight in the **cap time zone** — Settings › General "Daily caps reset at midnight in [zone]" (default UTC), overridable per offer — and the Pacing / Caps reports count those days. A shared report link doesn't carry `tz` — it opens in the viewer's zone (the network's unless they picked another). Report rows now carry `labels` (entity names), but the report pages still load full offer / partner / advertiser lists — they also feed the filter pickers, so dropping them needs a picker that searches server-side.
+
+### 19. Scheduled reports and system emails (F-24 follow-ups)
+Schedules are set from Reporting › Saved & Scheduled (a saved report's ⋮ › Schedule…); Requested Reports is still an empty shell. A scheduled run applies the saved filters, exclusions, Ignore Fail Traffic and sort, but not the page's metric filters (client-side on the pages) or hidden columns, and attaches at most 1,000 rows (the email says so when truncated). Since O11 every email goes through the email queue (`email_outbox` + the `email` worker, retried, visible in Communication Hub › Email Log), and 16 of the 18 Automated System Emails send; the two left — Advertiser Postback Received and New Conversion Recorded (one email per event would be noise; a digest is the better shape) — are hidden until they're built.
+
+### 20. Creatives: two APIs, inline leftovers, branding logos (F-27 follow-ups)
+`/api/creatives` (network-wide, fans out to a row per offer) and `/api/offers/:id/creatives` (per offer) are still two routes over `offer_creatives`; they now share one body schema, one URL rule and the list-safe url projection, but collapsing them into one API needs the Offer › Creatives tab and the Creatives page moved to the same endpoint. Creatives stored inline before F-27 stay inline until `npm run creatives:backfill` runs with storage configured (lists hide their bytes meanwhile); SVG files can't be backfilled (not stored — re-upload as PNG). O12 (done): branding logos / favicons and profile photos go to storage too and settings keep only the URL; the JSON body limit is 2 MB. Images stored inline before O12 stay until `npm run images:backfill` (SVGs can't be moved — re-upload as PNG); meanwhile they can be re-saved unchanged but aren't served by `/api/me`.
+
+### 21. Network purge keeps the ledger; metering counts raw rows (F-26 follow-ups)
+A purge deletes a network's data and its Supabase logins but keeps its `ledger_entries` rows (and the platform's audit rows): the ledger is append-only — a trigger forbids DELETE — and is the financial record, so removing them needs an explicit decision and a narrowly-scoped exception in that trigger. They are in the export, and after the purge the `purged_networks` tombstone (D3) keeps whose they were — Super Admin › Networks › Purged networks downloads them as CSV. Before F-26 a hard network delete also left the network's clicks, conversions and postback logs behind (those tables have no foreign key to networks); the purge now removes them. Usage metering counts raw clicks / conversions per day (indexed by network + time) every hour — fine at today's volumes; very large networks could read the 15-minute rollups instead. Over-limit usage is flagged, never blocked (by design). A suspended network's dashboard access ends within 15 s on other dashboard processes (in-process state cache); tracking stops at once.
+
+### 22. Duplicate endpoints (F-25·F-28 step 3)
+Collapsed: team-user create (`/api/control-center/users` POST removed — `/api/users` POST is the one), business units (`/api/business-units` removed — the SPA and `/api/control-center/business-units` remain; the removed one hard-deleted and listed soft-deleted units), and the frontend's dead `src/services/` copies of `lib/` modules. Kept with shared rules: creatives (two routes, one schema — #20) and postbacks (network / partner / offer views of `publisher_postbacks`, one URL rule). Team sign-in is now complete (O1): new members are emailed an invite (temporary password, replaced at first sign-in), Resend invite / Send password reset on Accounts, and a real self-serve "Forgot password?" (emailed one-time link). These need Supabase Auth (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY) and the network's SMTP. Editing team members works (Control Center › Accounts › click a name): role / status changes apply on the member's next request.

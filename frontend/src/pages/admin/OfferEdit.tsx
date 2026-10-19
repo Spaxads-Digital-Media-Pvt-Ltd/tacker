@@ -27,6 +27,7 @@ import { targetingErrors } from './offerForm/targetingValidation';
 import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
 import { ThumbnailField } from './offerForm/ThumbnailField';
 import { SearchablePicker } from '../../shared-components/primitives/SearchablePicker';
+import { CapTimeZoneSelect } from '../../shared-components/primitives/CapTimeZoneSelect';
 import { DEFAULT_ATTRIBUTION, DEFAULT_EMAIL, DEFAULT_REVENUE, settingsErrors, withDefaults } from './offerForm/settings';
 import type {
   Offer, Advertiser, TrackingDomain, OfferTargeting,
@@ -42,6 +43,8 @@ const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-s
 const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
 const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
+/** CPC pays per click, CPM per 1,000 impressions (backend lib/offer-settings/billing.ts); the rest per conversion. */
+const PAYOUT_LABEL: Record<string, string> = { CPC: 'Payout Per Click', CPM: 'Payout Per 1,000 Impressions' };
 const COMMON_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'INR', 'BRL'];
 /** Category picker option that switches to the "New category name" text input. */
 const NEW_CATEGORY = '__new__';
@@ -52,10 +55,12 @@ interface FormState {
   name: string; status: string; advertiserId: string; category: string; currency: string;
   visibility: string; destinationUrl: string; previewUrl: string; description: string;
   dailyClickCap: string; dailyConversionCap: string; totalConversionCap: string;
+  /** '' = the network's cap time zone. */
+  capTimezone: string;
   payoutModel: string; defaultPayout: string; defaultRevenue: string;
   attributionWindowS: string; dedupWindowS: string; fallbackUrl: string; allowedTrafficTypes: string[];
   trackingDomainId: string;
-  linkingType: string; deepLinkEnabled: boolean; firePartnerPostback: boolean;
+  linkingType: string; deepLinkEnabled: boolean; firePartnerPostback: boolean; impressionUrl: string;
   appIdentifier: string; internalNotes: string; productId: string; thumbnailUrl: string;
   targeting: OfferTargeting;
   attribution: OfferAttributionSettings; revenue: OfferRevenueSettings; email: OfferEmailSettings;
@@ -71,6 +76,8 @@ export default function OfferEdit() {
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: groups, refetch: refetchGroups } = useQuery<{ id: string; name: string; offerIds: string[] }[]>('/api/offer-groups');
   const { data: allOffers } = useQuery<Offer[]>('/api/offers');
+  // The network's cap time zone — what "Network default" means for this offer's caps.
+  const { data: netSettings } = useQuery<{ general: { capTimezone?: string } }>('/api/settings');
   const { data: networkSecurity } = useQuery<{ securityCode: string | null }>('/api/settings/security');
   // Category options = Control Center › Categories catalog ∪ names already on offers.
   const { options: categoryOptions, ensureCategory } = useOfferCategories((allOffers ?? []).map((o) => o.category));
@@ -97,12 +104,14 @@ export default function OfferEdit() {
       dailyClickCap: offer.dailyClickCap != null ? String(offer.dailyClickCap) : '',
       dailyConversionCap: offer.dailyConversionCap != null ? String(offer.dailyConversionCap) : '',
       totalConversionCap: offer.totalConversionCap != null ? String(offer.totalConversionCap) : '',
+      capTimezone: offer.capTimezone ?? '',
       payoutModel: offer.payoutModel, defaultPayout: String(offer.defaultPayout), defaultRevenue: String(offer.defaultRevenue),
       attributionWindowS: offer.attributionWindowS != null ? String(offer.attributionWindowS) : '',
       dedupWindowS: offer.dedupWindowS != null ? String(offer.dedupWindowS) : '',
       fallbackUrl: offer.fallbackUrl ?? '', allowedTrafficTypes: offer.allowedTrafficTypes ?? [],
       trackingDomainId: offer.trackingDomainId ?? '',
       linkingType: offer.linkingType ?? 'redirect',
+      impressionUrl: offer.impressionUrl ?? '',
       deepLinkEnabled: offer.deepLinkEnabled ?? false,
       // Unset = on (the tracker fires partner postbacks unless explicitly turned off).
       firePartnerPostback: offer.firePartnerPostback ?? true,
@@ -167,6 +176,7 @@ export default function OfferEdit() {
       previewUrl: form.previewUrl.trim() ? normalizeUrl(form.previewUrl.trim()) : null,
       description: orNull(form.description),
       linkingType: form.linkingType,
+      impressionUrl: form.impressionUrl.trim() || null,
       deepLinkEnabled: form.deepLinkEnabled,
       firePartnerPostback: form.firePartnerPostback,
       // Disabled or cleared → null, so the server really drops the old value.
@@ -174,6 +184,7 @@ export default function OfferEdit() {
       dailyClickCap: capOrNull(form.dailyClickCap),
       dailyConversionCap: capOrNull(form.dailyConversionCap),
       totalConversionCap: capOrNull(form.totalConversionCap),
+      capTimezone: form.capTimezone || null,
       appIdentifier: orNull(form.appIdentifier),
       internalNotes: orNull(form.internalNotes),
       productId: orNull(form.productId),
@@ -337,6 +348,9 @@ export default function OfferEdit() {
               <Field label="Linking Type">
                 <Segmented options={LINKING_TYPES} value={form.linkingType || 'redirect'} onChange={(v) => set('linkingType', v)} />
               </Field>
+              <Field label="Impression URL" hint="Optional — the advertiser's or MMP's impression link. The impression pixel sends the browser there with {imp_id} and the click macros filled in; without one it answers with a 1×1 pixel.">
+                <input className="input" placeholder="https://… {imp_id}" value={form.impressionUrl} onChange={(e) => set('impressionUrl', e.target.value)} />
+              </Field>
 
               <p className="text-small font-semibold text-fg">Conversion Event Tracking</p>
               <div>
@@ -364,6 +378,10 @@ export default function OfferEdit() {
                 </div>
               )}
               {!capsEnabled && <p className="text-tiny text-fg-muted">Caps off — saving removes any existing caps on this offer.</p>}
+              <Field label="Cap Time Zone" hint="When this offer's daily caps — and its partners' caps (Custom Settings) — start over: midnight in this zone. The advertiser who says “500 a day” may count the day in their own zone.">
+                <CapTimeZoneSelect value={form.capTimezone} onChange={(tz) => set('capTimezone', tz)}
+                  inheritLabel={`Network default — ${netSettings?.general.capTimezone ?? 'UTC'}`} />
+              </Field>
             </div>
           </div>
         )}
@@ -373,7 +391,9 @@ export default function OfferEdit() {
             <p className="text-small text-fg-secondary">Give this URL to the advertiser. They should fire it from their server when a user converts. The click_id is passed automatically via the redirect.</p>
             <div className="space-y-4">
               <Field label="S2S Postback URL" hint="The advertiser replaces {click_id} and {txn_id} with their own values. The secure code is already filled in.">
-                <CopyBox value={advertiserPostbackUrl(trackHost, offer.securityCode ?? networkSecurity?.securityCode)} placeholder="No active tracking domain — add one first." />
+                {offer.securityCodeHidden
+                  ? <p className="rounded-[var(--radius)] bg-page px-3 py-2 text-small text-fg-secondary">Only admins and managers can see this offer's postback URL, because it contains the security code.</p>
+                  : <CopyBox value={advertiserPostbackUrl(trackHost, offer.securityCode ?? networkSecurity?.securityCode)} placeholder="No active tracking domain — add one first." />}
               </Field>
               <div>
                 <p className="label mb-2 block">Postback Parameters</p>
@@ -391,13 +411,18 @@ export default function OfferEdit() {
             <div className="space-y-4 border-t border-border pt-4">
               <h3 className="text-h3 font-medium text-fg">Per-Offer Security Code</h3>
               <p className="text-small text-fg-secondary">Overrides the network-wide code when set. The advertiser must include the per-offer security code in their postback. Leave empty to use the network default.</p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <input className="input font-mono text-tiny" readOnly value={offer.securityCode ?? ''} placeholder="No per-offer code set — using network default" />
+              {offer.securityCodeHidden ? (
+                <p className="text-small text-fg-secondary">{offer.securityCodeSet ? 'This offer has its own security code — hidden for your role.' : 'This offer uses the network default code.'}</p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <input className="input font-mono text-tiny" readOnly value={offer.securityCode ?? ''} placeholder="No per-offer code set — using network default" />
+                  </div>
+                  <button type="button" className="btn-ghost !py-2" disabled={regenCode.busy} onClick={regenerateCode}>{regenCode.busy ? 'Generating…' : (offer.securityCode ? 'Regenerate' : 'Generate')}</button>
+                  {offer.securityCode && <button type="button" className="btn-ghost !py-2 text-danger-text" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
                 </div>
-                <button type="button" className="btn-ghost !py-2" disabled={regenCode.busy} onClick={regenerateCode}>{regenCode.busy ? 'Generating…' : (offer.securityCode ? 'Regenerate' : 'Generate')}</button>
-                {offer.securityCode && <button type="button" className="btn-ghost !py-2 text-danger-text" disabled={clearCode.busy} onClick={removeCode}>Remove</button>}
-              </div>
+              )}
+              {(regenCode.error || clearCode.error) && <p className="text-small text-danger-text">{regenCode.error ?? clearCode.error}</p>}
             </div>
 
             <div className="space-y-4 border-t border-border pt-4">
@@ -423,10 +448,10 @@ export default function OfferEdit() {
               <h3 className="text-h3 font-medium text-fg">Base Payout</h3>
               <Field label="Model">
                 <select className="input" value={form.payoutModel} onChange={(e) => set('payoutModel', e.target.value)}>
-                  {['CPA', 'CPL', 'CPC', 'CPI', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
+                  {['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
                 </select>
               </Field>
-              <Field label="Payout Per Action *"><input className="input" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} /></Field>
+              <Field label={`${PAYOUT_LABEL[form.payoutModel] ?? 'Payout Per Action'} *`}><input className="input" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} /></Field>
             </div>
           </div>
         )}

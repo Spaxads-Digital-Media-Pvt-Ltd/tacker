@@ -13,6 +13,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, Clock, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { useImpersonate } from '../../lib/impersonation';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer } from '../../shared-components/primitives/CategoryFilterDrawer';
@@ -82,17 +83,17 @@ function HistoryModal({ advertiserId, onClose }: { advertiserId: string; onClose
 
 function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onChanged: () => void }) {
   const nav = useNavigate();
-  const impersonate = useMutation(() => api.post<{ link: string }>(`/api/advertisers/${advertiser.id}/impersonate`, {}));
+  const impersonate = useImpersonate('advertiser', advertiser.id);
   const del = useMutation(() => api.del(`/api/advertisers/${advertiser.id}`));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [errDismissed, setErrDismissed] = useState(false);
 
   const go = (api: { close: () => void }, to: string) => { api.close(); nav(to); };
-  const doImpersonate = async (api: { close: () => void }) => {
-    if (!advertiser.hasPortalAccount) return;
+  // A new tab with the advertiser's portal as a 30-minute admin session (F-10, lib/impersonation.ts).
+  const doImpersonate = (api: { close: () => void }) => {
     api.close();
-    const res = await impersonate.run(undefined);
-    if (res) window.open(res.link, '_blank', 'noopener');
+    setErrDismissed(false);
+    void impersonate.start();
   };
   const confirm = useConfirm();
   const doDelete = async (api: { close: () => void }) => {
@@ -110,13 +111,7 @@ function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onCh
         {(api) => (
           <>
             <MenuItem icon={Pencil} onSelect={() => go(api, `/app/advertisers/${advertiser.id}/edit`)}>Edit</MenuItem>
-            {advertiser.hasPortalAccount ? (
-              <MenuItem icon={User} onSelect={() => doImpersonate(api)}>{impersonate.busy ? 'Impersonating…' : 'Impersonate'}</MenuItem>
-            ) : (
-              <div title="This advertiser has no linked portal account yet" className="opacity-50 pointer-events-none">
-                <MenuItem icon={User} onSelect={() => {}}>Impersonate</MenuItem>
-              </div>
-            )}
+            <MenuItem icon={User} onSelect={() => doImpersonate(api)}>{impersonate.busy ? 'Impersonating…' : 'Impersonate'}</MenuItem>
             <MenuItem icon={FileText} onSelect={() => go(api, `/app/reports/advertiser?advertiserId=${advertiser.id}`)}>View Advertiser Report</MenuItem>
             <MenuItem icon={Clock} onSelect={() => { api.close(); setHistoryOpen(true); }}>History</MenuItem>
             <MenuItem icon={Trash2} tone="danger" onSelect={() => doDelete(api)}>Delete</MenuItem>

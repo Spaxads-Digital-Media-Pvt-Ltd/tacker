@@ -20,19 +20,8 @@ import {
   combineCurrencies, comparePeriods, currenciesOf, mixedTitle, moneyRowComparator, moneyText, parseMoneyByCurrency, resolveCurrency,
   showSortedWithinNote, SORTED_WITHIN_CURRENCY_NOTE, withCurrenciesMetric, type MoneyField, type MoneyText, type RowCurrency,
 } from '../lib/reportCurrency';
+import { useReportZone } from '../lib/useReportZone';
 
-function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 /**
  * Role-aware overview. Admins get the full Everflow-style "Today's Stats" board (KPI cards +
@@ -44,6 +33,7 @@ export default function DashboardHome() {
   const { session } = useAuth();
   if (!session) return null;
   if (session.role === 'admin') return <AdminDashboard name={session.displayName} />;
+  if (session.role === 'super_admin') return null; // the Super Admin's own Overview (pages/super-admin/Overview.tsx)
   return <RoleTiles role={session.role} name={session.displayName} />;
 }
 
@@ -63,6 +53,15 @@ interface Dashboard {
   currencies?: Partial<Record<PeriodKey, unknown>>;
   moneyByCurrency?: Partial<Record<PeriodKey, unknown>>;
 }
+/** The API sends the hourly money series as fixed-scale decimal strings (it never does float math
+ * on money); the sparklines plot numbers, so they're converted once, here at the UI edge. */
+type DashboardResponse = Omit<Dashboard, 'series'> & {
+  series: { clicks: number[]; conversions: number[]; revenue: Array<number | string>; payout: Array<number | string> };
+};
+const plotSeries = (d: DashboardResponse) => ({
+  ...d,
+  series: { ...d.series, revenue: d.series.revenue.map(Number), payout: d.series.payout.map(Number) },
+});
 
 const nfmt = new Intl.NumberFormat('en-US');
 const money = (v: string | number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}`;
@@ -102,9 +101,10 @@ function moneyKpi(data: Pick<Dashboard, MoneyField | 'currencies' | 'moneyByCurr
 type KpiRow = [label: string, value: string, title?: string];
 
 /** Dev-only: swap in sample data when a request errors, so the dashboard is previewable without
- * a live api-backend. No-op in production and a no-op once the real API responds. */
-function withMock<T>(q: { data: T | null; loading: boolean; error: string | null }, mock: T): { data: T | null; loading: boolean; error: string | null } {
-  if (DEMO_MODE || (import.meta.env.DEV && q.error)) return { data: mock, loading: false, error: null };
+ * a live api-backend. A no-op once the real API responds. Callers pass `mock` only under
+ * `import.meta.env.DEV` (else null), so production builds drop the sample data entirely. */
+function withMock<T>(q: { data: T | null; loading: boolean; error: string | null }, mock: T | null): { data: T | null; loading: boolean; error: string | null } {
+  if (mock !== null && (DEMO_MODE || q.error)) return { data: mock, loading: false, error: null };
   return q;
 }
 
@@ -168,15 +168,19 @@ function CustomizeCards({ visible, onChange }: { visible: Record<SectionId, bool
 
 function AdminDashboard({ name }: { name: string }) {
   const navigate = useNavigate();
-  const { data, loading, error } = withMock(useQuery<Dashboard>('/api/reports/dashboard'), MOCK_DASHBOARD);
+  // D7: the tiles' today / yesterday / month and the report links are the report zone's days (the
+  // network's unless the viewer picked another on a report page).
+  const zone = useReportZone();
+  const { data: raw, loading, error } = withMock(useQuery<DashboardResponse>(`/api/reports/dashboard?${new URLSearchParams({ tz: zone.tz }).toString()}`), import.meta.env.DEV ? MOCK_DASHBOARD : null);
+  const data = useMemo(() => (raw ? plotSeries(raw) : null), [raw]);
   // Money without a currency of its own (no conversions, older API) is in the network's default.
   const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
   const currency = settings?.general?.defaultCurrency ?? 'USD';
   const offers = useQuery<Offer[]>('/api/offers');
   const pubs = useQuery<Publisher[]>('/api/publishers');
   const advs = useQuery<Advertiser[]>('/api/advertisers');
-  const from = daysAgo(7);
-  const to = todayStr();
+  const from = zone.daysAgo(7);
+  const to = zone.today();
 
   const goToReport = (kind: 'revenue' | 'clicks' | 'cr' | 'payout' | 'margin' | 'conversions') => {
     const params = new URLSearchParams({ from, to });
@@ -421,7 +425,7 @@ function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll, currency }: {
   const topQs = new URLSearchParams({
     groupBy: dimKey, metrics: withCurrenciesMetric('clicks,conversions,revenue'), orderBy: metric, orderDir: 'desc', limit: '6', from: win.from, to: win.to,
   });
-  const q = withMock(useQuery<AggResult>(`/api/reports?${topQs.toString()}`), mockTopRows(dimKey));
+  const q = withMock(useQuery<AggResult>(`/api/reports?${topQs.toString()}`), import.meta.env.DEV ? mockTopRows(dimKey) : null);
   const rcOf = (r: AggRow): RowCurrency => resolveCurrency(currenciesOf(r.metrics), currency);
   const valueOf = (r: AggRow) => Number(r.metrics[metric] ?? 0);
   // Server-ranked; the local sort only orders the mock rows the same way in dev/demo mode — by
@@ -437,7 +441,7 @@ function EntityPanel({ title, dimKey, filterKey, nameMap, viewAll, currency }: {
   const seriesPath = id
     ? `/api/reports?groupBy=hour&metrics=${withCurrenciesMetric('clicks,conversions,revenue')}&${filterKey}=${encodeURIComponent(id)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
     : null;
-  const series = withMock(useQuery<AggResult>(seriesPath), mockHourlySeries());
+  const series = withMock(useQuery<AggResult>(seriesPath), import.meta.env.DEV ? mockHourlySeries() : null);
   const points = [...(series.data?.rows ?? [])]
     .sort((a, b) => new Date(a.dimensions.hour ?? 0).getTime() - new Date(b.dimensions.hour ?? 0).getTime())
     .map((r) => Number(r.metrics[metric] ?? 0));
@@ -542,16 +546,7 @@ const portalMoney = (s: Summary, key: string, field?: MoneyField) =>
 const portalBalance = (s: Summary) =>
   balanceText({ balance: s['balance'], balances: s['balances'], currency: s['balanceCurrency'] ?? s['currency'] })?.text
   ?? money(String(s['balance'] ?? 0));
-const CONFIG: Record<Exclude<Role, 'admin'>, { endpoint?: string; tiles: Tile[] }> = {
-  super_admin: {
-    endpoint: '/platform/summary',
-    tiles: [
-      { label: 'Networks', hint: 'Active / total', val: (s) => `${int(s['activeNetworks'])} / ${int(s['networks'])}` },
-      { label: 'MRR', hint: 'Active subscriptions', val: (s) => money(String(s['mrr'] ?? 0)) },
-      { label: 'Clicks (24h)', hint: 'Platform-wide', val: (s) => int(s['clicks24h']) },
-      { label: 'Conversions (24h)', hint: 'Attributed to you', val: (s) => int(s['conversions24h']) },
-    ],
-  },
+const CONFIG: Record<Exclude<Role, 'admin' | 'super_admin'>, { endpoint?: string; tiles: Tile[] }> = {
   publisher: {
     endpoint: '/api/portal/publisher/summary',
     tiles: [
@@ -631,7 +626,7 @@ function InteractiveKpi({ label, icon: Icon, iconColor = 'text-accent', value, f
   );
 }
 
-function RoleTiles({ role, name }: { role: Exclude<Role, 'admin'>; name: string }) {
+function RoleTiles({ role, name }: { role: Exclude<Role, 'admin' | 'super_admin'>; name: string }) {
   const cfg = CONFIG[role];
   const { data, loading } = useQuery<Summary>(cfg.endpoint ?? '/api/me');
   return (

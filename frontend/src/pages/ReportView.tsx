@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '../lib/useApi';
 import { PageHeader, Table, Spinner, StateBlock, type Column } from '../shared-components/primitives/ui';
-import { Pagination, daysAgo, todayStr, toIso } from '../shared-components/primitives/ReportPageKit';
+import { Pagination } from '../shared-components/primitives/ReportPageKit';
+import { TimeZoneSelect } from '../shared-components/primitives/ReportTimeZone';
+import { useReportZone } from '../lib/useReportZone';
+import { bucketLabel } from '../lib/reportTime';
 import { countryLabel } from '../data/geo';
 
 interface ReportRow {
@@ -26,9 +29,8 @@ const MONEY = new Set(['payout', 'revenue', 'margin', 'epc']);
 
 function fmtDim(key: string, value: string | null, offerNames: Map<string, string>): string {
   if (value == null) return '—';
-  // Report days/hours are UTC buckets — format them in UTC so a bucket never shifts a day.
-  if (key === 'day') return new Date(value).toLocaleDateString(undefined, { timeZone: 'UTC' });
-  if (key === 'hour') return `${new Date(value).toLocaleString(undefined, { timeZone: 'UTC' })} UTC`;
+  // Days / hours are the report zone's buckets — shown as their own local day / hour (never shifted).
+  if (key === 'day' || key === 'hour') return bucketLabel(key, value);
   if (key === 'country') return countryLabel(value);
   if (key === 'offer') return offerNames.get(value) ?? value.slice(0, 8) + '…';
   if (['publisher', 'advertiser'].includes(key)) return value.slice(0, 8) + '…';
@@ -38,18 +40,19 @@ function fmtDim(key: string, value: string | null, offerNames: Map<string, strin
 /**
  * Generic portal stats view. `basePath` is the reporting endpoint; group-by is user-selectable.
  * Bounded by a date range (default last 30 days) and paged with the endpoint's real total; days
- * read newest first. Offer names come from the portal's own offer list (offers the viewer can
+ * read newest first. Days are the network's time zone unless the viewer picks another (D7). Offer names come from the portal's own offer list (offers the viewer can
  * still see) — anything else falls back to a short id.
  */
 export default function ReportView({
   title, subtitle, basePath, groupByOptions,
 }: { title: string; subtitle: string; basePath: string; groupByOptions: string[] }) {
   const [groupBy, setGroupBy] = useState(groupByOptions[0]!);
-  const [from, setFrom] = useState(daysAgo(30));
-  const [to, setTo] = useState(todayStr());
+  const zone = useReportZone();
+  const [from, setFrom] = useState(() => zone.daysAgo(30));
+  const [to, setTo] = useState(() => zone.today());
   const [page, setPage] = useState(1);
   const qs = new URLSearchParams({
-    groupBy, from: toIso(from), to: toIso(to, true),
+    groupBy, ...zone.range(from, to),
     limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE),
   });
   if (groupBy === 'day' || groupBy === 'hour') qs.set('orderDir', 'desc');
@@ -78,12 +81,13 @@ export default function ReportView({
       <PageHeader title={title} subtitle={subtitle}
         action={
           <div className="flex flex-wrap items-end gap-2">
-            <label className="text-tiny text-fg-secondary">From (UTC)
+            <label className="text-tiny text-fg-secondary">From ({zone.short})
               <input type="date" className="input" value={from} max={to} onChange={(e) => { if (e.target.value) { setFrom(e.target.value); setPage(1); } }} />
             </label>
-            <label className="text-tiny text-fg-secondary">To (UTC)
-              <input type="date" className="input" value={to} min={from} max={todayStr()} onChange={(e) => { if (e.target.value) { setTo(e.target.value); setPage(1); } }} />
+            <label className="text-tiny text-fg-secondary">To ({zone.short})
+              <input type="date" className="input" value={to} min={from} max={zone.today()} onChange={(e) => { if (e.target.value) { setTo(e.target.value); setPage(1); } }} />
             </label>
+            <TimeZoneSelect zone={zone} selectClassName="max-w-[16rem] text-small" />
             <select className="input max-w-[180px]" value={groupBy} onChange={(e) => { setGroupBy(e.target.value); setPage(1); }}>
               {groupByOptions.map((g) => <option key={g} value={g}>Group by {g}</option>)}
             </select>

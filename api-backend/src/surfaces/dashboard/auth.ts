@@ -11,36 +11,29 @@
  * until then we read role/network from verified custom claims and default safely.
  */
 import type { Request, Response, NextFunction } from 'express';
-import { unauthorized, forbidden } from '../../lib/http/errors.js';
+import { AppError, unauthorized, forbidden, serviceUnavailable } from '../../lib/http/errors.js';
 import { verifySupabaseJwt } from '../../lib/auth/verify-jwt.js';
+import {
+ isImpersonationToken, verifyImpersonationToken, signImpersonationToken, impersonationConfigured,
+} from '../../lib/auth/impersonation-token.js';
+import { networkAccessError } from '../../lib/networks/state.js';
 import { query } from '../../lib/db/pool.js';
+import { staffState } from '../../lib/auth/staff-state.js';
+import {
+ portalAccountStatus, portalAccessAllowed, inactiveAccountMessage, deletedAccountMessage,
+} from '../../lib/auth/portal-state.js';
 import type { DashboardKind, AdminRole } from '../../middleware/types.js';
 
 const ROLES: readonly AdminRole[] = ['admin', 'manager', 'finance', 'read_only'];
-const KINDS: readonly DashboardKind[] = ['admin', 'publisher', 'advertiser'];
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const NETWORK_OK_TTL_MS = 60_000;
-const networkSeen = new Map<string, number>();
 
 /**
- * The `network_id` claim is stamped on the Supabase user at provisioning and outlives the network
- * row: after a network is deleted, its logins keep valid JWTs whose reads come back empty and whose
- * first INSERT dies on a `network_id` FK (23503 — surfaced as a misleading "still in use" 409).
- * Reject such tokens up front. Positive results are cached briefly; misses are never cached.
+ * What a login still on its temporary password (an invite — `must_change_password` in its claims)
+ * may do: read who it is, and choose a new password (O1). Anything else → 403
+ * password_change_required, which sends the SPA to its change-password page.
  */
-async function networkExists(networkId: string): Promise<boolean> {
- if (!UUID_RE.test(networkId)) return false;
- const until = networkSeen.get(networkId);
- if (until && until > Date.now()) return true;
- const { rows } = await query('SELECT 1 FROM networks WHERE id = $1', [networkId]);
- if (!rows.length) {
- networkSeen.delete(networkId);
- return false;
- }
- networkSeen.set(networkId, Date.now() + NETWORK_OK_TTL_MS);
- return true;
-}
+const PASSWORD_CHANGE_ALLOWED = new Set(['GET /api/me', 'PATCH /api/me/password']);
+const KINDS: readonly DashboardKind[] = ['admin', 'publisher', 'advertiser'];
+
 
 function bearer(req: Request): string | null {
  const h = req.header('authorization');
@@ -56,9 +49,31 @@ function bearer(req: Request): string | null {
  */
 export async function dashboardAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
  const token = bearer(req);
- if (!token) return next(unauthorized('Missing bearer token.'));
+ if (!token) return next(unauthorized('You are not signed in (the request had no sign-in token). Please sign in again.'));
 
+ // Admin impersonation session (F-10): its own short-lived token and secret — the account's portal
+ // identity plus the admin behind it (`impersonatedBy`). Everything else is a Supabase-issued token.
+ if (isImpersonationToken(token)) {
  try {
+ const s = await verifyImpersonationToken(token);
+ if (s.kind === 'admin') {
+ // A Super Admin support session: the network's admin, acted by (and audited to) the platform admin.
+ req.identity = {
+ surface: 'dashboard', kind: 'admin', role: 'admin', userId: s.platformAdminId, networkId: s.networkId,
+ impersonatedBy: s.platformAdminId, impersonationExpiresAt: s.expiresAt, platformSupport: true,
+ };
+ req.scope = { networkId: s.networkId };
+ } else {
+ req.identity = {
+ surface: 'dashboard', kind: s.kind, userId: s.userId, networkId: s.networkId, ownerId: s.ownerId,
+ impersonatedBy: s.impersonatedBy, impersonationExpiresAt: s.expiresAt,
+ };
+ req.scope = { networkId: s.networkId, ownerId: s.ownerId };
+ }
+ } catch {
+ return next(unauthorized('Impersonation session is invalid or has expired.'));
+ }
+ } else try {
  const payload = await verifySupabaseJwt(token);
  const meta = (payload['app_metadata'] as Record<string, unknown> | undefined) ?? {};
  const claim = (k: string): string =>
@@ -73,6 +88,10 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  const kind = rawKind as DashboardKind;
 
  const userId = String(payload.sub ?? '');
+ if (meta['must_change_password'] === true
+ && !PASSWORD_CHANGE_ALLOWED.has(`${req.method} ${req.originalUrl.split('?')[0]!.replace(/\/+$/, '')}`)) {
+ return next(new AppError('forbidden', 'Choose a new password before you continue.', { reason: 'password_change_required' }));
+ }
  if (kind === 'admin') {
  const rawRole = claim('role') || 'read_only';
  const role: AdminRole = (ROLES as readonly string[]).includes(rawRole)
@@ -90,17 +109,94 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  return next(unauthorized('Invalid or expired token.'));
  }
 
- // Outside the try: a DB failure here is a 500, not "invalid token".
+ // The `network_id` claim is stamped on the Supabase user at provisioning and outlives the network
+ // row: a purged network's logins keep valid JWTs whose reads come back empty and whose first INSERT
+ // dies on a `network_id` FK — reject them up front. A suspended or (soft-)deleted network (F-26)
+ // has no dashboard or portal access either. Outside the try: a DB failure is a 500, not "invalid token".
  try {
- if (!(await networkExists(req.scope!.networkId))) {
+ const refused = await networkAccessError(req.scope!.networkId);
+ if (refused) {
  req.identity = undefined;
  req.scope = undefined;
- return next(unauthorized('This login belongs to a network that no longer exists. Sign in with an account on an active network.'));
+ return next(refused);
+ }
+ const id = req.identity!;
+ // A support session lasts only while its Super Admin account is active (disabled → refused at once).
+ if (id.surface === 'dashboard' && id.kind === 'admin' && id.platformSupport) {
+ const { rows } = await query<{ status: string }>('SELECT status FROM platform_admins WHERE id::text = $1', [id.userId]);
+ if (rows[0]?.status !== 'active') {
+ req.identity = undefined;
+ req.scope = undefined;
+ return next(unauthorized('This support session ended: its Super Admin account is no longer active.'));
+ }
+ }
+ // Team members: the users row decides — a disabled member is refused, and a role change applies
+ // now (the token's role claim is only the fallback for a login with no users row).
+ if (id.surface === 'dashboard' && id.kind === 'admin' && !id.platformSupport) {
+ const staff = await staffState(req.scope!.networkId, id.userId);
+ if (staff?.status === 'disabled') {
+ req.identity = undefined;
+ req.scope = undefined;
+ return next(new AppError('forbidden', 'This account is disabled. Ask an admin of your network to re-enable it.', { reason: 'account_disabled' }));
+ }
+ if (staff && (ROLES as readonly string[]).includes(staff.role)) id.role = staff.role as AdminRole;
+ }
+ // Partners / advertisers: the account row decides too — a deleted account, or one set inactive,
+ // loses portal access on its next request. An admin may still impersonate an inactive account
+ // (to look at it for support), but not one that no longer exists.
+ if (id.surface === 'dashboard' && id.kind !== 'admin') {
+ const status = await portalAccountStatus(req.scope!.networkId, id.kind, id.ownerId);
+ if (status === null || (!id.impersonatedBy && !portalAccessAllowed(status))) {
+ req.identity = undefined;
+ req.scope = undefined;
+ return next(status === null
+ ? new AppError('unauthorized', deletedAccountMessage(id.kind), { reason: 'account_deleted' })
+ : new AppError('forbidden', inactiveAccountMessage(id.kind), { reason: 'account_inactive' }));
+ }
  }
  } catch (err) {
  return next(err);
  }
  return next();
+}
+
+/** Is this request an impersonation (F-10) — an admin in a portal account, or a Super Admin support session? */
+export function isImpersonating(req: Request): boolean {
+ const id = req.identity;
+ return Boolean(id && id.surface === 'dashboard' && id.impersonatedBy);
+}
+
+/**
+ * Refuse while impersonating (F-10) — for credential changes (password, email, anonymize, API keys):
+ * an impersonation session is time-boxed and must not be able to outlive or take over the account.
+ * `writesOnly` lets reads through (e.g. listing API keys).
+ */
+export function notWhileImpersonating(opts: { writesOnly?: boolean } = {}) {
+ return (req: Request, _res: Response, next: NextFunction): void => {
+ if (opts.writesOnly && (req.method === 'GET' || req.method === 'HEAD')) return next();
+ if (isImpersonating(req)) return next(forbidden('Not available while impersonating.'));
+ return next();
+ };
+}
+
+/**
+ * Start impersonating a partner/advertiser account (F-10): a dedicated short-lived session for that
+ * account's portal, flagged with the admin starting it — never the account's own credentials. Works
+ * whether or not the account has a portal login. Returns the API response and what to audit.
+ */
+export async function startImpersonation(
+ req: Request, kind: 'publisher' | 'advertiser', account: { id: string; auth_user_id: string | null },
+) {
+ if (!impersonationConfigured()) throw serviceUnavailable('Impersonation is not configured on this server (IMPERSONATION_JWT_SECRET).');
+ const id = req.identity;
+ if (!id || id.surface !== 'dashboard' || id.kind !== 'admin') throw forbidden('Admin access required.');
+ const { token, expiresAt, jti } = await signImpersonationToken({
+ kind, networkId: id.networkId, ownerId: account.id, userId: account.auth_user_id ?? account.id, impersonatedBy: id.userId,
+ });
+ return {
+ response: { token, expiresAt, kind, ownerId: account.id, impersonatedBy: id.userId },
+ audit: { impersonatedBy: id.userId, expiresAt: new Date(expiresAt * 1000).toISOString(), sessionId: jti },
+ };
 }
 
 /** Restrict to admin logins (not portal users). */

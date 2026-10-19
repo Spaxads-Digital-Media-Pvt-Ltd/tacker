@@ -14,7 +14,7 @@ import { ChevronDown, ChevronUp, Filter, Search, X } from 'lucide-react';
 import { Overlay } from '../../../shared-components/primitives/ui';
 import { SearchablePicker, type PickerOption } from '../../../shared-components/primitives/SearchablePicker';
 import { TimeZoneSelect } from '../../../shared-components/primitives/ReportTimeZone';
-import type { ReportTimeZone } from '../../../lib/useReportTimeZone';
+import type { ReportZone } from '../../../lib/useReportZone';
 import {
   VISIBILITY_OPTIONS, draftErrors, draftFromApplied, filtersFromDraft, partitionFields, searchFields, selectAllState, setAllFields, toggleField,
   untrackedToggleLabel, type ClickField,
@@ -39,7 +39,7 @@ export function ClickFiltersModal({
   appliedCount: number;
   timezone: string;
   fields: string[];
-  zone: ReportTimeZone;
+  zone: ReportZone;
   offers: PickerOption[];
   partners: PickerOption[];
   advertisers: PickerOption[];
@@ -127,7 +127,7 @@ export function ClickFiltersModal({
     </div>
   );
   // The draft timezone needs a controlled select: TimeZoneSelect with value/onChange.
-  const draftZone: ReportTimeZone = { ...zone, override: draft.timezone || null, setOverride: (tz) => setDraft((d) => ({ ...d, timezone: tz ?? '' })) };
+  const draftZone: ReportZone = { ...zone, override: draft.timezone || null, setOverride: (tz) => setDraft((d) => ({ ...d, timezone: tz ?? '' })) };
 
   return (
     <Overlay>
@@ -161,7 +161,7 @@ export function ClickFiltersModal({
             <div className="min-w-0">
               <span className="label">Select Timezone</span>
               <TimeZoneSelect zone={draftZone} selectClassName="!w-full min-w-0 max-w-full" />
-              <p className="mt-1 text-tiny text-fg-muted">Display only — times are re-formatted; the date range stays UTC days.</p>
+              <p className="mt-1 text-tiny text-fg-muted">The report's time zone: its date range, days and the times shown.</p>
             </div>
             {pickerField('Select Smart Links', 'smartLink', smartLinks, draft.filters.smartLink, (v) => setFilter('smartLink', v), 'Type to search smart links…')}
             {pickerField('Select Country', 'country', countries, draft.filters.country, (v) => setFilter('country', v), 'Type to search countries…')}

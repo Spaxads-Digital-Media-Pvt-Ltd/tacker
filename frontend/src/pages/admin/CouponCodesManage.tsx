@@ -75,7 +75,7 @@ function RowMenu({ coupon, onDeleted }: { coupon: CouponCode; onDeleted: () => v
     void confirm({
       title: 'Delete coupon code?', message: `Are you sure you want to delete coupon code "${coupon.code}"?`,
       confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+      onConfirm: async () => { await del.runOrThrow(undefined); onDeleted(); },
     });
   };
 

@@ -16,6 +16,7 @@ import { createPayoutRun } from '../../lib/ledger/ledger.js';
 import { CURRENCY_RE } from '../../lib/money.js';
 import { reportQuerySchema, buildReportRequest } from '../../lib/reporting/request.js';
 import { getReportingProvider } from '../../lib/reporting/index.js';
+import { attachLabels } from '../../lib/reporting/labels.js';
 import { requireScope, apiIdentity } from './auth.js';
 
 export function networkApi(): Router {
@@ -54,17 +55,18 @@ export function networkApi(): Router {
  `SELECT COUNT(*)::text n FROM clicks WHERE network_id = $1 AND created_at >= now() - interval '30 days'`,
  [id.networkId],
  )).rows[0]!.n;
- const conv = (await query<{ n: string; payout: string; revenue: string }>(
+ // Money stays exact (O9): the margin is computed by Postgres's numeric, not as JS floats.
+ const conv = (await query<{ n: string; payout: string; revenue: string; margin: string }>(
  `SELECT COUNT(*)::text n,
- COALESCE(SUM(payout),0)::text payout, COALESCE(SUM(revenue),0)::text revenue
+ COALESCE(SUM(payout),0)::text payout, COALESCE(SUM(revenue),0)::text revenue,
+ (COALESCE(SUM(revenue),0) - COALESCE(SUM(payout),0))::numeric(16,4)::text margin
  FROM conversions
  WHERE network_id = $1 AND status = 'approved' AND created_at >= now() - interval '30 days'`,
  [id.networkId],
  )).rows[0]!;
- const margin = (Number(conv.revenue) - Number(conv.payout)).toFixed(4);
  sendOk(res, {
  windowDays: 30, clicks: Number(clicks), conversions: Number(conv.n),
- payout: conv.payout, revenue: conv.revenue, margin,
+ payout: conv.payout, revenue: conv.revenue, margin: conv.margin,
  });
  }),
  );
@@ -77,7 +79,7 @@ export function networkApi(): Router {
  asyncHandler(async (req, res) => {
  const id = apiIdentity(req);
  const request = buildReportRequest(id.networkId, res.locals.query, 'network');
- sendOk(res, await getReportingProvider().runReport(request));
+ sendOk(res, await attachLabels(id.networkId, await getReportingProvider().runReport(request)));
  }),
  );
 

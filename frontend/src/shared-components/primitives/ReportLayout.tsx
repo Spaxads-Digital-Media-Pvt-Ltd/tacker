@@ -16,6 +16,8 @@
 import type { ReactNode } from 'react';
 import { ArrowRight, SlidersHorizontal } from 'lucide-react';
 import { REPORT_CONTROL } from './reportControl';
+import { TimeZoneSelect } from './ReportTimeZone';
+import type { ReportZone } from '../../lib/useReportZone';
 
 /** One card with flush sections (controls / results bar / body). No hover lift — it holds dropdowns. */
 export function ReportCard({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -47,25 +49,32 @@ export function ControlField({ label, htmlFor, className = 'w-full sm:w-56', chi
 
 /**
  * From → To as one field on wider screens; the two dates stack on phones, where side by side
- * they'd clip. Ids are `${idPrefix}-from` / `${idPrefix}-to`.
+ * they'd clip. Ids are `${idPrefix}-from` / `${idPrefix}-to`. With `zone` (D7) the dates are that
+ * zone's days — the label says which — and its picker sits beside them (`zonePicker={false}` when
+ * the page shows it elsewhere).
  */
-export function DateRangeField({ idPrefix, label = 'Date range (UTC)', from, to, max, invalid, onFrom, onTo }: {
+export function DateRangeField({ idPrefix, label, from, to, max, invalid, onFrom, onTo, zone, zonePicker = true }: {
   idPrefix: string; label?: string; from: string; to: string; max: string; invalid?: boolean;
   onFrom: (v: string) => void; onTo: (v: string) => void;
+  zone?: ReportZone; zonePicker?: boolean;
 }) {
   const labelId = `${idPrefix}-range-label`;
+  const zoneName = zone ? zone.short : 'UTC';
   return (
     <div className="w-full sm:w-auto">
-      <span className="label" id={labelId}>{label}</span>
+      <span className="label" id={labelId}>{label ?? `Date range (${zoneName})`}</span>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div role="group" aria-labelledby={labelId}
         className={`flex flex-col rounded-[var(--radius)] border bg-surface shadow-sm transition-all duration-150 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25 sm:h-10 sm:flex-row sm:items-center ${invalid ? 'border-danger' : 'border-fg-muted/30 hover:border-accent/50'}`}>
-        <input id={`${idPrefix}-from`} type="date" aria-label="From (UTC)" value={from} max={to || max}
+        <input id={`${idPrefix}-from`} type="date" aria-label={`From (${zoneName})`} value={from} max={to || max}
           aria-invalid={invalid || undefined} onChange={(e) => onFrom(e.target.value)}
           className="h-10 w-full min-w-0 bg-transparent px-3.5 text-body text-fg focus:outline-none sm:h-full sm:w-[9.5rem] sm:pr-2" />
         <ArrowRight size={14} className="hidden shrink-0 text-fg-muted sm:block" aria-hidden />
-        <input id={`${idPrefix}-to`} type="date" aria-label="To (UTC)" value={to} min={from || undefined} max={max}
+        <input id={`${idPrefix}-to`} type="date" aria-label={`To (${zoneName})`} value={to} min={from || undefined} max={max}
           aria-invalid={invalid || undefined} onChange={(e) => onTo(e.target.value)}
           className="h-10 w-full min-w-0 border-t border-border bg-transparent px-3.5 text-body text-fg focus:outline-none sm:h-full sm:w-[9.5rem] sm:border-t-0 sm:pl-2" />
+      </div>
+      {zone && zonePicker && <TimeZoneSelect zone={zone} selectClassName={`${REPORT_CONTROL} min-w-0 max-w-full text-small sm:max-w-[17rem]`} />}
       </div>
     </div>
   );

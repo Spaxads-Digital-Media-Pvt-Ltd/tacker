@@ -16,11 +16,28 @@ import { installReportingProvider } from '../../lib/reporting/clickhouse.js';
 import { closeClickHouse, isClickHouseEnabled } from '../../lib/clickhouse/client.js';
 import { QUEUE, getQueue, type QueueName } from './queues.js';
 import { startClickPersistWorker } from './processors/click-persist.js';
+import { startImpressionPersistWorker } from './processors/impression-persist.js';
+import { startImpressionBillingWorker, scheduleImpressionBilling } from './processors/impression-billing.js';
+import { startTracker24Worker } from './processors/tracker24.js';
 import { startOutboundPostbackWorker } from './processors/outbound-postback.js';
 import { startFraudScanWorker, scheduleFraudScan } from './processors/fraud-scan.js';
 import { startRetentionWorker, scheduleRetention } from './processors/retention.js';
 import { startFacebookCapiWorker } from './processors/facebook-capi.js';
 import { startOfferFeedSyncWorker, scheduleOfferFeedScan } from './processors/offer-feed-sync.js';
+import { startDomainVerifyWorker, scheduleDomainVerify } from './processors/domain-verify.js';
+import { startScheduledActionsWorker, scheduleScheduledActions } from './processors/scheduled-actions.js';
+import { startAlertRulesWorker, scheduleAlertRules } from './processors/alert-rules.js';
+import { startSmartSwitchWorker, scheduleSmartSwitch } from './processors/smartswitch.js';
+import { startAutomationWebhookWorker } from './processors/automation-webhook.js';
+import { startSmartLinkKpiWorker, scheduleSmartLinkKpi } from './processors/smart-link-kpi.js';
+import { startReportingRollupWorker, scheduleReportingRollup } from './processors/reporting-rollup.js';
+import { startScheduledReportsWorker, scheduleScheduledReports } from './processors/scheduled-reports.js';
+import { startUsageMeterWorker, scheduleUsageMeter } from './processors/usage-meter.js';
+import { startPlatformBillingWorker, schedulePlatformBilling } from './processors/platform-billing.js';
+import { startPlatformHealthWorker, schedulePlatformHealth } from './processors/platform-health.js';
+import { startPlatformSupportWorker, schedulePlatformSupport } from './processors/platform-support.js';
+import { startPlatformTrustWorker, schedulePlatformTrust } from './processors/platform-trust.js';
+import { startEmailWorker } from './processors/email.js';
 
 const log = surfaceLogger('workers');
 
@@ -33,15 +50,45 @@ installReportingProvider();
 // Phase 2: click persistence. Phase 3: outbound postbacks. Phase 6: fraud scan. Phase 8: retention.
 const workers = [
  startClickPersistWorker(),
+ startImpressionPersistWorker(),
+ startImpressionBillingWorker(),
+ startTracker24Worker(),
  startOutboundPostbackWorker(),
  startFraudScanWorker(),
  startRetentionWorker(),
  startFacebookCapiWorker(),
  startOfferFeedSyncWorker(),
+ startDomainVerifyWorker(),
+ startScheduledActionsWorker(),
+ startAlertRulesWorker(),
+ startSmartSwitchWorker(),
+ startAutomationWebhookWorker(),
+ startSmartLinkKpiWorker(),
+ startReportingRollupWorker(),
+ startScheduledReportsWorker(),
+ startUsageMeterWorker(),
+ startPlatformBillingWorker(),
+ startPlatformHealthWorker(),
+ startPlatformSupportWorker(),
+ startPlatformTrustWorker(),
+ startEmailWorker(),
 ];
+void scheduleImpressionBilling().catch((err) => log.error({ err }, 'failed to schedule impression billing'));
 void scheduleFraudScan().catch((err) => log.error({ err }, 'failed to schedule fraud scan'));
 void scheduleRetention().catch((err) => log.error({ err }, 'failed to schedule retention'));
 void scheduleOfferFeedScan().catch((err) => log.error({ err }, 'failed to schedule offer feed scan'));
+void scheduleDomainVerify().catch((err) => log.error({ err }, 'failed to schedule tracking domain re-check'));
+void scheduleScheduledActions().catch((err) => log.error({ err }, 'failed to schedule scheduled actions'));
+void scheduleAlertRules().catch((err) => log.error({ err }, 'failed to schedule alert rules'));
+void scheduleSmartSwitch().catch((err) => log.error({ err }, 'failed to schedule smartswitch'));
+void scheduleSmartLinkKpi().catch((err) => log.error({ err }, 'failed to schedule smart link KPI scoring'));
+void scheduleReportingRollup().catch((err) => log.error({ err }, 'failed to schedule reporting rollups'));
+void scheduleScheduledReports().catch((err) => log.error({ err }, 'failed to schedule scheduled reports'));
+void scheduleUsageMeter().catch((err) => log.error({ err }, 'failed to schedule usage metering'));
+void schedulePlatformBilling().catch((err) => log.error({ err }, 'failed to schedule platform billing'));
+void schedulePlatformHealth().catch((err) => log.error({ err }, 'failed to schedule customer health'));
+void schedulePlatformSupport().catch((err) => log.error({ err }, 'failed to schedule support housekeeping'));
+void schedulePlatformTrust().catch((err) => log.error({ err }, 'failed to schedule the trust scan'));
 
 // Report only EXHAUSTED-retry failures to Sentry so transient retries don't spam it.
 for (const w of workers) {

@@ -10,8 +10,11 @@
  * 2. recordLoginFailure(ip, identifier) — called AFTER a failed auth; increments counters.
  * 3. resetLoginCounter(identifier) — called after a SUCCESSFUL login; clears acct key.
  *
- * Sliding window: 15 minutes split into 3 × 5-minute buckets. Counters for all currently-
- * active buckets are summed. Each bucket auto-expires 5 minutes after its first increment.
+ * Sliding window: 15 minutes split into 3 × 5-minute buckets. A failure is counted ONCE, in the
+ * current bucket; the window total is that bucket plus the 2 before it, and a bucket expires 15
+ * minutes after its last count. Blocked once the total REACHES the limit — 5 wrong passwords lock
+ * the account, the 6th attempt is refused. (O3: every failure used to INCR all 3 buckets, so an
+ * account locked after 2 wrong passwords and an IP after 4.)
  *
  * Thresholds (env-configurable, production-safe defaults):
  * - LOGIN_RATE_LIMIT_IP → 10 failures per IP per 15-min window (default)
@@ -61,6 +64,31 @@ function ipKeys(ipHash: string, idx: number): string[] {
 
 function acctKeys(acctHash: string, idx: number): string[] {
 	return Array.from({ length: BUCKET_COUNT }, (_, i) => `lr:acct:${acctHash}:${idx - i}`);
+}
+
+/**
+ * Seconds until the window total drops under `limit`: the oldest buckets leave the window one per
+ * bucket start (counts[0] is the current bucket, counts[i] the one i buckets back). Five failures
+ * in one bucket keep counting until that bucket leaves — up to 15 minutes, not 5.
+ */
+function secondsUntilUnder(counts: number[], limit: number, now: Date): number {
+	const bucketMs = BUCKET_MINUTES * 60_000;
+	const nextBucketStart = (bucketIndex(now) + 1) * bucketMs;
+	for (let k = 1; k < BUCKET_COUNT; k++) {
+		// Once k more buckets have begun, only counts[0 .. BUCKET_COUNT-1-k] are still in the window.
+		const remaining = counts.slice(0, BUCKET_COUNT - k).reduce((a, b) => a + b, 0);
+		if (remaining < limit) return Math.ceil((nextBucketStart + (k - 1) * bucketMs - now.getTime()) / 1000);
+	}
+	return Math.ceil((nextBucketStart + (BUCKET_COUNT - 1) * bucketMs - now.getTime()) / 1000);
+}
+
+/** What a refused sign-in says: which limit, and when to try again ("in 14 minutes"). */
+export function loginRateLimitMessage(result: RateLimitResult): string {
+	const minutes = Math.max(1, Math.ceil(result.retryAfterSeconds / 60));
+	const wait = `try again in ${minutes} minute${minutes === 1 ? '' : 's'}`;
+	return result.reason === 'account'
+		? `Too many failed attempts for this account — ${wait}.`
+		: `Too many login attempts from this network — ${wait}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,11 +149,11 @@ export async function checkLoginRateLimit(
 		const ipTotal = ipCounts.reduce((a, b) => a + b, 0);
 		const acctTotal = acctCounts.reduce((a, b) => a + b, 0);
 
-		if (ipTotal > IP_LIMIT) {
-			return { limited: true, reason: 'ip', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
+		if (ipTotal >= IP_LIMIT) {
+			return { limited: true, reason: 'ip', retryAfterSeconds: secondsUntilUnder(ipCounts, IP_LIMIT, now), ipCount: ipTotal, accountCount: acctTotal };
 		}
-		if (acctTotal > ACCOUNT_LIMIT) {
-			return { limited: true, reason: 'account', retryAfterSeconds: BUCKET_MINUTES * 60, ipCount: ipTotal, accountCount: acctTotal };
+		if (acctTotal >= ACCOUNT_LIMIT) {
+			return { limited: true, reason: 'account', retryAfterSeconds: secondsUntilUnder(acctCounts, ACCOUNT_LIMIT, now), ipCount: ipTotal, accountCount: acctTotal };
 		}
 
 		return { limited: false, ipCount: ipTotal, accountCount: acctTotal, retryAfterSeconds: 0 };
@@ -146,8 +174,8 @@ export async function checkLoginRateLimit(
  * Call AFTER verifying credentials are wrong (wrong password, unknown account, disabled
  * account, etc.) so the failure is actually counted.
  *
- * Implements its own atomic INCR — does NOT call checkLoginRateLimit, so each failed
- * attempt increments exactly once.
+ * Counts the failure once, in the current bucket of each key (IP, account), and reads the earlier
+ * buckets for the totals — one pipeline.
  */
 export async function recordLoginFailure(
 	ip: string,
@@ -160,30 +188,19 @@ export async function recordLoginFailure(
 
 	const ipK = ipKeys(ipHash, idx);
 	const acctK = acctKeys(acctHash, idx);
-	const allKeys = [...ipK, ...acctK];
 
 	try {
-		const redis = getRedis();
+		const pipe = getRedis().pipeline();
+		// Count once — the current bucket of each key; read the earlier buckets for the totals.
+		for (const k of [ipK[0]!, acctK[0]!]) { pipe.incr(k); pipe.expire(k, WINDOW_MINUTES * 60); }
+		for (const k of [...ipK.slice(1), ...acctK.slice(1)]) pipe.get(k);
+		const res = (await pipe.exec()) as [Error | null, unknown][];
+		const n = (i: number) => Number(res[i]?.[1] ?? 0) || 0;
+		const earlier = BUCKET_COUNT - 1;
+		const ipCount = n(0) + Array.from({ length: earlier }, (_, i) => n(4 + i)).reduce((a, b) => a + b, 0);
+		const accountCount = n(2) + Array.from({ length: earlier }, (_, i) => n(4 + earlier + i)).reduce((a, b) => a + b, 0);
 
-		// Pipeline 1: INCR all buckets (returns new count for each).
-		const incrPipe = redis.pipeline();
-		for (const k of allKeys) incrPipe.incr(k);
-		const incrResults = (await incrPipe.exec()) as [Error | null, number][];
-
-		// Pipeline 2: EXPIRE all buckets (no-op for keys with existing TTL).
-		const expPipe = redis.pipeline();
-		for (const k of allKeys) expPipe.expire(k, WINDOW_MINUTES * 60);
-		await expPipe.exec();
-
-		const ipCounts = Array.from({ length: BUCKET_COUNT }, (_, i) => Number(incrResults[i]?.[1] ?? 0));
-		const acctCounts = Array.from({ length: BUCKET_COUNT }, (_, i) => Number(incrResults[BUCKET_COUNT + i]?.[1] ?? 0));
-
-		return {
-			limited: false,
-			retryAfterSeconds: 0,
-			ipCount: ipCounts.reduce((a, b) => a + b, 0),
-			accountCount: acctCounts.reduce((a, b) => a + b, 0),
-		};
+		return { limited: false, retryAfterSeconds: 0, ipCount, accountCount };
 	} catch (err) {
 		logger.warn({ err }, 'login rate limiter: Redis unavailable — failing open');
 		return { limited: false, ipCount: 0, accountCount: 0, retryAfterSeconds: 0 };

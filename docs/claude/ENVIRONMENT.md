@@ -8,6 +8,7 @@
 | `NODE_ENV` | Environment mode | `development`/`test`/`production` | `development` |
 | `LOG_LEVEL` | Log verbosity | `fatal`/`error`/`warn`/`info`/`debug`/`trace` | `info` |
 | `DATABASE_URL` | PostgreSQL connection string | URL | `postgres://tracker:tracker_local_dev@localhost:5432/tracker` |
+| `DB_POOL_MAX` | Optional. Most Postgres connections per backend process (5 processes). Default 20 in production / 10 otherwise — **3 on a Supabase session pooler** (`*.pooler.supabase.com:5432`, whose default pool_size is 15 clients for the whole project; more and jobs fail with `EMAXCONNSESSION`). Raise it together with the Supabase pool size | integer 1–100 | `3` |
 | `REDIS_URL` | Redis connection string | URL | `redis://localhost:6379` |
 
 ### Required for Auth
@@ -17,18 +18,31 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | Backend admin key — **never leaves backend** | — |
 | `SUPABASE_JWT_SECRET` | HS256 fallback for test tokens | — |
 | `PLATFORM_ADMIN_JWT_SECRET` | Super admin JWT secret | — |
+| `SETTINGS_ENC_KEY` | Encrypts integration credentials + the SMTP password in `networks.settings` (AES-256-GCM). 32 bytes as 64 hex chars or base64 (`openssl rand -hex 32`). **Required — boot fails without it.** Keep it stable and backed up: stored secrets can't be read without it | — |
 
 ### Optional
 | Variable | Purpose | Default |
 |---|---|---|
+| `IMPERSONATION_JWT_SECRET` | Signs admin impersonation sessions and Super Admin support sessions (30 min). ≥32 chars (`openssl rand -hex 32`). Unset → "Impersonate" and Super Admin "Open dashboard" answer 503 | — |
 | `TRACKING_BASE_DOMAIN` | Base for tenant subdomains | `ourtracking.com` |
-| `TRACKING_TRUSTED_PROXIES` | Extra proxies (comma-separated IPv4/IPv6 IPs or CIDRs) allowed to set `X-Forwarded-For` on the tracking surface, e.g. an Nginx/LB not on the same host. Loopback + Cloudflare's published ranges are always trusted | — |
+| `TRACKING_RL_CLICK_LIMIT` | `/click`, `/sl`: requests per IP per sliding 5-min window (each request counts once — O3) | `120` |
+| `TRACKING_RL_POSTBACK_LIMIT` | `/postback`: **failed** postbacks (no / wrong security code, unknown click) per IP per 5 min — an authenticated postback is never throttled (O3); also the per-IP limit for `/pixel` and `/iframe` (all requests) | `60` |
+| `TRACKING_RL_POSTBACK_PER_CLICK_LIMIT` | `/postback`: failed postbacks per `click_id` per 5 min (a leaked click id can't be hammered from many IPs). Off in development/test | `20` |
+| `LOGIN_RATE_LIMIT_ACCOUNT` / `LOGIN_RATE_LIMIT_IP` | Failed sign-ins per account / per IP per 15 min before the next attempt is refused (each failure counts once — O3) | `5` / `10` |
+| `TRUSTED_PROXIES` | Proxies every surface trusts to set `X-Forwarded-For` (O2): comma-separated IPv4/IPv6 IPs or CIDRs, and `private` (10/8, 172.16/12, 192.168/16, fc00::/7). Loopback + Cloudflare's published ranges are always trusted. **AWS ALB + Cloudflare: `private`** | — |
+| `TRACKING_TRUSTED_PROXIES` | Older name — merged into `TRUSTED_PROXIES` | — |
 | `SENTRY_DSN` | Error tracking (no-op if absent) | — |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sentry trace sampling | `0` |
 | `ANTHROPIC_API_KEY` | AI ops layer (Phase 7) | — |
+| `AI_DAILY_CHAT_LIMIT` | AI chats per network per UTC day on `/api/ai/chat`; `0` = no cap | `200` |
+| `AI_DAILY_TOKEN_LIMIT` | Model tokens (input + output, every tool-loop turn) per network per UTC day; `0` = no cap | `2000000` |
 | `MAXMIND_LICENSE_KEY` | GeoIP2 DB updates | — |
-| `CLICK_RETENTION_DAYS` | Days to keep clicks before pruning | `90` |
-| `CONVERSION_RETENTION_DAYS` | Days to keep conversions before pruning | `400` |
+| `TRACKER24_GATEWAY_URL` | The 24metrics gateway base (`{id}` = the offer's 24metrics tracker ID) — point it at `scripts/fake-24metrics.mjs` (`http://localhost:4799/{id}`) to test without an account | `https://{id}.gateway.go2link.co` |
+| `TRACKING_RL_CLICK_LIMIT` × 5 | `/impression` per IP per 5 min (a page can show several ads) — derived, not its own variable | `600` |
+| `CLICK_RETENTION_DAYS` | Default days to keep clicks + postback logs (a network can override in Settings › Retention; 0 = keep forever) | `90` |
+| `CONVERSION_RETENTION_DAYS` | Default days to keep conversions that never touched the ledger (per-network override as above). Ledgered conversions are never pruned (F-21) | `400` |
+| `NETWORK_PURGE_GRACE_DAYS` | Days a soft-deleted network waits before `POST /platform/networks/:id/purge` may hard-delete it; `0` = no wait (F-26) | `30` |
+| `REPORTING_ROLLUPS` | `on` = the Postgres reporting provider reads the 15-minute rollups when a report fits them (F-20); `off` = raw tables only (the vitest config pins `off`) | `on` |
 
 ### Surface Ports
 | Variable | Default | Description |

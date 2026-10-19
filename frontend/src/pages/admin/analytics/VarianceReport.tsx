@@ -34,7 +34,7 @@ import { PageHeader, Spinner, StateBlock } from '../../../shared-components/prim
 import { type FilterCategory, type FilterValues } from '../../../shared-components/primitives/CategorizedFilters';
 import { ApiRequestModal } from '../../../shared-components/primitives/TableActionsKit';
 import {
-  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct, toIso, daysAgo, todayStr,
+  type AggResult, type AggRow, METRICS_PARAM, DASH, DEVICE_OPTIONS, money, pct,
   deriveRow, type DerivedRow, Pagination,
   type MetricFilters, passesMetricFilters, reportingFiltersCount, ReportingFiltersFlyout,
   type ReportingFiltersValue, reportingChips, withoutReportingChip, EMPTY_REPORTING_FILTERS,
@@ -43,6 +43,9 @@ import { useReportOpts, type Opts } from '../Reports';
 import { countryLabel } from '../../../data/geo';
 import { ActiveFilterChips } from '../../../shared-components/primitives/ActiveFilterChips';
 import { useAutoDateRange } from '../reportView';
+import { bucketLabel } from '../../../lib/reportTime';
+import { useReportZone } from '../../../lib/useReportZone';
+import { zoneRangeParams } from '../../../lib/reportZone';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives/reportControl';
 import {
@@ -130,7 +133,7 @@ function resolveName(dim: DimKey, id: string | null, opts: Opts, smartLinkMap: M
   if (dim === 'publisher') { const m = opts.pubMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'advertiser') { const m = opts.advMap.get(id); return m ? `${m.ref != null ? `(${m.ref}) ` : ''}${m.name}` : id.slice(0, 8) + '…'; }
   if (dim === 'smartLink') return smartLinkMap.get(id) ?? id.slice(0, 8) + '…';
-  return uaDimensionLabel(dim, id);
+  return uaDimensionLabel(dim, bucketLabel(dim, id)); // Day / Hour: the bucket's own local day / hour
 }
 function linkFor(dim: DimKey, id: string): string | null {
   if (dim === 'offer') return `/app/offers/${id}`;
@@ -231,15 +234,15 @@ function SingleSelectDropdown({ label, value, onChange, allowNone }: { label: st
 }
 
 function ExpandedChildRows({
-  childDim, parentFilterParam, parentRawId, currentFrom, currentTo, previousFrom, previousTo, dimParams, mode, opts, smartLinkMap, currency,
+  childDim, parentFilterParam, parentRawId, currentFrom, currentTo, previousFrom, previousTo, tz, dimParams, mode, opts, smartLinkMap, currency,
 }: {
-  childDim: DimKey; parentFilterParam: string; parentRawId: string; currentFrom: string; currentTo: string; previousFrom: string; previousTo: string;
+  childDim: DimKey; parentFilterParam: string; parentRawId: string; currentFrom: string; currentTo: string; previousFrom: string; previousTo: string; tz: string;
   dimParams: Record<string, string | number | undefined>; mode: 'pct' | 'num'; opts: Opts; smartLinkMap: Map<string, string>; currency: string;
 }) {
   // The page's filters narrowed to this parent; the parent value replaces a page filter on the same
   // dimension, and a text parent value goes as a literal `key[]=value` (never comma-split).
   const qs = (from: string, to: string) => {
-    const params = buildQs({ ...dimParams, groupBy: childDim, metrics: withCurrenciesMetric(METRICS_PARAM), limit: 200, from: toIso(from), to: toIso(to, true) });
+    const params = buildQs({ ...dimParams, groupBy: childDim, metrics: withCurrenciesMetric(METRICS_PARAM), limit: 200, ...zoneRangeParams(from, to, tz) });
     setFilterValues(params, parentFilterParam, []);
     if (/Id$/.test(parentFilterParam)) params.set(parentFilterParam, parentRawId);
     else params.append(`${parentFilterParam}[]`, parentRawId);
@@ -287,8 +290,11 @@ export default function VarianceReport() {
   // No "Run Report": both ranges apply on their own once valid (debounced, see useAutoDateRange) and
   // every other control applies immediately. The table pages with the Current range's hook, so a new
   // Current range lands on page 1 in the same render (one request).
-  const current = useAutoDateRange(todayStr(), todayStr());
-  const previous = useAutoDateRange(daysAgo(1), daysAgo(1));
+  // D7: the report's time zone — the network's unless one is picked beside the dates: both ranges
+  // are its days ("today" / "yesterday" included); requests send plain dates + tz.
+  const zone = useReportZone();
+  const current = useAutoDateRange(zone.today(), zone.today());
+  const previous = useAutoDateRange(zone.daysAgo(1), zone.daysAgo(1));
   const { page, setPage, toFirstPage } = current;
   const [parentDim, setParentDim] = useState<DimKey>('publisher');
   const [childDim, setChildDim] = useState<DimKey | null>(null);
@@ -357,8 +363,8 @@ export default function VarianceReport() {
   const qs = (extra: Record<string, string | number | undefined>) => buildQs(extra).toString();
 
   // Summary: one exact grand-total row per period (groupBy=none), not a sum of a truncated grouping.
-  const curSummaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(currentFrom), to: toIso(currentTo, true), ...dimParams });
-  const prevSummaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), from: toIso(previousFrom), to: toIso(previousTo, true), ...dimParams });
+  const curSummaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), ...zone.range(currentFrom, currentTo), ...dimParams });
+  const prevSummaryQs = qs({ groupBy: 'none', metrics: withBreakdownMetrics(METRICS_PARAM), ...zone.range(previousFrom, previousTo), ...dimParams });
   const { data: curSummaryData, loading: curSummaryLoading, error: curSummaryError } = useQuery<AggResult>(`/api/reports?${curSummaryQs}`);
   const { data: prevSummaryData, loading: prevSummaryLoading, error: prevSummaryError } = useQuery<AggResult>(`/api/reports?${prevSummaryQs}`);
   const summaryLoading = curSummaryLoading || prevSummaryLoading;
@@ -369,7 +375,7 @@ export default function VarianceReport() {
   // Previous result had no activity there — a real 0, not a top-N truncation artefact). Page size
   // stays ≤ 20: comma-bearing text keys go as repeated `key[]` params, which the API caps at 20.
   const curTableQs = qs({
-    groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM), from: toIso(currentFrom), to: toIso(currentTo, true), ...dimParams,
+    groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM), ...zone.range(currentFrom, currentTo), ...dimParams,
     orderBy: 'clicks', orderDir: 'desc', limit: pageSize, offset: (page - 1) * pageSize,
   });
   const { data: curData, loading: curLoading, error: curError } = useQuery<AggResult>(`/api/reports?${curTableQs}`);
@@ -384,7 +390,7 @@ export default function VarianceReport() {
     [curFresh, curData, parentDim]);
   const prevTableQs = useMemo(() => {
     if (!pageKeys.length) return null;
-    const params = buildQs({ groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM), from: toIso(previousFrom), to: toIso(previousTo, true), ...dimParams, limit: pageKeys.length });
+    const params = buildQs({ groupBy: parentDim, metrics: withCurrenciesMetric(METRICS_PARAM), ...zone.range(previousFrom, previousTo), ...dimParams, limit: pageKeys.length });
     setFilterValues(params, DIM_OPTIONS.find((o) => o.key === parentDim)!.filterParam, pageKeys);
     return params.toString();
   // dimParams is rebuilt each render; its content is fully determined by the filter state below.
@@ -436,8 +442,8 @@ export default function VarianceReport() {
   // Both ranges, dimensions and every Reporting Filter reset in one render → one request per query.
   // The debounced ranges catch up to the same values later and are then a no-op.
   const clearAll = () => {
-    current.reset({ from: todayStr(), to: todayStr() });
-    previous.reset({ from: daysAgo(1), to: daysAgo(1) });
+    current.reset({ from: zone.today(), to: zone.today() });
+    previous.reset({ from: zone.daysAgo(1), to: zone.daysAgo(1) });
     setParentDim('publisher'); setChildDim(null);
     setFilters({}); setExclusions({}); setMetricFilters({}); setIgnoreFailTraffic(false);
     setExpanded(new Set());
@@ -504,10 +510,10 @@ export default function VarianceReport() {
             <MoreVertical size={15} />
           </button>
         </>}>
-          <DateRangeField idPrefix="variance-current" label="Current (UTC)" from={current.from} to={current.to} max={todayStr()}
-            invalid={current.problem !== null} onFrom={current.setFrom} onTo={current.setTo} />
-          <DateRangeField idPrefix="variance-previous" label="Previous (UTC)" from={previous.from} to={previous.to} max={todayStr()}
-            invalid={previous.problem !== null} onFrom={previous.setFrom} onTo={previous.setTo} />
+          <DateRangeField idPrefix="variance-current" label={`Current (${zone.short})`} from={current.from} to={current.to} max={zone.today()}
+            invalid={current.problem !== null} onFrom={current.setFrom} onTo={current.setTo} zone={zone} />
+          <DateRangeField idPrefix="variance-previous" label={`Previous (${zone.short})`} from={previous.from} to={previous.to} max={zone.today()}
+            invalid={previous.problem !== null} onFrom={previous.setFrom} onTo={previous.setTo} zone={zone} zonePicker={false} />
           <SingleSelectDropdown label="Parent" value={parentDim} onChange={(k) => { if (k) changeParent(k); }} />
           <SingleSelectDropdown label="Child" value={childDim} onChange={changeChild} allowNone />
         </ReportControls>
@@ -619,7 +625,7 @@ export default function VarianceReport() {
                           parentFilterParam={DIM_OPTIONS.find((o) => o.key === parentDim)!.filterParam}
                           parentRawId={r.raw}
                           currentFrom={currentFrom} currentTo={currentTo}
-                          previousFrom={previousFrom} previousTo={previousTo}
+                          previousFrom={previousFrom} previousTo={previousTo} tz={zone.tz}
                           dimParams={dimParams} mode={mode} opts={opts} smartLinkMap={smartLinkMap} currency={currency}
                         />
                       )}

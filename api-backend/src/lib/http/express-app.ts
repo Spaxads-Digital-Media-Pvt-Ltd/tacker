@@ -9,6 +9,7 @@
  * configured dashboard origin(s). Set `corsOrigin: false` to disable CORS entirely (workers,
  * internal-only surfaces).
  */
+import { randomUUID } from 'node:crypto';
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
@@ -17,6 +18,11 @@ import { env } from '../../config/env.js';
 import { buildHealthReport } from './health.js';
 import { errorHandler, notFoundHandler } from './envelope.js';
 import { metricsText, metricsContentType, httpDuration } from '../metrics.js';
+import { buildTrustedProxyCheck, configuredProxies } from '../net/trusted-proxy.js';
+
+// X-Forwarded-For is believed only from trusted proxies (loopback, Cloudflare, TRUSTED_PROXIES — see
+// lib/net/trusted-proxy.ts), so req.ip is the real visitor on every surface (O2).
+const isTrustedProxy = buildTrustedProxyCheck(configuredProxies(env));
 
 type CorsOrigin = string | string[] | false;
 
@@ -47,10 +53,23 @@ function buildCorsMiddleware(origin: string | string[]): express.RequestHandler 
 export function createBaseApp(surface: string, corsOrigin?: CorsOrigin): Express {
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', (addr: string) => isTrustedProxy(addr));
   app.use(helmet({ crossOriginEmbedderPolicy: false }));
-  // 6mb matches creatives / branding data-URL uploads (zod max 6_000_000 on creative url).
-  app.use(express.json({ limit: '6mb' }));
-  app.use(pinoHttp({ logger: surfaceLogger(surface) }));
+  // No file travels as JSON any more — creatives (F-27), offer thumbnails, branding images and profile
+  // photos (O12) upload the raw file to object storage. 2mb covers the largest real JSON bodies (a
+  // 1,000-row conversion import, a 3,000-value traffic list); it was 6mb for data: URI logos.
+  app.use(express.json({ limit: '2mb' }));
+  // Every request gets an id — an incoming X-Request-Id that looks like one (a proxy's), else a new uuid —
+  // returned as X-Request-Id and logged with the request; a 500 quotes it as its reference.
+  app.use(pinoHttp({
+    logger: surfaceLogger(surface),
+    genReqId: (req, res) => {
+      const incoming = req.headers['x-request-id'];
+      const id = typeof incoming === 'string' && /^[A-Za-z0-9._-]{8,64}$/.test(incoming) ? incoming : randomUUID();
+      res.setHeader('x-request-id', id);
+      return id;
+    },
+  }));
 
   // CORS: allow configured origins for surfaces that are called from browsers.
   // Pass corsOrigin=false at the call site to skip (workers, internal-only surfaces).

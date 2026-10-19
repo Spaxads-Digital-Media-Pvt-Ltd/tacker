@@ -1,21 +1,58 @@
 #!/usr/bin/env bash
-# Download MaxMind GeoLite2 City + ASN databases for in-process geo enrichment (spec §2).
-# Requires a free MaxMind account + license key in MAXMIND_LICENSE_KEY.
-# Without these DBs the click path still works (geo enrichment fails-open).
+# Download the GeoIP databases the tracker reads country / region / city / ISP from (spec §2). Without a
+# city database, GEO rules (allow / block countries, per-country payouts) and geo targeting are NOT
+# enforced — every country is let through.
+#
+#   MaxMind GeoLite2 (recommended)  — free account at maxmind.com → Manage License Keys → put
+#                                     MAXMIND_LICENSE_KEY=… in api-backend/.env. Updated twice a week.
+#   DB-IP Lite (fallback, no account) — used when there is no MaxMind key. Updated monthly, CC BY 4.0
+#                                     (credit "IP Geolocation by DB-IP" with a link to db-ip.com).
+#
+# Files land in data/geoip/ (git-ignored); the tracking server reloads them within 10 minutes, no restart.
+# Re-run weekly (MaxMind) or monthly (DB-IP) to stay current, e.g. from cron.
+#
+#   npm run geoip:download
 set -euo pipefail
 
-: "${MAXMIND_LICENSE_KEY:?Set MAXMIND_LICENSE_KEY (free at maxmind.com)}"
-DEST="$(dirname "$0")/../data/geoip"
+cd "$(dirname "$0")/.."
+DEST="data/geoip"
 mkdir -p "$DEST"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
-fetch() {
-  local edition="$1"
-  echo "Downloading $edition..."
-  curl -sSL "https://download.maxmind.com/app/geoip_download?edition_id=${edition}&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz" \
-    | tar -xz -C "$DEST" --strip-components=1 --wildcards "*/${edition}.mmdb"
-  echo "  -> $DEST/${edition}.mmdb"
-}
+# The key from the environment, else from .env (that line only — .env is never sourced).
+KEY="${MAXMIND_LICENSE_KEY:-}"
+if [[ -z "$KEY" && -f .env ]]; then
+  KEY="$(grep -E '^MAXMIND_LICENSE_KEY=' .env | tail -1 | cut -d= -f2- | tr -d '"'"'"' ' || true)"
+fi
 
-fetch GeoLite2-City
-fetch GeoLite2-ASN
-echo "Done. Set MAXMIND_CITY_DB / MAXMIND_ASN_DB if you keep them elsewhere."
+# Atomic replace: the tracker never opens a half-written file.
+install_db() { mv -f "$1" "$DEST/$2.tmp" && mv -f "$DEST/$2.tmp" "$DEST/$2"; echo "  -> $DEST/$2"; }
+
+if [[ -n "$KEY" ]]; then
+  for edition in GeoLite2-City GeoLite2-ASN; do
+    echo "Downloading MaxMind ${edition}…"
+    curl -sSfL "https://download.maxmind.com/app/geoip_download?edition_id=${edition}&license_key=${KEY}&suffix=tar.gz" -o "$TMP/$edition.tar.gz"
+    mkdir -p "$TMP/$edition"
+    tar -xzf "$TMP/$edition.tar.gz" -C "$TMP/$edition"            # portable: no GNU-only --wildcards
+    found="$(find "$TMP/$edition" -name "$edition.mmdb" -type f | head -1)"
+    [[ -n "$found" ]] || { echo "No $edition.mmdb in the download — is the license key right?" >&2; exit 1; }
+    install_db "$found" "$edition.mmdb"
+  done
+  # A MaxMind database wins; drop DB-IP copies so it's clear which one is loaded.
+  rm -f "$DEST/dbip-city-lite.mmdb" "$DEST/dbip-asn-lite.mmdb"
+else
+  echo "No MAXMIND_LICENSE_KEY — using DB-IP Lite (free, monthly, CC BY 4.0)."
+  for kind in city asn; do
+    ok=""
+    for month in "$(date -u +%Y-%m)" "$(date -u -v-1m +%Y-%m 2>/dev/null || date -u -d '1 month ago' +%Y-%m)"; do
+      url="https://download.db-ip.com/free/dbip-${kind}-lite-${month}.mmdb.gz"
+      echo "Downloading ${url}…"
+      if curl -sSfL "$url" -o "$TMP/$kind.mmdb.gz"; then ok=1; break; fi
+    done
+    [[ -n "$ok" ]] || { echo "DB-IP $kind download failed." >&2; exit 1; }
+    gunzip -f "$TMP/$kind.mmdb.gz"
+    install_db "$TMP/$kind.mmdb" "dbip-${kind}-lite.mmdb"
+  done
+fi
+echo "Done. Check: curl -s localhost:4002/health | grep -o '\"geoip\":{[^}]*}'"

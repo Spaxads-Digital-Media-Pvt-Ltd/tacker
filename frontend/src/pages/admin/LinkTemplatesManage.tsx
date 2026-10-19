@@ -51,7 +51,7 @@ function RowMenu({ template, onChanged }: { template: LinkTemplate; onChanged: (
     void confirm({
       title: 'Delete link template?', message: `Are you sure you want to delete link template "${template.name}"?`,
       confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(undefined)) onChanged(); },
+      onConfirm: async () => { await del.runOrThrow(undefined); onChanged(); },
     });
   };
 

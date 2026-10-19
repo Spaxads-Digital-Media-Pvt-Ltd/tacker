@@ -2,19 +2,23 @@ import { z } from 'zod';
 import { moneySchema } from '../../../lib/money.js';
 import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 import { offerSettingsFields } from '../../../lib/offer-settings/index.js';
+import { tzParam } from '../../../lib/reporting/request.js';
 
 export const createOfferSchema = z.object({
   advertiserId: z.string().uuid(),
   name: z.string().min(1).max(200),
   status: z.enum(['draft', 'active', 'paused', 'archived']).default('draft'),
   destinationUrl: redirectUrlWithMax(2000),
-  payoutModel: z.enum(['CPA', 'CPL', 'CPC', 'CPI', 'RevShare']).default('CPA'),
+  // CPC pays the partner per click, CPM per 1000 impressions (lib/offer-settings/billing.ts); the others per conversion.
+  payoutModel: z.enum(['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare']).default('CPA'),
   defaultPayout: moneySchema.default('0'),
   defaultRevenue: moneySchema.default('0'),
   currency: z.string().length(3).default('USD'),
   dailyConversionCap: z.number().int().min(0).nullable().optional(),
   totalConversionCap: z.number().int().min(0).nullable().optional(),
   dailyClickCap: z.number().int().min(0).nullable().optional(),
+  // Cap time zone: when this offer's daily caps reset; null = the network's (Settings › General).
+  capTimezone: tzParam.nullable().optional(),
   attributionWindowS: z.number().int().min(0).max(31_536_000).optional(),
   dedupWindowS: z.number().int().min(0).max(31_536_000).optional(),
   allowedTrafficTypes: z.array(z.string().max(50)).max(50).optional(),

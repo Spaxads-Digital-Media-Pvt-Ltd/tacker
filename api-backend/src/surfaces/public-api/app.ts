@@ -17,6 +17,8 @@ import { networkApi } from './network.js';
 import { openApiSpec } from './openapi.js';
 
 export function buildPublicApiApp(): Express {
+  // The API IP whitelist (F-16) needs the real client address — createBaseApp trusts the same proxies
+  // as every surface (lib/net/trusted-proxy.ts).
   const app = createBaseApp('public-api');
 
   // Public, unauthenticated API docs.

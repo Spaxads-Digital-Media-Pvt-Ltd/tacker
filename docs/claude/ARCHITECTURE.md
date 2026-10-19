@@ -54,15 +54,17 @@ Client Browser
 │ - click-persist: durable write from Redis queue │
 │ - outbound-postback: fire postbacks to publishers │
 │ - fraud-scan: scheduled fraud analysis │
-│ - retention: prune old clicks/conversions │
+│ - retention: prune old clicks/conversions (per network; ledgered conversions kept) │
 │ - facebook-capi: CAPI batch │
 │ - offer-feed-sync: outbound offers │
+│ - scheduled-actions / alert-rules / automation-webhook (Automation, F-17a) │
+│ - smart-link-kpi (F-17b), reporting-rollup (15-min rollups, F-20) │
 └─────────────────────────────────────────────────────┘
  │
  ▼
 ┌─────────────────────────────────────────────────────┐
 │ Shared Data Layer │
-│ Postgres 16 (via node-pg-migrate, 62 migrations) │
+│ Postgres 16 (via node-pg-migrate, 76 migrations) │
 │ Redis 7 (ioredis — cache, dedup, caps, BullMQ) │
 │ Supabase (Auth + Admin API — backend only) │
 │ MaxMind GeoIP2 (optional) │
@@ -91,8 +93,9 @@ End user (browser → click on tracking link)
  → Host header → resolveHostToNetwork(host) → tenant.networkId (Redis-cached DB lookup)
  → GET /click?offer_id=X&pub_id=Y
  → getOfferConfig(networkId, offerId) from Redis (load-through, no PG on hot path)
- → evaluateGeoRules, evaluateTrafficControls, isTrafficBlocked, isClickCapped, markUnique
- → fraudPreSignals(ip)
+ → evaluateGeoRules, evaluateTrafficControls, isTrafficBlocked
+ → fraudPreSignals (datacenter, velocity, bot UA, cached IPQS verdict; network weights) → divert if score ≥ blockScore
+ → isClickCapped, markUnique
  → enqueueClick(job) to BullMQ (async durable write)
  → storeClickForAttribution (Redis attribution cache for conversion path)
  → substituteMacros(destinationUrl, macros) → 302 redirect

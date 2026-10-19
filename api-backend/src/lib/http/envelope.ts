@@ -6,6 +6,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { AppError, MALFORMED_VALUE_MESSAGE, type ErrorCode } from './errors.js';
 import { logger } from '../logger.js';
 import { captureError } from '../observability/sentry.js';
+import { isProd } from '../../config/env.js';
 
 export interface Pagination {
  limit: number;
@@ -58,11 +59,11 @@ export function errorHandler(
  ok: false,
  error: { code: err.code, message: err.message, ...(details !== undefined ? { details } : {}) },
  };
- res.status(err.status).json(body);
- // Set Retry-After for rate-limited responses (HTTP 429).
+ // Retry-After for rate-limited responses (HTTP 429) — before the body is sent, or it never goes out.
  if (err.code === 'rate_limited' && typeof details?.retryAfter === 'number') {
  res.setHeader('Retry-After', String(details.retryAfter));
  }
+ res.status(err.status).json(body);
  return;
  }
 
@@ -89,10 +90,17 @@ export function errorHandler(
  return;
  }
 
- // Unknown error — never leak internals to the caller (spec §3A/§12).
- logger.error({ err }, 'unhandled error');
- captureError(err, { path: _req.path, method: _req.method });
- const body: ErrorEnvelope = { ok: false, error: { code: 'internal', message: 'Internal server error' } };
+ // Unknown error — never leak internals to the caller in production (spec §3A/§12). The message says
+ // what happened in plain words and quotes the request's reference (X-Request-Id, in the log line too)
+ // so the failure can be found; outside production it also names the cause — the fastest way to a fix.
+ const reference = String((_req as { id?: unknown }).id ?? 'unknown');
+ logger.error({ err, reference }, 'unhandled error');
+ captureError(err, { path: _req.path, method: _req.method, reference });
+ const cause = !isProd && err instanceof Error && err.message ? ` (${err.message})` : '';
+ const body: ErrorEnvelope = {
+ ok: false,
+ error: { code: 'internal', message: `Something went wrong on our side${cause}. If it keeps happening, quote reference ${reference}.`, details: { reference } },
+ };
  res.status(500).json(body);
 }
 

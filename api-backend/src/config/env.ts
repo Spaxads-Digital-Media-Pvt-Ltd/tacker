@@ -10,6 +10,17 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+/** SETTINGS_ENC_KEY → the 32-byte key (64 hex chars, or base64/base64url of 32 bytes); null if malformed. */
+export function settingsKeyBytes(raw: string): Buffer | null {
+  const v = raw.trim();
+  if (/^[0-9a-f]{64}$/i.test(v)) return Buffer.from(v, 'hex');
+  if (/^[A-Za-z0-9+/_-]{43}={0,1}$/.test(v)) {
+    const b = Buffer.from(v.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    if (b.length === 32) return b;
+  }
+  return null;
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z
@@ -17,6 +28,10 @@ const schema = z.object({
     .default('info'),
 
   DATABASE_URL: z.string().url(),
+  // Most Postgres connections each backend process may hold (5 processes share the database). Default 20 in
+  // production / 10 otherwise — but 3 on a Supabase session pooler (its default pool_size is 15 clients in
+  // all), so the five processes never exceed it (lib/db/pool.ts poolMax).
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(100).optional(),
 
   // Supabase — backend-only secrets. Optional at Phase 0 boot so the scaffold runs
   // before a real project is wired; surfaces that need them assert at use-time.
@@ -25,6 +40,15 @@ const schema = z.object({
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
 
   PLATFORM_ADMIN_JWT_SECRET: z.string().min(1),
+
+  // Encrypts integration credentials + the SMTP password stored in networks.settings (AES-256-GCM,
+  // lib/crypto/secret-box.ts). Required — these are real third-party secrets. 32 bytes, as 64 hex
+  // chars or base64 (e.g. `openssl rand -hex 32`). Losing it makes stored secrets unreadable.
+  SETTINGS_ENC_KEY: z.string().refine((v) => settingsKeyBytes(v) !== null, 'must be 32 bytes: 64 hex chars or base64'),
+
+  // Signs short-lived admin impersonation sessions (lib/auth/impersonation-token.ts, audit F-10).
+  // Optional: without it, "Impersonate" answers 503. Use a long random value (openssl rand -hex 32).
+  IMPERSONATION_JWT_SECRET: z.string().min(32).optional(),
 
   REDIS_URL: z.string().url(),
 
@@ -36,7 +60,12 @@ const schema = z.object({
  // --- Tracking surface rate limiting (AP-1 / Task 9.3.3) ---
  // Requests per IP per sliding window (1-min buckets, 5-bucket window).
  TRACKING_RL_CLICK_LIMIT: z.coerce.number().int().positive().default(120),
+ // O3: FAILED postbacks (no / wrong security code, unknown click) per IP per 5 minutes; an
+ // authenticated postback is never throttled.
  TRACKING_RL_POSTBACK_LIMIT: z.coerce.number().int().positive().default(60),
+ // Failed postbacks per click_id per 5 minutes (F-01): a leaked click_id can't be hammered from many
+ // IPs. Each request now counts once (O3), and authenticated postbacks don't count at all.
+ TRACKING_RL_POSTBACK_PER_CLICK_LIMIT: z.coerce.number().int().positive().default(20),
 
  // --- ClickHouse analytics store (Phase 8) ---
  // Optional so the app boots without ClickHouse configured (Phase 0-7 do not need it).
@@ -52,11 +81,20 @@ const schema = z.object({
  REPORTING_PROVIDER: z
  .enum(['postgres', 'clickhouse', 'clickhouse_with_fallback'])
  .default('postgres'),
+ // F-20: the Postgres provider reads the 15-minute rollups (lib/reporting/rollups.ts) when a report
+ // fits them. 'off' = always the raw tables (the test config pins it so mocked SQL stays stable).
+ REPORTING_ROLLUPS: z.enum(['on', 'off']).default('on'),
 
  TRACKING_BASE_DOMAIN: z.string().min(1).default('ourtracking.com'),
- TRACKING_TRUSTED_PROXIES: z.string().optional(), // comma-sep trusted IPs/CIDRs; loopback always trusted
+ TRACKING_TRUSTED_PROXIES: z.string().optional(), // older name for TRUSTED_PROXIES (merged)
+ // Proxies every surface trusts for X-Forwarded-For (O2): comma-sep IPs / CIDRs and `private`
+ // (RFC 1918 + fc00::/7 — e.g. an AWS load balancer). Loopback + Cloudflare are always trusted.
+ TRUSTED_PROXIES: z.string().optional(),
  TRACKING_ALLOWED_HOSTS: z.string().optional(), // comma-sep allowlist; empty = all (after validation)
  TRACKING_REJECT_RAW_IPS: z.coerce.boolean().default(true),
+ // 24metrics gateway (lib/integrations/tracker24.ts); {id} = the offer's 24metrics tracker ID. Override to
+ // point at a stand-in server when testing.
+ TRACKER24_GATEWAY_URL: z.string().min(1).default('https://{id}.gateway.go2link.co'),
 
   PORT_DASHBOARD: z.coerce.number().int().positive().default(4001),
   PORT_TRACKING: z.coerce.number().int().positive().default(4002),
@@ -83,6 +121,15 @@ const schema = z.object({
   // retention job prunes them; 0 disables pruning.
   CLICK_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
   CONVERSION_RETENTION_DAYS: z.coerce.number().int().min(0).default(400),
+
+  // Network purge (audit F-26): days a soft-deleted network waits before it can be purged (its
+  // data hard-deleted); 0 = no wait.
+  NETWORK_PURGE_GRACE_DAYS: z.coerce.number().int().min(0).default(30),
+
+  // AI budget per network per UTC day on /api/ai/chat (audit F-25·F-28; lib/ai/quota.ts): chats,
+  // and model tokens (input + output, every tool-loop turn). 0 = no cap.
+  AI_DAILY_CHAT_LIMIT: z.coerce.number().int().min(0).default(200),
+  AI_DAILY_TOKEN_LIMIT: z.coerce.number().int().min(0).default(2_000_000),
 });
 
 const parsed = schema.safeParse(process.env);

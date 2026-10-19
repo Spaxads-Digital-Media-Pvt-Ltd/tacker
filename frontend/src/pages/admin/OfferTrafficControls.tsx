@@ -288,7 +288,7 @@ export default function OfferTrafficControls() {
                       <td className="px-4 py-3">
                         <div className="flex justify-end">
                           <RowMenu onEdit={() => nav(`/app/offers-traffic-controls/${r.id}/edit`)}
-                            onSetDeleted={async () => { setSetStatusErr(null); try { const ok = await setStatusMutation.run({ id: r.id, status: 'deleted' }); if (ok) refetch(); } catch { setSetStatusErr('Failed to set status.'); } }}
+                            onSetDeleted={async () => { setSetStatusErr(null); try { await setStatusMutation.runOrThrow({ id: r.id, status: 'deleted' }); refetch(); } catch (e) { setSetStatusErr(e instanceof Error ? e.message : 'Failed to set status.'); } }}
                             onHistory={() => setHistoryId(r.id)} />
                         </div>
                       </td>

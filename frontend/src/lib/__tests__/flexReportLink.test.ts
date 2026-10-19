@@ -1,6 +1,6 @@
 // Row ⋮ "Open Flex Report" links (lib/flexReportLink.ts) — imports the real module, and checks the
 // link against the same URL readers Flex uses on load (lib/reportFilterState.ts).
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { flexReportPath } from '../flexReportLink.ts';
 import { readUrlDate, readUrlFilters, readUrlFlag, IGNORE_FAIL_PARAM } from '../reportFilterState.ts';

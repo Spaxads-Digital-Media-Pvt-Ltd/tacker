@@ -1,9 +1,10 @@
 /**
  * Network settings (spec feature-depth) — general, SMTP/email, and integrations. Stored in the
  * networks.settings jsonb (+ core columns name/default_currency for general). Admin-only; writes
- * require admin. The SMTP password is a secret: it's stored but NEVER returned to the client — GET
- * returns passwordSet:boolean instead, and a write only changes it when a non-empty value is sent
- * (spec §3A: secrets don't leave the server).
+ * require admin. Secrets — the SMTP password and every integration credential — are encrypted at
+ * rest and NEVER returned to the client: GET returns passwordSet / `<key>Set` booleans instead, and a
+ * write only changes a secret when a non-empty value is sent (spec §3A: secrets don't leave the
+ * server; audit F-07).
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -21,6 +22,12 @@ import { enqueueOfferFeedSync } from '../../../lib/integrations/enqueue.js';
 import { getIntegrationStatus } from '../../../lib/integrations/status.js';
 import { getCategoryCatalog, getAllCatalogs, categoryFromTab } from '../../../lib/integrations/catalog.js';
 import { invalidateNetworkOfferConfigs } from '../../tracking/offer-cache.js';
+import { maskIntegrations, mergeIntegrationsPatch } from '../../../lib/integrations/settings.js';
+import { encryptSecret } from '../../../lib/crypto/secret-box.js';
+import { retentionWindows } from '../../../lib/retention/retention.js';
+import { tzParam } from '../../../lib/reporting/request.js';
+import { env } from '../../../config/env.js';
+import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 
 interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
@@ -40,6 +47,11 @@ const generalSchema = z.object({
   defaultCurrency: z.string().length(3).optional(),
   timezone: z.string().max(60).optional(),
   supportEmail: z.string().email().optional(),
+  // Where rejected clicks go when their offer has no fallback of its own (D1); null clears it.
+  fallbackUrl: redirectUrlWithMax(2000).nullable().optional(),
+  // "Daily caps reset at midnight in [zone]" — the network's cap time zone (an offer can override it);
+  // null clears it back to UTC.
+  capTimezone: tzParam.nullable().optional(),
 });
 
 const smtpSchema = z.object({
@@ -52,14 +64,36 @@ const smtpSchema = z.object({
   secure: z.boolean().optional(),
 });
 
+// Retention windows (F-21): days, 0 = keep forever, null = back to the platform default. Floors keep a
+// typo from wiping recent data: clicks ≥ 30 days (longer than typical attribution windows),
+// conversions ≥ 90 days (pending ones may still be awaiting approval). Ledgered conversions are never
+// pruned whatever the window (lib/retention/retention.ts).
+const days = (min: number) => z.number().int().max(3650).refine((v) => v === 0 || v >= min, { message: `0 (keep forever) or at least ${min}` });
+const retentionSchema = z.object({
+  clickDays: days(30).nullable().optional(),
+  conversionDays: days(90).nullable().optional(),
+});
+
 const integrationsSchema = z.object({
   values: z.record(z.string(), z.unknown()),   // freeform integration key/values (webhook URLs, ids)
 });
 
+/** A network's retention settings as the API shows them: its own values, the effective windows, the defaults. */
+function retentionView(settings: Record<string, unknown>) {
+  const own = (settings['retention'] as { clickDays?: number; conversionDays?: number } | undefined) ?? {};
+  return {
+    clickDays: own.clickDays ?? null,
+    conversionDays: own.conversionDays ?? null,
+    effective: retentionWindows(settings),
+    defaults: { clickDays: env.CLICK_RETENTION_DAYS, conversionDays: env.CONVERSION_RETENTION_DAYS },
+    ledgeredConversions: 'kept forever',
+  };
+}
+
 export function settingsRoutes(): Router {
   const r = Router();
 
-  // Read everything (SMTP password masked).
+  // Read everything (SMTP password and integration credentials masked).
   r.get('/', asyncHandler(async (req, res) => {
     const net = await loadNetwork(req.scope!.networkId);
     const s = net.settings ?? {};
@@ -68,8 +102,27 @@ export function settingsRoutes(): Router {
     sendOk(res, {
       general: { nid: Number(net.ref), name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
       smtp: { ...smtpSafe, passwordSet: Boolean(password) },
-      integrations: (s['integrations'] as object) ?? {},
+      integrations: maskIntegrations((s['integrations'] as Record<string, unknown> | undefined) ?? {}),
+      retention: retentionView(s),
     });
+  }));
+
+  // Retention (F-21) — admin only: it decides when data is deleted.
+  r.put('/retention', requireRole('admin'), validateBody(retentionSchema), asyncHandler(async (req, res) => {
+    const networkId = req.scope!.networkId;
+    const b = req.body as z.infer<typeof retentionSchema>;
+    const net = await loadNetwork(networkId);
+    const before = retentionView(net.settings ?? {});
+    const retention = { ...((net.settings?.['retention'] as Record<string, unknown> | undefined) ?? {}) };
+    for (const k of ['clickDays', 'conversionDays'] as const) {
+      if (b[k] === null) delete retention[k];
+      else if (b[k] !== undefined) retention[k] = b[k];
+    }
+    const settings = { ...net.settings, retention };
+    await saveSettings(networkId, settings);
+    const after = retentionView(settings);
+    await writeAudit(req, { action: 'settings.retention.update', entityType: 'network', entityId: networkId, before, after });
+    sendOk(res, after);
   }));
 
   // General — also writes core network columns.
@@ -84,7 +137,12 @@ export function settingsRoutes(): Router {
     const general = { ...(net.settings?.['general'] as object ?? {}) } as Record<string, unknown>;
     if (b.timezone !== undefined) general['timezone'] = b.timezone;
     if (b.supportEmail !== undefined) general['supportEmail'] = b.supportEmail;
+    if (b.fallbackUrl !== undefined) { if (b.fallbackUrl === null) delete general['fallbackUrl']; else general['fallbackUrl'] = b.fallbackUrl; }
+    if (b.capTimezone !== undefined) { if (b.capTimezone === null) delete general['capTimezone']; else general['capTimezone'] = b.capTimezone; }
     await saveSettings(networkId, { ...net.settings, general });
+    // Every offer's cached click config carries the network fallback and cap time zone — apply them on
+    // the next click.
+    if (b.fallbackUrl !== undefined || b.capTimezone !== undefined) await invalidateNetworkOfferConfigs(networkId);
     await writeAudit(req, { action: 'settings.general.update', entityType: 'network', entityId: networkId });
     sendOk(res, { ok: true });
   }));
@@ -99,7 +157,7 @@ export function settingsRoutes(): Router {
     for (const k of ['host', 'port', 'username', 'fromEmail', 'fromName', 'secure'] as const) {
       if (b[k] !== undefined) smtp[k] = b[k];
     }
-    if (b.password) smtp['password'] = b.password; // only overwrite when a real value is sent
+    if (b.password) smtp['password'] = encryptSecret(b.password); // only overwrite when a real value is sent
     await saveSettings(networkId, { ...net.settings, smtp });
     await writeAudit(req, { action: 'settings.smtp.update', entityType: 'network', entityId: networkId });
     sendOk(res, { ok: true });
@@ -111,7 +169,10 @@ export function settingsRoutes(): Router {
     const b = req.body as z.infer<typeof integrationsSchema>;
     const net = await loadNetwork(networkId);
     const prev = (net.settings?.['integrations'] as Record<string, unknown> | undefined) ?? {};
-    const integrations = { ...prev, ...b.values };
+    // Credentials are encrypted; '' keeps a stored one (the UI never gets them back to re-send).
+    const integrations = mergeIntegrationsPatch(prev, b.values);
+    // ...except pinApiKey: '' has always meant "revoke the Pin API key".
+    if (b.values['pinApiKey'] === '') delete integrations['pinApiKey'];
     const now = new Date().toISOString();
     if (b.values['offerFeedName'] && !prev['offerFeedCreatedAt']) integrations['offerFeedCreatedAt'] = now;
     if (Object.keys(b.values).some((k) => k.startsWith('offerFeed'))) integrations['offerFeedModifiedAt'] = now;
@@ -166,8 +227,9 @@ export function settingsRoutes(): Router {
     sendOk(res, result);
   }));
 
-  // Global postback secure_code — the code the tracking /postback requires by default (offer code overrides).
-  r.get('/security', asyncHandler(async (req, res) => {
+  // Global postback secure_code — the code the tracking /postback requires by default (offer code
+  // overrides). It authenticates S2S conversions, so only the roles that configure integrations see it.
+  r.get('/security', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
     const { rows } = await query<{ postback_security_code: string | null }>(
       'SELECT postback_security_code FROM networks WHERE id = $1', [req.scope!.networkId]);
     sendOk(res, { securityCode: rows[0]?.postback_security_code ?? null });

@@ -56,7 +56,7 @@ function RowMenu({ rule, onDeleted }: { rule: TrafficBlocking; onDeleted: () => 
     void confirm({
       title: 'Delete traffic blocking rule?', message: 'Are you sure you want to delete this traffic blocking rule?',
       confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(undefined)) onDeleted(); },
+      onConfirm: async () => { await del.runOrThrow(undefined); onDeleted(); },
     });
   };
   return (

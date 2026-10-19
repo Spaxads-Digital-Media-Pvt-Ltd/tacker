@@ -75,7 +75,7 @@ Change both when renaming.
 - API client in `frontend/src/lib/api.ts` — Bearer token + envelope + auto-refresh
 - Session in localStorage (`tracker.session.v2`), refresh in httpOnly cookie
 - Design tokens in `frontend/src/index.css` (RGB triplets for alpha support)
-- Fonts: Sora (UI) + Space Mono (IDs/tokens)
+- Fonts: Inter (UI) + Space Mono (IDs/tokens)
 - Palette: Slate neutrals + teal accent
 
 ## Backend Constraints

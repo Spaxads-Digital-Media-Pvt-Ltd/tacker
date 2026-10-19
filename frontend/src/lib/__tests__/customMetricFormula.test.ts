@@ -1,5 +1,5 @@
 // Custom-metric formula grammar (lib/customMetricFormula.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { formulaError, isValidFormula, MAX_FORMULA_TOKENS } from '../customMetricFormula.ts';
 import type { FormulaToken } from '../customMetrics.ts';

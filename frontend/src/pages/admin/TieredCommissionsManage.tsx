@@ -82,7 +82,7 @@ function RowMenu({ commission, onChanged }: { commission: TieredCommission; onCh
     void confirm({
       title: 'Delete tiered commission?', message: `Are you sure you want to delete tiered commission "${commission.name}"?`,
       confirmLabel: 'Delete', destructive: true,
-      onConfirm: async () => { if (await del.run(undefined)) onChanged(); },
+      onConfirm: async () => { await del.runOrThrow(undefined); onChanged(); },
     });
   };
 

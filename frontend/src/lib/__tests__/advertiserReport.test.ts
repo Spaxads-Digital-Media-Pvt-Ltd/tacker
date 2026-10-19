@@ -1,5 +1,5 @@
 // Advertiser Report display rules (lib/advertiserReport.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { advertiserDisplay, apiEpc } from '../advertiserReport.ts';
 

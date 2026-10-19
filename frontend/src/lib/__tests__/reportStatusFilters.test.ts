@@ -1,5 +1,5 @@
 // Click Report "Conversion Status" and Click → Conversion Time status filters (lib/reportStatusFilters.ts).
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import {
   CONVERSION_STATUS_OPTIONS, CONVERSION_STATUS_PARAM, C2C_STATUS_OPTIONS, C2C_STATUS_PARAM, C2C_DEFAULT_STATUS,

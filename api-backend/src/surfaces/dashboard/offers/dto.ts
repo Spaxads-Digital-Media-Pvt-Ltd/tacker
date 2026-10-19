@@ -25,6 +25,8 @@ export interface OfferAdminDTO {
   dailyConversionCap: number | null;
   totalConversionCap: number | null;
   dailyClickCap: number | null;
+  /** When the daily caps reset; null = the network's cap time zone (Settings › General). */
+  capTimezone: string | null;
   attributionWindowS: number;
   dedupWindowS: number;
   allowedTrafficTypes: string[];
@@ -48,6 +50,8 @@ export interface OfferAdminDTO {
   internalNotes: string | null;
   productId: string | null;
   thumbnailUrl: string | null;
+  /** The advertiser's impression URL (/impression redirects there); null = /impression answers a pixel. */
+  impressionUrl: string | null;
   targeting: OfferTargeting;
   attributionSettings: AttributionSettings;
   revenueSettings: RevenueSettings;
@@ -72,6 +76,7 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     dailyConversionCap: row.daily_conversion_cap,
     totalConversionCap: row.total_conversion_cap,
     dailyClickCap: row.daily_click_cap,
+    capTimezone: row.cap_timezone ?? null,
     attributionWindowS: row.attribution_window_s,
     dedupWindowS: row.dedup_window_s,
     allowedTrafficTypes: row.allowed_traffic_types,
@@ -96,6 +101,7 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     internalNotes: readString(meta, 'internal_notes'),
     productId: readString(meta, 'product_id'),
     thumbnailUrl: readString(meta, 'thumbnail_url'),
+    impressionUrl: readString(meta, 'impression_url'),
     targeting: readTargeting(meta),
     attributionSettings: readAttribution(meta),
     revenueSettings: readRevenue(meta),
@@ -103,6 +109,20 @@ export function toAdminDTO(row: OfferRow): OfferAdminDTO {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/**
+ * The offer's postback security code is a secret — whoever holds it can post conversions — so only
+ * roles that manage integrations (admin, manager) see it (O5). Others get `securityCode: null` with
+ * `securityCodeSet` (is there a per-offer code?) and `securityCodeHidden: true`, so the UI can say it's
+ * hidden instead of offering to generate one.
+ */
+export const OFFER_SECRET_ROLES: readonly string[] = ['admin', 'manager'];
+
+export function withOfferSecrets<T extends { securityCode: string | null }>(dto: T, visible: boolean): T & { securityCodeSet: boolean; securityCodeHidden: boolean } {
+  return visible
+    ? { ...dto, securityCodeSet: dto.securityCode != null, securityCodeHidden: false }
+    : { ...dto, securityCode: null, securityCodeSet: dto.securityCode != null, securityCodeHidden: true };
 }
 
 /**

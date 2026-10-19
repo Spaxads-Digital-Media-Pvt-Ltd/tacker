@@ -12,7 +12,8 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../shared-components/primitives/ui';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
-import { METRICS_PARAM, deriveRow, pct, toIso, todayStr, type AggResult } from '../../shared-components/primitives/ReportPageKit';
+import { METRICS_PARAM, deriveRow, pct, type AggResult } from '../../shared-components/primitives/ReportPageKit';
+import { useReportZone } from '../../lib/useReportZone';
 import { combineCurrencies, currenciesOf, moneyByCurrencyOf, withBreakdownMetrics } from '../../lib/reportCurrency';
 import { Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
@@ -52,8 +53,10 @@ function RunRecordTab() {
 }
 
 function StatsCard({ id }: { id: string }) {
-  const today = todayStr();
-  const { data } = useQuery<AggResult>(`/api/reports?groupBy=smartLink&metrics=${withBreakdownMetrics(METRICS_PARAM)}&smartLinkId=${id}&from=${toIso(today)}&to=${toIso(today, true)}`);
+  // "Today" is the report zone's day (D7 — the network's unless the viewer picked another).
+  const zone = useReportZone();
+  const today = zone.today();
+  const { data } = useQuery<AggResult>(`/api/reports?groupBy=smartLink&metrics=${withBreakdownMetrics(METRICS_PARAM)}&smartLinkId=${id}&${new URLSearchParams(zone.range(today, today)).toString()}`);
   const { data: settings } = useQuery<{ general?: { defaultCurrency?: string } }>('/api/settings');
   const row = data?.rows[0];
   const d = deriveRow(row?.metrics ?? {});

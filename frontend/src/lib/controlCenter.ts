@@ -7,7 +7,6 @@ export const cc = {
   putConfig: (section: ConfigSection, body: Record<string, unknown>) =>
     api.put<Record<string, unknown>>(`/api/control-center/config/${section}`, body),
 
-  createUser: (body: Record<string, unknown>) => api.post('/api/control-center/users', body),
 
   usage: (year?: number) => api.get<{ year: number; rows: { month: string; impressions: number; offersPulled: number }[] }>(
     `/api/control-center/usage${year ? `?year=${year}` : ''}`,

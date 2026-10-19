@@ -22,6 +22,9 @@ import type { Request, NextFunction } from 'express';
 
 const NET = '11111111-1111-4111-8111-111111111111';
 const DELETED_NET = '00000000-0000-4000-8000-000000000001';
+// Portal owners (O6: dashboardAuth checks the partner / advertiser row still exists and is active).
+const PUB = '22222222-2222-4222-8222-222222222222';
+const ADV = '33333333-3333-4333-8333-333333333333';
 
 vi.mock('../../src/config/env.js', () => ({
  SUPABASE_JWT_SECRET: 'test-secret',
@@ -33,8 +36,11 @@ vi.mock('../../src/lib/auth/verify-jwt.js', () => ({
 vi.mock('../../src/lib/db/pool.js', () => ({
  query: async (sql: string, params: unknown[]) => {
  if (/FROM networks WHERE id = \$1/.test(sql)) {
- const rows = globalThis.__existingNetworks.has(String(params[0])) ? [{ '?column?': 1 }] : [];
+ const rows = globalThis.__existingNetworks.has(String(params[0])) ? [{ status: 'active' }] : [];
  return { rows, rowCount: rows.length };
+ }
+ if (/FROM (publishers|advertisers) WHERE network_id = \$1 AND id = \$2/.test(sql)) {
+ return { rows: [{ status: 'active' }], rowCount: 1 };
  }
  return { rows: [], rowCount: 0 };
  },
@@ -86,13 +92,13 @@ describe('Dashboard kind validation (A-4)', () => {
  });
 
  it('accepts kind=publisher (portal)', async () => {
- const { errorStatus, identityKind } = await runAuth({ sub: 'u1', app_metadata: { network_id: NET, kind: 'publisher', owner_id: 'pub-1' } });
+ const { errorStatus, identityKind } = await runAuth({ sub: 'u1', app_metadata: { network_id: NET, kind: 'publisher', owner_id: PUB } });
  expect(errorStatus).toBeUndefined();
  expect(identityKind).toBe('publisher');
  });
 
  it('accepts kind=advertiser (portal)', async () => {
- const { errorStatus, identityKind } = await runAuth({ sub: 'u1', app_metadata: { network_id: NET, kind: 'advertiser', owner_id: 'adv-1' } });
+ const { errorStatus, identityKind } = await runAuth({ sub: 'u1', app_metadata: { network_id: NET, kind: 'advertiser', owner_id: ADV } });
  expect(errorStatus).toBeUndefined();
  expect(identityKind).toBe('advertiser');
  });
@@ -107,7 +113,7 @@ describe('Dashboard kind validation (A-4)', () => {
  });
 
  it('rejects a portal token whose network no longer exists', async () => {
- const { errorStatus, identityKind } = await runAuth({ sub: 'u1', app_metadata: { network_id: DELETED_NET, kind: 'advertiser', owner_id: 'adv-1' } });
+ const { errorStatus, identityKind } = await runAuth({ sub: 'u1', app_metadata: { network_id: DELETED_NET, kind: 'advertiser', owner_id: ADV } });
  expect(errorStatus).toBe(401);
  expect(identityKind).toBeUndefined();
  });

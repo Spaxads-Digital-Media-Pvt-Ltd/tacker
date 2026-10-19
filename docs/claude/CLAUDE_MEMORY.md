@@ -50,15 +50,15 @@ frontend/src/
 ├── main.tsx — Entry (BrowserRouter > ThemeProvider > AuthProvider > App)
 ├── App.tsx — Routes (4 role groups, all lazy-loaded)
 ├── auth/ — AuthContext, ProtectedRoute, roles, session (localStorage)
-├── components/ — Shared UI (AppShell, NavFlyout, ui.tsx, etc.)
+├── shared-components/ — Shared UI: shell/ (AppShell, NavFlyout), primitives/ (ui.tsx, nav.ts, ReportPageKit…), panels/, charts/
 ├── pages/
 │ ├── admin/ — 80+ page files (advertisers, publishers, offers, reports, etc.)
 │ ├── portal/ — Publisher/Advertiser portal pages
-│ └── super-admin/ — Networks, Subscriptions, Usage
+│ └── super-admin/ — Networks, Plans, Billing, Usage, Team & roles (+ two-factor), sales/, success/, support/, money/, platform/ (flags, announcements, system, email, security)
 ├── lib/ — api.ts (HTTP client), authClient.ts, useApi.ts, reportFilters.ts
 ├── theme/ — Light/dark theme (CSS-only)
 ├── config/branding.ts — Brand name
-└── index.css — Design tokens (Sora/Space Mono fonts, teal/slate palette)
+└── index.css — Design tokens (Inter/Space Mono fonts, teal/slate palette)
 ```
 
 **No external state management**. `useState` + `useContext` + `localStorage`.
@@ -82,17 +82,17 @@ api-backend/src/
 │ ├── ai/, analytics/, fraud/, geo/, integrations/, ledger/, observability/, postback/, postback-controls/, reporting/, retention/, tiered-commissions/
 ├── surfaces/ — 5 independently scalable services
 │ ├── dashboard/main.ts → app.ts (50+ route modules) → auth.ts (RBAC)
-│ ├── tracking/main.ts → Fastify /click /postback /pixel /iframe /sl
+│ ├── tracking/main.ts → Fastify /click /postback /pixel /iframe /sl /impression /sdk.js
 │ ├── public-api/main.ts → Express /api/v1/advertiser|publisher|network/*
 │ ├── platform-admin/main.ts → Express /platform/*
-│ └── workers/main.ts → BullMQ processors (click-persist, outbound-postback, fraud-scan, retention, facebook-capi, offer-feed-sync)
+│ └── workers/main.ts → BullMQ processors (click-persist, impression-persist, impression-billing (CPM), tracker24, outbound-postback, fraud-scan, retention, facebook-capi, offer-feed-sync, domain-verify, scheduled-actions, alert-rules, automation-webhook, smart-link-kpi, reporting-rollup)
 ```
 
 ---
 
 # Database
 
-**62 migrations** in `api-backend/migrations/`. Key tables:
+**76 migrations** in `api-backend/migrations/`. Key tables:
 - `networks` — tenant (one per advertiser)
 - `users` — dashboard auth users (linked to Supabase Auth)
 - `parties` — unified advertisers + publishers
@@ -116,7 +116,7 @@ api-backend/src/
 | Surface | Auth | Token | Claims |
 |---|---|---|---|
 | Dashboard (:4001) | Supabase JWT (jose JWKS) | Bearer header | network_id, kind, role, owner_id |
-| Platform Admin (:4004) | Own JWT (PLATFORM_ADMIN_JWT_SECRET) | Bearer header | Separate from tenants |
+| Platform Admin (:4004) | Own JWT (PLATFORM_ADMIN_JWT_SECRET); optional TOTP two-factor step (`/platform/login/2fa`) | Bearer header | Separate from tenants; staff roles per section (`requirePerm`) |
 | Tracking (:4002) | **None** | Host header → tenant | network_id from DB |
 | Public API (:4003) | API key (sha256) | Authorization: ApiKey | audience |
 | Workers (:4005) | Internal | — | — |
@@ -156,6 +156,8 @@ api-backend/src/
 - `GET/POST /postback` — S2S conversion
 - `GET /pixel` — Pixel conversion (1x1 GIF)
 - `GET /iframe` — Iframe conversion
+- `GET /impression` — Ad impression (CPM billing, view-through), 1x1 GIF / redirect to the advertiser's impression URL
+- `GET /sdk.js` — Direct-linking JavaScript tag (`trk.click()` / `trk.conversion()`)
 
 ### Public API (API key auth)
 - `/api/v1/advertiser/*` — Advertiser keys only
@@ -170,8 +172,8 @@ api-backend/src/
 ### Click Path (Hot Path — NO Postgres on /click)
 1. Resolve tenant from Host header → Redis-cached
 2. Load offer config from Redis (load-through cache)
-3. Check: offer active, publisher not denied, geo rules, traffic controls, traffic blocking, daily cap, unique/dedup
-4. Fraud pre-signals (datacenter IP, velocity)
+3. Check: offer active, publisher not denied, geo rules, traffic controls, traffic blocking
+4. Fraud pre-signals (datacenter IP, velocity, bot UA, cached IPQS) → divert at the network's block score; then daily cap, unique/dedup
 5. Enqueue click to BullMQ (async Postgres write)
 6. Store attribution data in Redis
 7. Build macros, substitute into destination URL, 302 redirect
@@ -208,7 +210,7 @@ api-backend/src/
 | `api-backend/src/lib/redis.ts` | Redis connection |
 | `frontend/src/App.tsx` | All routes |
 | `frontend/src/lib/api.ts` | HTTP client |
-| `frontend/src/components/AppShell.tsx` | Layout shell |
+| `frontend/src/shared-components/shell/AppShell.tsx` | Layout shell |
 | `api-backend/src/config/env.ts` | Env loading |
 | `migrations/` | 62 SQL migrations |
 
@@ -253,7 +255,7 @@ api-backend/src/
 - No ORM — all raw SQL via `pg`
 - Hot path: `/click` must NEVER touch Postgres synchronously
 - Tracking surface has NO auth (tenant by Host header)
-- 62 migrations are raw SQL (node-pg-migrate)
+- 76 migrations are raw SQL (node-pg-migrate)
 - Frontend has NO test framework
 - Phase 0 scaffold active; many route modules minimal
 
@@ -268,7 +270,7 @@ api-backend/src/
 5. **Queue connection leak risk** if `makeQueueConnection()` called repeatedly without close
 6. **Two brand name sources** of truth across repos
 7. **Phase 0 scaffold** — many route modules are empty/minimal stubs
-8. **`dashboardMock.ts`** contains mock data that should be removed
+8. **`dashboardMock.ts`** — dev-only dashboard sample data; not in production builds
 
 ---
 

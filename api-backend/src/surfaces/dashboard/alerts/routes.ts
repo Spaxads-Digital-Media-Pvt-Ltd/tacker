@@ -8,10 +8,11 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../../lib/http/pagination.js';
-import { notFound } from '../../../lib/http/errors.js';
+import { notFound, validationFailed } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { writeAudit } from '../../../lib/audit.js';
-import { getFraudConfig, setFraudConfig } from '../../../lib/fraud/rules.js';
+import { getFraudConfig, setFraudConfig, fraudConfigView } from '../../../lib/fraud/rules.js';
+import { assertOutboundUrl, BlockedDestinationError } from '../../../lib/net/safe-http.js';
 import { requireRole } from '../auth.js';
 
 interface AlertRow {
@@ -25,6 +26,7 @@ const toDTO = (a: AlertRow) => ({
 
 const listQuery = paginationSchema.extend({ status: z.enum(['open', 'acknowledged', 'resolved']).optional() });
 const patchSchema = z.object({ status: z.enum(['acknowledged', 'resolved']) });
+const weight = z.number().int().min(0).max(100);
 const rulesSchema = z.object({
   enabled: z.boolean().optional(),
   velocityPerMinute: z.number().int().min(1).optional(),
@@ -33,6 +35,15 @@ const rulesSchema = z.object({
   crSpikeThreshold: z.number().min(0).max(1).optional(),
   minClicksForCrAlert: z.number().int().min(1).optional(),
   scanWindowHours: z.number().int().min(1).max(720).optional(),
+  // F-23: block threshold (null = flag only), points per signal, and where new alerts are sent.
+  blockScore: z.number().int().min(1).max(100).nullable().optional(),
+  weights: z.object({
+    datacenter: weight, velocity: weight, botUserAgent: weight,
+    ipqsProxy: weight, ipqsVpn: weight, ipqsTor: weight, ipqsBot: weight,
+  }).partial().strict().optional(),
+  alertEmails: z.array(z.string().trim().toLowerCase().email().max(254)).max(20)
+    .transform((a) => Array.from(new Set(a))).optional(),
+  alertWebhookUrl: z.string().trim().url().max(2048).nullable().optional(),
 });
 
 /** Mounted at /api/alerts. */
@@ -56,6 +67,7 @@ export function alertsRoutes(): Router {
 
   r.patch(
     '/:id',
+    requireRole('admin', 'manager'),
     validateBody(patchSchema),
     asyncHandler(async (req, res) => {
       const b = req.body as z.infer<typeof patchSchema>;
@@ -74,7 +86,7 @@ export function fraudRulesRoutes(): Router {
   const r = Router();
 
   r.get('/', asyncHandler(async (req, res) => {
-    sendOk(res, await getFraudConfig(req.scope!.networkId));
+    sendOk(res, fraudConfigView(await getFraudConfig(req.scope!.networkId)));
   }));
 
   r.put(
@@ -82,7 +94,21 @@ export function fraudRulesRoutes(): Router {
     requireRole('admin', 'manager'),
     validateBody(rulesSchema),
     asyncHandler(async (req, res) => {
-      const updated = await setFraudConfig(req.scope!.networkId, req.body as z.infer<typeof rulesSchema>);
+      const b = { ...(req.body as z.infer<typeof rulesSchema>) };
+      if (b.alertWebhookUrl) {
+        // The masked form GET returned, sent back unchanged: keep the stored URL.
+        if (b.alertWebhookUrl === fraudConfigView(await getFraudConfig(req.scope!.networkId)).alertWebhookUrl) {
+          delete b.alertWebhookUrl;
+        } else {
+          try {
+            assertOutboundUrl(b.alertWebhookUrl); // http(s), and no private address literal outside development
+          } catch (err) {
+            if (err instanceof BlockedDestinationError) throw validationFailed(`alertWebhookUrl is not allowed (${err.reason})`);
+            throw err;
+          }
+        }
+      }
+      const updated = fraudConfigView(await setFraudConfig(req.scope!.networkId, b));
       await writeAudit(req, { action: 'fraud_rules.update', entityType: 'fraud_rules', entityId: req.scope!.networkId, after: updated });
       sendOk(res, updated);
     }),

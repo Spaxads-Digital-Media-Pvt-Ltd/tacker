@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { postbackUrl } from '../../../lib/url-schemas.js';
 
 export const createPublisherSchema = z.object({
   name: z.string().min(1).max(200),
@@ -23,15 +24,17 @@ export const createPublisherSchema = z.object({
   notes: z.string().max(4000).nullable().optional(),
   // Values for network-defined custom fields → merged into metadata.custom.
   customFields: z.record(z.string(), z.unknown()).optional(),
+  // Create only: send a portal invite when there's a contact email (default) — false skips it (F-04).
+  invite: z.boolean().optional(),
 });
 
-export const updatePublisherSchema = createPublisherSchema.partial();
+export const updatePublisherSchema = createPublisherSchema.omit({ invite: true }).partial();
 
 export type CreatePublisher = z.infer<typeof createPublisherSchema>;
 export type UpdatePublisher = z.infer<typeof updatePublisherSchema>;
 
 export const createPostbackSchema = z.object({
-  url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL'),
+  url: postbackUrl,
   method: z.enum(['GET', 'POST']).default('GET'),
   offerId: z.string().uuid().nullable().optional(),
   event: z.string().max(100).nullable().optional(),
@@ -45,7 +48,7 @@ export const updatePostbackSchema = createPostbackSchema.partial().extend({
 export type UpdatePostback = z.infer<typeof updatePostbackSchema>;
 
 export const postbackTestSchema = z.object({
-  url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'Must be an http(s) URL'),
+  url: postbackUrl,
   method: z.enum(['GET', 'POST']).default('GET'),
   country: z.string().max(3).optional(),
   device: z.string().max(40).optional(),

@@ -1,8 +1,9 @@
 /**
  * Control Center config — stored in networks.settings.controlCenter JSONB.
  */
-import { notFound } from '../../../lib/http/errors.js';
+import { notFound, validationFailed } from '../../../lib/http/errors.js';
 import { query } from '../../../lib/db/pool.js';
+import { assertImageValue } from '../../../lib/storage/images.js';
 
 export type ConfigSection = 'platform' | 'partners' | 'advertisers' | 'security';
 
@@ -41,4 +42,29 @@ export async function putControlCenterConfig(
 export async function getFullControlCenterConfig(networkId: string): Promise<Record<string, unknown>> {
   const settings = await loadNetworkSettings(networkId);
   return (settings['controlCenter'] as Record<string, unknown> | undefined) ?? {};
+}
+
+const BRANDING_IMAGES = ['logoUrl', 'faviconUrl'] as const;
+
+/**
+ * A `platform.branding` patch (O12): only logoUrl / faviconUrl, each null or an uploaded image's URL
+ * (POST /api/control-center/branding/:kind) — the file itself never goes into settings. Merged over
+ * what's stored, so the SPA sends only what changed.
+ */
+export function mergeBranding(stored: unknown, patch: unknown): Record<string, unknown> {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw validationFailed('branding must be an object');
+  const before = stored && typeof stored === 'object' ? stored as Record<string, unknown> : {};
+  const next = patch as Record<string, unknown>;
+  const unknownKeys = Object.keys(next).filter((k) => !(BRANDING_IMAGES as readonly string[]).includes(k));
+  if (unknownKeys.length) throw validationFailed(`branding: unknown field(s) ${unknownKeys.join(', ')}`);
+  for (const k of BRANDING_IMAGES) if (k in next) assertImageValue(next[k], before[k], `branding.${k}`);
+  return { ...before, ...next };
+}
+
+/** A network's branding images for every portal (GET /api/me): stored URLs only. */
+export async function networkBranding(networkId: string): Promise<{ logoUrl: string | null; faviconUrl: string | null }> {
+  const { rows } = await query<{ b: Record<string, unknown> | null }>(
+    `SELECT settings->'controlCenter'->'platform'->'branding' AS b FROM networks WHERE id = $1`, [networkId]);
+  const url = (v: unknown) => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : null);
+  return { logoUrl: url(rows[0]?.b?.['logoUrl']), faviconUrl: url(rows[0]?.b?.['faviconUrl']) };
 }

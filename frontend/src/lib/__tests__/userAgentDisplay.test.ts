@@ -1,5 +1,5 @@
 // Honest Browser / OS display (lib/userAgentDisplay.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { displayBrowser, displayOs, uaDimensionLabel } from '../userAgentDisplay.ts';
 

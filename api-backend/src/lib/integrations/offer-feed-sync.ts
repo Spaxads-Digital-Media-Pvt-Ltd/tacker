@@ -3,8 +3,10 @@
  * Matches existing offers by metadata.feedExternalId. Supports demo://offer-feed for local testing.
  */
 import { query } from '../db/pool.js';
+import { roundMoney, MoneyFormatError } from '../money.js';
 import { invalidateOfferConfig } from '../../surfaces/tracking/offer-cache.js';
-import { loadIntegrations, saveIntegrations, type IntegrationSettings } from './settings.js';
+import { safeRequest, BlockedDestinationError, type SafeResponse } from '../net/safe-http.js';
+import { loadIntegrations, saveIntegrations, secretValue, type IntegrationSettings } from './settings.js';
 
 export interface FeedOffer {
   id: string;
@@ -20,6 +22,8 @@ export interface SyncResult {
   pulled: number;
   created: number;
   updated: number;
+  /** Offers left out because an amount wasn't a usable decimal (O9) — never imported as 0. */
+  skipped?: { id: string; reason: string }[];
   error?: string;
 }
 
@@ -59,7 +63,16 @@ function parseFeedPayload(json: unknown): FeedOffer[] {
     .filter((o): o is FeedOffer => o != null);
 }
 
-async function fetchFeed(url: string, apiKey: string | undefined): Promise<FeedOffer[]> {
+/** A feed is parsed whole, so its size is capped (tens of thousands of offers fit comfortably). */
+export const FEED_MAX_BYTES = 16 * 1024 * 1024;
+const FEED_TIMEOUT_MS = 30_000;
+
+/**
+ * Fetch + parse the feed. The URL is tenant-supplied, so it goes through the SSRF guard (audit F-06):
+ * http(s) only, no redirects, and no loopback / private / link-local (cloud metadata) targets outside
+ * NODE_ENV=development — checked on the address actually connected to. 30 s for the whole fetch.
+ */
+export async function fetchFeed(url: string, apiKey: string | undefined): Promise<FeedOffer[]> {
   if (url === 'demo://offer-feed') return DEMO_FEED;
 
   const headers: Record<string, string> = { accept: 'application/json' };
@@ -67,12 +80,39 @@ async function fetchFeed(url: string, apiKey: string | undefined): Promise<FeedO
     headers['authorization'] = `Bearer ${apiKey}`;
     headers['x-api-key'] = apiKey;
   }
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`Feed HTTP ${res.status}`);
-  const json = await res.json();
+  let res: SafeResponse;
+  try {
+    res = await safeRequest(url, {
+      method: 'GET', headers, timeoutMs: FEED_TIMEOUT_MS, deadlineMs: FEED_TIMEOUT_MS, maxBodyBytes: FEED_MAX_BYTES,
+    });
+  } catch (err) {
+    if (err instanceof BlockedDestinationError) {
+      throw new Error(`${err.message} — offer feeds can only be fetched from public internet addresses`);
+    }
+    if ((err as Error).name === 'AbortError') throw new Error(`Feed request timed out after ${FEED_TIMEOUT_MS / 1000}s`);
+    throw err;
+  }
+  if (res.status >= 300 && res.status < 400) {
+    throw new Error(`Feed HTTP ${res.status} (redirects are not followed — use the feed's final URL)`);
+  }
+  if (res.status < 200 || res.status >= 300) throw new Error(`Feed HTTP ${res.status}`);
+  if (res.truncated) throw new Error(`Feed is larger than ${FEED_MAX_BYTES / (1024 * 1024)} MB`);
+  let json: unknown;
+  try {
+    // Money must stay exact (O9): a parsed JSON number has already lost digits past ~15, so payout /
+    // revenue keep the number's source text where the runtime provides it (Node 21+); else the number.
+    json = JSON.parse(res.body.replace(/^\uFEFF/, ''), keepMoneySource as (this: unknown, key: string, value: unknown) => unknown);
+  } catch {
+    throw new Error('Feed is not valid JSON');
+  }
   const offers = parseFeedPayload(json);
   if (offers.length === 0) throw new Error('Feed returned no valid offers');
   return offers;
+}
+
+const MONEY_KEYS = new Set(['payout', 'revenue']);
+function keepMoneySource(key: string, value: unknown, context?: { source?: string }): unknown {
+  return typeof value === 'number' && MONEY_KEYS.has(key) && typeof context?.source === 'string' ? context.source : value;
 }
 
 function mapStatus(s: string | undefined): 'active' | 'paused' | 'draft' {
@@ -82,10 +122,10 @@ function mapStatus(s: string | undefined): 'active' | 'paused' | 'draft' {
   return 'active';
 }
 
+/** A feed amount, exactly (O9): missing → the fallback; not a usable decimal → MoneyFormatError. */
 function money(v: string | number | undefined, fallback: string): string {
-  if (v == null) return fallback;
-  const n = Number(v);
-  return Number.isFinite(n) ? n.toFixed(4) : fallback;
+  if (v == null || (typeof v === 'string' && !v.trim())) return fallback;
+  return roundMoney(v);
 }
 
 async function resolveCurrency(networkId: string, cfg: IntegrationSettings, offer: FeedOffer): Promise<string> {
@@ -125,8 +165,11 @@ async function upsertFeedOffer(
 
   if (existing[0]) {
     await query(
+      // The feed owns name / URL / status / money; everything else on the offer (targeting, settings,
+      // notes, custom fields set in the dashboard) stays — the feed keys are MERGED into metadata.
       `UPDATE offers SET name = $3, destination_url = $4, status = $5,
-         default_payout = $6, default_revenue = $7, currency = $8, metadata = $9::jsonb, updated_at = now()
+         default_payout = $6, default_revenue = $7, currency = $8,
+         metadata = COALESCE(metadata, '{}'::jsonb) || $9::jsonb, updated_at = now()
        WHERE id = $2 AND network_id = $1`,
       [networkId, existing[0].id, offer.name, offer.destinationUrl, status, payout, revenue, currency, meta],
     );
@@ -167,12 +210,20 @@ export async function syncOfferFeed(networkId: string): Promise<SyncResult> {
   if (!adv[0]) return { pulled: 0, created: 0, updated: 0, error: 'advertiser_not_found' };
 
   try {
-    const offers = await fetchFeed(url, cfg.offerFeedKey);
+    const offers = await fetchFeed(url, secretValue(cfg, 'offerFeedKey') ?? undefined); // key stored encrypted (F-07)
     let created = 0;
     let updated = 0;
+    const skipped: { id: string; reason: string }[] = [];
     for (const offer of offers) {
       const currency = await resolveCurrency(networkId, cfg, offer);
-      const result = await upsertFeedOffer(networkId, advertiserId, offer, currency);
+      let result: 'created' | 'updated';
+      try {
+        result = await upsertFeedOffer(networkId, advertiserId, offer, currency);
+      } catch (err) {
+        if (!(err instanceof MoneyFormatError)) throw err;
+        skipped.push({ id: offer.id, reason: err.message }); // never imported with a made-up amount
+        continue;
+      }
       if (result === 'created') created++;
       else updated++;
     }
@@ -205,12 +256,14 @@ export async function syncOfferFeed(networkId: string): Promise<SyncResult> {
       offerFeedPulledTotal: pulledTotal,
       offerFeedLastSyncDay: today,
       offerFeedLastSyncMonth: month,
-      offerFeedLastSyncError: null,
+      offerFeedLastSyncError: skipped.length
+        ? `${skipped.length} offer(s) skipped — an amount wasn't a usable decimal: ${skipped.slice(0, 5).map((x) => `${x.id} (${x.reason})`).join('; ')}`
+        : null,
       offerFeedModifiedAt: now,
       ...(cfg.offerFeedCreatedAt ? {} : { offerFeedCreatedAt: now }),
     });
 
-    return { pulled: offers.length, created, updated };
+    return { pulled: offers.length, created, updated, ...(skipped.length ? { skipped } : {}) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await saveIntegrations(networkId, { offerFeedLastSyncError: msg, offerFeedLastStatusSync: new Date().toISOString() });

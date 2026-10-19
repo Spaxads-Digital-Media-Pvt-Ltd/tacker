@@ -1,9 +1,23 @@
 /**
  * Data retention / pruning (spec §7 storage, §11 data lifecycle). Raw clicks are the highest-volume
- * table and carry PII (IP, UA) — they get the shortest window. postback_logs are operational and
- * pruned with the click window. Conversions are FINANCIAL records referenced by the append-only
+ * table and carry PII (IP, UA) — they get the shortest window. postback_logs (outbound) and
+ * inbound_postback_logs (every conversion request received) are operational and pruned with the
+ * click window. Conversions are FINANCIAL records referenced by the append-only
  * ledger, so they get a much longer default window and are pruned last; the ledger itself is NEVER
  * touched here (spec: append-only, no UPDATE/DELETE).
+ *
+ * THE LEDGER RULE (audit F-21): a conversion that ANY ledger entry references — its earning /
+ * billing, and the reversal of either — is never pruned, whatever its age: the ledger is kept forever,
+ * so the conversion it points at is too (tax / audit trails run 5–7 years and more). Only conversions
+ * that never touched the ledger (rejected, never-approved, unattributed) age out with the window.
+ * Clicks still prune on their window: nothing financial references a click — a conversion carries its
+ * own payout / revenue / currency and the ledger references conversions, never clicks — so a pruned
+ * click only takes its click-side detail (country, device, subs) out of row-level reports (the rollups
+ * keep the aggregates, F-20).
+ *
+ * Windows are per network (Settings › Retention — networks.settings.retention.{clickDays,
+ * conversionDays}; 0 = keep forever), falling back to CLICK_RETENTION_DAYS / CONVERSION_RETENTION_DAYS.
+ * Each network is pruned on its own window through the (network_id, created_at) indexes.
  *
  * `clicks`, `conversions`, and `postback_logs` are regular tables (they must keep global unique
  * keys on click_id / conversion_id / (offer_id, transaction_id), which Postgres can't enforce on a
@@ -21,12 +35,21 @@ const log = surfaceLogger('workers');
 const BATCH = 5_000;
 const MAX_BATCHES = 1_000; // safety valve: at most 5M rows/table/run on the ctid fallback
 
+/** How long the email log (email_outbox, O11) keeps its records. */
+export const EMAIL_LOG_RETENTION_DAYS = 90;
+
 export interface RetentionResult {
  clicksDeleted: number;
+ /** Impressions (on the click window, like clicks). Optional: absent in results from before impressions. */
+ impressionsDeleted?: number;
  postbackLogsDeleted: number;
+ /** Inbound postback log rows (every conversion request received), on the click window. */
+ inboundPostbackLogsDeleted: number;
  conversionsDeleted: number;
  /** Names of partitions dropped (e.g. ["clicks_2024_01", "conversions_2024_01"]). */
  partitionsDropped: string[];
+ /** Email log rows older than EMAIL_LOG_RETENTION_DAYS (O11). */
+ emailLogDeleted?: number;
 }
 
 /** YYYYMM → integer month-key. Postgres partition naming uses `_YYYY_MM` (zero-padded). */
@@ -122,20 +145,27 @@ async function ensureMonthlyPartitions(): Promise<void> {
  }
 }
 
+/** Never prune a conversion any ledger entry references (THE LEDGER RULE above). */
+const NOT_LEDGERED = `NOT EXISTS (SELECT 1 FROM ledger_entries le
+ WHERE le.network_id = t.network_id AND le.conversion_id = t.conversion_id)`;
+
 /**
- * ctid-batch fallback for the DEFAULT partition (pre-existing data + the partial current-month
- * partition). Bounded so we never hold a long table lock.
+ * Delete one network's rows older than `cutoff` in bounded ctid batches (never a long table lock),
+ * through the (network_id, created_at) index. `extra` narrows what may go (the ledger rule).
  */
-async function pruneDefaultOlderThan(
- table: 'clicks' | 'postback_logs' | 'conversions',
+async function pruneNetwork(
+ table: 'clicks' | 'impressions' | 'postback_logs' | 'inbound_postback_logs' | 'conversions',
+ networkId: string,
  cutoff: Date,
+ extra?: string,
 ): Promise<number> {
  let total = 0;
  for (let i = 0; i < MAX_BATCHES; i++) {
  const { rowCount } = await query(
  `DELETE FROM ${table}
- WHERE ctid IN (SELECT ctid FROM ${table} WHERE created_at < $1 LIMIT ${BATCH})`,
- [cutoff.toISOString()],
+ WHERE ctid IN (SELECT t.ctid FROM ${table} t
+ WHERE t.network_id = $1 AND t.created_at < $2${extra ? ` AND ${extra}` : ''} LIMIT ${BATCH})`,
+ [networkId, cutoff.toISOString()],
  );
  const n = rowCount ?? 0;
  total += n;
@@ -144,17 +174,33 @@ async function pruneDefaultOlderThan(
  return total;
 }
 
-function cutoff(days: number): Date {
- return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+function cutoff(days: number, now: Date): Date {
+ return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 }
 
-export async function runRetention(): Promise<RetentionResult> {
- const clickDays = env.CLICK_RETENTION_DAYS;
- const convDays = env.CONVERSION_RETENTION_DAYS;
+export interface RetentionWindows {
+ /** Clicks and postback logs (outbound and inbound), in days; 0 = keep forever. */
+ clickDays: number;
+ /** Conversions that never touched the ledger, in days; 0 = keep forever. */
+ conversionDays: number;
+}
 
+/** A network's windows: its Settings › Retention values, else the env defaults. */
+export function retentionWindows(settings: Record<string, unknown> | null | undefined): RetentionWindows {
+ const r = (settings?.['retention'] ?? {}) as { clickDays?: unknown; conversionDays?: unknown };
+ const days = (v: unknown, dflt: number) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : dflt);
+ return {
+ clickDays: days(r.clickDays, env.CLICK_RETENTION_DAYS),
+ conversionDays: days(r.conversionDays, env.CONVERSION_RETENTION_DAYS),
+ };
+}
+
+export async function runRetention(now: Date = new Date()): Promise<RetentionResult> {
  const result: RetentionResult = {
  clicksDeleted: 0,
+ impressionsDeleted: 0,
  postbackLogsDeleted: 0,
+ inboundPostbackLogsDeleted: 0,
  conversionsDeleted: 0,
  partitionsDropped: [],
  };
@@ -162,29 +208,43 @@ export async function runRetention(): Promise<RetentionResult> {
  // 1. Make sure future-month partitions exist so inserts don't accumulate in DEFAULT.
  await ensureMonthlyPartitions();
 
- // 2. Drop whole-month partitions that are fully out of window (O(1), no vacuum pressure).
- if (clickDays > 0) {
- const c = cutoff(clickDays);
+ const networks = (await query<{ id: string; settings: Record<string, unknown> | null }>(
+ 'SELECT id, settings FROM networks ORDER BY id')).rows.map((n) => ({ id: n.id, ...retentionWindows(n.settings) }));
+
+ // 2. Whole-month partition drops (only when a table is partitioned — today none is): click
+ // partitions only past the LONGEST click window of any network (a partition holds every network's
+ // rows); conversion partitions never (they can hold ledgered conversions — the ledger rule).
+ const clickWindows = networks.map((n) => n.clickDays);
+ if (clickWindows.length && clickWindows.every((d) => d > 0)) {
+ const c = cutoff(Math.max(...clickWindows), now);
  const dropped = await dropOldPartitions('clicks', c);
  result.partitionsDropped.push(...dropped.filter((n) => n.startsWith('clicks_')));
-
  const droppedLogs = await dropOldPartitions('postback_logs', c);
  result.partitionsDropped.push(...droppedLogs.filter((n) => n.startsWith('postback_logs_')));
+ }
 
- // 3. Fallback for the partial current-month partition (and DEFAULT pre-existing data).
- result.clicksDeleted = await pruneDefaultOlderThan('clicks', c);
- result.postbackLogsDeleted = await pruneDefaultOlderThan('postback_logs', c);
+ // 3. Each network on its own windows.
+ for (const n of networks) {
+ if (n.clickDays > 0) {
+ const c = cutoff(n.clickDays, now);
+ result.clicksDeleted += await pruneNetwork('clicks', n.id, c);
+ result.impressionsDeleted = (result.impressionsDeleted ?? 0) + await pruneNetwork('impressions', n.id, c);
+ result.postbackLogsDeleted += await pruneNetwork('postback_logs', n.id, c);
+ result.inboundPostbackLogsDeleted += await pruneNetwork('inbound_postback_logs', n.id, c);
  }
- if (convDays > 0) {
- const c = cutoff(convDays);
- const dropped = await dropOldPartitions('conversions', c);
- result.partitionsDropped.push(...dropped.filter((n) => n.startsWith('conversions_')));
- result.conversionsDeleted = await pruneDefaultOlderThan('conversions', c);
+ if (n.conversionDays > 0) {
+ result.conversionsDeleted += await pruneNetwork('conversions', n.id, cutoff(n.conversionDays, now), NOT_LEDGERED);
  }
+ }
+
+ // 4. The email log (O11): records older than EMAIL_LOG_RETENTION_DAYS go (queued rows too — a
+ // queued email that old was never going to send).
+ result.emailLogDeleted = (await query(
+ `DELETE FROM email_outbox WHERE created_at < $1`, [cutoff(EMAIL_LOG_RETENTION_DAYS, now)])).rowCount ?? 0;
 
  log.info(
- { ...result, clickDays, convDays },
- 'retention prune complete (ledger untouched — append-only)',
+ { ...result, networks: networks.length },
+ 'retention prune complete (ledgered conversions kept; ledger untouched — append-only)',
  );
 
  // VACUUM only when the fallback path deleted rows (partition drops do not produce dead tuples).

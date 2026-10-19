@@ -4,56 +4,40 @@
  *
  *  - Audiences are saved filters over the REAL publishers/advertisers tables (status + Partner
  *    Tier), with a live, queried recipient count — not a fabricated number.
- *  - Email Messages actually send, via `lib/mailer.ts`, to each recipient's real contact_email,
- *    using the network's own SMTP settings (Settings › SMTP) — previously stored but unused by
- *    anything in this app. "Schedule" is intentionally not offered: there is no worker to fire a
+ *  - Email Messages actually send to each recipient's real contact_email, using the network's own
+ *    SMTP settings (Settings › SMTP), through the email queue (O11): "Send Now" checks SMTP and
+ *    queues one email per recipient; the email worker delivers them with retries, and the Email Log
+ *    (GET /email-log) shows each one's outcome. "Schedule" is intentionally not offered: there is no worker to fire a
  *    scheduled send, and a control that silently does nothing would be dishonest, so the compose
  *    flow only supports Save Draft / Send Now (the reference's own default counters — "0
  *    Scheduled" — show this is a legitimately empty state there too).
  *  - Partner Banners' Published/Scheduled/Drafts/Expired status is derived on read from
  *    publish_at/expire_at vs. now(), so the tabs are always accurate without a cron job.
- *  - "Automated System Emails" lists real events this app's own data model can fire on
- *    (Partner sign-up, Offer Applications, Offer Creatives, Invoices, Postbacks, Alerts) —
- *    the enabled/disabled toggle persists for real, but actually wiring a send into each of
- *    those ~14 action handlers is a separate, much larger project than Communication Hub itself,
- *    so toggling does not yet trigger a send (same "real state, not yet wired" honesty already
- *    used elsewhere in this app for out-of-scope automation).
+ *  - "Automated System Emails" lists the events that really send (SENT_SYSTEM_EMAILS — invites,
+ *    balance requests, offer details, invoices, the partner notifications and the alert emails), each
+ *    with a persisted on/off toggle the senders honour. Events with no send behind them yet are left
+ *    out of the list (O11) rather than shown as toggles that do nothing.
+ *  - Email Log: every queued email (system or campaign) with its status, attempts and last error;
+ *    a failed one can be retried unless it carried a credential (an invite / reset — send a new one).
  */
 import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound } from '../../../lib/http/errors.js';
+import { notFound, conflict } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
-import { sendNetworkEmail } from '../../../lib/mailer.js';
+import { smtpConfigError } from '../../../lib/mailer.js';
+import { enqueueEmails, queueOutboxRow } from '../../../lib/email/outbox.js';
+import { SYSTEM_EMAIL_CATALOG, SENT_SYSTEM_EMAILS, VISIBLE_SYSTEM_EMAILS } from '../../../lib/email/system-emails.js';
 import type { Request } from 'express';
 
 const STATUSES = ['active', 'pending', 'inactive'] as const;
-
-// Real events this app's own data model can already fire on — see file header for why the
-// enabled toggle is real but not yet wired to an actual send.
-export const SYSTEM_EMAIL_CATALOG = [
-  { key: 'partner_signup_approved', label: 'Partner Sign-Up Approved', category: 'partner' },
-  { key: 'partner_signup_rejected', label: 'Partner Sign-Up Rejected', category: 'partner' },
-  { key: 'offer_application_approved', label: 'Offer Application Approved', category: 'partner' },
-  { key: 'offer_application_denied', label: 'Offer Application Denied', category: 'partner' },
-  { key: 'new_offer_creative_available', label: 'New Offer Creative Available', category: 'partner' },
-  { key: 'partner_offer_now_available', label: 'Partner Offer Now Available', category: 'partner' },
-  { key: 'partner_offer_now_unavailable', label: 'Partner Offer Now Unavailable', category: 'partner' },
-  { key: 'partner_invoice_generated', label: 'Partner Invoice Generated', category: 'partner' },
-  { key: 'advertiser_invoice_generated', label: 'Advertiser Invoice Generated', category: 'advertiser' },
-  { key: 'advertiser_postback_received', label: 'Advertiser Postback Received', category: 'advertiser' },
-  { key: 'new_conversion_recorded', label: 'New Conversion Recorded', category: 'advertiser' },
-  { key: 'alert_threshold_triggered', label: 'Alert Threshold Triggered', category: 'misc' },
-  { key: 'payout_batch_completed', label: 'Payout Batch Completed', category: 'misc' },
-  { key: 'fraud_rule_triggered', label: 'Fraud Rule Triggered', category: 'misc' },
-] as const;
 
 interface AudienceRow {
   id: string; name: string; group_type: 'publishers' | 'advertisers';
@@ -151,23 +135,21 @@ async function performSend(req: Request, row: EmailRow): Promise<EmailRow> {
       { send_error: 'No recipients with an email address matched this audience.' }, { id: row.id });
     return updated!;
   }
-  const result = await sendNetworkEmail(networkId, recipients, row.subject, row.body);
-  if (result.configError) {
-    const [updated] = await dbForRequest(req).update<EmailRow>('email_messages',
-      { send_error: result.configError }, { id: row.id });
+  // SMTP not set up → nothing is queued and the message stays a draft with the reason.
+  const configError = await smtpConfigError(networkId);
+  if (configError) {
+    const [updated] = await dbForRequest(req).update<EmailRow>('email_messages', { send_error: configError }, { id: row.id });
     return updated!;
   }
-  const failed = result.results.filter((r) => !r.ok);
-  if (result.sent === 0) {
-    // Every attempt failed (bad host/credentials/etc.) — this did not actually send anything,
-    // so it stays a draft with the real error surfaced, rather than a false "Sent" entry.
-    const [updated] = await dbForRequest(req).update<EmailRow>('email_messages',
-      { send_error: `Send failed for all ${recipients.length} recipient(s): ${failed[0]?.error ?? 'unknown error'}` }, { id: row.id });
+  // One queued email per recipient (O11): the email worker delivers them with retries; the Email Log
+  // shows each one's outcome.
+  const queued = await enqueueEmails(networkId, 'communication_message', recipients, { subject: row.subject, html: row.body });
+  if (queued.error) {
+    const [updated] = await dbForRequest(req).update<EmailRow>('email_messages', { send_error: queued.error }, { id: row.id });
     return updated!;
   }
   const [updated] = await dbForRequest(req).update<EmailRow>('email_messages', {
-    status: 'sent', sent_at: new Date().toISOString(), recipient_count: result.sent,
-    send_error: failed.length ? `Sent to ${result.sent}/${recipients.length}. Failed: ${failed.map((f) => f.recipient).join(', ')}` : null,
+    status: 'sent', sent_at: new Date().toISOString(), recipient_count: recipients.length, send_error: null,
   }, { id: row.id });
   return updated!;
 }
@@ -211,7 +193,7 @@ export function communicationHubRoutes(): Router {
     const recentEmails = await db.selectMany<EmailRow>('email_messages', { where: { status: 'sent' }, orderBy: 'sent_at', orderDir: 'desc', limit: 4 });
     const recentBanners = (await db.selectMany<BannerRow>('banners', { orderBy: 'created_at', orderDir: 'desc', limit: 4 })).map(bannerDto);
 
-    const categoryCounts = SYSTEM_EMAIL_CATALOG.reduce<Record<string, number>>((acc, e) => {
+    const categoryCounts = VISIBLE_SYSTEM_EMAILS.reduce<Record<string, number>>((acc, e) => {
       acc[e.category] = (acc[e.category] ?? 0) + 1;
       return acc;
     }, {});
@@ -221,7 +203,7 @@ export function communicationHubRoutes(): Router {
       banners: { publishedLive, scheduledThisWeek: scheduledThisWeekBanners, drafts: bannerDrafts },
       topAudiences, audiencesTotal,
       templates: templateRows.map((t) => ({ id: t.id, name: t.name, messageType: t.message_type })), templatesTotal,
-      systemEmailCategories: categoryCounts, systemEmailsTotal: SYSTEM_EMAIL_CATALOG.length,
+      systemEmailCategories: categoryCounts, systemEmailsTotal: VISIBLE_SYSTEM_EMAILS.length,
       recentEmails: recentEmails.map((e) => ({
         id: e.id, subject: e.subject, messageType: e.message_type, recipientCount: e.recipient_count, sentAt: e.sent_at,
       })),
@@ -404,12 +386,13 @@ export function communicationHubRoutes(): Router {
       'SELECT settings FROM networks WHERE id = $1', [req.scope!.networkId],
     );
     const stored = (rows[0]?.settings?.['communicationHub'] as { systemEmails?: Record<string, boolean> } | undefined)?.systemEmails ?? {};
-    sendOk(res, SYSTEM_EMAIL_CATALOG.map((e) => ({ ...e, enabled: stored[e.key] ?? true })));
+    // Only emails that actually send are listed (O11) — `wired` stays for API compatibility.
+    sendOk(res, VISIBLE_SYSTEM_EMAILS.map((e) => ({ ...e, enabled: stored[e.key] ?? true, wired: true })));
   }));
   r.put('/system-emails/:key', requireRole('admin'), validateBody(z.object({ enabled: z.boolean() })), asyncHandler(async (req, res) => {
     const key = req.params.key ?? '';
-    const catalogEntry = SYSTEM_EMAIL_CATALOG.find((e) => e.key === key);
-    if (!catalogEntry) throw notFound('Unknown system email');
+    const catalogEntry = VISIBLE_SYSTEM_EMAILS.find((e) => e.key === key);
+    if (!catalogEntry || !SENT_SYSTEM_EMAILS.has(catalogEntry.key)) throw notFound('Unknown system email');
     const networkId = req.scope!.networkId;
     const { rows } = await query<{ settings: Record<string, unknown> }>('SELECT settings FROM networks WHERE id = $1', [networkId]);
     const settings = rows[0]?.settings ?? {};
@@ -420,5 +403,56 @@ export function communicationHubRoutes(): Router {
     sendOk(res, { key, enabled: systemEmails[key] });
   }));
 
+  // ---- Email Log (O11): the email queue's records, newest first — never a body. ----
+  const logQuery = z.object({
+    status: z.enum(['all', 'queued', 'sent', 'failed']).default('all'),
+    limit: z.coerce.number().int().min(1).max(500).default(200),
+  });
+  r.get('/email-log', requireRole('admin', 'manager'), validateQuery(logQuery), asyncHandler(async (req, res) => {
+    const { status, limit } = res.locals.query as z.infer<typeof logQuery>;
+    const params: unknown[] = [req.scope!.networkId];
+    let where = 'network_id = $1';
+    if (status !== 'all') { params.push(status); where += ` AND status = $${params.length}`; }
+    params.push(limit);
+    const { rows } = await query<{
+      id: string; event: string; recipient: string; subject: string; status: string; attempts: number;
+      last_error: string | null; sensitive: boolean; created_at: string; sent_at: string | null;
+    }>(
+      `SELECT id, event, recipient, subject, status, attempts, last_error, sensitive, created_at, sent_at
+         FROM email_outbox WHERE ${where} ORDER BY created_at DESC LIMIT $${params.length}`, params);
+    const counts = (await query<{ status: string; n: string }>(
+      `SELECT status, COUNT(*)::text AS n FROM email_outbox WHERE network_id = $1 AND created_at >= now() - interval '7 days' GROUP BY status`,
+      [req.scope!.networkId])).rows;
+    sendOk(res, {
+      rows: rows.map((e) => ({
+        id: e.id, event: e.event, label: emailLabel(e.event), recipient: e.recipient, subject: e.subject, status: e.status,
+        attempts: e.attempts, lastError: e.last_error, retryable: e.status === 'failed' && !e.sensitive, createdAt: e.created_at, sentAt: e.sent_at,
+      })),
+      last7Days: Object.fromEntries(counts.map((c) => [c.status, Number(c.n)])),
+    });
+  }));
+
+  // Retry a failed email. One that carried a credential (an invite's temporary password, a reset
+  // link) isn't kept to resend — issue a new invite / reset instead.
+  r.post('/email-log/:id/retry', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const { rows } = await query<{ id: string; status: string; sensitive: boolean }>(
+      'SELECT id, status, sensitive FROM email_outbox WHERE network_id = $1 AND id = $2', [req.scope!.networkId, req.params.id]);
+    const row = rows[0];
+    if (!row) throw notFound('Email not found');
+    if (row.status !== 'failed') throw conflict('Only a failed email can be retried.');
+    if (row.sensitive) throw conflict('This email carried a temporary password or a reset link — send a new invite or reset instead.');
+    await query(`UPDATE email_outbox SET status = 'queued', last_error = NULL WHERE network_id = $1 AND id = $2`, [req.scope!.networkId, row.id]);
+    await queueOutboxRow(row.id);
+    await writeAudit(req, { action: 'email.retry', entityType: 'email_outbox', entityId: row.id });
+    sendOk(res, { queued: true });
+  }));
+
   return r;
+}
+
+/** A readable name for an email log row's event. */
+function emailLabel(event: string): string {
+  const known = SYSTEM_EMAIL_CATALOG.find((e) => e.key === event)?.label;
+  if (known) return known;
+  return ({ communication_message: 'Email message', staff_invite: 'Team member invite', password_reset: 'Password reset', scheduled_report: 'Scheduled report' } as Record<string, string>)[event] ?? event;
 }

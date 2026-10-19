@@ -43,6 +43,8 @@ import type {
  SortOnlyKey,
 } from './types.js';
 import { MONEY_SORT_METRICS, moneyFieldsOf, money4 } from './types.js';
+import { isUtcZone } from './time-zone.js';
+import { rejectedClickChSql } from '../click-rejections.js';
 
 /** Metrics computed by the per-side aggregates (`money_by_currency` is assembled separately below). */
 type SideMetric = Exclude<Metric, 'money_by_currency'>;
@@ -108,28 +110,32 @@ const METRIC_CLICKS: Record<SideMetric, string> = {
  total_conversions: '0',
  avg_fraud_score: 'AVG(c.fraud_score)',
  currencies: 'CAST([], \'Array(String)\')',
+ // Impressions aren't in ClickHouse (Postgres only).
+ impressions: '0', unique_impressions: '0', invalid_impressions: '0', ctr: '0',
 };
 
 const METRIC_CONV: Record<SideMetric, string> = {
  clicks: '0',
  unique_clicks: '0',
- conversions: "COUNTIf(k.status = 'approved')",
+ // Billing rows (CPC paid clicks / CPM bookings — source click / impression) are money, not conversions.
+ conversions: "COUNTIf(k.status = 'approved' AND k.source NOT IN ('click', 'impression'))",
  cr: '0',
  payout: 'SUMIf(k.payout, k.status = \'approved\')',
  revenue: 'SUMIf(k.revenue, k.status = \'approved\')',
  margin: 'SUMIf(k.revenue - k.payout, k.status = \'approved\')',
  epc: '0',
  invalid_clicks: '0',
- total_conversions: 'COUNT(*)',
+ total_conversions: "COUNTIf(k.source NOT IN ('click', 'impression'))",
  avg_fraud_score: 'AVG(k.fraud_score)',
  // Distinct currencies of exactly the conversions behind payout/revenue/margin (approved), sorted.
  currencies: 'arraySort(groupUniqArrayIf(toString(assumeNotNull(k.currency)), k.status = \'approved\' AND isNotNull(k.currency)))',
+ impressions: '0', unique_impressions: '0', invalid_impressions: '0', ctr: '0',
 };
 
 // ORDER BY expressions over the outer select's aliases. cr/epc order by the derived ratio itself
 // (computed the same way as `derivedExpr` below) — not by clicks.
 // `currencies` / `money_by_currency` are never sort keys (request.ts refuses them as orderBy).
-type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency'> | SortOnlyKey;
+type OrderMetric = Exclude<Metric, 'currencies' | 'money_by_currency' | 'impressions' | 'unique_impressions' | 'invalid_impressions' | 'ctr'> | SortOnlyKey;
 const ORDER_COL: Record<OrderMetric, string> = {
  clicks: 'clicks',
  // Sort-only: net (valid) clicks — what the admin reports' "Clicks" column shows.
@@ -175,6 +181,12 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  const params: Array<unknown | unknown[]> = [req.networkId];
  const phArr = (v: unknown[]) => { params.push(v); return `{p${params.length}:Array(String)}`; };
  const phTs = (v: unknown) => { params.push(v); return `parseDateTime64BestEffort({p${params.length}:String}, 3)`; };
+ // F-20: day / hour bucket in the request's time zone (a constant-folded query parameter); UTC
+ // reports keep the old SQL. A bucket then reads as that zone's local wall time.
+ let zoneArg = '';
+ if (!isUtcZone(req.timeZone) && gb.some((d) => d === 'day' || d === 'hour')) { params.push(req.timeZone); zoneArg = `, {p${params.length}:String}`; }
+ const zoned = (d: Dimension, base: string): string =>
+ (zoneArg && (d === 'day' || d === 'hour') ? base.replace(/\)$/, `${zoneArg})`) : base);
 
  const clickWhere: string[] = ['c.network_id = {p1:String}'];
  const convWhere: string[] = ['k.network_id = {p1:String}'];
@@ -251,11 +263,13 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  clickWhere.push('length(c.fraud_flags) = 0');
  convWhere.push('k.click_id NOT IN (SELECT ic.click_id FROM tracker.clicks ic WHERE ic.network_id = {p1:String} AND length(ic.fraud_flags) > 0)');
  }
+ // Partner / advertiser views and the automation: only clicks that reached the offer (lib/click-rejections).
+ if (f.excludeRejected) clickWhere.push(`NOT ${rejectedClickChSql('c')}`);
 
  // Click-side advertiser grouping: map offer → advertiser via the Postgres mapping (NULL when the
  // offer has none, matching the Postgres provider's LEFT JOIN offers).
  const clickDim = (d: Dimension): string => {
- if (d !== 'advertiser') return DIM_SQL_CLICK[d];
+ if (d !== 'advertiser') return zoned(d, DIM_SQL_CLICK[d]);
  const from = phArr(offerAdv.map((o) => o.id));
  const to = phArr(offerAdv.map((o) => o.advertiser_id));
  return `nullIf(transform(toString(c.offer_id), ${from}, ${to}, ''), '')`;
@@ -280,7 +294,7 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  WHERE ${clickWhere.join(' AND ')}
  ${gbHas ? `GROUP BY ${groupIdx}` : ''}`;
 
- const convSel = gb.map((d, i) => `${DIM_SQL_CONV[d]} AS d${i}`).join(', ');
+ const convSel = gb.map((d, i) => `${zoned(d, DIM_SQL_CONV[d])} AS d${i}`).join(', ');
  const convMetrics = ALL_METRICS.map(m => `${METRIC_CONV[m]} AS ${m}`).join(', ');
  // `money_by_currency` (opt-in): one sumMap per group over the approved conversions with a currency —
  // keys = currency, values = payout, revenue and a row count. The count keeps a currency whose
@@ -294,7 +308,8 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  // currency / none / mixed-or-unknown so currencies are never compared (see the ORDER BY below).
  const moneySort = req.orderBy != null && MONEY_SORT_METRICS.has(req.orderBy);
  const sortSql = moneySort
- ? `, uniqExactIf(k.currency, ${approvedCur}) AS cur_n, countIf(k.status = 'approved' AND isNull(k.currency)) AS cur_null, minIf(CAST(assumeNotNull(k.currency) AS String), ${approvedCur}) AS cur_one`
+ // money_rows: approved rows WITH billing rows (CPC / CPM money, not conversions) — what carries money.
+ ? `, countIf(k.status = 'approved') AS money_rows, uniqExactIf(k.currency, ${approvedCur}) AS cur_n, countIf(k.status = 'approved' AND isNull(k.currency)) AS cur_null, minIf(CAST(assumeNotNull(k.currency) AS String), ${approvedCur}) AS cur_one`
  : '';
  const conversionsCte =
  `SELECT ${gbHas ? convSel + ',' : ''}${convMetrics}${mbcSql}${sortSql}
@@ -338,8 +353,8 @@ export class ClickHouseReportingProvider implements ReportingProvider {
  COALESCE(cl.revenue, 0) + COALESCE(cv.revenue, 0) - (COALESCE(cl.payout, 0) + COALESCE(cv.payout, 0)) AS margin${wantCurrencies ? `,
  cv.currencies AS currencies` : ''}${wantMbc ? `,
  arrayMap((cur, p, r) -> tuple(cur, toString(p), toString(r), toString(r - p)), tupleElement(cv.mbc, 1), tupleElement(cv.mbc, 2), tupleElement(cv.mbc, 3)) AS money_by_currency` : ''}${moneySort ? `,
- multiIf(COALESCE(cv.conversions, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket,
- if(COALESCE(cv.conversions, 0) > 0 AND COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, cv.cur_one, '') AS money_currency` : ''}${outerMetrics ? `,
+ multiIf(COALESCE(cv.money_rows, 0) = 0, 1, COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, 0, 2) AS money_bucket,
+ if(COALESCE(cv.money_rows, 0) > 0 AND COALESCE(cv.cur_n, 0) = 1 AND COALESCE(cv.cur_null, 0) = 0, cv.cur_one, '') AS money_currency` : ''}${outerMetrics ? `,
  ${outerMetrics}` : ''}
  FROM cl ${joinType} cv ${onClause}`;
 

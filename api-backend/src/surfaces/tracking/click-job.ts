@@ -40,6 +40,11 @@ export interface ClickJob {
   gclid?: string | null;
   /** Offer has IPQualityScore enrichment on — the click-persist worker looks the IP up (async). */
   ipqs?: boolean;
+  /** The offer bills this partner per click (payout and / or revenue — null = that side isn't): the
+   * click-persist worker books a billable click as a paid click (conversions/volume-billing.ts). */
+  cpc?: { payout: string | null; revenue: string | null; advertiserId: string; manualApproval: boolean } | null;
+  /** The offer has 24metrics on: the click-persist worker asks 24metrics about the click first (lib/integrations/tracker24.ts). */
+  tracker24?: { trackerId: string } | null;
 }
 
 export async function enqueueClick(job: ClickJob): Promise<void> {

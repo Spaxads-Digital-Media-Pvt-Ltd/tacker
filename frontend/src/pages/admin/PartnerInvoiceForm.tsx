@@ -5,12 +5,13 @@
  * allows changing the partner-facing/administrative fields, not the period or amount — matching how
  * a real invoice, once generated, keeps its billed snapshot.
  */
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { PartnerInvoice, Publisher } from '../../types';
+import { InvoiceCurrencyPicker } from './InvoiceCurrencyPicker';
 
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
 
@@ -26,9 +27,9 @@ function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolea
 }
 
 interface FormState {
-  publisherId: string; periodStart: string; periodEnd: string; hidden: boolean; paymentTerms: string; publicNotes: string; internalNotes: string;
+  publisherId: string; periodStart: string; periodEnd: string; currency: string; hidden: boolean; paymentTerms: string; publicNotes: string; internalNotes: string;
 }
-const INITIAL: FormState = { publisherId: '', periodStart: '', periodEnd: '', hidden: false, paymentTerms: '', publicNotes: '', internalNotes: '' };
+const INITIAL: FormState = { publisherId: '', periodStart: '', periodEnd: '', currency: '', hidden: false, paymentTerms: '', publicNotes: '', internalNotes: '' };
 
 export default function PartnerInvoiceForm() {
   const { id } = useParams();
@@ -44,11 +45,16 @@ export default function PartnerInvoiceForm() {
   useEffect(() => {
     if (!existing) return;
     setForm({
-      publisherId: existing.publisherId, periodStart: existing.periodStart, periodEnd: existing.periodEnd,
+      publisherId: existing.publisherId, periodStart: existing.periodStart, periodEnd: existing.periodEnd, currency: existing.currency,
       hidden: !existing.visibleToPartner, paymentTerms: existing.paymentTerms ?? '',
       publicNotes: existing.publicNotes ?? '', internalNotes: existing.internalNotes ?? '',
     });
   }, [existing]);
+
+  const setCurrency = useCallback((currency: string) => setForm((f) => ({ ...f, currency })), []);
+  const previewPath = !isEdit && form.publisherId && form.periodStart && form.periodEnd && form.periodEnd >= form.periodStart
+    ? `/api/partner-invoices/preview?publisherId=${form.publisherId}&periodStart=${form.periodStart}&periodEnd=${form.periodEnd}`
+    : null;
 
   if (isEdit && loading) return <StateBlock><Spinner /></StateBlock>;
 
@@ -64,6 +70,7 @@ export default function PartnerInvoiceForm() {
     }
     const res = await create.run({
       publisherId: form.publisherId, periodStart: form.periodStart, periodEnd: form.periodEnd,
+      ...(form.currency ? { currency: form.currency } : {}),
       visibleToPartner: !form.hidden, paymentTerms: form.paymentTerms || null,
       publicNotes: form.publicNotes || null, internalNotes: form.internalNotes || null,
     });
@@ -99,7 +106,15 @@ export default function PartnerInvoiceForm() {
                 : <input type="date" className="input" required min={form.periodStart || undefined} value={form.periodEnd} onChange={(e) => setForm((f) => ({ ...f, periodEnd: e.target.value }))} />}
             </Field>
           </div>
-          {!isEdit && <p className="-mt-4 text-tiny text-fg-secondary">Billed amount is calculated automatically from this Partner's ledger activity within the payment period.</p>}
+          {isEdit ? (
+            <Field label="Currency"><input className="input" disabled value={existing?.currency ?? ''} /></Field>
+          ) : (
+            <div>
+              <label className="label">Currency *</label>
+              <InvoiceCurrencyPicker previewPath={previewPath} value={form.currency} onChange={setCurrency} what="earned" />
+              <p className="mt-1.5 text-tiny text-fg-secondary">The billed amount is what this partner earned in that currency over the period (from the ledger).</p>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
             <div>
@@ -123,7 +138,7 @@ export default function PartnerInvoiceForm() {
 
           <div className="flex justify-end gap-2 border-t border-border pt-4">
             <Link to="/app/aff-invoices" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+            <button type="submit" className="btn-primary" disabled={busy || (!isEdit && previewPath !== null && !form.currency)}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
         </form>
       </div>

@@ -56,14 +56,15 @@ export type AuditLogQuery = z.infer<typeof auditLogQuery>;
 interface Row {
   id: string; ref: string; created_at: string; action: string; entity_type: string | null;
   actor_type: string; actor_id: string | null; ip: string | null; user_agent: string | null;
-  employee_name: string | null; employee_email: string | null;
+  employee_name: string | null; employee_email: string | null; platform_email: string | null;
 }
 
 /** SQL expression for the "service" key a row is grouped/filtered by. */
 const SERVICE_KEY_SQL = `COALESCE(al.entity_type, split_part(al.action, '.', 1))`;
 /** Last dot-segment of the action (JS: action.split('.').pop()). */
 const ACTION_SUFFIX_SQL = `regexp_replace(al.action, '^.*\\.', '')`;
-const USERS_JOIN = `LEFT JOIN users u ON al.actor_type = 'user' AND u.auth_user_id::text = al.actor_id AND u.network_id = al.network_id`;
+const USERS_JOIN = `LEFT JOIN users u ON al.actor_type = 'user' AND u.auth_user_id::text = al.actor_id AND u.network_id = al.network_id
+  LEFT JOIN platform_admins pa ON al.actor_type = 'platform_admin' AND pa.id::text = al.actor_id`;
 
 function humanize(word: string): string {
   return word.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -104,7 +105,7 @@ function toDTO(row: Row) {
     service: entityLabel,
     changes: `- ${entityLabel}`,
     isNew: suffix === 'create',
-    employee: row.employee_name ?? row.employee_email ?? row.actor_id ?? '—',
+    employee: row.employee_name ?? row.employee_email ?? (row.platform_email ? `Super Admin ${row.platform_email}` : null) ?? row.actor_id ?? '—',
     method: row.actor_type === 'system' ? 'Scheduled Action' : (METHOD_BY_ACTION_SUFFIX[suffix] ?? '—'),
     portal: row.actor_type === 'user' ? 'Dashboard' : row.actor_type === 'api_key' ? 'API' : row.actor_type === 'platform_admin' ? 'Platform Admin' : 'System',
     userIp: row.ip, userAgent: row.user_agent,
@@ -123,7 +124,7 @@ export async function listAuditLog(networkId: string, q: AuditLogQuery) {
   const pageParams = [...params, limit, offset];
   const { rows } = await query<Row>(
     `SELECT al.id, al.ref, al.created_at, al.action, al.entity_type, al.actor_type, al.actor_id, al.ip, al.user_agent,
-            u.name AS employee_name, u.email AS employee_email
+            u.name AS employee_name, u.email AS employee_email, pa.email AS platform_email
        FROM audit_log al
        ${USERS_JOIN}
       WHERE ${where}

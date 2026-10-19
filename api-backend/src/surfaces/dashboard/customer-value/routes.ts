@@ -19,6 +19,7 @@ import { requireRole } from '../auth.js';
 import { CV_TEXT_OPERATORS, CV_NUMBER_OPERATORS, toYmd } from '../../../lib/customer-value/evaluate.js';
 import { moneySchema } from '../../../lib/money.js';
 import { isSensitiveParamKey } from '../../../lib/reporting/redact.js';
+import { tzParam, zonedRange } from '../../../lib/reporting/request.js';
 
 const DATA_POINTS_TABLE = 'customer_data_points';
 const RULES_TABLE = 'customer_value_rules';
@@ -215,6 +216,7 @@ const conversionEventsQuery = z.object({
   userId: z.string().max(500).optional(),
   from: z.union([queryDate, z.literal('')]).optional(),
   to: z.union([queryDate, z.literal('')]).optional(),
+  tz: tzParam.optional(),
   limit: z.coerce.number().int().min(1).max(500).default(26),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -334,8 +336,10 @@ export function customerValueRoutes(): Router {
     const userId = q.userId ?? '';
     if (!userId) return sendOk(res, { userId: '', events: [] });
     const networkId = req.scope!.networkId;
-    const from = q.from || null;
-    const to = q.to || null;
+    // A plain date is a whole day of the report zone (`?tz=`, D7; UTC when unset).
+    const range = zonedRange(q.from || undefined, q.to || undefined, q.tz);
+    const from = range.from ?? null;
+    const to = range.to ?? null;
     const limit = q.limit;
     const offset = q.offset;
 

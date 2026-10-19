@@ -37,7 +37,7 @@ import { PageHeader, Spinner, StateBlock, Badge } from '../../shared-components/
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { type FilterCategory, type FilterValues } from '../../shared-components/primitives/CategorizedFilters';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
-import { daysAgo, todayStr, toIso, DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, DEVICE_OPTIONS, fetchAllPages, useReportExport, ExportStatus, ReportingFiltersFlyout, EMPTY_REPORTING_FILTERS } from '../../shared-components/primitives/ReportPageKit';
 import type { Advertiser, Offer, Publisher } from '../../types';
 import { countryName, countryOptions, regionName, useRegions } from '../../data/geo';
 import { readUrlDate, readUrlIds } from '../../lib/reportFilterState';
@@ -45,11 +45,10 @@ import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import { formatDateTime } from '../../lib/datetime';
-import { TimeZoneSelect } from '../../shared-components/primitives/ReportTimeZone';
-import { useReportTimeZone } from '../../lib/useReportTimeZone';
+import { useReportZone } from '../../lib/useReportZone';
 import { ActiveFilterChips } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
-import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta } from '../../lib/conversionReport';
+import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta, reasonLabel } from '../../lib/conversionReport';
 
 /**
  * Approve a pending conversion (writes publisher earning + advertiser billing and fires the partner
@@ -116,6 +115,8 @@ const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending' },
   { value: 'rejected', label: 'Rejected' },
 ];
+/** Conversions past a cap are held as Pending for review (Everflow's "Over Caps"). */
+const OVER_CAPS_OPTIONS = [{ value: 'true', label: 'Held over caps — to approve or reject' }];
 
 interface SmartLink { id: string; name: string }
 
@@ -125,7 +126,7 @@ interface SmartLink { id: string; name: string }
  */
 const URL_FILTER_PARAMS: [category: string, param: string][] = [
   ['offer', 'offerId'], ['advertiser', 'advertiserId'], ['partner', 'publisherId'], ['status', 'status'],
-  ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
+  ['overCaps', 'overCaps'], ['smartLink', 'smartLinkId'], ['country', 'country'], ['device', 'device'],
 ];
 
 /** Applied report state from the URL (reload / shared link / legacy deep links). */
@@ -135,20 +136,27 @@ function readInitialState() {
   for (const [cat, param] of URL_FILTER_PARAMS) {
     const ids = readUrlIds(sp, param).slice(0, 1); // single-select per category
     if (cat === 'status' && !STATUS_OPTIONS.some((o) => o.value === ids[0])) continue;
+    if (cat === 'overCaps' && ids[0] !== 'true') continue;
     if (ids.length) filters[cat] = ids;
   }
-  return { from: readUrlDate(sp, 'from', daysAgo(7)), to: readUrlDate(sp, 'to', todayStr()), filters };
+  // '' = the report zone's default range, filled in by the page (it knows the zone).
+  return { from: readUrlDate(sp, 'from', ''), to: readUrlDate(sp, 'to', ''), filters };
 }
 
 export default function ConversionReport() {
   const [init] = useState(readInitialState);
   const [, setSearchParams] = useSearchParams();
+  const [filters, setFilters] = useState<FilterValues>(init.filters);
+  const countryFilter = filters['country']?.[0];
+  // D7: the report's time zone — the network's unless one is picked: its days, "today" and the times
+  // shown (a Country filter adds that country's zones to the picker's suggestions).
+  const zone = useReportZone(countryFilter);
   // Dates apply on their own once they form a valid range (see useAutoDateRange); filters apply
   // immediately and return to page 1.
-  const range = useAutoDateRange(init.from, init.to);
+  const [initRange] = useState(() => ({ from: init.from || zone.daysAgo(7), to: init.to || zone.today() }));
+  const range = useAutoDateRange(initRange.from, initRange.to);
   const { from, to, appliedFrom, appliedTo, page, setPage, toFirstPage } = range;
 
-  const [filters, setFilters] = useState<FilterValues>(init.filters);
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState('');
   const pageSize = 25;
@@ -189,6 +197,7 @@ export default function ConversionReport() {
     { key: 'advertiser', label: 'Advertiser', options: (advertisers ?? []).map((a) => ({ value: a.id, label: a.name })) },
     { key: 'partner', label: 'Partner', options: (publishers ?? []).map((p) => ({ value: p.id, label: p.name })) },
     { key: 'status', label: 'Status', options: STATUS_OPTIONS },
+    { key: 'overCaps', label: 'Over Caps', options: OVER_CAPS_OPTIONS },
     // Click-side filters — applied server-side via the conversion's originating click.
     { key: 'smartLink', label: 'Smart Link', options: (smartLinks ?? []).map((s) => ({ value: s.id, label: s.name })) },
     { key: 'country', label: 'Country', options: allCountryOptions },
@@ -199,11 +208,9 @@ export default function ConversionReport() {
   const advertiserIdFilter = filters['advertiser']?.[0];
   const publisherIdFilter = filters['partner']?.[0];
   const statusFilter = filters['status']?.[0];
+  const overCapsFilter = filters['overCaps']?.[0];
   const smartLinkIdFilter = filters['smartLink']?.[0];
-  const countryFilter = filters['country']?.[0];
   const deviceFilter = filters['device']?.[0];
-  // Timestamps follow the filtered country's zone (else network/browser) — re-formatting only.
-  const zone = useReportTimeZone(countryFilter);
   const regions = useRegions();
   const formatDate = (iso: string) => formatDateTime(iso, zone.tz);
   const regionLabel = (r: ConvRow) => (r.region ? (regionName(regions, r.region, r.country) ?? r.region) : DASH);
@@ -216,9 +223,9 @@ export default function ConversionReport() {
 
   // Only accepted /api/reports/conversions keys (the endpoint rejects anything else with 422).
   const baseParams = {
-    from: toIso(appliedFrom), to: toIso(appliedTo, true),
+    ...zone.range(appliedFrom, appliedTo),
     offerId: offerIdFilter, publisherId: publisherIdFilter, advertiserId: advertiserIdFilter, status: statusFilter,
-    smartLinkId: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
+    overCaps: overCapsFilter, smartLinkId: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
   };
   const tableQs = qs({ ...baseParams, limit: pageSize + 1, offset: (page - 1) * pageSize });
   // The applied report lives in the URL (replace, not push) so reload / back keep it.
@@ -248,12 +255,12 @@ export default function ConversionReport() {
 
   // Reset dates and filters in one render → one request. The debounced range catches up to the same
   // values later and is then a no-op.
-  const clearAll = () => { range.reset({ from: daysAgo(7), to: todayStr() }); setFilters({}); };
+  const clearAll = () => { range.reset({ from: zone.daysAgo(7), to: zone.today() }); setFilters({}); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
   const toExportRow = (r: ConvRow) => ({
     date: formatDate(r.created_at), conversionId: r.conversion_id, clickId: r.click_id ?? DASH,
-    status: r.status, reason: r.reason ?? DASH,
+    status: r.status, reason: reasonLabel(r.reason) ?? DASH,
     offer: offerMap.get(r.offer_id) ?? r.offer_id, partner: r.publisher_id ? (pubMap.get(r.publisher_id) ?? r.publisher_id) : DASH,
     advertiser: r.advertiser_id ? (advMap.get(r.advertiser_id) ?? r.advertiser_id) : DASH,
     eventName: r.event_name ?? DASH, goal: r.goal_name ?? DASH, source: r.source,
@@ -290,13 +297,11 @@ export default function ConversionReport() {
             )}
           </FiltersButton>
         </>}>
-          <DateRangeField idPrefix="conversion-report" from={from} to={to} max={todayStr()} invalid={range.problem !== null}
+          <DateRangeField idPrefix="conversion-report" from={from} to={to} max={zone.today()} invalid={range.problem !== null} zone={zone}
             onFrom={range.setFrom} onTo={range.setTo} />
         </ReportControls>
 
         <ResultsBar title="Detailed Report" loading={loading} actions={<>
-          {/* min-w-0 / max-w: the long "Auto — …" option text truncates instead of stretching the bar. */}
-          <div className="min-w-0 max-w-full"><TimeZoneSelect zone={zone} selectClassName={`${CONTROL} min-w-0 max-w-full text-small sm:max-w-[22rem]`} /></div>
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input className={`input ${CONTROL} !pl-8 sm:!w-56`} placeholder="Search this page…" title="Filters only the rows on the current page"
@@ -386,7 +391,7 @@ export default function ConversionReport() {
                       {shown.has('Conversion ID') && <td className="font-mono text-tiny">{r.conversion_id}</td>}
                       {shown.has('Click ID') && <td className="font-mono text-tiny">{r.click_id ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3"><Badge value={r.status} /></td>}
-                      {shown.has('Reason') && <td className="px-4 py-3">{r.reason ?? DASH}</td>}
+                      {shown.has('Reason') && <td className="px-4 py-3" title={r.reason ?? undefined}>{reasonLabel(r.reason) ?? DASH}</td>}
                       {shown.has('Offer') && <td className="px-4 py-3"><Link to={`/app/offers/${r.offer_id}`} className="text-accent-text hover:underline">{offerMap.get(r.offer_id) ?? r.offer_id}</Link></td>}
                       {shown.has('Partner') && <td className="px-4 py-3">{r.publisher_id ? <Link to={`/app/publishers/${r.publisher_id}`} className="text-accent-text hover:underline">{pubMap.get(r.publisher_id) ?? r.publisher_id}</Link> : DASH}</td>}
                       {shown.has('Advertiser') && <td className="px-4 py-3">{r.advertiser_id ? <Link to={`/app/advertisers/${r.advertiser_id}`} className="text-accent-text hover:underline">{advMap.get(r.advertiser_id) ?? r.advertiser_id}</Link> : DASH}</td>}
@@ -442,7 +447,7 @@ export default function ConversionReport() {
       {showColumns && <ColumnsModal allColumns={ALL_COLUMNS} order={[...ALL_COLUMNS]} hidden={hiddenColumns} onClose={() => setShowColumns(false)} reorderable={false} onApply={(_o, h) => setHiddenColumns(h)} />}
       {showApiRequest && <ApiRequestModal onClose={() => setShowApiRequest(false)} path={`/api/reports/conversions?${tableQs}`} appliedFilters={{
         from: appliedFrom, to: appliedTo, offer: offerIdFilter, advertiser: advertiserIdFilter, partner: publisherIdFilter, status: statusFilter,
-        smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
+        overCaps: overCapsFilter, smartLink: smartLinkIdFilter, country: countryFilter, device: deviceFilter,
       }} />}
     </>
   );

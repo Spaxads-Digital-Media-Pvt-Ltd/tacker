@@ -15,8 +15,9 @@ import { EmptyShellTable } from '../../../shared-components/primitives/EmptyShel
 import { Pagination } from '../../../shared-components/primitives/ReportPageKit';
 import { InfoCard, InfoGrid, InfoRow, NotificationCard, EditableInfoCard, HelpIcon, InfoBanner, HeadsUpBanner, type EditField, type NotifySaved } from './shared';
 import type { TrackingDomain } from '../../../types';
-import { advertiserPostbackUrl } from '../../../lib/trackingLinks';
-import { readFileAsDataUrl } from '../../../data/creatives';
+import { advertiserPostbackUrl, resolveTrackingHost } from '../../../lib/trackingLinks';
+import { imageAccept, imageTypesText, uploadImage } from '../../../lib/imageUpload';
+import { CapTimeZoneSelect } from '../../../shared-components/primitives/CapTimeZoneSelect';
 import {
   PARTNER_NOTIFS, OFFER_NOTIFS_PLATFORM, OFFER_GROUP_NOTIFS, ADVERTISER_NOTIFS,
   ACTION_NOTIFS, BILLING_NOTIFS, NETWORK_NOTIFS, SECURITY_NOTIFS, TRAFFIC_HEALTH_NOTIFS,
@@ -76,17 +77,13 @@ function YesNoPill({ label, value, onChange }: { label: string; value: boolean; 
   );
 }
 
-const IMAGE_ACCEPT = 'image/png,image/jpeg,image/jpg,image/jfif,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.ico,.jfif';
-
-function isImageFile(file: File): boolean {
-  if (file.type.startsWith('image/')) return true;
-  return /\.(png|jpe?g|jfif|gif|webp|svg|ico)$/i.test(file.name);
-}
-
-function UploadBox({ label, value, error, onFile, onClear }: {
+/** An image box: the file goes to object storage at once (O12) and the form keeps its URL until Save. */
+function UploadBox({ label, value, error, busy, allowIco = false, onFile, onClear }: {
   label: string;
   value: string | null;
   error: string | null;
+  busy: boolean;
+  allowIco?: boolean;
   onFile: (f: File) => void;
   onClear: () => void;
 }) {
@@ -94,9 +91,8 @@ function UploadBox({ label, value, error, onFile, onClear }: {
   const [dragging, setDragging] = useState(false);
 
   const takeFile = (file: File | undefined | null) => {
-    if (!file) return;
-    if (!isImageFile(file)) return;
-    onFile(file);
+    if (!file || busy) return;
+    onFile(file); // type and size are checked by the upload (lib/imageUpload) — a refusal shows as `error`
   };
 
   return (
@@ -126,7 +122,7 @@ function UploadBox({ label, value, error, onFile, onClear }: {
           </div>
         ) : (
           <p className="py-4 text-small text-fg-secondary">
-            {dragging ? 'Drop image here' : (
+            {busy ? 'Uploading…' : dragging ? 'Drop image here' : (
               <>
                 Drag and drop or{' '}
                 <button type="button" className="font-medium text-accent-text hover:underline" onClick={() => inputRef.current?.click()}>Browse</button>
@@ -137,7 +133,7 @@ function UploadBox({ label, value, error, onFile, onClear }: {
         <input
           ref={inputRef}
           type="file"
-          accept={IMAGE_ACCEPT}
+          accept={imageAccept(allowIco)}
           className="hidden"
           onChange={(e) => {
             takeFile(e.target.files?.[0]);
@@ -145,12 +141,13 @@ function UploadBox({ label, value, error, onFile, onClear }: {
           }}
         />
       </div>
-      {error && <p className="mt-1 text-tiny text-danger-text">{error}</p>}
+      {error ? <p className="mt-1 text-tiny text-danger-text">{error}</p>
+        : <p className="mt-1 text-tiny text-fg-muted">{imageTypesText(allowIco)}, up to 2 MB.</p>}
     </div>
   );
 }
 
-interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string } }
+interface NetworkSettings { general: { nid: number; name: string; defaultCurrency: string; status: string; timezone?: string; supportEmail?: string; fallbackUrl?: string; capTimezone?: string } }
 interface PlatformBranding { logoUrl?: string | null; faviconUrl?: string | null }
 
 /** "Edit General" — Network Displayed Name, Support Email, Currency, and Timezone persist via
@@ -163,10 +160,13 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
   const [supportEmail, setSupportEmail] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [timezone, setTimezone] = useState('UTC');
+  const [fallbackUrl, setFallbackUrl] = useState('');
+  const [capTimezone, setCapTimezone] = useState(''); // '' = UTC (the default)
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [faviconError, setFaviconError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<null | 'logo' | 'favicon'>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -176,22 +176,25 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
     setSupportEmail(settings.general.supportEmail ?? '');
     setCurrency(settings.general.defaultCurrency ?? 'USD');
     setTimezone(settings.general.timezone ?? 'UTC');
+    setFallbackUrl(settings.general.fallbackUrl ?? '');
+    setCapTimezone(settings.general.capTimezone ?? '');
   }, [settings]);
 
+  const savedLogo = branding.logoUrl ?? null;
+  const savedFavicon = branding.faviconUrl ?? null;
   useEffect(() => {
-    setLogoUrl(branding.logoUrl ?? null);
-    setFaviconUrl(branding.faviconUrl ?? null);
-  }, [platformConfig]);
+    setLogoUrl(savedLogo);
+    setFaviconUrl(savedFavicon);
+  }, [savedLogo, savedFavicon]);
 
-  const onLogo = async (f: File) => {
-    setLogoError(null);
-    try { setLogoUrl(await readFileAsDataUrl(f)); }
-    catch (e) { setLogoError(e instanceof Error ? e.message : 'Could not read file.'); }
-  };
-  const onFavicon = async (f: File) => {
-    setFaviconError(null);
-    try { setFaviconUrl(await readFileAsDataUrl(f)); }
-    catch (e) { setFaviconError(e instanceof Error ? e.message : 'Could not read file.'); }
+  // O12: the file goes to object storage now; the form keeps its URL and Save stores that.
+  const upload = async (kind: 'logo' | 'favicon', f: File) => {
+    const [setUrl, setError] = kind === 'logo' ? [setLogoUrl, setLogoError] : [setFaviconUrl, setFaviconError];
+    setError(null);
+    setUploading(kind);
+    try { setUrl(await uploadImage(`/api/control-center/branding/${kind}`, f, kind === 'favicon')); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Upload failed.'); }
+    finally { setUploading(null); }
   };
 
   const save = async () => {
@@ -203,15 +206,22 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
       if (supportEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail.trim())) {
         throw new Error('Support Email must be a valid address.');
       }
+      if (fallbackUrl.trim() && !/^https?:\/\/\S+$/i.test(fallbackUrl.trim())) {
+        throw new Error('Fallback URL must be a full http(s) address.');
+      }
       await api.put('/api/settings/general', {
         name: name.trim(),
         supportEmail: supportEmail.trim() || undefined,
         defaultCurrency: currency,
         timezone,
+        fallbackUrl: fallbackUrl.trim() || null,
+        capTimezone: capTimezone || null,
       });
-      await api.put('/api/control-center/config/platform', {
-        branding: { logoUrl: logoUrl || null, faviconUrl: faviconUrl || null },
-      });
+      // Only what changed (branding fields merge server-side).
+      const branding: Record<string, string | null> = {};
+      if ((logoUrl || null) !== savedLogo) branding['logoUrl'] = logoUrl || null;
+      if ((faviconUrl || null) !== savedFavicon) branding['faviconUrl'] = faviconUrl || null;
+      if (Object.keys(branding).length) await api.put('/api/control-center/config/platform', { branding });
       onSaved();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Save failed');
@@ -236,6 +246,14 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
       </Field>
       <Field label="Language *"><select className="input" defaultValue="English"><option>English</option></select></Field>
       <Field label="Timezone"><input className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="e.g. UTC, America/Los_Angeles" /></Field>
+      <Field label="Fallback URL for rejected clicks">
+        <input className="input" value={fallbackUrl} onChange={(e) => setFallbackUrl(e.target.value)} placeholder="https://yourdomain.com/offer-unavailable" />
+        <p className="mt-1 text-tiny text-fg-secondary">Where a click goes when it can't run — the partner isn't active, or a geo / cap / fraud / traffic rule stops it — and its offer has no fallback URL of its own. Empty = a blank page.</p>
+      </Field>
+      <Field label="Daily caps reset at midnight in">
+        <CapTimeZoneSelect value={capTimezone} onChange={setCapTimezone} inheritLabel="UTC (default)" />
+        <p className="mt-1 text-tiny text-fg-secondary">When every offer's daily caps (clicks, conversions, partner caps) start over — weekly and monthly caps count in this zone too. An offer can use its own (Edit Offer › Caps › Cap Time Zone).</p>
+      </Field>
       <Checkbox label="Show Partner Sign Up link (Login page)" defaultChecked />
       <Checkbox label="Show Advertiser Sign Up link (Login page)" defaultChecked />
       <Checkbox label="Show Everflow Support Link in Partner and Advertiser UIs" />
@@ -250,12 +268,12 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
         </div>
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <UploadBox label="Logo" value={logoUrl} error={logoError} onFile={onLogo} onClear={() => setLogoUrl(null)} />
-        <UploadBox label="Favicon" value={faviconUrl} error={faviconError} onFile={onFavicon} onClear={() => setFaviconUrl(null)} />
+        <UploadBox label="Logo" value={logoUrl} error={logoError} busy={uploading === 'logo'} onFile={(f) => void upload('logo', f)} onClear={() => setLogoUrl(null)} />
+        <UploadBox label="Favicon" value={faviconUrl} error={faviconError} busy={uploading === 'favicon'} allowIco onFile={(f) => void upload('favicon', f)} onClear={() => setFaviconUrl(null)} />
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         <button type="button" className="btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
-        <button className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+        <button className="btn-primary" disabled={busy || uploading !== null} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
     </div>
   );
@@ -431,8 +449,9 @@ function GlobalPostbackCard() {
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const { data: security } = useQuery<{ securityCode: string | null }>('/api/settings/security');
   const [copied, setCopied] = useState(false);
-  const primary = domains?.find((d) => d.isPrimary) ?? domains?.[0];
-  const url = primary ? advertiserPostbackUrl(primary.host, security?.securityCode) : null;
+  // The network's default link domain — never a disabled primary (lib/trackingLinks).
+  const host = resolveTrackingHost(domains);
+  const url = host ? advertiserPostbackUrl(host, security?.securityCode) : null;
 
   const copy = () => {
     if (!url) return;
@@ -522,6 +541,8 @@ function GeneralSub() {
             <InfoRow label="Language" value="English" />
             <ColorSwatchRow label="Secondary Color" color={null} />
             <InfoRow label="Timezone" value={settings?.general.timezone} />
+            <InfoRow label="Fallback URL (rejected clicks)" value={settings?.general.fallbackUrl} help="Used when the offer has no fallback URL of its own." />
+            <InfoRow label="Daily caps reset at midnight in" value={settings?.general.capTimezone ?? 'UTC'} help="An offer can use its own cap time zone." />
             <InfoRow label="HTML Custom Footer (Left menu)" />
             <InfoRow label="Currency" value={settings?.general.defaultCurrency} />
             <InfoRow label="Show Name" />
@@ -591,7 +612,7 @@ function DomainsSub() {
     { header: 'ID', cell: (d) => <span className="tabular-nums text-fg-secondary">{d.ref}</span> },
     { header: 'URL', cell: (d) => <span className="font-mono text-xs text-accent-text">{d.host}</span> },
     { header: 'Status', cell: (d) => <Badge value={d.status} /> },
-    { header: 'Is Default', cell: (d) => (d.isPrimary ? 'Default' : '—') },
+    { header: 'Is Default', cell: (d) => (d.isDefault ? 'Default' : d.isPrimary ? 'Primary (not active)' : '—') },
   ];
   const primary = domains.find((d) => d.isPrimary) ?? domains[0];
 

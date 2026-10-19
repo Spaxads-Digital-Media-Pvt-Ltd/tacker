@@ -25,7 +25,8 @@ interface PostbackRow {
 /**
  * Best-matching fire-able postback: Specific (partner + offer) beats the partner's Global postback,
  * which beats the offer's Global (Offer) postback; an event-specific row beats a catch-all. HTML
- * pixels (browser-side) and CPC-level rows aren't fired on a conversion.
+ * pixels (browser-side) never fire here; CPC-level rows fire only for a paid click (job.level 'cpc' —
+ * a CPC offer's billable click), the other levels only for a conversion.
  */
 async function fire(job: OutboundPostbackJob, attempt: number): Promise<void> {
   const { rows } = await query<PostbackRow>(
@@ -34,7 +35,7 @@ async function fire(job: OutboundPostbackJob, attempt: number): Promise<void> {
         AND (publisher_id = $2 OR (publisher_id IS NULL AND offer_id = $3))
         AND (offer_id = $3 OR offer_id IS NULL)
         AND (event = $4 OR event IS NULL)
-        AND delivery_method <> 'html' AND level <> 'cpc' AND url IS NOT NULL
+        AND delivery_method <> 'html' AND ${job.level === 'cpc' ? "level = 'cpc'" : "level <> 'cpc'"} AND url IS NOT NULL
       ORDER BY (publisher_id IS NOT NULL AND offer_id IS NOT NULL) DESC, (publisher_id IS NOT NULL) DESC,
                (event IS NOT NULL) DESC
       LIMIT 1`,
@@ -42,8 +43,9 @@ async function fire(job: OutboundPostbackJob, attempt: number): Promise<void> {
   );
   const cfg = rows[0];
   if (!cfg) {
-    // Nothing configured for this publisher — not an error; record and finish.
-    await logDelivery(job, '(none)', attempt, null, false, 'no_postback_configured');
+    // Nothing configured for this publisher — not an error; record and finish. (A paid click with no CPC-level
+    // postback is the normal case, not worth a log row per click.)
+    if (job.level !== 'cpc') await logDelivery(job, '(none)', attempt, null, false, 'no_postback_configured');
     return;
   }
 

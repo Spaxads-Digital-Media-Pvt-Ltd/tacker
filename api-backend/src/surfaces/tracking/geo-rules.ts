@@ -4,9 +4,11 @@
  *
  * Semantics:
  * - No rules → allow.
- * - Geo DB unavailable (dev/no mmdb) → FAIL-OPEN allow (can't evaluate country).
- * - Exact country rule beats a '*' default rule.
- * - No matching rule but allow-rules exist (allow-list mode) → deny (not on the list).
+ * - Geo unknown (no GeoIP database, no override, no Cloudflare country) → FAIL-OPEN allow.
+ * - The most specific rule wins: country + region ("US" + "CA", or "US-CA") › the country alone › '*'.
+ *   A region is the ISO subdivision code the GeoIP database gives (US states "CA", "NY"; GB "ENG", "SCT"…).
+ * - No matching rule but allow-rules exist (allow-list mode) → deny (not on the list). A click whose
+ *   region is unknown never matches a region rule.
  */
 import type { GeoRuleConfig } from './offer-cache.js';
 
@@ -19,18 +21,31 @@ export interface GeoDecision {
 
 const ALLOW: GeoDecision = { allowed: true, payoutOverride: null, revenueOverride: null, destinationOverride: null };
 
+/** "us-ca" / "US-CA" / "CA" (for country US) → "CA"; blank → null. */
+export function ruleRegion(country: string, region: string | null | undefined): string | null {
+ const r = (region ?? '').trim().toUpperCase();
+ if (!r) return null;
+ const prefix = `${country.trim().toUpperCase()}-`;
+ return r.startsWith(prefix) ? r.slice(prefix.length) : r;
+}
+
 export function evaluateGeoRules(
  rules: GeoRuleConfig[],
  country: string | null,
  geoAvailable: boolean,
+ region: string | readonly (string | null)[] | null = null,
 ): GeoDecision {
  if (rules.length === 0) return ALLOW;
  if (!geoAvailable) return ALLOW; // fail-open when we genuinely can't determine geo
 
  const cc = (country ?? '').toUpperCase();
- const exact = rules.find((r) => r.country.toUpperCase() === cc);
+ // The click's region as code and / or name (the database may give either): a rule matches either.
+ const regions = (Array.isArray(region) ? region : [region]).filter((x): x is string => !!x).map((x) => x.trim().toUpperCase());
+ const forCountry = cc ? rules.filter((r) => r.country.toUpperCase() === cc) : [];
+ const exactRegion = regions.length ? forCountry.find((r) => { const rr = ruleRegion(r.country, r.region); return rr !== null && regions.includes(rr); }) : undefined;
+ const countryOnly = forCountry.find((r) => ruleRegion(r.country, r.region) === null);
  const wildcard = rules.find((r) => r.country === '*');
- const matched = exact ?? wildcard;
+ const matched = exactRegion ?? countryOnly ?? wildcard;
 
  if (matched) {
  if (matched.action === 'deny') return { ...ALLOW, allowed: false };
@@ -60,4 +75,11 @@ export function resolveForcedGeo(
  if (nodeEnv === 'production') return null;
  const raw = (geoParam ?? testGeoParam ?? '').trim();
  return raw.toUpperCase().slice(0, 2) || null;
+}
+
+/** The region part of a dev override `geo=US-CA` (dev / test only; null in production or without one). */
+export function resolveForcedRegion(nodeEnv: string, geoParam: string | null, testGeoParam: string | null): string | null {
+ if (nodeEnv === 'production') return null;
+ const m = /^[A-Za-z]{2}-([A-Za-z0-9]{1,3})$/.exec((geoParam ?? testGeoParam ?? '').trim());
+ return m ? m[1]!.toUpperCase() : null;
 }

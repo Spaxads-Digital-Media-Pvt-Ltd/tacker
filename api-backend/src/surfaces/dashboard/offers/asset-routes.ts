@@ -17,10 +17,13 @@ import { writeAudit } from '../../../lib/audit.js';
 import { invalidateOfferConfig } from '../../tracking/offer-cache.js';
 import { requireRole } from '../auth.js';
 import type { PublisherRow } from '../../../domain/entities.js';
+import { isInlineData } from '../../../lib/creatives/files.js';
+import { notifyNewCreative, creativeIsPartnerVisible } from '../../../lib/email/notifications.js';
 import {
   createGoalSchema, updateGoalSchema,
   createCreativeSchema, updateCreativeSchema,
   createCouponSchema, updateCouponSchema,
+  createOfferProductSchema, updateOfferProductSchema,
   createDealSchema, updateDealSchema,
   createForwardingRuleSchema, updateForwardingRuleSchema,
   createOfferPostbackSchema, updateOfferPostbackSchema, POSTBACK_LEVELS,
@@ -58,6 +61,8 @@ export interface AssetSpec {
   auditKind: string;                  // e.g. 'goal'
   invalidateCache?: boolean;          // goals affect payout resolution → bust the offer cache
   beforeWrite?: (db: Db, offerId: string, body: Record<string, unknown>) => Promise<void>;
+  /** After a create is saved (e.g. tell partners about a new creative). Must not throw. */
+  afterCreate?: (networkId: string, offerId: string, row: Row) => void;
   /** Allow-listed exact-match list filters: query param → snake_case column + its allowed values
    * (e.g. ?level=event). An empty param is ignored; any other value outside `values` is a 400. */
   listFilters?: Record<string, { column: string; values: readonly [string, ...string[]] }>;
@@ -85,6 +90,7 @@ export async function createAsset(req: Request, spec: AssetSpec, offerId: string
   const row = await withUniqueMessage(spec, () => db.insert<Row>(spec.table, { offer_id: offerId, ...toColumns(body, spec.colMap, spec.jsonCols) }));
   await writeAudit(req, { action: `offer.${spec.auditKind}.create`, entityType: spec.table, entityId: row.id, after: row });
   if (spec.invalidateCache) await invalidateOfferConfig(db.scope.networkId, offerId);
+  spec.afterCreate?.(db.scope.networkId, offerId, row);
   return row;
 }
 
@@ -150,6 +156,7 @@ export const goalDTO = (r: Row) => ({
   id: r.id, name: r.name, eventName: r.event_name, payoutModel: r.payout_model,
   payout: r.payout, revenue: r.revenue, currency: r.currency,
   dailyConversionCap: r.daily_conversion_cap, totalConversionCap: r.total_conversion_cap,
+  duplicateMode: r.duplicate_mode ?? null,
   isDefault: r.is_default, status: r.status, sortOrder: r.sort_order,
 });
 
@@ -161,7 +168,8 @@ export const GOAL_ASSET: AssetSpec = {
   colMap: {
     name: 'name', eventName: 'event_name', payoutModel: 'payout_model', payout: 'payout',
     revenue: 'revenue', currency: 'currency', dailyConversionCap: 'daily_conversion_cap',
-    totalConversionCap: 'total_conversion_cap', isDefault: 'is_default', status: 'status', sortOrder: 'sort_order',
+    totalConversionCap: 'total_conversion_cap', duplicateMode: 'duplicate_mode',
+    isDefault: 'is_default', status: 'status', sortOrder: 'sort_order',
   },
   dto: goalDTO, auditKind: 'goal', invalidateCache: true,
   uniqueMessage: 'This offer already has a goal/event with that event name.',
@@ -173,7 +181,8 @@ export const GOAL_ASSET: AssetSpec = {
   },
 };
 const creativeDTO = (r: Row) => ({
-  id: r.id, ref: Number(r.ref), name: r.name, type: r.type, url: r.url, html: r.html,
+  // F-27: a not-yet-migrated inline (data:) file's bytes are never sent — GET /api/creatives/:id has it.
+  id: r.id, ref: Number(r.ref), name: r.name, type: r.type, url: isInlineData(r.url) ? null : r.url, urlInline: isInlineData(r.url), html: r.html,
   width: r.width, height: r.height, language: r.language, status: r.status,
   visibleToPartners: r.visible_to_partners, emailFrom: r.email_from, emailSubject: r.email_subject,
   offerId: r.offer_id, createdAt: r.created_at, updatedAt: r.updated_at,
@@ -181,6 +190,11 @@ const creativeDTO = (r: Row) => ({
 const couponDTO = (r: Row) => ({
   id: r.id, code: r.code, publisherId: r.publisher_id, description: r.description,
   discount: r.discount, status: r.status, startsAt: r.starts_at, endsAt: r.ends_at,
+});
+const productDTO = (r: Row) => ({
+  id: r.id, offerId: r.offer_id, sku: r.sku, category: r.category, name: r.name,
+  payoutType: r.payout_type, payoutValue: r.payout_value, revenueType: r.revenue_type, revenueValue: r.revenue_value,
+  status: r.status, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 const dealDTO = (r: Row) => ({
   id: r.id, name: r.name, description: r.description, dealType: r.deal_type,
@@ -208,6 +222,10 @@ export function mountOfferAssets(r: Router): void {
       status: 'status', visibleToPartners: 'visible_to_partners', emailFrom: 'email_from', emailSubject: 'email_subject',
     },
     dto: creativeDTO, auditKind: 'creative',
+    // New Offer Creative Available → the partners running the offer (O11).
+    afterCreate: (networkId, offerId, row) => {
+      if (creativeIsPartnerVisible({ status: row['status'], visible_to_partners: row['visible_to_partners'] })) void notifyNewCreative(networkId, offerId, String(row['name'] ?? 'New creative'));
+    },
   });
 
   mountAsset(r, {
@@ -223,6 +241,18 @@ export function mountOfferAssets(r: Router): void {
         if (!pub) throw badRequest('publisherId does not belong to this network');
       }
     },
+  });
+
+  // Price Per Product rules (lib/offer-settings/products.ts) — the tracking cache holds them, so writes bust it.
+  mountAsset(r, {
+    collection: 'products', table: 'offer_products',
+    createSchema: createOfferProductSchema, updateSchema: updateOfferProductSchema,
+    colMap: {
+      sku: 'sku', category: 'category', name: 'name', payoutType: 'payout_type', payoutValue: 'payout_value',
+      revenueType: 'revenue_type', revenueValue: 'revenue_value', status: 'status',
+    },
+    dto: productDTO, auditKind: 'product', invalidateCache: true,
+    uniqueMessage: 'This offer already has a product with that SKU (or, without a SKU, that category).',
   });
 
   mountAsset(r, {

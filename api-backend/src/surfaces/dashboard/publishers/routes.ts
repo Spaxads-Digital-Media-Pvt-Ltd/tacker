@@ -8,18 +8,18 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { paginationSchema, entityListLimit, ENTITY_LIST_CAP, type PaginationQuery } from '../../../lib/http/pagination.js';
-import { notFound } from '../../../lib/http/errors.js';
+import { notFound, conflict } from '../../../lib/http/errors.js';
 import { rejectMalformedIdParams } from '../../../lib/http/path-params.js';
 import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import type { PublisherRow } from '../../../domain/entities.js';
-import { requireRole, requirePortal } from '../auth.js';
+import { requireRole, requirePortal, startImpersonation } from '../auth.js';
 import { balanceSummary, type CurrencyBalance } from '../../../lib/ledger/ledger.js';
-import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
+import { attachLabels } from '../../../lib/reporting/labels.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
 import {
   createPublisherSchema, updatePublisherSchema, createPostbackSchema,
@@ -34,6 +34,13 @@ import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { badRequest } from '../../../lib/http/errors.js';
+import { invitePortalUser, inviteOnCreate, inviteAuditView, portalLoginUrl } from '../../../lib/portal-invite.js';
+import { sendTransactional, networkName, type TransactionalResult } from '../../../lib/email/transactional.js';
+import { balanceRequestEmail } from '../../../lib/email/templates.js';
+import { invalidatePartnerStatus } from '../../tracking/partner-status.js';
+import { forgetPortalAccount, portalAccessAllowed } from '../../../lib/auth/portal-state.js';
+import { applyPortalStatusChange, removeLogin, type LoginSync } from '../../../lib/auth/login-sync.js';
+import { notifySignupDecision } from '../../../lib/email/notifications.js';
 
 const TABLE = 'publishers';
 const POSTBACKS = 'publisher_postbacks';
@@ -140,46 +147,63 @@ export function publishersAdminRoutes(): Router {
     sendOk(res, { total, active: by['active'] ?? 0, pending: by['pending'] ?? 0, suspended: by['inactive'] ?? 0 });
   }));
 
-  // "Request Outstanding Balances" (Table Actions) — no outbound-email infra to actually send a
-  // request, so this computes each selected publisher's REAL approved-but-unpaid balance (the same
-  // ledger the publisher portal itself reads) and records it as a real audit_log entry. Registered
-  // before /:id.
+  // "Request Outstanding Balances" (Table Actions) — computes each selected publisher's REAL
+  // approved-but-unpaid balance (the same ledger the publisher portal itself reads), records it in the
+  // audit log and (F-24) emails it to the partner's contact address — "Outstanding Balance Request"
+  // system email; nobody is emailed about a zero balance. Registered before /:id.
   r.post('/request-balances', requireRole('admin', 'manager'), validateBody(requestBalancesSchema), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const networkId = db.scope.networkId;
     const b = req.body as z.infer<typeof requestBalancesSchema>;
     // Never a cross-currency sum: balance/currency are null when the balance spans several
     // currencies; `balances` is always the per-currency split.
-    const results: { publisherId: string; balance: string | null; currency: string | null; balances: CurrencyBalance[] }[] = [];
+    const results: { publisherId: string; balance: string | null; currency: string | null; balances: CurrencyBalance[]; email: TransactionalResult | null }[] = [];
+    const netName = await networkName(networkId);
     for (const publisherId of b.publisherIds) {
       const pub = await db.selectOne<PublisherRow>(TABLE, { id: publisherId });
       if (!pub) continue;
       const { balance, currency, balances } = await balanceSummary(networkId, 'publisher', publisherId, 'approved');
+      const owed = balances.filter((x) => Number(x.balance) > 0); // a sign test, not money arithmetic
+      const email = owed.length
+        ? await sendTransactional(networkId, 'partner_balance_request', [pub.contact_email],
+          balanceRequestEmail({ networkName: netName, partnerName: pub.name, balances: owed, loginUrl: portalLoginUrl() }))
+        : null;
       await writeAudit(req, {
         action: 'publisher.request_balance', entityType: 'publisher', entityId: publisherId,
-        after: { balance, currency, balances },
+        after: { balance, currency, balances, emailed: email?.sent ?? false, ...(email?.skipped ? { emailSkipped: email.skipped } : {}) },
       });
-      results.push({ publisherId, balance, currency, balances });
+      results.push({ publisherId, balance, currency, balances, email });
     }
     sendOk(res, { requested: results });
   }));
 
-  // "Impersonate" (row menu) — mints a real Supabase magic-link for the publisher's OWN linked
-  // portal account (never a forged/self-signed token) so opening it logs in as that publisher for
-  // real. Only publishers with a linked portal account (hasPortalAccount) can be impersonated.
+  // "Impersonate" (row menu) — a short-lived impersonation session for this publisher's portal
+  // (F-10): a dedicated 30-minute token flagged with the admin who started it — never the account's
+  // own credentials (the old Supabase magic link was a reusable login). Writes made with it are
+  // audited to that admin; credential changes are refused. See dashboard/auth.ts startImpersonation.
   r.post('/:id/impersonate', requireRole('admin'), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const pub = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
     if (!pub) throw notFound('Publisher not found');
-    if (!pub.auth_user_id || !pub.contact_email) {
-      throw badRequest('This partner has no linked portal account to impersonate.');
-    }
-    const { data, error } = await getSupabaseAdmin().auth.admin.generateLink({
-      type: 'magiclink', email: pub.contact_email,
+    const session = await startImpersonation(req, 'publisher', pub);
+    await writeAudit(req, { action: 'publisher.impersonate', entityType: 'publisher', entityId: pub.id, after: session.audit });
+    sendOk(res, session.response);
+  }));
+
+  // Portal invite (audit F-04): give this partner a working portal login — a temporary password
+  // emailed to their contact email — and link it (auth_user_id). Idempotent by email; inviting again
+  // before they sign in re-issues the password. See lib/portal-invite.ts.
+  r.post('/:id/invite', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const pub = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
+    if (!pub) throw notFound('Publisher not found');
+    if (!portalAccessAllowed(pub.status)) throw conflict('This partner is inactive — set it to active (or pending) before sending a portal invite.');
+    const invite = await invitePortalUser({
+      networkId: db.scope.networkId, kind: 'publisher', ownerId: pub.id,
+      email: pub.contact_email, linkedAuthUserId: pub.auth_user_id,
     });
-    if (error || !data?.properties?.action_link) throw badRequest('Could not generate an impersonation link.');
-    await writeAudit(req, { action: 'publisher.impersonate', entityType: 'publisher', entityId: pub.id });
-    sendOk(res, { link: data.properties.action_link });
+    await writeAudit(req, { action: 'publisher.invite', entityType: 'publisher', entityId: pub.id, after: inviteAuditView(invite) });
+    sendOk(res, invite);
   }));
 
   r.get(
@@ -226,7 +250,11 @@ export function publishersAdminRoutes(): Router {
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
       });
       await writeAudit(req, { action: 'publisher.create', entityType: 'publisher', entityId: row.id, after: row });
-      sendOk(res, toAdminDTO((await loadPublisher(nid, row.id)) ?? row), undefined, 201);
+      const invited = await inviteOnCreate({ networkId: nid, kind: 'publisher', row, requested: b.invite });
+      if (invited.invite) {
+        await writeAudit(req, { action: 'publisher.invite', entityType: 'publisher', entityId: row.id, after: inviteAuditView(invited.invite) });
+      }
+      sendOk(res, { ...toAdminDTO((await loadPublisher(nid, row.id)) ?? row), ...invited }, undefined, 201);
     }),
   );
 
@@ -267,8 +295,19 @@ export function publishersAdminRoutes(): Router {
       if (b.customFields !== undefined) patch['metadata'] = mergeCustomFields(before.metadata, b.customFields);
 
       const [row] = await db.update<PublisherRow>(TABLE, patch, { id: req.params.id });
+      let loginSync: LoginSync | undefined;
+      if (b.status !== undefined && b.status !== before.status) {
+        // Tracking reads partner status from a Redis cache (F-08) — a status change applies on the next click.
+        await invalidatePartnerStatus(db.scope.networkId, before.id);
+        // Portal + API access follow at once; an inactive partner's login is blocked (O6).
+        loginSync = await applyPortalStatusChange(db.scope.networkId, 'publisher', before, before.status, b.status);
+        // A pending sign-up decided: Partner Sign-Up Approved / Rejected email (O11).
+        if (before.status === 'pending' && b.status !== 'pending') {
+          void notifySignupDecision(db.scope.networkId, { id: before.id, name: row?.name ?? before.name, email: row?.contact_email ?? before.contact_email }, b.status === 'active');
+        }
+      }
       await writeAudit(req, { action: 'publisher.update', entityType: 'publisher', entityId: req.params.id, before, after: row });
-      sendOk(res, toAdminDTO((await loadPublisher(db.scope.networkId, before.id)) ?? row ?? before));
+      sendOk(res, { ...toAdminDTO((await loadPublisher(db.scope.networkId, before.id)) ?? row ?? before), ...(loginSync ? { loginSync } : {}) });
     }),
   );
 
@@ -279,9 +318,16 @@ export function publishersAdminRoutes(): Router {
       const db = dbForRequest(req);
       const before = await db.selectOne<PublisherRow>(TABLE, { id: req.params.id });
       if (!before) throw notFound('Publisher not found');
+      // Invoices are financial records (O8) — deleting the partner would cascade them away.
+      const invoices = await db.count('partner_invoices', { publisher_id: req.params.id });
+      if (invoices > 0) throw conflict(`This partner has ${invoices} invoice(s), which are financial records. Set the partner to inactive instead of deleting it.`);
       await db.delete(TABLE, { id: req.params.id });
-      await writeAudit(req, { action: 'publisher.delete', entityType: 'publisher', entityId: req.params.id, before });
-      sendOk(res, { deleted: true });
+      await invalidatePartnerStatus(db.scope.networkId, before.id);
+      // Portal + API access end at once, and the login is deleted with the account (O6).
+      forgetPortalAccount(db.scope.networkId, 'publisher', before.id);
+      const login = await removeLogin(before.auth_user_id);
+      await writeAudit(req, { action: 'publisher.delete', entityType: 'publisher', entityId: req.params.id, before, after: { login } });
+      sendOk(res, { deleted: true, login });
     }),
   );
 
@@ -460,7 +506,7 @@ export function publisherPortalRoutes(): Router {
     validateQuery(reportQuerySchema),
     asyncHandler(async (req, res) => {
       const request = buildReportRequest(req.scope!.networkId, res.locals.query, 'publisher', { publisherId: ownerIdOf(req) });
-      sendOk(res, await getReportingProvider().runReport(request));
+      sendOk(res, await attachLabels(req.scope!.networkId, await getReportingProvider().runReport(request)));
     }),
   );
 

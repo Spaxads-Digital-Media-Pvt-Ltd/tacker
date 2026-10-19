@@ -10,6 +10,9 @@ import {
   readTargeting, readAttribution, readRevenue,
   type OfferTargeting, type AttributionSettings, type RevenueSettings,
 } from '../../lib/offer-settings/index.js';
+import type { CustomSettingConfig, CustomCategory, CapsMatrix, CustomTargeting } from '../../lib/offer-settings/custom-settings.js';
+import { capTimeZoneOf } from '../../lib/offer-settings/custom-settings.js';
+import type { ProductPrice } from '../../lib/offer-settings/products.js';
 
 export interface GeoRuleConfig {
   country: string;
@@ -53,6 +56,9 @@ export interface OfferConfig {
   dailyConversionCap: number | null;
   totalConversionCap: number | null;
   dailyClickCap: number | null;
+  /** When daily (weekly, monthly) caps reset: the offer's Cap time zone, else the network's, else UTC
+   * (capTimeZoneOf). Undefined on a config cached before it existed (≤ cache TTL) = UTC. */
+  capTimeZone?: string;
   attributionWindowS: number;
   dedupWindowS: number;
   allowedTrafficTypes: string[];
@@ -61,6 +67,9 @@ export interface OfferConfig {
   deniedPublishers: string[];
   /** Per-partner payout overrides (offer_publisher_access.payout_override), publisherId → money string. */
   partnerPayouts?: Record<string, string>;
+  /** Partner Tiers (F-17b): publisherId → margin % of the active tier(s) linked to this offer with
+   * "apply margin" — payout = revenue × (1 − margin/100). Undefined on configs cached before it. */
+  tierMargins?: Record<string, string>;
   /** 'public' | 'ask' | 'private'. Non-public offers only run for approvedPublishers. */
   visibility?: string;
   /** Publishers with access='allow' AND approval_status='approved' on this offer. */
@@ -77,8 +86,20 @@ export interface OfferConfig {
    * dashboard "Fire Partner Postback" toggle). Unset/non-boolean metadata defaults to true so
    * existing offers keep firing postbacks as they always have (backward compatible). */
   firePartnerPostback: boolean;
+  /** Active per-partner Offer Custom Settings (F-12; lib/offer-settings/custom-settings.ts) — undefined
+   * only on a config cached before they were loaded (≤ cache TTL). */
+  customSettings?: CustomSettingConfig[];
   /** Targeting rules (Edit Offer › Targeting) enforced at /click. */
   targeting: OfferTargeting;
+  /** Edit Offer › "Allow deep links": a partner may send the visitor to another page of the offer's own site (&url=…). */
+  deepLinkEnabled?: boolean;
+  /** Edit Offer › Click Tracking Type: 'redirect_direct' also takes clicks the JavaScript tag on the advertiser's
+   * site registers (/sdk.js — direct linking). Undefined on a config cached before it existed = 'redirect'. */
+  linkingType?: string;
+  /** The advertiser's impression URL: /impression sends the browser there (macros filled) instead of a pixel. */
+  impressionUrl?: string | null;
+  /** Price Per Product rules (active offer_products) — loaded only while the offer prices per product. */
+  products?: ProductPrice[];
   attribution: AttributionSettings;
   revenue: RevenueSettings;
 }
@@ -136,12 +157,17 @@ interface Row {
   visibility: string | null;
   security_code: string | null;
   network_security_code: string | null;
+  network_fallback_url: string | null;
+  cap_timezone: string | null;
+  network_cap_timezone: string | null;
   metadata: Record<string, unknown> | null;
 }
 
 async function loadFromDb(networkId: string, offerId: string): Promise<OfferConfig | null> {
   const { rows } = await query<Row>(
     `SELECT o.*, n.postback_security_code AS network_security_code,
+            (SELECT nn.settings->'general'->>'fallbackUrl' FROM networks nn WHERE nn.id = o.network_id) AS network_fallback_url,
+            (SELECT nn.settings->'general'->>'capTimezone' FROM networks nn WHERE nn.id = o.network_id) AS network_cap_timezone,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'country', g.country, 'region', g.region, 'action', g.action,
               'payoutOverride', g.payout_override, 'revenueOverride', g.revenue_override,
@@ -187,16 +213,67 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     [networkId, offerId],
   );
 
+  // Offer Custom Settings (F-12): active, not yet expired (a future start is checked when applied).
+  // Creatives are partner-facing assets, not click/conversion behaviour, so they aren't loaded.
+  const csRes = await query<{
+    id: string; category: CustomCategory; partner_id: string | null; partner_ids: string[] | null; apply_all_partners: boolean;
+    effective_from: string | null; effective_to: string | null; targeting: CustomTargeting | null;
+    apply_custom_payout: boolean; payout_model: string | null; payout_value: string | null;
+    apply_custom_revenue: boolean; revenue_model: string | null; revenue_value: string | null;
+    goal_id: string | null; fire_partner_postback: boolean; caps: CapsMatrix | null;
+    throttle_rate: string | null; conversion_status: 'rejected' | 'pending' | null; landing_page_url: string | null;
+  }>(
+    `SELECT id, category, partner_id, partner_ids, apply_all_partners, effective_from, effective_to, targeting,
+            apply_custom_payout, payout_model, payout_value::text, apply_custom_revenue, revenue_model, revenue_value::text,
+            goal_id, fire_partner_postback, caps, throttle_rate::text, conversion_status, landing_page_url
+       FROM offer_custom_settings
+      WHERE network_id = $1 AND offer_id = $2 AND status = 'active' AND category <> 'creatives'
+        AND (effective_to IS NULL OR effective_to > now())
+      ORDER BY created_at, id`,
+    [networkId, offerId],
+  );
+
+  // Price Per Product rules — only while the offer prices per product (Revenue › Price Per Product).
+  const revenue = readRevenue(r.metadata);
+  const products = revenue.pricePerProduct ? (await query<{
+    id: string; sku: string | null; category: string | null; payout_type: 'fixed' | 'percent'; payout_value: string | null;
+    revenue_type: 'fixed' | 'percent'; revenue_value: string | null;
+  }>(
+    `SELECT id, sku, category, payout_type, payout_value::text, revenue_type, revenue_value::text
+       FROM offer_products WHERE network_id = $1 AND offer_id = $2 AND status = 'active'
+      ORDER BY created_at, id LIMIT 5000`,
+    [networkId, offerId],
+  )).rows.map((p): ProductPrice => ({
+    id: p.id, sku: p.sku, category: p.category, payoutType: p.payout_type, payoutValue: p.payout_value,
+    revenueType: p.revenue_type, revenueValue: p.revenue_value,
+  })) : [];
+
+  // Partner Tiers (F-17b): the members of every ACTIVE tier linked to this offer with apply_margin.
+  // DECISION: a partner in several such tiers gets the lowest margin (the best rate it qualifies for).
+  const tierRes = await query<{ publisher_id: string; margin: string }>(
+    `SELECT m.publisher_id::text AS publisher_id, MIN(t.margin_pct)::text AS margin
+       FROM partner_tier_offers tof
+       JOIN partner_tiers t ON t.id = tof.tier_id AND t.network_id = tof.network_id AND t.status = 'active'
+       JOIN partner_tier_members m ON m.tier_id = t.id AND m.network_id = t.network_id
+      WHERE tof.network_id = $1 AND tof.offer_id = $2 AND tof.apply_margin
+      GROUP BY m.publisher_id`,
+    [networkId, offerId],
+  );
+
   return {
     id: r.id, networkId: r.network_id, advertiserId: r.advertiser_id, status: r.status,
-    destinationUrl: r.destination_url, fallbackUrl: r.fallback_url, payoutModel: r.payout_model,
+    destinationUrl: r.destination_url,
+    // The offer's own fallback, else the network's (Settings › General — D1): where rejected clicks go.
+    fallbackUrl: r.fallback_url ?? r.network_fallback_url ?? null, payoutModel: r.payout_model,
     defaultPayout: r.default_payout, defaultRevenue: r.default_revenue, currency: r.currency,
     dailyConversionCap: r.daily_conversion_cap, totalConversionCap: r.total_conversion_cap,
     dailyClickCap: r.daily_click_cap, attributionWindowS: r.attribution_window_s,
+    capTimeZone: capTimeZoneOf(r.cap_timezone, r.network_cap_timezone),
     dedupWindowS: r.dedup_window_s, allowedTrafficTypes: r.allowed_traffic_types,
     geoRules: r.geo_rules ?? [],
     deniedPublishers: r.denied_publishers ?? [],
     partnerPayouts: r.partner_payouts ?? {},
+    tierMargins: Object.fromEntries(tierRes.rows.map((t) => [t.publisher_id, t.margin])),
     visibility: r.visibility ?? 'public',
     approvedPublishers: r.approved_publishers ?? [],
     securityCode: r.security_code ?? null,
@@ -210,7 +287,23 @@ async function loadFromDb(networkId: string, offerId: string): Promise<OfferConf
     trafficBlockings: tbRes.rows.map((t) => ({ publisherId: t.publisher_id, filters: t.filters ?? {} })),
     firePartnerPostback: r.metadata?.['fire_partner_postback'] !== false,
     targeting: readTargeting(r.metadata),
+    deepLinkEnabled: r.metadata?.['deep_link_enabled'] === true,
+    linkingType: r.metadata?.['linking_type'] === 'redirect_direct' || r.metadata?.['linkingType'] === 'redirect_direct' ? 'redirect_direct' : 'redirect',
+    impressionUrl: typeof r.metadata?.['impression_url'] === 'string' ? (r.metadata['impression_url'] as string) : null,
+    products,
     attribution: readAttribution(r.metadata),
-    revenue: readRevenue(r.metadata),
+    revenue,
+    customSettings: csRes.rows.map((c): CustomSettingConfig => {
+      const partnerIds = [...new Set([...(c.partner_id ? [c.partner_id] : []), ...(c.partner_ids ?? [])])];
+      return {
+        id: c.id, category: c.category,
+        allPartners: c.apply_all_partners || partnerIds.length === 0, partnerIds,
+        effectiveFrom: c.effective_from, effectiveTo: c.effective_to, targeting: c.targeting ?? {},
+        payoutModel: c.payout_model, payout: c.apply_custom_payout ? c.payout_value : null,
+        revenueModel: c.revenue_model, revenue: c.apply_custom_revenue ? c.revenue_value : null,
+        goalId: c.goal_id, firePartnerPostback: c.fire_partner_postback, caps: c.caps ?? {},
+        throttleRate: c.throttle_rate, conversionStatus: c.conversion_status, landingPageUrl: c.landing_page_url,
+      };
+    }),
   };
 }

@@ -1,7 +1,7 @@
 // Conversion Report display rules (lib/conversionReport.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
-import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta } from '../conversionReport.ts';
+import { canModerateConversions, conversionCurrency, conversionMoney, formatDelta, inboundRecorded, INBOUND_OUTCOME_LABELS, reasonLabel } from '../conversionReport.ts';
 
 describe('conversionMoney', () => {
   it('formats in the currency stored on the conversion', () => {
@@ -42,5 +42,27 @@ describe('canModerateConversions', () => {
     assert.strictEqual(canModerateConversions('admin'), true);
     assert.strictEqual(canModerateConversions('finance'), true);
     for (const r of ['manager', 'read_only', '', null, undefined]) assert.strictEqual(canModerateConversions(r), false);
+  });
+});
+
+describe('reasonLabel', () => {
+  it('puts the codes the tracking surface writes into words', () => {
+    assert.strictEqual(reasonLabel('duplicate_transaction_id'), 'Transaction ID already recorded for this event');
+    assert.strictEqual(reasonLabel('held_unusual_volume'), 'Unusual volume from one click — held for review');
+    assert.strictEqual(reasonLabel('wrong_security_code'), 'Wrong security code');
+    assert.strictEqual(reasonLabel('goal_daily_conversion_cap_reached'), 'Over caps — event daily cap');
+  });
+  it('names the postback control; shows an unknown code as sent; no reason → null', () => {
+    assert.strictEqual(reasonLabel('postback_control:Hold big orders'), 'Postback control: Hold big orders');
+    assert.strictEqual(reasonLabel('some_new_reason'), 'some_new_reason');
+    for (const v of [null, undefined, '']) assert.strictEqual(reasonLabel(v), null);
+  });
+});
+
+describe('inbound postback outcomes', () => {
+  it('approved / pending / rejected became a conversion; the rest recorded nothing', () => {
+    for (const o of ['approved', 'pending', 'rejected']) assert.strictEqual(inboundRecorded(o), true);
+    for (const o of ['duplicate', 'click_not_found', 'security_failed', 'error']) assert.strictEqual(inboundRecorded(o), false);
+    assert.strictEqual(INBOUND_OUTCOME_LABELS['click_not_found'], 'Click not found');
   });
 });

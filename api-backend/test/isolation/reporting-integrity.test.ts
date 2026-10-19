@@ -853,7 +853,10 @@ d('reporting integrity (live DB)', () => {
         expect(empty.body.data.rows[0].metrics).toEqual({ money_by_currency: {} });
         // Multi-dimension grouping (incl. a NULL dimension value) attaches to the right group.
         const two = await request(app).get(`/api/reports?groupBy=offer,country&metrics=money_by_currency&offerId=${mixed}`).set(auth);
-        expect(two.body.data.rows).toEqual([{ dimensions: { offer: mixed, country: null }, metrics: { money_by_currency: { EUR: M('2.0000', '5.0000', '3.0000'), USD: M('1.0000', '2.0000', '1.0000') } } }]);
+        expect(two.body.data.rows).toEqual([{
+          dimensions: { offer: mixed, country: null }, metrics: { money_by_currency: { EUR: M('2.0000', '5.0000', '3.0000'), USD: M('1.0000', '2.0000', '1.0000') } },
+          labels: { offer: { ref: expect.any(Number), name: expect.any(String) } }, // F-20: entity names on id dimensions
+        }]);
         const dflt = await request(app).get(`/api/reports?groupBy=offer&offerId=${mixed}`).set(auth);
         expect(dflt.body.data.rows[0].metrics).not.toHaveProperty('money_by_currency');
         expect((await request(app).get(`/api/reports?orderBy=money_by_currency&offerId=${mixed}`).set(auth)).body.data.sortedWithinCurrency).toBeUndefined();
@@ -866,7 +869,10 @@ d('reporting integrity (live DB)', () => {
         const pub = bearer(portalToken({ userId: 'p1', networkId: fx.networkA, kind: 'publisher', ownerId: fx.pubA1 }));
         const res = await request(app).get(`/api/portal/publisher/stats?groupBy=offer&metrics=money_by_currency,revenue,margin&offerId=${pubOffer}`).set(pub);
         expect(res.status).toBe(200);
-        expect(res.body.data.rows).toEqual([{ dimensions: { offer: pubOffer }, metrics: { money_by_currency: { EUR: { payout: '2.0000' } } } }]);
+        expect(res.body.data.rows).toEqual([{
+          dimensions: { offer: pubOffer }, metrics: { money_by_currency: { EUR: { payout: '2.0000' } } },
+          labels: { offer: { ref: expect.any(Number), name: 'MBC publisher' } },
+        }]);
         const sum = await request(app).get('/api/portal/publisher/summary').set(pub);
         expect(sum.status).toBe(200);
         expect(sum.body.data.moneyByCurrency.EUR).toEqual({ payout: expect.any(String) });
@@ -999,7 +1005,7 @@ d('reporting integrity (live DB)', () => {
         expect(created.status).toBe(201);
         const s = await request(app).get(`/api/offer-groups/${created.body.data.id}/stats`).set(auth);
         expect(s.status).toBe(200);
-        expect(s.body.data).toMatchObject({ payout: '3.00', revenue: '8.00', clicks: 2, cv: 2, currencies: ['EUR', 'USD'],
+        expect(s.body.data).toMatchObject({ payout: '3.0000', revenue: '8.0000', margin: '5.0000', clicks: 2, cv: 2, currencies: ['EUR', 'USD'],
           moneyByCurrency: { EUR: M('2.0000', '5.0000', '3.0000'), USD: M('1.0000', '3.0000', '2.0000') } });
         const list = await request(app).get('/api/offer-groups').set(auth);
         const mine = list.body.data.find((g: { id: string }) => g.id === created.body.data.id);

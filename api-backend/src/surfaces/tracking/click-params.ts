@@ -5,8 +5,21 @@
  * Populated values are kept exactly as sent.
  */
 
+import { isIP } from 'node:net';
+
 /** Source aliases in precedence order (also what Traffic Blocking matches on). */
 export const SOURCE_PARAMS = ['source_id', 'source', 'src'] as const;
+
+/** A query / body value as a string — the first of a repeated param — else null. */
+export function firstStr(v: unknown): string | null {
+  return typeof v === 'string' ? v : Array.isArray(v) && typeof v[0] === 'string' ? v[0] : null;
+}
+
+/** A plain IPv4 / IPv6 address, else null (a visitor IP passed on a server-to-server click, D2). */
+export function asIp(v: string | null): string | null {
+  const s = v?.trim() ?? '';
+  return s && s.length <= 45 && isIP(s) ? s : null;
+}
 
 /** null for undefined / null / blank / whitespace-only; otherwise the value unchanged. */
 export function blankToNull(v: string | null | undefined): string | null {

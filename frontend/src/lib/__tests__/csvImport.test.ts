@@ -1,5 +1,5 @@
 // Conversion Imports CSV parsing (lib/csvImport.ts) — imports the real module.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { parseCsv, parseCsvRecords } from '../csvImport.ts';
 

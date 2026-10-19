@@ -14,11 +14,11 @@ import { dbForRequest, ownerIdOf } from '../../../lib/db/from-request.js';
 import { assertSameNetwork } from '../../../lib/db/ownership.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
-import { getSupabaseAdmin } from '../../../lib/supabase.js';
 import type { AdvertiserRow } from '../../../domain/entities.js';
-import { requireRole, requirePortal } from '../auth.js';
+import { requireRole, requirePortal, startImpersonation } from '../auth.js';
 import { reportQuerySchema, buildReportRequest } from '../../../lib/reporting/request.js';
 import { getReportingProvider } from '../../../lib/reporting/index.js';
+import { attachLabels } from '../../../lib/reporting/labels.js';
 import { summary24h } from '../../../lib/reporting/summary.js';
 import {
   createAdvertiserSchema, updateAdvertiserSchema, debugPostbackSchema, type DebugPostback,
@@ -32,6 +32,9 @@ import { attachTagRoutes } from '../tags/routes.js';
 import { mergeCustomFields } from '../custom-fields/routes.js';
 import { firePostbackTest, sampleMacros } from '../../../lib/postback/test.js';
 import { apiKeyManagementRoutes } from '../api-keys/routes.js';
+import { invitePortalUser, inviteOnCreate, inviteAuditView } from '../../../lib/portal-invite.js';
+import { forgetPortalAccount, portalAccessAllowed } from '../../../lib/auth/portal-state.js';
+import { applyPortalStatusChange, removeLogin } from '../../../lib/auth/login-sync.js';
 
 const TABLE = 'advertisers';
 
@@ -261,7 +264,12 @@ export function advertisersAdminRoutes(): Router {
         ...(b.customFields ? { metadata: mergeCustomFields(null, b.customFields) } : {}),
       });
       await writeAudit(req, { action: 'advertiser.create', entityType: 'advertiser', entityId: row.id, after: row });
-      sendOk(res, toAdminDTO(row), undefined, 201);
+      const invited = await inviteOnCreate({ networkId: req.scope!.networkId, kind: 'advertiser', row, requested: b.invite });
+      if (invited.invite) {
+        await writeAudit(req, { action: 'advertiser.invite', entityType: 'advertiser', entityId: row.id, after: inviteAuditView(invited.invite) });
+      }
+      const saved = invited.invite ? await dbForRequest(req).selectOne<AdvertiserRow>(TABLE, { id: row.id }) : null;
+      sendOk(res, { ...toAdminDTO(saved ?? row), ...invited }, undefined, 201);
     }),
   );
 
@@ -291,8 +299,12 @@ export function advertisersAdminRoutes(): Router {
       if (b.customFields !== undefined) patch['metadata'] = mergeCustomFields(before.metadata, b.customFields);
 
       const [row] = await db.update<AdvertiserRow>(TABLE, patch, { id: req.params.id });
+      // Portal + API access follow a status change at once; an inactive advertiser's login is blocked (O6).
+      const loginSync = b.status !== undefined && b.status !== before.status
+        ? await applyPortalStatusChange(db.scope.networkId, 'advertiser', before, before.status, b.status)
+        : undefined;
       await writeAudit(req, { action: 'advertiser.update', entityType: 'advertiser', entityId: req.params.id, before, after: row });
-      sendOk(res, toAdminDTO(row ?? before));
+      sendOk(res, { ...toAdminDTO(row ?? before), ...(loginSync ? { loginSync } : {}) });
     }),
   );
 
@@ -313,27 +325,40 @@ export function advertisersAdminRoutes(): Router {
       if (offers > 0) throw conflict(`This advertiser still has ${offers} offer(s). Move or delete them first, or set the advertiser to inactive.`);
       if (invoices > 0) throw conflict(`This advertiser has ${invoices} invoice(s), which are financial records. Set the advertiser to inactive instead of deleting it.`);
       await db.delete(TABLE, { id: req.params.id });
-      await writeAudit(req, { action: 'advertiser.delete', entityType: 'advertiser', entityId: req.params.id, before });
-      sendOk(res, { deleted: true });
+      // Portal + API access end at once, and the login is deleted with the account (O6).
+      forgetPortalAccount(db.scope.networkId, 'advertiser', before.id);
+      const login = await removeLogin(before.auth_user_id);
+      await writeAudit(req, { action: 'advertiser.delete', entityType: 'advertiser', entityId: req.params.id, before, after: { login } });
+      sendOk(res, { deleted: true, login });
     }),
   );
 
-  // "Impersonate" (row menu) — mints a real Supabase magic-link for the advertiser's OWN linked
-  // portal account (never a forged/self-signed token), mirroring the same publisher pattern. Only
-  // advertisers with a linked portal account (hasPortalAccount) can be impersonated.
+  // "Impersonate" (row menu) — a short-lived impersonation session for this advertiser's portal
+  // (F-10): a dedicated 30-minute token flagged with the admin who started it — never the account's
+  // own credentials (the old Supabase magic link was a reusable login). Writes made with it are
+  // audited to that admin; credential changes are refused. See dashboard/auth.ts startImpersonation.
   r.post('/:id/impersonate', requireRole('admin'), asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const adv = await db.selectOne<AdvertiserRow>(TABLE, { id: req.params.id });
     if (!adv) throw notFound('Advertiser not found');
-    if (!adv.auth_user_id || !adv.contact_email) {
-      throw badRequest('This advertiser has no linked portal account to impersonate.');
-    }
-    const { data, error } = await getSupabaseAdmin().auth.admin.generateLink({
-      type: 'magiclink', email: adv.contact_email,
+    const session = await startImpersonation(req, 'advertiser', adv);
+    await writeAudit(req, { action: 'advertiser.impersonate', entityType: 'advertiser', entityId: adv.id, after: session.audit });
+    sendOk(res, session.response);
+  }));
+
+  // Portal invite (audit F-04): same as the partner invite — a temporary password emailed to the
+  // advertiser's contact email, linked via auth_user_id, idempotent by email. See lib/portal-invite.ts.
+  r.post('/:id/invite', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const adv = await db.selectOne<AdvertiserRow>(TABLE, { id: req.params.id });
+    if (!adv) throw notFound('Advertiser not found');
+    if (!portalAccessAllowed(adv.status)) throw conflict('This advertiser is inactive — set it to active (or pending) before sending a portal invite.');
+    const invite = await invitePortalUser({
+      networkId: db.scope.networkId, kind: 'advertiser', ownerId: adv.id,
+      email: adv.contact_email, linkedAuthUserId: adv.auth_user_id,
     });
-    if (error || !data?.properties?.action_link) throw badRequest('Could not generate an impersonation link.');
-    await writeAudit(req, { action: 'advertiser.impersonate', entityType: 'advertiser', entityId: adv.id });
-    sendOk(res, { link: data.properties.action_link });
+    await writeAudit(req, { action: 'advertiser.invite', entityType: 'advertiser', entityId: adv.id, after: inviteAuditView(invite) });
+    sendOk(res, invite);
   }));
 
   r.get('/:id/history', asyncHandler(async (req, res) => {
@@ -391,7 +416,7 @@ export function advertiserPortalRoutes(): Router {
     validateQuery(reportQuerySchema),
     asyncHandler(async (req, res) => {
       const request = buildReportRequest(req.scope!.networkId, res.locals.query, 'advertiser', { advertiserId: ownerIdOf(req) });
-      sendOk(res, await getReportingProvider().runReport(request));
+      sendOk(res, await attachLabels(req.scope!.networkId, await getReportingProvider().runReport(request)));
     }),
   );
 

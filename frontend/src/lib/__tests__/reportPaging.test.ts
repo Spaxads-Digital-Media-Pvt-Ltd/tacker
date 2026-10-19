@@ -1,6 +1,6 @@
 // Performance Graph / export paging (lib/reportPaging.ts) — the real loop, against a fake
 // `/api/reports` that behaves like the API: chronological day rows, `limit` ≤ 200, `total` returned.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import { pageThrough, graphCappedNote, GRAPH_DAY_CAP, REPORT_PAGE_SIZE } from '../reportPaging.ts';
 

@@ -1,6 +1,6 @@
 // Customer Value › Conversion Events (lib/conversionEvents.ts) — the real row / export / paging code,
 // the real CSV writer (lib/export toCsv) and the same xlsx call the Excel export makes.
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import assert from 'node:assert';
 import * as XLSX from 'xlsx';
 import { eventExportRow, formatEventTime, loadAllEvents, EVENTS_PAGE_SIZE, type ConversionEvent } from '../conversionEvents.ts';

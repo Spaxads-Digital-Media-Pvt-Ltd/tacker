@@ -10,10 +10,12 @@
 import { addMoney } from '../money.js';
 import { MONEY_FIELDS, type MoneyByCurrency, type MoneyField } from './types.js';
 
+// round(x, 4) rather than ::numeric(14,4): these are SUMs, which can exceed the 10 integer digits a
+// single amount column holds (the cast overflowed with a 500) — same 4dp text otherwise (F-22).
 const FIELD_SQL: Record<MoneyField, (a: string) => string> = {
-  payout: (a) => `'payout', ${a}.p::numeric(14,4)::text`,
-  revenue: (a) => `'revenue', ${a}.r::numeric(14,4)::text`,
-  margin: (a) => `'margin', (${a}.r - ${a}.p)::numeric(14,4)::text`,
+  payout: (a) => `'payout', round(${a}.p, 4)::text`,
+  revenue: (a) => `'revenue', round(${a}.r, 4)::text`,
+  margin: (a) => `'margin', round(${a}.r - ${a}.p, 4)::text`,
 };
 
 /** jsonb_object_agg over `<alias>.cur` → only the given money fields (all three by default). */
