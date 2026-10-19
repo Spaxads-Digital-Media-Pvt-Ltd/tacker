@@ -9,16 +9,17 @@ import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { csvList, queryDate } from '../../../lib/http/query-params.js';
-import { notFound } from '../../../lib/http/errors.js';
+import { calendarDate, csvList, queryDate } from '../../../lib/http/query-params.js';
+import { AppError, notFound, badRequest, validationFailed } from '../../../lib/http/errors.js';
+import { assertAllSameNetwork } from '../../../lib/db/ownership.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
-import { CV_TEXT_OPERATORS, CV_NUMBER_OPERATORS } from '../../../lib/customer-value/evaluate.js';
+import { CV_TEXT_OPERATORS, CV_NUMBER_OPERATORS, toYmd } from '../../../lib/customer-value/evaluate.js';
+import { moneySchema } from '../../../lib/money.js';
 import { isSensitiveParamKey } from '../../../lib/reporting/redact.js';
 import { tzParam, zonedRange } from '../../../lib/reporting/request.js';
-import { dateOnlyOrNull } from '../../../lib/date-only.js';
 
 const DATA_POINTS_TABLE = 'customer_data_points';
 const RULES_TABLE = 'customer_value_rules';
@@ -40,6 +41,26 @@ const dataPointSchema = z.object({
     .refine((k) => !isSensitiveParamKey(k), 'this parameter carries a secret (e.g. secure_code) and cannot be a data point'),
 });
 
+/** Rules in this network whose goal conditions use data point `id` (by ref). */
+async function rulesUsingDataPoint(networkId: string, id: string): Promise<{ id: string; ref: number; name: string }[]> {
+  const { rows } = await query<{ id: string; ref: string; name: string }>(
+    `SELECT id, ref, name FROM customer_value_rules
+      WHERE network_id = $1 AND conditions @> jsonb_build_array(jsonb_build_object('dataPointId', $2::text))
+      ORDER BY ref ASC`, [networkId, id]);
+  return rows.map((r) => ({ id: r.id, ref: Number(r.ref), name: r.name }));
+}
+
+/**
+ * 409 for a data point that rules depend on: deleting it — or changing its type / parameter key —
+ * would silently stop those rules from ever matching. Names the rules so they can be fixed first.
+ */
+function dataPointInUse(rules: { id: string; ref: number; name: string }[], action: string): AppError {
+  const names = rules.map((r) => `"${r.name}"`).join(', ');
+  return new AppError('conflict',
+    `This data point is used by ${rules.length === 1 ? 'rule' : `${rules.length} rules`} ${names}. Remove it from ${rules.length === 1 ? 'that rule' : 'those rules'} before you ${action}.`,
+    { rules });
+}
+
 // ---- Payout & Revenue Rules ----
 interface RuleRow {
   id: string; ref: string; name: string; status: string;
@@ -47,7 +68,8 @@ interface RuleRow {
   apply_offers_mode: string; apply_offer_ids: string[];
   apply_advertisers_mode: string; apply_advertiser_ids: string[];
   apply_partners_mode: string; apply_partner_ids: string[];
-  start_date: string | null; end_date: string | null;
+  /** Postgres `date` — node-pg returns a Date (local midnight); `toYmd` turns it back into the day. */
+  start_date: Date | string | null; end_date: Date | string | null;
   goal_cycle: string; recurring_duration: string | null;
   continuous_mode: string | null; continuous_days: number | null;
   set_goal_conditions: boolean; conditions: unknown;
@@ -60,7 +82,8 @@ const ruleDto = (r: RuleRow) => ({
   applyOffersMode: r.apply_offers_mode, applyOfferIds: r.apply_offer_ids,
   applyAdvertisersMode: r.apply_advertisers_mode, applyAdvertiserIds: r.apply_advertiser_ids,
   applyPartnersMode: r.apply_partners_mode, applyPartnerIds: r.apply_partner_ids,
-  startDate: dateOnlyOrNull(r.start_date), endDate: dateOnlyOrNull(r.end_date),
+  // Calendar days (YYYY-MM-DD) — never a timestamp, which shifted the day in non-UTC clients/servers.
+  startDate: toYmd(r.start_date), endDate: toYmd(r.end_date),
   goalCycle: r.goal_cycle, recurringDuration: r.recurring_duration,
   continuousMode: r.continuous_mode, continuousDays: r.continuous_days,
   setGoalConditions: r.set_goal_conditions, conditions: r.conditions,
@@ -75,6 +98,17 @@ const conditionSchema = z.object({
   value: z.string().min(1).max(200),
 });
 
+/**
+ * A Custom Payout / Revenue: decimal text — or a JSON number from older callers — non-negative, at
+ * most 4 decimal places, normalized to exact text ("12.3456"; never a float, never rounded by the
+ * numeric(14,4) column). '' / null = not set. Anything else is a 422, never silently dropped.
+ * The amount applies in each conversion's own currency (rules carry none).
+ */
+const ruleAmount = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+  moneySchema.refine((v) => !v.startsWith('-'), { message: 'Amount cannot be negative' }).nullable().optional(),
+);
+
 const ruleSchema = z.object({
   name: z.string().min(1).max(200),
   status: z.enum(['active', 'inactive']).default('active'),
@@ -85,8 +119,9 @@ const ruleSchema = z.object({
   applyAdvertiserIds: z.array(z.string().uuid()).max(500).default([]),
   applyPartnersMode: z.enum(['all', 'specific']).default('all'),
   applyPartnerIds: z.array(z.string().uuid()).max(500).default([]),
-  startDate: z.string().nullable().optional(),
-  endDate: z.string().nullable().optional(),
+  // Rule Duration days, YYYY-MM-DD (UTC days); '' / null = no limit.
+  startDate: z.union([calendarDate, z.literal('')]).nullable().optional(),
+  endDate: z.union([calendarDate, z.literal('')]).nullable().optional(),
   goalCycle: z.enum(['recurring', 'continuous']).default('continuous'),
   recurringDuration: z.enum(['daily', 'weekly', 'monthly', 'quarterly']).nullable().optional(),
   continuousMode: z.enum(['from_first_conversion', 'for_rule_duration']).nullable().optional(),
@@ -94,8 +129,8 @@ const ruleSchema = z.object({
   setGoalConditions: z.boolean().default(false),
   conditions: z.array(conditionSchema).max(20).default([]),
   outcomeFrequency: z.enum(['once_per_customer', 'every_cycle']).default('once_per_customer'),
-  payoutValue: z.number().min(0).nullable().optional(),
-  revenueValue: z.number().min(0).nullable().optional(),
+  payoutValue: ruleAmount,
+  revenueValue: ruleAmount,
 }).refine((b) => b.applyOffersMode === 'all' || b.applyOfferIds.length > 0, {
   message: 'Select at least one Offer', path: ['applyOfferIds'],
 }).refine((b) => b.applyAdvertisersMode === 'all' || b.applyAdvertiserIds.length > 0, {
@@ -110,7 +145,46 @@ const ruleSchema = z.object({
   message: 'At least one condition is required when Set Goal Conditions is Yes', path: ['conditions'],
 }).refine((b) => b.payoutValue != null || b.revenueValue != null, {
   message: 'Set a Custom Payout and/or a Custom Revenue', path: ['payoutValue'],
+}).refine((b) => !b.startDate || !b.endDate || b.endDate >= b.startDate, {
+  message: 'End Date must be on or after Start Date', path: ['endDate'],
 });
+
+/** A number condition's target: a plain decimal (e.g. "100", "99.5", "-3"). */
+const NUMERIC_CONDITION_VALUE = /^-?\d+(\.\d+)?$/;
+
+/**
+ * What the schema alone can't check, before a rule is written:
+ *  - every offer / advertiser / partner / data-point id belongs to the caller's network → else 400
+ *    (all stored ids, whatever the mode — they're persisted either way);
+ *  - each condition fits its data point's type → else 422: text = exact match on Any Value; number =
+ *    a number operator and a numeric value. (A mismatch used to save fine and then never fire.)
+ */
+async function validateRuleReferences(networkId: string, b: z.infer<typeof ruleSchema>): Promise<void> {
+  await assertAllSameNetwork(networkId, 'offers', b.applyOfferIds, 'applyOfferIds');
+  await assertAllSameNetwork(networkId, 'advertisers', b.applyAdvertiserIds, 'applyAdvertiserIds');
+  await assertAllSameNetwork(networkId, 'publishers', b.applyPartnerIds, 'applyPartnerIds');
+  const dpIds = Array.from(new Set(b.conditions.map((c) => c.dataPointId)));
+  if (!dpIds.length) return;
+  const { rows } = await query<{ id: string; data_type: string }>(
+    `SELECT id, data_type FROM ${DATA_POINTS_TABLE} WHERE network_id = $1 AND id = ANY($2::uuid[])`, [networkId, dpIds]);
+  if (rows.length !== dpIds.length) throw badRequest('conditions contains data point ids that do not belong to this network');
+  const typeOf = new Map(rows.map((r) => [r.id, r.data_type]));
+  b.conditions.forEach((c, i) => {
+    const type = typeOf.get(c.dataPointId);
+    if (type === 'text') {
+      if (c.operator !== 'exact_match' || c.conditionLogic !== 'any_value') {
+        throw validationFailed(`Condition ${i + 1}: a text data point only supports "Any Value" with "Exact Match"`, { path: ['conditions', i, 'operator'] });
+      }
+    } else {
+      if (!(CV_NUMBER_OPERATORS as readonly string[]).includes(c.operator)) {
+        throw validationFailed(`Condition ${i + 1}: a number data point needs a number operator (greater than, equal to, …)`, { path: ['conditions', i, 'operator'] });
+      }
+      if (!NUMERIC_CONDITION_VALUE.test(c.value.trim())) {
+        throw validationFailed(`Condition ${i + 1}: the value must be a number (e.g. 100 or 99.5)`, { path: ['conditions', i, 'value'] });
+      }
+    }
+  });
+}
 
 function ruleToColumns(b: z.infer<typeof ruleSchema>): Record<string, unknown> {
   return {
@@ -166,6 +240,13 @@ export function customerValueRoutes(): Router {
   }));
   r.patch('/data-points/:id', requireRole('admin', 'manager'), validateBody(dataPointSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof dataPointSchema>;
+    const current = await dbForRequest(req).selectOne<DataPointRow>(DATA_POINTS_TABLE, { id: req.params.id });
+    if (!current) throw notFound('Data point not found');
+    // Renaming is always fine; a new type or parameter key would break the rules that use it.
+    if (current.data_type !== b.dataType || current.parameter_key !== b.parameterKey) {
+      const using = await rulesUsingDataPoint(req.scope!.networkId, current.id);
+      if (using.length) throw dataPointInUse(using, 'change its type or parameter name');
+    }
     const [row] = await dbForRequest(req).update<DataPointRow>(DATA_POINTS_TABLE, {
       name: b.name, data_type: b.dataType, parameter_key: b.parameterKey,
     }, { id: req.params.id });
@@ -174,6 +255,10 @@ export function customerValueRoutes(): Router {
     sendOk(res, dataPointDto(row));
   }));
   r.delete('/data-points/:id', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const current = await dbForRequest(req).selectOne<DataPointRow>(DATA_POINTS_TABLE, { id: req.params.id });
+    if (!current) throw notFound('Data point not found');
+    const using = await rulesUsingDataPoint(req.scope!.networkId, current.id);
+    if (using.length) throw dataPointInUse(using, 'delete it');
     const n = await dbForRequest(req).delete(DATA_POINTS_TABLE, { id: req.params.id });
     if (!n) throw notFound('Data point not found');
     await writeAudit(req, { action: 'customer_data_point.delete', entityType: DATA_POINTS_TABLE, entityId: req.params.id });
@@ -219,6 +304,7 @@ export function customerValueRoutes(): Router {
   }));
   r.post('/rules', requireRole('admin', 'manager'), validateBody(ruleSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof ruleSchema>;
+    await validateRuleReferences(req.scope!.networkId, b);
     const row = await dbForRequest(req).insert<RuleRow>(RULES_TABLE, ruleToColumns(b));
     await writeAudit(req, { action: 'customer_value_rule.create', entityType: RULES_TABLE, entityId: row.id, after: row });
     sendOk(res, ruleDto(row), undefined, 201);
@@ -230,6 +316,7 @@ export function customerValueRoutes(): Router {
   }));
   r.patch('/rules/:id', requireRole('admin', 'manager'), validateBody(ruleSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof ruleSchema>;
+    await validateRuleReferences(req.scope!.networkId, b);
     const [row] = await dbForRequest(req).update<RuleRow>(RULES_TABLE, ruleToColumns(b), { id: req.params.id });
     if (!row) throw notFound('Rule not found');
     await writeAudit(req, { action: 'customer_value_rule.update', entityType: RULES_TABLE, entityId: row.id, after: row });
@@ -272,12 +359,13 @@ export function customerValueRoutes(): Router {
     params.push(limit, offset);
     const { rows } = await query<{
       conversion_id: string; created_at: string; offer_id: string; offer_name: string;
-      event_name: string | null; status: string; payout: string | null; revenue: string | null;
+      event_name: string | null; status: string; payout: string | null; revenue: string | null; currency: string | null;
       dp_values: (string | null)[]; rule_id: string | null; rule_name: string | null;
     }>(
       // dp_values[i] = raw_params->>(dataPoints[i].parameter_key), in the same order.
+      // payout / revenue come back as numeric text (exact) with the currency stored on the conversion.
       `SELECT c.conversion_id, c.created_at, c.offer_id, o.name AS offer_name, c.event_name, c.status,
-              c.payout, c.revenue,
+              c.payout, c.revenue, c.currency,
               ARRAY(SELECT c.raw_params->>k.key FROM unnest(${keysParam}::text[]) WITH ORDINALITY AS k(key, i) ORDER BY k.i) AS dp_values,
               f.rule_id, cvr.name AS rule_name
          FROM conversions c
@@ -285,14 +373,15 @@ export function customerValueRoutes(): Router {
          LEFT JOIN customer_value_rule_firings f ON f.conversion_id = c.conversion_id AND f.network_id = c.network_id
          LEFT JOIN customer_value_rules cvr ON cvr.id = f.rule_id AND cvr.network_id = c.network_id
         WHERE ${where}
-        ORDER BY c.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        ORDER BY c.created_at DESC, c.conversion_id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      // conversion_id breaks created_at ties, so paging (and the all-pages export) never repeats or skips a row.
       params,
     );
     sendOk(res, {
       userId,
       events: rows.map((row) => ({
         conversionId: row.conversion_id, createdAt: row.created_at, offerId: row.offer_id, offerName: row.offer_name,
-        eventName: row.event_name, status: row.status, payout: row.payout, revenue: row.revenue,
+        eventName: row.event_name, status: row.status, payout: row.payout, revenue: row.revenue, currency: row.currency,
         dataPoints: dataPoints
           .map((dp, i) => ({ name: dp.name, parameterKey: dp.parameter_key, value: row.dp_values?.[i] ?? null }))
           .filter((dp): dp is { name: string; parameterKey: string; value: string } => dp.value != null),

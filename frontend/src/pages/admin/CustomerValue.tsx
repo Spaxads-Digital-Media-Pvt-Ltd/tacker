@@ -16,6 +16,7 @@ import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
 import type { Offer, Publisher, Advertiser } from '../../types';
+import { formatRuleDate, formatRuleAmount, groupingLabel, SEPARATELY_BY_LABEL, deleteFailureMeansGone } from '../../lib/customerValueRules';
 
 const ALL_COLUMNS = [
   'ID', 'Name', 'Conversion Event Grouping', 'Apply Rule To', 'Start Date', 'End Date',
@@ -70,9 +71,6 @@ function StatusSelect({ value, onChange }: { value: string; onChange: (v: string
   );
 }
 
-function fmtDate(d: string | null): string {
-  return d ? new Date(d).toLocaleDateString() : '—';
-}
 function cycleDurationLabel(r: Rule): string {
   if (r.goalCycle === 'recurring') return r.recurringDuration ? r.recurringDuration.charAt(0).toUpperCase() + r.recurringDuration.slice(1) : '—';
   return 'Continuous';
@@ -82,17 +80,24 @@ function goalLabel(r: Rule, dataPoints: DataPoint[]): string {
   const names = r.conditions.map((c) => dataPoints.find((d) => d.id === c.dataPointId)?.name ?? '—');
   return names.join(', ');
 }
-function money(v: string | null): string {
-  return v != null ? `$${Number(v).toFixed(2)}` : '—';
-}
 
 export default function CustomerValue() {
-  const { data, loading, refetch } = useQuery<Rule[]>('/api/customer-value/rules?status=all');
+  const { data, loading, error, refetch } = useQuery<Rule[]>('/api/customer-value/rules?status=all');
   const { data: offers } = useQuery<Offer[]>('/api/offers');
   const { data: advertisers } = useQuery<Advertiser[]>('/api/advertisers');
   const { data: publishers } = useQuery<Publisher[]>('/api/publishers');
   const { data: dataPoints } = useQuery<DataPoint[]>('/api/customer-value/data-points');
-  const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/customer-value/rules/${id}`));
+  // A failed delete is shown (not swallowed). A 404 means the rule is already gone (deleted
+  // elsewhere): refresh so its stale row disappears; the alert still says why.
+  const { run: runDelete, error: deleteError } = useMutation(async (id: string) => {
+    try {
+      return await api.del(`/api/customer-value/rules/${id}`);
+    } catch (e) {
+      if (deleteFailureMeansGone(e)) refetch();
+      throw e;
+    }
+  });
+  const [deleteErrorDismissed, setDeleteErrorDismissed] = useState(false);
   const confirm = useConfirm();
 
   const [status, setStatus] = useState('active');
@@ -182,7 +187,7 @@ export default function CustomerValue() {
   const offerOpts = (offers ?? []).map((o) => ({ value: o.id, label: o.name }));
   const partnerOpts = (publishers ?? []).map((p) => ({ value: p.id, label: p.name }));
   const dataPointOpts = (dataPoints ?? []).map((d) => ({ value: d.id, label: d.name }));
-  const groupingOpts = [{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: 'Separately By' }];
+  const groupingOpts = [{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: SEPARATELY_BY_LABEL }];
   const cycleOpts = [
     { value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' },
     { value: 'quarterly', label: 'Quarterly' }, { value: 'continuous', label: 'Continuous' },
@@ -216,7 +221,7 @@ export default function CustomerValue() {
     switch (header) {
       case 'ID': return <span className="tabular-nums text-fg-secondary">{r.ref}</span>;
       case 'Name': return <Link to={`/app/customer-value/${r.id}/edit`} className="font-medium text-accent-text hover:underline">{r.name}</Link>;
-      case 'Conversion Event Grouping': return r.conversionEventGrouping === 'all_together' ? 'All Together' : 'Separately By';
+      case 'Conversion Event Grouping': return groupingLabel(r.conversionEventGrouping);
       case 'Apply Rule To': {
         const advPart = r.applyAdvertisersMode === 'all' ? 'All Advertisers' : `${r.applyAdvertiserIds.length} Advertiser${r.applyAdvertiserIds.length === 1 ? '' : 's'}`;
         const offPart = r.applyOffersMode === 'all' ? 'All Offers' : `${r.applyOfferIds.length} Offer${r.applyOfferIds.length === 1 ? '' : 's'}`;
@@ -228,13 +233,15 @@ export default function CustomerValue() {
         ].filter(Boolean).join(' · ');
         return <span title={title || undefined}>{advPart} · {offPart} · {parPart}</span>;
       }
-      case 'Start Date': return fmtDate(r.startDate);
-      case 'End Date': return fmtDate(r.endDate);
+      // The rule's calendar day (YYYY-MM-DD), never shifted by the viewer's timezone.
+      case 'Start Date': return formatRuleDate(r.startDate);
+      case 'End Date': return formatRuleDate(r.endDate);
       case 'Goal Cycle Duration': return cycleDurationLabel(r);
       case 'Goal': return goalLabel(r, dp);
       case 'Outcome Frequency': return r.outcomeFrequency === 'once_per_customer' ? 'Once per Customer' : 'Every Cycle';
-      case 'Custom Payout': return money(r.payoutValue);
-      case 'Custom Revenue': return money(r.revenueValue);
+      // Exact stored amounts; a rule has no currency — it applies in each conversion's own.
+      case 'Custom Payout': return <span title="Applied in each conversion's own currency">{formatRuleAmount(r.payoutValue)}</span>;
+      case 'Custom Revenue': return <span title="Applied in each conversion's own currency">{formatRuleAmount(r.revenueValue)}</span>;
       default: return null;
     }
   };
@@ -308,7 +315,15 @@ export default function CustomerValue() {
         </div>
       </div>
 
-      {loading ? <StateBlock><Spinner /></StateBlock> : filtered.length === 0 ? (
+      {deleteError && !deleteErrorDismissed && (
+        <div role="alert" className="mb-3 flex items-start justify-between gap-2 rounded-[var(--radius)] border border-danger bg-danger-bg px-3 py-2 text-small text-danger-text">
+          <span>Couldn't delete the rule: {deleteError}</span>
+          <button type="button" aria-label="Dismiss" className="text-fg-muted hover:text-fg" onClick={() => setDeleteErrorDismissed(true)}>×</button>
+        </div>
+      )}
+      {loading ? <StateBlock><Spinner /></StateBlock>
+        : error ? <StateBlock><span className="text-danger-text">Couldn't load rules: {error}</span></StateBlock>
+        : filtered.length === 0 ? (
         <StateBlock>No Record Found</StateBlock>
       ) : (
         <div className="overflow-x-auto rounded-card border border-border">
@@ -340,7 +355,7 @@ export default function CustomerValue() {
                     <div className="flex justify-end gap-1">
                       <Link to={`/app/customer-value/${r.id}/edit`} title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Pencil size={14} /></Link>
                       <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text"
-                        onClick={() => confirm({ title: 'Delete rule?', message: `Are you sure you want to delete rule "${r.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { await runDelete(r.id); refetch(); } })}>
+                        onClick={() => confirm({ title: 'Delete rule?', message: `Are you sure you want to delete rule "${r.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { setDeleteErrorDismissed(false); if (await runDelete(r.id)) refetch(); } })}>
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -351,7 +366,8 @@ export default function CustomerValue() {
           </table>
         </div>
       )}
-      <div className="mt-3"><Pagination total={filtered.length} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} /></div>
+      {/* No "0 Total" under a load error — the count is unknown, not zero. */}
+      {!error && <div className="mt-3"><Pagination total={filtered.length} page={page} pageSize={PAGE_SIZE} onPageChange={setPage} /></div>}
 
       {showColumns && (
         <ColumnsModal allColumns={ALL_COLUMNS} order={columnOrder} hidden={hiddenColumns}

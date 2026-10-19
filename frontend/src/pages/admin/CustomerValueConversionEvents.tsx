@@ -18,9 +18,11 @@ import { useMemo, useState } from 'react';
 import { Search, MoreVertical, ChevronRight, ChevronLeft } from 'lucide-react';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
-import { downloadCsv, downloadXlsx } from '../../lib/export';
-import { DASH } from '../../shared-components/primitives/ReportPageKit';
+import { DASH, EXPORT_ROW_CAP, useReportExport, ExportStatus } from '../../shared-components/primitives/ReportPageKit';
 import { useQuery } from '../../lib/useApi';
+import { api } from '../../lib/api';
+import { conversionMoney } from '../../lib/conversionReport';
+import { eventExportRow, loadAllEvents, type ConversionEvent } from '../../lib/conversionEvents';
 import { useDebounced } from './pagedList';
 import { useAutoDateRange } from './reportView';
 import { ReportCard, ReportControls, ControlField, DateRangeField, ClearButton, ResultsBar, ReportBody } from '../../shared-components/primitives/ReportLayout';
@@ -28,19 +30,15 @@ import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/re
 import { formatMdyDateTime } from '../../lib/datetime';
 import { useReportZone } from '../../lib/useReportZone';
 
-interface EventRow {
-  conversionId: string; createdAt: string; offerId: string; offerName: string;
-  eventName: string | null; status: string; payout: string | null; revenue: string | null;
-  dataPoints: { name: string; parameterKey: string; value: string }[];
-  ruleName: string | null;
-}
-interface Report { userId: string; events: EventRow[] }
+interface Report { userId: string; events: ConversionEvent[] }
 
 const ALL_COLUMNS = ['Conversion ID', 'Offer', 'Event', 'Status', 'Payout', 'Revenue', 'Data Points', 'Rule Applied'] as const;
 const PAGE_SIZE = 25;
 
-function money(v: string | null): string {
-  return v != null ? `$${Number(v).toFixed(2)}` : DASH;
+/** A payout / revenue cell in the conversion's own currency (lib/conversionReport) — never an assumed "$". */
+function MoneyCell({ value, currency }: { value: string | null; currency: string | null | undefined }) {
+  const m = conversionMoney(value, currency);
+  return m.title ? <span title={m.title}>{m.text}</span> : <>{m.text}</>;
 }
 
 export default function CustomerValueConversionEvents() {
@@ -69,7 +67,7 @@ export default function CustomerValueConversionEvents() {
     userId, ...zone.range(appliedFrom, appliedTo),
     limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE,
   });
-  const { data, loading } = useQuery<Report>(userId ? `/api/customer-value/conversion-events?${tableQs}` : null);
+  const { data, loading, error } = useQuery<Report>(userId ? `/api/customer-value/conversion-events?${tableQs}` : null);
 
   const allEvents = data?.events ?? [];
   const hasNextPage = allEvents.length > PAGE_SIZE;
@@ -83,11 +81,22 @@ export default function CustomerValueConversionEvents() {
   const clearAll = () => { setUserIdInput(''); range.reset({ from: zone.daysAgo(30), to: zone.today() }); setQ(''); };
 
   const shown = useMemo(() => new Set(ALL_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
-  const exportRows = () => rows.map((e) => ({
-    conversionId: e.conversionId, created: formatMdyDateTime(e.createdAt, zone.tz), offer: e.offerName, event: e.eventName ?? DASH,
-    status: e.status, payout: money(e.payout), revenue: money(e.revenue),
-    dataPoints: e.dataPoints.map((dp) => `${dp.name}=${dp.value}`).join('; '), ruleApplied: e.ruleName ?? DASH,
-  }));
+  // Export every event matching the applied User ID + date range (all pages, newest first, exact
+  // money + currency) — not just the visible page, and not narrowed by "Search this page". A failed
+  // page request shows the error and writes no file (never a silently partial export).
+  const reportExport = useReportExport();
+  const runExport = (format: 'csv' | 'xlsx') => {
+    if (!userId) return;
+    const exportUserId = userId, exportRange = zone.range(appliedFrom, appliedTo), exportTz = zone.tz;
+    void reportExport.run(format, 'conversion-events-report', async () => {
+      const r = await loadAllEvents(
+        async (limit, offset) => (await api.get<Report>(`/api/customer-value/conversion-events?${qs({ userId: exportUserId, ...exportRange, limit, offset })}`)).events,
+        EXPORT_ROW_CAP,
+      );
+      // Timestamps in the report's zone, like the table (eventExportRow's own are UTC).
+      return { rows: r.rows.map((e) => ({ ...eventExportRow(e), created: formatMdyDateTime(e.createdAt, exportTz) })), capped: r.capped };
+    });
+  };
 
   return (
     <>
@@ -122,10 +131,10 @@ export default function CustomerValueConversionEvents() {
                     Export <ChevronRight size={13} className="text-fg-muted" />
                   </button>
                   {exportOpen && (
-                    <div className="absolute right-full top-0 mr-1 w-44 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                      <p className="px-3 py-1 text-tiny text-fg-muted">Current page only</p>
-                      <button onClick={() => { downloadCsv('conversion-events-report.csv', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV (current page)</button>
-                      <button onClick={() => { downloadXlsx('conversion-events-report.xlsx', exportRows()); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Excel (current page)</button>
+                    <div className="absolute right-full top-0 mr-1 w-52 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+                      <p className="px-3 py-1 text-tiny text-fg-muted">All events for this User ID and date range</p>
+                      <button disabled={!userId || reportExport.busy} onClick={() => { runExport('csv'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:opacity-50">CSV</button>
+                      <button disabled={!userId || reportExport.busy} onClick={() => { runExport('xlsx'); setTableActionsOpen(false); setExportOpen(false); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:cursor-not-allowed disabled:opacity-50">Excel</button>
                     </div>
                   )}
                 </div>
@@ -136,7 +145,9 @@ export default function CustomerValueConversionEvents() {
         </>} />
 
         <ReportBody>
+        <ExportStatus busy={reportExport.busy} note={reportExport.note} error={reportExport.error} onDismiss={reportExport.dismiss} />
         {!userId ? <StateBlock>Enter a User ID to see that customer's full activity log.</StateBlock>
+          : error ? <StateBlock><span className="text-danger-text">Couldn't load conversion events: {error}</span></StateBlock>
           : loading && !rows.length ? <StateBlock><Spinner /></StateBlock>
           : !rows.length ? <StateBlock>{q.trim() && pageEvents.length > 0 ? 'No events on this page match your search.' : 'No Record Found'}</StateBlock>
           : (
@@ -163,8 +174,8 @@ export default function CustomerValueConversionEvents() {
                       {shown.has('Offer') && <td className="px-4 py-3">{e.offerName}</td>}
                       {shown.has('Event') && <td className="px-4 py-3">{e.eventName ?? DASH}</td>}
                       {shown.has('Status') && <td className="px-4 py-3 capitalize">{e.status}</td>}
-                      {shown.has('Payout') && <td className="px-4 py-3 text-right">{money(e.payout)}</td>}
-                      {shown.has('Revenue') && <td className="px-4 py-3 text-right">{money(e.revenue)}</td>}
+                      {shown.has('Payout') && <td className="px-4 py-3 text-right"><MoneyCell value={e.payout} currency={e.currency} /></td>}
+                      {shown.has('Revenue') && <td className="px-4 py-3 text-right"><MoneyCell value={e.revenue} currency={e.currency} /></td>}
                       {shown.has('Data Points') && (
                         <td className="px-4 py-3">
                           {e.dataPoints.length === 0 ? DASH : (
@@ -185,7 +196,7 @@ export default function CustomerValueConversionEvents() {
               </table>
             </div>
           )}
-        {userId && (rows.length > 0 || hasNextPage || page > 1) && (
+        {userId && !error && (rows.length > 0 || hasNextPage || page > 1) && (
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {page}</span>
             <div className="flex items-center gap-1">

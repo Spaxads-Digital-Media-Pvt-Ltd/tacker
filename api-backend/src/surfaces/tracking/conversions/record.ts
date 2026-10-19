@@ -38,7 +38,9 @@ import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
 import { getFraudConfig } from '../../../lib/fraud/rules.js';
 import { findMatchingControl } from '../../../lib/postback-controls/evaluate.js';
 import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.js';
-import { evaluateCustomerValueRules, recordCustomerValueFiring } from '../../../lib/customer-value/evaluate.js';
+import {
+ evaluateCustomerValueRules, recordCustomerValueFiring, lockCustomerValue, hasActiveCustomerValueRules, type CvQuery,
+} from '../../../lib/customer-value/evaluate.js';
 import { enqueueOutboundPostback } from './enqueue-postback.js';
 import { emitAutomationEvent } from '../../../lib/automation/webhooks.js';
 import { tierPayout } from '../../../lib/partner-tiers.js';
@@ -542,39 +544,45 @@ async function recordAttributed(
  }
  }
 
- let cvAppliedId: string | null = null;
- // Customer Value rules key off the client-supplied user_id (and other raw params), so a
- // browser-fired conversion could pick its own bonus; it stays at the default price instead.
- if (!browserFired && status === 'approved' && (payout != null || revenue != null)) {
+ // Customer Value (payout & revenue rules) is evaluated INSIDE the transaction below, after the
+ // per-customer lock, so two conversions of the same customer can't both pass the "already fired?"
+ // check (H1). Here only: is this conversion a candidate? The active-rule check is a performance
+ // shortcut (no lock for networks without rules), not part of correctness. Rules key off the
+ // client-supplied user_id (and other raw params), so a browser-fired conversion could pick its own
+ // bonus; it is never a candidate and stays at the default price instead.
  const userIdParam = input.rawParams['user_id'];
- const userId = typeof userIdParam === 'string' && userIdParam.length > 0 ? userIdParam : null;
- const cvResult = await evaluateCustomerValueRules({
- networkId: input.networkId, offerId: click.offer_id, advertiserId, publisherId: click.publisher_id,
- userId, payout: payout ?? '0.0000', revenue: revenue ?? '0.0000', rawParams: input.rawParams,
- });
- if (cvResult.appliedId) {
- if (cvResult.payoutOverridden) payout = cvResult.payout;
- if (cvResult.revenueOverridden) revenue = cvResult.revenue;
- cvAppliedId = cvResult.appliedId;
- }
- }
+ const cvUserId = typeof userIdParam === 'string' && userIdParam.length > 0 ? userIdParam : null;
+ const cvCandidate = !browserFired && cvUserId != null && status === 'approved' && (payout != null || revenue != null)
+ && await hasActiveCustomerValueRules(input.networkId);
+ let cvAppliedId: string | null = null;
 
  // Throttle rate (Attribution tab): this share of approved conversions still bills the advertiser
- // but pays the partner nothing and fires no partner postback.
+ // but pays the partner nothing and fires no partner postback. Applied in the transaction, after
+ // Customer Value — the order stays tiered commission → Customer Value → throttle.
  let throttled = false;
  const throttle = attrCfg?.throttle;
+ const applyThrottle = () => {
  if (status === 'approved' && throttle?.enabled && throttle.ratePct > 0 && Math.random() * 100 < throttle.ratePct) {
  throttled = true;
  payout = '0.0000';
  reason = 'throttled';
  }
+ };
 
  const client = await pool.connect();
  let insertedOk = false;
  let duplicateReason: DedupeRule['reason'] | null = null;
  try {
  await client.query('BEGIN');
- // The (click, event) rule, permanently (the Redis key above expires): one conversion per click +
+ // ADVISORY-LOCK ORDER — every conversion transaction takes only the locks it needs, always in this
+ // order, and all row writes (conversion, ledger, firing) come after the last lock. A transaction
+ // waiting for a lock therefore only holds earlier ones, so no wait cycle (deadlock) can form:
+ //   1. convclickevent(network, click, event) — the (click, event) duplicate rule
+ //   2. cvcust(network, user_id)              — Customer Value evaluation (5 s lock_timeout)
+ //   3. convcap(offer), then customcap(network, offer, partner) — conversion caps
+ // (The ledger's payout-run lock is only taken in its own transaction, never here.)
+ //
+ // 1. The (click, event) rule, permanently (the Redis key above expires): one conversion per click +
  // event — any, or (unique_txn without a transaction id) one without a transaction id. The
  // transaction-scoped advisory lock serialises concurrent attempts for the same click + event, and
  // the check runs after it, so the second attempt sees the first's committed row. Taken before the
@@ -591,7 +599,24 @@ async function recordAttributed(
  );
  if (prior.rows.length > 0) duplicateReason = 'duplicate_click_event';
  }
- // Over caps (Everflow): held as pending, the cap as its reason, for an admin to approve or reject —
+ // 2. Customer Value, under the per-customer lock, every query on THIS transaction's client (never
+ // the pool): the firing check sees any firing committed by an earlier holder of the lock, and this
+ // conversion's own firing is inserted below before the lock is released at COMMIT.
+ if (!duplicateReason && cvCandidate && cvUserId) {
+ const tx: CvQuery = (sql, params) => client.query(sql, params);
+ await lockCustomerValue(tx, input.networkId, cvUserId);
+ const cvResult = await evaluateCustomerValueRules({
+ networkId: input.networkId, offerId: click.offer_id, advertiserId, publisherId: click.publisher_id,
+ userId: cvUserId, payout: payout ?? '0.0000', revenue: revenue ?? '0.0000', rawParams: input.rawParams,
+ }, tx);
+ if (cvResult.appliedId) {
+ if (cvResult.payoutOverridden) payout = cvResult.payout;
+ if (cvResult.revenueOverridden) revenue = cvResult.revenue;
+ cvAppliedId = cvResult.appliedId;
+ }
+ }
+ applyThrottle();
+ // 3. Over caps (Everflow): held as pending, the cap as its reason, for an admin to approve or reject —
  // recorded, never dropped (they used to be rejected). No ledger and no partner postback until approved.
  let overCap: string | null = null;
  if (!duplicateReason && status !== 'rejected') {
