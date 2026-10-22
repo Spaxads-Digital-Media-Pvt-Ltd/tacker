@@ -18,15 +18,15 @@
  * here) opens ScheduleReportModal — daily / weekly / monthly at a time, or a cron, in the network's
  * time zone, plus recipients (Finance / Read-only: their own email) and a rolling date range; also
  * Send now and Remove schedule.
- * Requested Reports is an honest empty shell (no async export-request queue). Columns match the
- * reference: Scheduled = ID | Name | Report Type | Interval | Frequency | Week Day | Day | Format.
- * Requested = ID | Name | Report Type | Format | File | Error | Processed at | Created.
+ * Requested Reports (RequestedReports.tsx) lists report files built in the background: "Request export…"
+ * on a saved report (its saved dates or a rolling range), and scheduled reports too big to email.
+ * Columns match the reference: Scheduled = ID | Name | Report Type | Interval | Frequency | Week Day |
+ * Day | Format. Requested = ID | Name | Report Type | Format | File | Error | Processed at | Created.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MoreVertical, Search } from 'lucide-react';
 import { PageHeader, Tabs, StateBlock, Spinner } from '../../shared-components/primitives/ui';
-import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 import { loadSavedReports, persistSavedReports, syncSavedReports } from '../../lib/savedReports';
 import type { SavedReportConfig } from '../../shared-components/primitives/ReportPageKit';
 import { api } from '../../lib/api';
@@ -34,6 +34,7 @@ import { useMutation, useQuery } from '../../lib/useApi';
 import { describeSchedule, rangeLabel, sendSummary, type SendResult } from '../../lib/reportSchedule';
 import { SAVED_REPORT_SOURCES, savedReportHref, type SavedReportLinkConfig } from '../../lib/savedReportLink';
 import { ScheduleReportModal, type SavedReportDto } from './ScheduleReportModal';
+import { RequestExportModal, RequestedReportsTab } from './RequestedReports';
 
 const TABS = ['Saved Reports', 'Scheduled Reports', 'Requested Reports'] as const;
 
@@ -73,9 +74,10 @@ function useSavedRows() {
   return { rows, remove, tick };
 }
 
-function SavedReportsTab() {
+function SavedReportsTab({ onExportRequested }: { onExportRequested: () => void }) {
   const nav = useNavigate();
   const { rows, remove, tick } = useSavedRows();
+  const [exporting, setExporting] = useState<{ report: SavedReportDto; from: string; to: string } | null>(null);
   const [q, setQ] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState<SavedReportDto | null>(null);
@@ -123,11 +125,14 @@ function SavedReportsTab() {
                       <MoreVertical size={15} />
                     </button>
                     {menuFor === `${r.source}-${r.name}` && (
-                      <div className="absolute right-2 top-full z-30 w-36 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setMenuFor(null)}>
+                      <div className="absolute right-2 top-full z-30 w-44 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setMenuFor(null)}>
                         <button onClick={() => { setMenuFor(null); nav(r.href); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Open</button>
                         <button onClick={() => { const s = onServer(r); setMenuFor(null); if (s) setScheduling(s); }} disabled={!onServer(r)}
                           title={onServer(r) ? undefined : 'Still saving to the server — try again in a moment'}
                           className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">{onServer(r)?.schedule ? 'Edit schedule…' : 'Schedule…'}</button>
+                        <button onClick={() => { const s = onServer(r); setMenuFor(null); if (s) setExporting({ report: s, from: r.from, to: r.to }); }} disabled={!onServer(r)}
+                          title={onServer(r) ? 'Build the whole report as a CSV file (Requested Reports)' : 'Still saving to the server — try again in a moment'}
+                          className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">Request export…</button>
                         <button onClick={() => { setMenuFor(null); remove(r.source, r.name); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Delete</button>
                       </div>
                     )}
@@ -142,6 +147,7 @@ function SavedReportsTab() {
         <span>{filtered.length} Total</span>
       </div>
       {scheduling && <ScheduleReportModal report={scheduling} onClose={() => setScheduling(null)} onChanged={refetchServer} />}
+      {exporting && <RequestExportModal report={exporting.report} savedFrom={exporting.from} savedTo={exporting.to} onClose={() => setExporting(null)} onRequested={onExportRequested} />}
     </div>
   );
 }
@@ -238,27 +244,28 @@ function ScheduledReportsTab() {
     </div>
   );
 }
-const REQUESTED_COLUMNS = ['ID', 'Name', 'Report Type', 'Format', 'File', 'Error', 'Processed at', 'Created'];
-
 export default function SavedScheduledReports() {
   const [tab, setTab] = useState<(typeof TABS)[number]>('Saved Reports');
+  const [requested, setRequested] = useState(0);
+  const me = useQuery<{ identity?: { role?: string } }>('/api/me');
+  const everyone = ['admin', 'manager'].includes(me.data?.identity?.role ?? '');
 
   return (
     <>
       <PageHeader title="Saved & Scheduled" subtitle="Reporting › Saved & Scheduled" />
       <Tabs tabs={[...TABS]} active={tab} onChange={(t) => setTab(t as (typeof TABS)[number])} />
 
-      {tab === 'Saved Reports' && <SavedReportsTab />}
+      {tab === 'Saved Reports' && <SavedReportsTab onExportRequested={() => { setRequested((n) => n + 1); setTab('Requested Reports'); }} />}
       {tab === 'Scheduled Reports' && (
         <div className="space-y-3">
           <p className="text-small text-fg-muted">Scheduled reports are emailed as CSV on their schedule. To add one, open a saved report’s ⋮ menu (Saved Reports tab) and choose “Schedule…”.</p>
           <ScheduledReportsTab />
         </div>
       )}
-      {tab === 'Requested Reports' && (
+      {tab === 'Requested Reports' && !me.loading && (
         <div className="space-y-3">
-          <p className="text-small text-fg-muted">Requested Reports aren't available yet — this network has no async report-export job queue configured.</p>
-          <EmptyShellTable columns={REQUESTED_COLUMNS} search={false} />
+          <p className="text-small text-fg-muted">Report files built in the background — exports you request from a saved report’s ⋮ menu, and scheduled reports too big to email. Download a finished one as CSV.</p>
+          <RequestedReportsTab everyone={everyone} refreshKey={requested} />
         </div>
       )}
     </>

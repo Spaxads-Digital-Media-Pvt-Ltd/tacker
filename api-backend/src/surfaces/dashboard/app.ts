@@ -44,6 +44,7 @@ import { customFieldRoutes } from './custom-fields/routes.js';
 import { settingsRoutes } from './settings/routes.js';
 import { smartLinksRoutes } from './smart-links/routes.js';
 import { savedReportsRoutes } from './saved-reports/routes.js';
+import { reportRequestsRoutes } from './report-requests/routes.js';
 import { offlineRoutes } from './offline/routes.js';
 import { importExportRoutes } from './import-export/routes.js';
 import { catalogRoutes, invoiceRoutes } from './catalog/routes.js';
@@ -449,6 +450,7 @@ export function buildDashboardApp(): Express {
   authed.use('/settings', requireAdmin, settingsRoutes());
   authed.use('/smart-links', requireAdmin, smartLinksRoutes());
   authed.use('/saved-reports', requireAdmin, savedReportsRoutes());
+  authed.use('/report-requests', requireAdmin, reportRequestsRoutes());
   authed.use('/offline', requireAdmin, offlineRoutes());
   authed.use('/import-export', requireAdmin, importExportRoutes());
   authed.use('/catalog', requireAdmin, catalogRoutes());

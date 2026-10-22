@@ -20,6 +20,7 @@ export const QUEUE = {
  smartLinkKpi: 'smart-link-kpi',
  reportingRollup: 'reporting-rollup',
  scheduledReports: 'scheduled-reports',
+ reportExports: 'report-exports',
  usageMeter: 'usage-meter',
  platformBilling: 'platform-billing',
  platformHealth: 'platform-health',
