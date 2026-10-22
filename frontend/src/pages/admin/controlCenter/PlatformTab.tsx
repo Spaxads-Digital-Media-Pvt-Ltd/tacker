@@ -18,12 +18,13 @@ import type { TrackingDomain } from '../../../types';
 import { advertiserPostbackUrl, resolveTrackingHost } from '../../../lib/trackingLinks';
 import { imageAccept, imageTypesText, uploadImage } from '../../../lib/imageUpload';
 import { CapTimeZoneSelect } from '../../../shared-components/primitives/CapTimeZoneSelect';
+import { WhiteLabelForm } from '../../../shared-components/panels/WhiteLabelForm';
 import {
   PARTNER_NOTIFS, OFFER_NOTIFS_PLATFORM, OFFER_GROUP_NOTIFS, ADVERTISER_NOTIFS,
   ACTION_NOTIFS, BILLING_NOTIFS, NETWORK_NOTIFS, SECURITY_NOTIFS, TRAFFIC_HEALTH_NOTIFS,
 } from '../../../data/defaultNotifications';
 
-const SUB_TABS = ['General', 'Domains', 'IPs', 'Default Notifications', 'Billing'] as const;
+const SUB_TABS = ['General', 'Domains', 'IPs', 'Default Notifications', 'Billing', 'White-label'] as const;
 
 interface ToggleDef { label: string; help?: string }
 const GLOBAL_TOGGLE_DEFS: ToggleDef[] = [
@@ -917,6 +918,12 @@ export default function PlatformTab() {
       {sub === 'IPs' && <IPsSub />}
       {sub === 'Default Notifications' && <NotificationsSub />}
       {sub === 'Billing' && <BillingSub />}
+      {sub === 'White-label' && (
+        <div className="card max-w-3xl">
+          <p className="mb-3 text-small text-fg-secondary">Your own brand on a dashboard domain of your own — your team, partners and advertisers sign in at your domain and see your name, logo (General › Logo) and colour.</p>
+          <WhiteLabelForm base="/api/white-label" canEdit />
+        </div>
+      )}
     </>
   );
 }

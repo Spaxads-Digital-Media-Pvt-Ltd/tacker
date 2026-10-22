@@ -18,6 +18,7 @@ import { flagsRoutes } from './flags-routes.js';
 import { systemRoutes } from './system-routes.js';
 import { trustRoutes } from './trust-routes.js';
 import { emailRoutes } from './email-routes.js';
+import { resellerRoutes } from './reseller-routes.js';
 
 export function buildPlatformAdminApp(): Express {
  const app = createBaseApp('platform-admin');
@@ -40,6 +41,7 @@ export function buildPlatformAdminApp(): Express {
  authed.use('/', systemRoutes());
  authed.use('/', trustRoutes());
  authed.use('/', emailRoutes());
+ authed.use('/', resellerRoutes());
 
  app.use('/platform', authed);
 

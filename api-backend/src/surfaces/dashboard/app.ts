@@ -79,6 +79,7 @@ import { advertiserInvoicesRoutes } from './advertiser-invoices/routes.js';
 import { tieredCommissionsRoutes } from './tiered-commissions/routes.js';
 import { controlCenterRoutes } from './control-center/routes.js';
 import { signupRoutes } from './signup/routes.js';
+import { whiteLabelRoutes, publicBrandRoutes } from './white-label/routes.js';
 import { networkTimeZone } from '../../lib/reporting/network-zone.js';
 import { IMAGE_MAX_BYTES, IMAGE_UPLOAD_CONTENT_TYPES, assertImageValue, imageTypesFor, imageTypesText, uploadContentType, uploadImage } from '../../lib/storage/images.js';
 import { networkBranding } from './control-center/config.js';
@@ -91,6 +92,7 @@ export function buildDashboardApp(): Express {
   // Everything else requires an identity.
   app.use('/api/auth', authRoutes());
   app.use('/api/signup', signupRoutes());
+  app.use('/api/public', publicBrandRoutes());
 
   const authed = Router();
   authed.use(dashboardAuth);
@@ -451,6 +453,7 @@ export function buildDashboardApp(): Express {
   authed.use('/smart-links', requireAdmin, smartLinksRoutes());
   authed.use('/saved-reports', requireAdmin, savedReportsRoutes());
   authed.use('/report-requests', requireAdmin, reportRequestsRoutes());
+  authed.use('/white-label', requireAdmin, whiteLabelRoutes());
   authed.use('/offline', requireAdmin, offlineRoutes());
   authed.use('/import-export', requireAdmin, importExportRoutes());
   authed.use('/catalog', requireAdmin, catalogRoutes());

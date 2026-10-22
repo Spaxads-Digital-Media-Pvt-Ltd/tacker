@@ -648,6 +648,9 @@ export interface NetworkDetail {
   ref: string;
   name: string;
   slug: string;
+  /** Super Admin › Resellers: who sold this network (null = direct). */
+  reseller_id?: string | null;
+  reseller_name?: string | null;
   status: 'active' | 'suspended' | 'deleted';
   default_currency: string;
   created_at: string;

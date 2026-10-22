@@ -164,8 +164,9 @@ export function platformRoutes(): Router {
  if (!UUID_RE.test(id)) throw notFound('Network not found');
  await assertNetworkInScope(req, id);
  const net = (await query(
- `SELECT id, ref, name, slug, status, suspended_reason, default_currency, created_at, updated_at, deleted_at, exported_at
- FROM networks WHERE id = $1`, [id])).rows[0];
+ `SELECT n.id, n.ref, n.name, n.slug, n.status, n.suspended_reason, n.default_currency, n.created_at, n.updated_at, n.deleted_at, n.exported_at,
+ n.reseller_id, r.name AS reseller_name
+ FROM networks n LEFT JOIN platform_resellers r ON r.id = n.reseller_id WHERE n.id = $1`, [id])).rows[0];
  if (!net) throw notFound('Network not found');
  const [sub, owner, counts, domains, usage] = await Promise.all([
  query(

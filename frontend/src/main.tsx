@@ -6,6 +6,7 @@ import { AuthProvider } from './auth/AuthContext';
 import { ThemeProvider, applyTheme, readStoredTheme } from './theme/ThemeContext';
 import { ConfirmProvider } from './shared-components/primitives/ConfirmDialog';
 import './index.css';
+import { loadHostBrand } from './lib/hostBrand';
 
 // Apply the user's saved light/dark choice before first paint (light unless they opted into dark).
 applyTheme(readStoredTheme());
@@ -15,6 +16,8 @@ applyTheme(readStoredTheme());
 for (const prop of ['--accent', '--accent-hover', '--accent-subtle', '--accent-text']) {
   document.documentElement.style.removeProperty(prop);
 }
+// White-label: on a network's verified dashboard domain, wear its brand (title, favicon, accent colour).
+void loadHostBrand();
 
 function Root() {
   return (

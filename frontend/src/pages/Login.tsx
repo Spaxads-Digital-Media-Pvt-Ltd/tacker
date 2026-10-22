@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { publicNetwork, type PublicNetwork } from '../auth/authClient';
 import { Brandmark } from '../shared-components/primitives/Brandmark';
 import { BRAND } from '../config/branding';
+import { useHostBrand } from '../lib/hostBrand';
 
 /** Decorative "tracking flow" motif for the brand panel — clicks (small dots) travelling a rising
  * path and landing as a conversion (the larger dot). Pure token-free white-on-accent; sits behind
@@ -40,8 +41,13 @@ export default function Login() {
   const { signIn, signInPlatform, completePlatformSignIn } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  // A network's own login link (?network=<slug>, from its sign-up pages / profile): its sign-up links, when open.
-  const networkSlug = params.get('network')?.trim() ?? '';
+  // White-label: on a network's dashboard domain its brand replaces the platform's, and its sign-up links show.
+  const hostBrand = useHostBrand();
+  const brandName = hostBrand?.brandName ?? BRAND.name;
+  const platformHidden = hostBrand?.hidePlatformBranding ?? false;
+  // A network's own login link (?network=<slug>, from its sign-up pages / profile) — or its own domain: its
+  // sign-up links, when open.
+  const networkSlug = params.get('network')?.trim() || hostBrand?.networkSlug || '';
   const [signupNet, setSignupNet] = useState<{ slug: string; info: PublicNetwork } | null>(null);
   useEffect(() => {
     if (!networkSlug) return;
@@ -117,7 +123,7 @@ export default function Login() {
               <path d="M3 17l6-6 4 4 8-8" /><path d="M17 7h4v4" />
             </svg>
           </span>
-          <span className="text-xl font-bold tracking-tight">{BRAND.name}</span>
+          <span className="text-xl font-bold tracking-tight">{brandName}</span>
         </div>
         <div className="relative max-w-md text-white">
           <h2 className="text-h1 font-bold leading-tight tracking-tight">
@@ -196,7 +202,7 @@ export default function Login() {
             </form>
             )}
 
-            {!challenge && <button type="button" onClick={() => { setAsSuperAdmin((v) => !v); setError(null); }}
+            {!challenge && !platformHidden && <button type="button" onClick={() => { setAsSuperAdmin((v) => !v); setError(null); }}
               className="mt-4 w-full text-center text-tiny font-medium text-accent-text hover:underline">
               {asSuperAdmin ? 'Back to regular sign in' : 'Sign in as Super Admin'}
             </button>}
@@ -209,7 +215,7 @@ export default function Login() {
                 {signupNet.info.advertiserSignup && <Link to={`/adv-signup?network=${encodeURIComponent(signupNet.slug)}`} className="font-medium text-accent-text hover:underline">Sign up as an advertiser</Link>}
               </p>
             )}
-            {!asSuperAdmin && !signupNet && (
+            {!asSuperAdmin && !signupNet && !hostBrand && (
               <p className="mt-4 text-center text-tiny text-fg-secondary">
                 New to {BRAND.name}? <Link to="/request-demo" className="font-medium text-accent-text hover:underline">Request a demo</Link>
               </p>

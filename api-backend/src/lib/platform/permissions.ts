@@ -23,6 +23,7 @@ export const SECTIONS = [
   { key: 'comms', name: 'Announcements', description: 'Banners and news shown in tenant dashboards.' },
   { key: 'platform', name: 'Platform', description: 'Feature flags and system health.' },
   { key: 'trust', name: 'Trust & safety', description: 'Fraud across networks, the platform blocklist and privacy (GDPR / CCPA) requests.' },
+  { key: 'resellers', name: 'Resellers & white-label', description: 'Resellers and their commission; networks’ own brand and dashboard domain.' },
   { key: 'team', name: 'Team & roles', description: 'Staff accounts and what each role may do.' },
   { key: 'settings', name: 'Settings', description: 'Billing, email and platform settings.' },
   { key: 'activity', name: 'Activity', description: 'The platform activity log.' },
