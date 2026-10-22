@@ -448,5 +448,40 @@ d('portal logins are provisioned in-product (live DB, fake Supabase)', () => {
         await put(false);
       }
     });
+
+    it('sign-up is open or closed per network (Control Center › Platform): partner open by default, advertiser closed; the public info says which', async () => {
+      const platform = (body: Record<string, unknown>) => request(dash).put('/api/control-center/config/platform').set(admin).send(body);
+      const info = async () => (await request(dash).get(`/api/signup/network/${slugA}`)).body.data;
+      expect(await info()).toMatchObject({ partnerSignup: true, advertiserSignup: false, logoUrl: null });
+      expect((await request(dash).get('/api/signup/network/no-such-network')).status).toBe(404);
+
+      const adv = (email: string) => request(dash).post('/api/signup/advertiser').send({ network: slugA, name: `Adv ${randomUUID().slice(0, 6)}`, email });
+      const closed = await adv(newEmail());
+      expect([closed.status, closed.body.error.details]).toEqual([403, { reason: 'signup_closed' }]);
+
+      expect((await platform({ showAdvertiserSignupLink: true, showPartnerSignupLink: false })).status).toBe(200);
+      try {
+        expect(await info()).toMatchObject({ partnerSignup: false, advertiserSignup: true });
+        expect((await signup({ email: newEmail() })).body.error.details).toEqual({ reason: 'signup_closed' });
+
+        const email = newEmail();
+        const res = await adv(email);
+        expect(res.status).toBe(201);
+        expect(res.body.data.status).toBe('pending');
+        const { rows } = await query<{ id: string; status: string; auth_user_id: string }>(
+          'SELECT id, status, auth_user_id FROM advertisers WHERE network_id = $1 AND contact_email = $2', [fx.networkA, email.toLowerCase()]);
+        expect(rows[0]).toMatchObject({ status: 'pending' });
+        expect(sb.users.get(rows[0]!.auth_user_id)!.app_metadata).toMatchObject({ kind: 'advertiser', network_id: fx.networkA, owner_id: rows[0]!.id });
+        expect((await adv(email)).status).toBe(409);
+        // Audit: labelled as a sign-up, not a "Scheduled Action".
+        const log = await request(dash).get('/api/audit-log').query({ method: 'Sign-up' }).set(admin);
+        expect(log.status).toBe(200);
+        const mine = (log.body.data as { method: string; service: string }[]).filter((r) => r.service === 'Advertiser');
+        expect(mine.length).toBeGreaterThan(0);
+        expect(mine.every((r) => r.method === 'Sign-up')).toBe(true);
+      } finally {
+        await platform({ showAdvertiserSignupLink: false, showPartnerSignupLink: true });
+      }
+    });
   });
 });

@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_HOME } from '../auth/roles';
 import { loadSession } from '../auth/session';
 import { api } from '../lib/api';
+import { publicNetwork, type PublicNetwork } from '../auth/authClient';
 import { Brandmark } from '../shared-components/primitives/Brandmark';
 import { BRAND } from '../config/branding';
 
@@ -39,6 +40,15 @@ export default function Login() {
   const { signIn, signInPlatform, completePlatformSignIn } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  // A network's own login link (?network=<slug>, from its sign-up pages / profile): its sign-up links, when open.
+  const networkSlug = params.get('network')?.trim() ?? '';
+  const [signupNet, setSignupNet] = useState<{ slug: string; info: PublicNetwork } | null>(null);
+  useEffect(() => {
+    if (!networkSlug) return;
+    let live = true;
+    publicNetwork(networkSlug).then((info) => { if (live) setSignupNet({ slug: networkSlug, info }); }).catch(() => { /* unknown network: plain login */ });
+    return () => { live = false; };
+  }, [networkSlug]);
   const ended = ENDED[params.get('ended') ?? ''] ?? null;
   const resetDone = params.get('reset') === 'done';
   const [email, setEmail] = useState('');
@@ -191,7 +201,15 @@ export default function Login() {
               {asSuperAdmin ? 'Back to regular sign in' : 'Sign in as Super Admin'}
             </button>}
 
-            {!asSuperAdmin && (
+            {!asSuperAdmin && signupNet && (signupNet.info.partnerSignup || signupNet.info.advertiserSignup) && (
+              <p className="mt-4 text-center text-tiny text-fg-secondary">
+                New to {signupNet.info.name}?{' '}
+                {signupNet.info.partnerSignup && <Link to={`/pub-signup?network=${encodeURIComponent(signupNet.slug)}`} className="font-medium text-accent-text hover:underline">Sign up as a partner</Link>}
+                {signupNet.info.partnerSignup && signupNet.info.advertiserSignup && ' · '}
+                {signupNet.info.advertiserSignup && <Link to={`/adv-signup?network=${encodeURIComponent(signupNet.slug)}`} className="font-medium text-accent-text hover:underline">Sign up as an advertiser</Link>}
+              </p>
+            )}
+            {!asSuperAdmin && !signupNet && (
               <p className="mt-4 text-center text-tiny text-fg-secondary">
                 New to {BRAND.name}? <Link to="/request-demo" className="font-medium text-accent-text hover:underline">Request a demo</Link>
               </p>

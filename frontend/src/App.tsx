@@ -88,6 +88,7 @@ const TrustOverview = lazy(() => import('./pages/super-admin/trust/TrustOverview
 const TrustBlocklist = lazy(() => import('./pages/super-admin/trust/Blocklist'));
 const PrivacyRequests = lazy(() => import('./pages/super-admin/trust/PrivacyRequests'));
 const RequestDemo = lazy(() => import('./pages/RequestDemo'));
+const SignUp = lazy(() => import('./pages/SignUp'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
 const AdvertiserOffers = lazy(() => import('./pages/portal/AdvertiserOffers'));
@@ -180,6 +181,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/request-demo" element={<RequestDemo />} />
+        <Route path="/pub-signup" element={<SignUp kind="partner" />} />
+        <Route path="/adv-signup" element={<SignUp kind="advertiser" />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/change-password" element={<ChangePassword />} />
         <Route path="/impersonate" element={<Impersonate />} />

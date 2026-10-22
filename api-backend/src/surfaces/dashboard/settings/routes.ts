@@ -29,10 +29,10 @@ import { tzParam } from '../../../lib/reporting/request.js';
 import { env } from '../../../config/env.js';
 import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 
-interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
+interface NetworkRow { ref: string; slug: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
 async function loadNetwork(networkId: string): Promise<NetworkRow> {
-  const { rows } = await query<NetworkRow>('SELECT ref, name, default_currency, status, settings FROM networks WHERE id = $1', [networkId]);
+  const { rows } = await query<NetworkRow>('SELECT ref, slug, name, default_currency, status, settings FROM networks WHERE id = $1', [networkId]);
   const row = rows[0];
   if (!row) throw notFound('Network not found');
   return row;
@@ -100,7 +100,7 @@ export function settingsRoutes(): Router {
     const smtp = (s['smtp'] as Record<string, unknown> | undefined) ?? {};
     const { password, ...smtpSafe } = smtp as { password?: string };
     sendOk(res, {
-      general: { nid: Number(net.ref), name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
+      general: { nid: Number(net.ref), slug: net.slug, name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
       smtp: { ...smtpSafe, passwordSet: Boolean(password) },
       integrations: maskIntegrations((s['integrations'] as Record<string, unknown> | undefined) ?? {}),
       retention: retentionView(s),

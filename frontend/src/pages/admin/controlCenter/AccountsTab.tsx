@@ -398,6 +398,8 @@ function MoreFiltersButton({ portal, method, onApply }: { portal: string; method
               <option value="PATCH">PATCH</option>
               <option value="DELETE">DELETE</option>
               <option value="Scheduled Action">Scheduled Action</option>
+              <option value="Sign-up">Sign-up</option>
+              <option value="Automatic">Automatic</option>
             </select>
           </div>
           <div className="flex justify-end gap-2">

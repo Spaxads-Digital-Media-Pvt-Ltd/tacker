@@ -68,3 +68,21 @@ export async function networkBranding(networkId: string): Promise<{ logoUrl: str
   const url = (v: unknown) => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : null);
   return { logoUrl: url(rows[0]?.b?.['logoUrl']), faviconUrl: url(rows[0]?.b?.['faviconUrl']) };
 }
+
+/** The self-serve sign-ups a network can open (Control Center › Platform). */
+export type SignupKind = 'partner' | 'advertiser';
+const SIGNUP_FLAG: Record<SignupKind, { key: string; dflt: boolean }> = {
+  // Partner sign-up existed before the switch, so it stays open until a network closes it; advertiser
+  // sign-up is new — closed until a network opens it.
+  partner: { key: 'showPartnerSignupLink', dflt: true },
+  advertiser: { key: 'showAdvertiserSignupLink', dflt: false },
+};
+
+/**
+ * Is this network taking sign-ups of this kind? The Control Center switch shows the link on the login
+ * page AND gates the sign-up endpoint — a hidden link alone would leave the form reachable.
+ */
+export function signupOpen(settings: Record<string, unknown>, kind: SignupKind): boolean {
+  const v = getControlCenterConfig(settings, 'platform')[SIGNUP_FLAG[kind].key];
+  return typeof v === 'boolean' ? v : SIGNUP_FLAG[kind].dflt;
+}

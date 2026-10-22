@@ -50,6 +50,12 @@ const GLOBAL_TOGGLE_DEFS: ToggleDef[] = [
 ];
 const GLOBAL_TOGGLES = GLOBAL_TOGGLE_DEFS.map((t) => t.label);
 
+/** A sign-up switch from the platform config, or its default when the network never set it. */
+function signupFlag(config: Record<string, unknown> | null | undefined, key: string, dflt: boolean): boolean {
+  const v = config?.[key];
+  return typeof v === 'boolean' ? v : dflt;
+}
+
 function Checkbox({ label, help, defaultChecked }: { label: string; help?: string; defaultChecked?: boolean }) {
   const [checked, setChecked] = useState(!!defaultChecked);
   return (
@@ -162,6 +168,13 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
   const [timezone, setTimezone] = useState('UTC');
   const [fallbackUrl, setFallbackUrl] = useState('');
   const [capTimezone, setCapTimezone] = useState(''); // '' = UTC (the default)
+  // Self-serve sign-up per kind: shows the login page's link AND opens the sign-up (partner open by
+  // default, advertiser closed — api-backend control-center/config.ts signupOpen).
+  const savedPartnerSignup = signupFlag(platformConfig, 'showPartnerSignupLink', true);
+  const savedAdvertiserSignup = signupFlag(platformConfig, 'showAdvertiserSignupLink', false);
+  const [partnerSignup, setPartnerSignup] = useState(savedPartnerSignup);
+  const [advertiserSignup, setAdvertiserSignup] = useState(savedAdvertiserSignup);
+  useEffect(() => { setPartnerSignup(savedPartnerSignup); setAdvertiserSignup(savedAdvertiserSignup); }, [savedPartnerSignup, savedAdvertiserSignup]);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -221,7 +234,11 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
       const branding: Record<string, string | null> = {};
       if ((logoUrl || null) !== savedLogo) branding['logoUrl'] = logoUrl || null;
       if ((faviconUrl || null) !== savedFavicon) branding['faviconUrl'] = faviconUrl || null;
-      if (Object.keys(branding).length) await api.put('/api/control-center/config/platform', { branding });
+      const platformPatch: Record<string, unknown> = {};
+      if (Object.keys(branding).length) platformPatch['branding'] = branding;
+      if (partnerSignup !== savedPartnerSignup) platformPatch['showPartnerSignupLink'] = partnerSignup;
+      if (advertiserSignup !== savedAdvertiserSignup) platformPatch['showAdvertiserSignupLink'] = advertiserSignup;
+      if (Object.keys(platformPatch).length) await api.put('/api/control-center/config/platform', platformPatch);
       onSaved();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Save failed');
@@ -254,8 +271,15 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
         <CapTimeZoneSelect value={capTimezone} onChange={setCapTimezone} inheritLabel="UTC (default)" />
         <p className="mt-1 text-tiny text-fg-secondary">When every offer's daily caps (clicks, conversions, partner caps) start over — weekly and monthly caps count in this zone too. An offer can use its own (Edit Offer › Caps › Cap Time Zone).</p>
       </Field>
-      <Checkbox label="Show Partner Sign Up link (Login page)" defaultChecked />
-      <Checkbox label="Show Advertiser Sign Up link (Login page)" defaultChecked />
+      <label className="flex items-center gap-2 text-small text-fg">
+        <input type="checkbox" checked={partnerSignup} onChange={(e) => setPartnerSignup(e.target.checked)} className="h-4 w-4 rounded border-border" />
+        Partner sign-up open (link on the login page)
+      </label>
+      <label className="flex items-center gap-2 text-small text-fg">
+        <input type="checkbox" checked={advertiserSignup} onChange={(e) => setAdvertiserSignup(e.target.checked)} className="h-4 w-4 rounded border-border" />
+        Advertiser sign-up open (link on the login page)
+      </label>
+      <p className="-mt-2 text-tiny text-fg-secondary">Off = the link is hidden and the sign-up page refuses new applications. New sign-ups wait in Pending unless Auto Approve is on (Control Center › Partners / Advertisers › Sign Up).</p>
       <Checkbox label="Show Everflow Support Link in Partner and Advertiser UIs" />
       <div className="grid grid-cols-1 gap-3 rounded-card border border-border p-3 sm:grid-cols-2">
         <div className="flex items-center justify-between">
@@ -546,8 +570,8 @@ function GeneralSub() {
             <InfoRow label="HTML Custom Footer (Left menu)" />
             <InfoRow label="Currency" value={settings?.general.defaultCurrency} />
             <InfoRow label="Show Name" />
-            <InfoRow label="Show Partner Sign Up link (Login page)" help="Adds a Partner sign-up link to the login page." />
-            <InfoRow label="Show Advertiser Sign Up link (Login page)" help="Adds an Advertiser sign-up link to the login page." />
+            <InfoRow label="Partner sign-up open" value={signupFlag(platformConfig, 'showPartnerSignupLink', true) ? 'YES' : 'NO'} help="Shows a Partner sign-up link on the login page and accepts sign-ups." />
+            <InfoRow label="Advertiser sign-up open" value={signupFlag(platformConfig, 'showAdvertiserSignupLink', false) ? 'YES' : 'NO'} help="Shows an Advertiser sign-up link on the login page and accepts sign-ups." />
             <InfoRow label="Show Everflow Support Link in Partner and Advertiser UIs" />
           </InfoGrid>
         </InfoCard>
