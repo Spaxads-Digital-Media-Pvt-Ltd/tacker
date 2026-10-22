@@ -63,9 +63,9 @@ d('transactional email + Communication Hub toggles (live DB, mock SMTP)', () => 
     for (const key of ['partner_portal_invite', 'advertiser_portal_invite', 'partner_balance_request', 'offer_details_shared', 'partner_invoice_generated', 'advertiser_invoice_generated']) {
       expect(byKey[key]).toMatchObject({ enabled: true, wired: true });
     }
-    // Unwired ones are hidden rather than shown as toggles that do nothing.
-    expect(byKey['new_conversion_recorded']).toBeUndefined();
-    expect(byKey['advertiser_postback_received']).toBeUndefined();
+    // The advertiser digests are listed, off until the network turns them on.
+    expect(byKey['new_conversion_recorded']).toMatchObject({ enabled: false, wired: true });
+    expect(byKey['advertiser_postback_received']).toMatchObject({ enabled: false, wired: true });
   });
 
   it('Offer Details Shared: emailed to the partner; with the toggle off it is not, and the response says why', async () => {

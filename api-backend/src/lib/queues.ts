@@ -21,6 +21,7 @@ export const QUEUE = {
  reportingRollup: 'reporting-rollup',
  scheduledReports: 'scheduled-reports',
  reportExports: 'report-exports',
+ advertiserDigest: 'advertiser-digest',
  usageMeter: 'usage-meter',
  platformBilling: 'platform-billing',
  platformHealth: 'platform-health',

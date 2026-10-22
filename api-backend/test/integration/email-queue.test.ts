@@ -143,9 +143,9 @@ d('email through a queue (live DB, real email worker, fake mail server)', () => 
     const keys = list.body.data.map((e: { key: string }) => e.key);
     expect(keys).toContain('partner_signup_approved');
     expect(keys).toContain('payout_batch_completed');
-    expect(keys).not.toContain('advertiser_postback_received');
-    expect(keys).not.toContain('new_conversion_recorded');
-    expect((await toggle('new_conversion_recorded', false)).status).toBe(404);
+    expect(keys).toContain('advertiser_postback_received'); // hourly digests (off by default)
+    expect(keys).toContain('new_conversion_recorded');
+    expect((await toggle('not_an_email', false)).status).toBe(404);
   });
 
   it('Communication Hub "Send now" queues one email per recipient', async () => {
