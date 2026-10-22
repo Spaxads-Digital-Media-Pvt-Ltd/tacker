@@ -375,6 +375,15 @@ d('offers end to end — conversions and postbacks (live DB + GeoIP test data)',
       await sleep(600);
       expect(sent.some((s) => s.url.includes(t))).toBe(false);
     });
+
+    it('throttle 100 % + a cap: the conversion held over the cap keeps its real payout (approving it pays the partner)', async () => {
+      const o = await lab.offer({ attributionSettings: ATTRIBUTION({ throttle: { enabled: true, ratePct: 100 } }), dailyConversionCap: 1 });
+      const p = await lab.partner('active');
+      const first = await lab.postback({ click_id: await clickOn(o.id, { pub: p }), txn_id: 'cap-1', status: 'approved' });
+      expect(await lab.conversion(first.body.conversion_id)).toMatchObject({ status: 'approved', reason: 'throttled', payout: '0.0000' });
+      const held = await lab.postback({ click_id: await clickOn(o.id, { pub: p }), txn_id: 'cap-2', status: 'approved' });
+      expect(await lab.conversion(held.body.conversion_id)).toMatchObject({ status: 'pending', reason: 'daily_conversion_cap_reached', payout: '5.0000', revenue: '8.0000' });
+    });
   });
 
   describe('pixel', () => {
