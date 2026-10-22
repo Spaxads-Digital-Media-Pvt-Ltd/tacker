@@ -3,7 +3,7 @@
  *
  * O3: a failure counts ONCE (it used to INCR all 3 buckets — an account locked after 2 wrong
  * passwords, an IP after 4). Now 5 failures lock the account and 10 the IP, for 15 minutes.
- * HTTP integration tests require INTEGRATION_DB=1 + INTEGRATION_REDIS=1.
+ * HTTP integration tests run with INTEGRATION_DB=1 (as in CI); Redis and Supabase are faked here.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { memoryRedis, type MemoryRedis } from '../helpers/memory-redis.js';
@@ -12,6 +12,11 @@ let redis: MemoryRedis;
 let down = false;
 vi.mock('../../src/lib/redis.js', () => ({
  getRedis: () => { if (down) throw new Error('ECONNREFUSED'); return redis; },
+}));
+// The HTTP tests' Supabase: every sign-in is refused as invalid credentials (unknown account or wrong password alike).
+vi.mock('../../src/lib/supabase.js', () => ({
+ getSupabaseAdmin: () => ({ auth: { signInWithPassword: async () => ({ data: { session: null, user: null }, error: { message: 'Invalid login credentials', status: 400, code: 'invalid_credentials' } }) } }),
+ createEphemeralAuthClient: () => { throw new Error('not used'); },
 }));
 
 import { checkLoginRateLimit, loginRateLimitMessage, recordLoginFailure, resetLoginCounter } from '../../src/lib/auth/login-rate-limit.js';
@@ -100,10 +105,11 @@ describe('login rate limiter (unit, in-memory Redis)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// HTTP integration tests (INTEGRATION_DB=1 + INTEGRATION_REDIS=1)
+// HTTP integration tests (INTEGRATION_DB=1 — Redis is the in-memory fake, Supabase the stub above)
 // ---------------------------------------------------------------------------
 
-const runHttp = process.env.INTEGRATION_DB === '1' && process.env.INTEGRATION_REDIS === '1';
+// It needed INTEGRATION_REDIS=1 too, which CI never set — so test 13 went stale unnoticed.
+const runHttp = process.env.INTEGRATION_DB === '1';
 const dHttp = runHttp ? describe : describe.skip;
 
 dHttp('Login rate limiting — HTTP integration', () => {
@@ -134,8 +140,10 @@ dHttp('Login rate limiting — HTTP integration', () => {
  const email = 'no-such-' + Date.now() + '@test.local';
  // eslint-disable-next-line @typescript-eslint/no-explicit-any
  const rt = request as (app: unknown) => any;
- const unknownRes = await rt(dashboardApp).post('/api/auth/login').send({ email, password: 'wrong' });
- const wrongPassRes = await rt(dashboardApp).post('/api/auth/login').send({ email, password: 'also-wrong' });
+ // Passwords long enough for the sign-in policy (12+) — a short one is refused with 422 before any
+ // credentials are checked. Supabase answers "invalid credentials" for both (the fake below).
+ const unknownRes = await rt(dashboardApp).post('/api/auth/login').send({ email, password: 'wrong-password-1' });
+ const wrongPassRes = await rt(dashboardApp).post('/api/auth/login').send({ email, password: 'also-wrong-password-2' });
  expect(unknownRes.status).toBe(401);
  expect(wrongPassRes.status).toBe(401);
  expect(unknownRes.body.error.message).toBe(wrongPassRes.body.error.message);

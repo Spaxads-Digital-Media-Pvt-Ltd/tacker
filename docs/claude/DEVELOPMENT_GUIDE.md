@@ -110,15 +110,24 @@ npm test # vitest run
 npm run test:isolation # Cross-tenant/cross-owner isolation tests
 ```
 
-### Frontend
-No test framework configured. CI runs: typecheck + lint + build.
-
-Offer end-to-end suites (every offer setting through the dashboard API → real /click, /sl, /postback, GeoIP test data, workers):
+Full backend suite with the integration tests (a local `tracker_test` database, migrated):
 ```bash
-INTEGRATION_DB=1 REDIS_URL=redis://localhost:6379/1 DATABASE_URL=postgres://tracker:tracker_local_dev@localhost:5432/tracker_test \
+INTEGRATION_DB=1 DATABASE_URL=postgres://tracker@localhost:5432/tracker_test npx vitest run
+```
+- Tests use Redis db **15** by default (vitest.config.ts), so a running `npm run dev` (db 0) can't take the tests' BullMQ jobs.
+- supertest binds its test servers to 127.0.0.1 (test/setup/loopback.ts) — a wildcard socket could be shadowed by another local process on the same port (the old "stray 404 / 401 / hang" flakes).
+- Don't run two DB test runs at once — they share the database and collide.
+- Keep the test database's time zone UTC like production (`ALTER DATABASE tracker_test SET timezone TO 'UTC'`); the suite also passes with other session zones, which is how the SQL stays zone-explicit.
+- Never point DATABASE_URL at a real database — the suites create networks and traffic.
+
+Offer end-to-end suites only (every offer setting through the dashboard API → real /click, /sl, /postback, GeoIP test data, workers):
+```bash
+INTEGRATION_DB=1 DATABASE_URL=postgres://tracker@localhost:5432/tracker_test \
   npx vitest run test/integration/offer-e2e-clicks.test.ts test/integration/offer-e2e-conversions.test.ts
 ```
-(never point DATABASE_URL at a real database — the suites create networks and traffic)
+
+### Frontend
+Vitest (`npm test`) — the pure lib tests in `src/lib/__tests__`. CI runs: typecheck + lint + build + test.
 
 ## Lint
 
