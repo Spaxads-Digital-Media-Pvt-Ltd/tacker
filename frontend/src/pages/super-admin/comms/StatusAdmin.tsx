@@ -19,7 +19,7 @@ function IncidentForm({ components, onClose, onSaved }: { components: StatusPage
   const submit = async (e: FormEvent) => { e.preventDefault(); if (await save.run({ ...f, startsAt: f.startsAt || null })) onSaved(); };
   return (
     <Modal open onClose={onClose} title="New incident / maintenance"
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="incident" className="btn-primary" disabled={save.busy}>Publish</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="incident" className="btn-primary" disabled={save.busy}>Publish</button></>}>
       <form id="incident" onSubmit={submit} className="space-y-3">
         {save.error && <p className="text-small text-danger-text">{save.error}</p>}
         <Field label="Title"><input className="input" required maxLength={200} value={f.title} onChange={(e) => setF((s) => ({ ...s, title: e.target.value }))} /></Field>
@@ -48,7 +48,7 @@ function UpdateForm({ incident, onClose, onSaved }: { incident: StatusIncident; 
   const save = useMutation((b: Record<string, unknown>) => api.post(`/platform/status/incidents/${incident.id}/updates`, b));
   return (
     <Modal open onClose={onClose} title={`Update: ${incident.title}`}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="button" className="btn-primary" disabled={save.busy || !body.trim()} onClick={async () => { if (await save.run({ status, body: body.trim() })) onSaved(); }}>Post update</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="button" className="btn-primary" disabled={save.busy || !body.trim()} onClick={async () => { if (await save.run({ status, body: body.trim() })) onSaved(); }}>Post update</button></>}>
       {save.error && <p className="mb-2 text-small text-danger-text">{save.error}</p>}
       <Field label="State"><select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>{Object.entries(INCIDENT_STATE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
       <Field label="Update (shown publicly)"><textarea className="input mt-1 min-h-[6rem]" maxLength={5000} value={body} onChange={(e) => setBody(e.target.value)} /></Field>
@@ -95,7 +95,7 @@ export default function StatusAdmin() {
           {canEdit && (
             <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (compName.trim()) void act(async () => { await api.post('/platform/status/components', { name: compName.trim(), position: s.components.length }); setCompName(''); }); }}>
               <input className="input" placeholder="Component name" value={compName} onChange={(e) => setCompName(e.target.value)} maxLength={120} />
-              <button className="btn-secondary" type="submit">Add</button>
+              <button className="btn-ghost" type="submit">Add</button>
             </form>
           )}
         </Panel>

@@ -79,7 +79,7 @@ export function WhiteLabelForm({ base, platform = false, canEdit }: { base: stri
           )}
           {wl.domainCheckResult && <p className="text-tiny text-fg-secondary">Last check: {wl.domainCheckResult}</p>}
           {canEdit && !locked && (
-            <button type="button" className="btn-secondary" disabled={verify.busy} onClick={async () => { if (await verify.run(undefined)) q.refetch(); }}>{verify.busy ? 'Checking…' : 'Check DNS now'}</button>
+            <button type="button" className="btn-ghost" disabled={verify.busy} onClick={async () => { if (await verify.run(undefined)) q.refetch(); }}>{verify.busy ? 'Checking…' : 'Check DNS now'}</button>
           )}
           {verify.error && <p className="text-small text-danger-text">{verify.error}</p>}
         </div>

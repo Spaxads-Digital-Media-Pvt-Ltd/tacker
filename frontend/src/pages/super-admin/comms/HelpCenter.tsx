@@ -28,7 +28,7 @@ function ArticleEditor({ initial, onClose, onSaved }: { initial: HelpArticle | n
   };
   return (
     <Modal open size="xl" onClose={onClose} title={initial ? `Edit: ${initial.title}` : 'New article'}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="article" className="btn-primary" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save'}</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="article" className="btn-primary" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save'}</button></>}>
       <form id="article" onSubmit={submit} className="space-y-3">
         {save.error && <p className="text-small text-danger-text">{save.error}</p>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

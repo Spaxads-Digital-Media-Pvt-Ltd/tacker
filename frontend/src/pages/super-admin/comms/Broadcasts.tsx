@@ -31,7 +31,7 @@ function Composer({ initial, onClose, onSaved }: { initial: Broadcast | null; on
   const submit = async (e: FormEvent) => { e.preventDefault(); if (await save.run({ subject: subject.trim(), body: body.trim(), audience })) onSaved(); };
   return (
     <Modal open size="xl" onClose={onClose} title={initial ? 'Edit broadcast' : 'New broadcast'}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="broadcast" className="btn-primary" disabled={save.busy}>Save draft</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="broadcast" className="btn-primary" disabled={save.busy}>Save draft</button></>}>
       <form id="broadcast" onSubmit={submit} className="space-y-3">
         {save.error && <p className="text-small text-danger-text">{save.error}</p>}
         <Field label="Subject"><input className="input" required maxLength={200} value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>

@@ -17,7 +17,7 @@ function EntryEditor({ initial, onClose, onSaved }: { initial: ChangelogEntry | 
   const submit = async (e: FormEvent) => { e.preventDefault(); if (await save.run({ ...f, title: f.title.trim() })) onSaved(); };
   return (
     <Modal open size="xl" onClose={onClose} title={initial ? 'Edit entry' : 'New entry'}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="entry" className="btn-primary" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save'}</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="entry" className="btn-primary" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save'}</button></>}>
       <form id="entry" onSubmit={submit} className="space-y-3">
         {save.error && <p className="text-small text-danger-text">{save.error}</p>}
         <Field label="Title"><input className="input" required maxLength={200} value={f.title} onChange={(e) => setF((s) => ({ ...s, title: e.target.value }))} /></Field>

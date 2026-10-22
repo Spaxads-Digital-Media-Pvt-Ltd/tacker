@@ -52,7 +52,7 @@ export function AlertRuleModal({ initial, onClose, onSaved }: { initial: AlertRu
   const metrics = meta.data?.ruleMetrics ?? [];
   return (
     <Modal open size="xl" onClose={onClose} title={initial?.id ? `Edit alert rule: ${initial.name}` : 'New alert rule'}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="alert-rule" className="btn-primary" disabled={save.busy || !name.trim() || !conditions}>{save.busy ? 'Saving…' : 'Save rule'}</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="alert-rule" className="btn-primary" disabled={save.busy || !name.trim() || !conditions}>{save.busy ? 'Saving…' : 'Save rule'}</button></>}>
       {meta.loading ? <StateBlock><Spinner /></StateBlock> : (
         <form id="alert-rule" onSubmit={submit} className="space-y-4">
           {save.error && <p className="text-small text-danger-text">{save.error}</p>}
@@ -135,7 +135,7 @@ export function WebhookModal({ initial, onClose, onSaved }: { initial: WebhookFo
   };
   return (
     <Modal open onClose={onClose} title={initial?.id ? `Edit webhook: ${initial.name}` : 'New webhook'}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="webhook" className="btn-primary" disabled={save.busy || !name.trim() || !url.trim() || !events.length}>{save.busy ? 'Saving…' : 'Save webhook'}</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="webhook" className="btn-primary" disabled={save.busy || !name.trim() || !url.trim() || !events.length}>{save.busy ? 'Saving…' : 'Save webhook'}</button></>}>
       <form id="webhook" onSubmit={submit} className="space-y-4">
         {save.error && <p className="text-small text-danger-text">{save.error}</p>}
         <Field label="Name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} /></Field>
@@ -172,8 +172,8 @@ export function DeliveriesModal({ webhook, onClose }: { webhook: { id: string; n
   return (
     <Modal open size="xl" onClose={onClose} title={`Deliveries: ${webhook.name}`}
       footer={<>
-        <button type="button" className="btn-secondary mr-auto" disabled={test.busy} onClick={async () => { setNote(null); if (await test.run(undefined)) { setNote('Test event queued — refresh in a few seconds.'); setTimeout(refetch, 2500); } }}>Send test event</button>
-        <button type="button" className="btn-secondary" onClick={() => refetch()}>Refresh</button>
+        <button type="button" className="btn-ghost mr-auto" disabled={test.busy} onClick={async () => { setNote(null); if (await test.run(undefined)) { setNote('Test event queued — refresh in a few seconds.'); setTimeout(refetch, 2500); } }}>Send test event</button>
+        <button type="button" className="btn-ghost" onClick={() => refetch()}>Refresh</button>
         <button type="button" className="btn-primary" onClick={onClose}>Close</button>
       </>}>
       {(retry.error || test.error) && <p className="mb-2 text-small text-danger-text">{retry.error ?? test.error}</p>}

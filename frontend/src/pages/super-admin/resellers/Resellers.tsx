@@ -32,7 +32,7 @@ function ResellerForm({ initial, onClose, onSaved }: { initial: Reseller | null;
   };
   return (
     <Modal open onClose={onClose} title={initial ? `Edit ${initial.name}` : 'New reseller'}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="reseller" className="btn-primary" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save'}</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="reseller" className="btn-primary" disabled={save.busy}>{save.busy ? 'Saving…' : 'Save'}</button></>}>
       <form id="reseller" onSubmit={submit} className="space-y-3">
         {save.error && <p className="text-small text-danger-text">{save.error}</p>}
         <Field label="Name"><input className="input" required maxLength={200} value={f.name} onChange={set('name')} /></Field>

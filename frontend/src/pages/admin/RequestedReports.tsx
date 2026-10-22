@@ -44,7 +44,7 @@ export function RequestExportModal({ report, savedFrom, savedTo, onClose, onRequ
   };
   return (
     <Modal open onClose={onClose} title={`Request export: ${report.name}`}
-      footer={<><button type="button" className="btn-secondary" onClick={onClose}>Cancel</button><button type="submit" form="request-export" className="btn-primary" disabled={submit.busy}>{submit.busy ? 'Requesting…' : 'Request export'}</button></>}>
+      footer={<><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button type="submit" form="request-export" className="btn-primary" disabled={submit.busy}>{submit.busy ? 'Requesting…' : 'Request export'}</button></>}>
       <form id="request-export" onSubmit={onSubmit} className="space-y-3">
         {submit.error && <p className="text-small text-danger-text">{submit.error}</p>}
         <p className="text-small text-fg-secondary">The whole report is built in the background — with the saved filters, metric filters, sort and hidden columns — and listed under Requested Reports for download (CSV, up to 100,000 rows). Dates are the network&rsquo;s time zone.</p>

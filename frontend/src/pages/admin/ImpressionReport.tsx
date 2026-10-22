@@ -88,8 +88,8 @@ export default function ImpressionReport() {
           </div>
           <div className="mt-3 flex items-center justify-end gap-3 text-tiny text-fg-secondary">
             <span>Page {range.page}</span>
-            <button type="button" className="btn-secondary" disabled={range.page <= 1} onClick={() => range.setPage(range.page - 1)}>Previous</button>
-            <button type="button" className="btn-secondary" disabled={list.length < PAGE} onClick={() => range.setPage(range.page + 1)}>Next</button>
+            <button type="button" className="btn-ghost" disabled={range.page <= 1} onClick={() => range.setPage(range.page - 1)}>Previous</button>
+            <button type="button" className="btn-ghost" disabled={list.length < PAGE} onClick={() => range.setPage(range.page + 1)}>Next</button>
           </div>
         </ReportBody>
       </ReportCard>

@@ -129,8 +129,8 @@ function RunRecordTab({ id }: { id: string }) {
       <div className="flex items-center justify-between px-4 py-2 text-tiny text-fg-secondary">
         <span>{page * RUNS_PAGE + 1}–{page * RUNS_PAGE + data.length} of {total}</span>
         <span className="flex gap-2">
-          <button className="btn-secondary" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</button>
-          <button className="btn-secondary" disabled={(page + 1) * RUNS_PAGE >= total} onClick={() => setPage((p) => p + 1)}>Next</button>
+          <button className="btn-ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</button>
+          <button className="btn-ghost" disabled={(page + 1) * RUNS_PAGE >= total} onClick={() => setPage((p) => p + 1)}>Next</button>
         </span>
       </div>
     </div>
