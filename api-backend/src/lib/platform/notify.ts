@@ -118,6 +118,25 @@ async function notifyLeadInboundImpl(leadId: string): Promise<void> {
   });
 }
 
+async function notifyQuoteRespondedImpl(quoteId: string): Promise<void> {
+  const q = (await query<{ number: string; status: string; responder_name: string | null; decline_reason: string | null; lead_id: string; company: string; owner_email: string | null }>(
+    `SELECT q.number::text AS number, q.status, q.responder_name, q.decline_reason, l.id AS lead_id, l.company, o.email AS owner_email
+       FROM sales_quotes q JOIN sales_leads l ON l.id = q.lead_id LEFT JOIN platform_admins o ON o.id = l.owner_id WHERE q.id = $1`, [quoteId])).rows[0];
+  if (!q) return;
+  const to = q.owner_email ? [q.owner_email] : await sectionTeam('sales');
+  const verb = q.status === 'accepted' ? 'accepted' : 'declined';
+  const title = `${q.company} ${verb} quote Q-${q.number}`;
+  await notifyStaffInApp({ emails: to }, { kind: 'quote', title, body: q.decline_reason ?? (q.responder_name ? `By ${q.responder_name}` : null), link: `/admin/sales/leads/${q.lead_id}` });
+  await send('quoteResponded', `sales.quote_${verb}`, to, {
+    subject: title,
+    html: layout({
+      heading: title,
+      paragraphs: [q.responder_name ? `${verb === 'accepted' ? 'Accepted' : 'Declined'} by ${e(q.responder_name)}.` : '', q.decline_reason ? quote(q.decline_reason) : ''],
+      button: { label: 'Open the lead', url: appUrl(`/admin/sales/leads/${q.lead_id}`) },
+    }),
+  });
+}
+
 async function notifyTaskAssignedImpl(taskId: string, byName: string | null): Promise<void> {
   const t = (await query<{ title: string; due_at: Date | null; assignee_email: string | null; notes: string | null }>(
     `SELECT t.title, t.due_at, a.email AS assignee_email, t.notes FROM platform_tasks t LEFT JOIN platform_admins a ON a.id = t.assignee_id WHERE t.id = $1`, [taskId])).rows[0];
@@ -179,6 +198,7 @@ export const notifyCustomerReply = safely('notifyCustomerReply', notifyCustomerR
 export const notifyStaffReply = safely('notifyStaffReply', notifyStaffReplyImpl);
 export const notifyLeadInbound = safely('notifyLeadInbound', notifyLeadInboundImpl);
 export const notifyTaskAssigned = safely('notifyTaskAssigned', notifyTaskAssignedImpl);
+export const notifyQuoteResponded = safely('notifyQuoteResponded', notifyQuoteRespondedImpl);
 export const notifyInvoiceIssued = safely('notifyInvoiceIssued', notifyInvoiceIssuedImpl);
 export const notifyInvoiceOverdue = safely('notifyInvoiceOverdue', notifyInvoiceOverdueImpl);
 export const notifyNetworkSuspended = safely('notifyNetworkSuspended', notifyNetworkSuspendedImpl);

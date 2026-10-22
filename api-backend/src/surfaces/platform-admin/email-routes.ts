@@ -27,7 +27,8 @@ const settingsSchema = z.object({
   password: z.string().max(500).nullable().optional(),
   fromEmail: z.string().trim().max(200).refine((v) => v === '' || z.string().email().safeParse(v).success, 'must be an email address'),
   fromName: z.string().trim().max(120),
-  notify: z.object(Object.fromEntries(NOTIFICATIONS.map((n) => [n.key, z.boolean()])) as Record<(typeof NOTIFICATIONS)[number]['key'], z.ZodBoolean>).strict(),
+  // A notification left out keeps its current setting (one added later never makes an older form invalid).
+  notify: z.object(Object.fromEntries(NOTIFICATIONS.map((n) => [n.key, z.boolean()])) as Record<(typeof NOTIFICATIONS)[number]['key'], z.ZodBoolean>).partial().strict(),
 }).strict();
 
 export function emailRoutes(): Router {
@@ -39,7 +40,7 @@ export function emailRoutes(): Router {
 
   r.put('/settings/email', requirePerm('settings', 'full'), validateBody(settingsSchema), asyncHandler(async (req, res) => {
     const b = req.body as z.infer<typeof settingsSchema>;
-    const after = await savePlatformEmailSettings(b, meId(req));
+    const after = await savePlatformEmailSettings({ ...b, notify: { ...(await platformEmailSettings()).notify, ...b.notify } }, meId(req));
     await writePlatformAudit(req, null, { action: 'settings.email', entityType: 'platform_settings', entityId: 'email', after: { ...after, passwordChanged: b.password !== undefined && b.password !== '' } });
     sendOk(res, { ...after, notifications: NOTIFICATIONS, configError: await platformSmtpConfigError() });
   }));

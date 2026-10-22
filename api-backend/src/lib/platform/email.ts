@@ -11,6 +11,7 @@ export const NOTIFICATIONS = [
   { key: 'customerReply', label: 'A customer answered a ticket — to its agent' },
   { key: 'staffReply', label: 'Support answered — to the customer who asked' },
   { key: 'leadInbound', label: 'A demo request — to the salesperson it went to' },
+  { key: 'quoteResponded', label: 'A prospect accepted or declined a quote — to the lead’s owner' },
   { key: 'taskAssigned', label: 'A task given to someone — to them' },
   { key: 'invoiceIssued', label: 'A new invoice — to the network’s owner' },
   { key: 'invoiceOverdue', label: 'An invoice is overdue — to the network’s owner' },

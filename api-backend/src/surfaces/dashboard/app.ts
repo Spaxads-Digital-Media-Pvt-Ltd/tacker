@@ -81,6 +81,7 @@ import { controlCenterRoutes } from './control-center/routes.js';
 import { signupRoutes } from './signup/routes.js';
 import { whiteLabelRoutes, publicBrandRoutes } from './white-label/routes.js';
 import { helpRoutes, publicStatusRoutes } from './help/routes.js';
+import { publicQuoteRoutes } from './quotes/routes.js';
 import { networkTimeZone } from '../../lib/reporting/network-zone.js';
 import { IMAGE_MAX_BYTES, IMAGE_UPLOAD_CONTENT_TYPES, assertImageValue, imageTypesFor, imageTypesText, uploadContentType, uploadImage } from '../../lib/storage/images.js';
 import { networkBranding } from './control-center/config.js';
@@ -95,6 +96,7 @@ export function buildDashboardApp(): Express {
   app.use('/api/signup', signupRoutes());
   app.use('/api/public', publicBrandRoutes());
   app.use('/api/public', publicStatusRoutes());
+  app.use('/api/public', publicQuoteRoutes());
 
   const authed = Router();
   authed.use(dashboardAuth);

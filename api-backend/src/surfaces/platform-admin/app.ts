@@ -10,6 +10,8 @@ import { platformRoutes, publicPlatformRoutes } from './routes.js';
 import { billingRoutes } from './billing-routes.js';
 import { opsRoutes } from './ops-routes.js';
 import { salesRoutes } from './sales-routes.js';
+import { salesTeamRoutes } from './sales-team-routes.js';
+import { quoteRoutes } from './quote-routes.js';
 import { taskRoutes } from './task-routes.js';
 import { successRoutes } from './success-routes.js';
 import { supportRoutes } from './support-routes.js';
@@ -35,6 +37,8 @@ export function buildPlatformAdminApp(): Express {
  authed.use('/', billingRoutes());
  authed.use('/', opsRoutes());
  authed.use('/', salesRoutes());
+ authed.use('/', salesTeamRoutes());
+ authed.use('/', quoteRoutes());
  authed.use('/', taskRoutes());
  authed.use('/', successRoutes());
  authed.use('/', supportRoutes());

@@ -72,6 +72,8 @@ const SalesDashboard = lazy(() => import('./pages/super-admin/sales/SalesDashboa
 const SalesLeads = lazy(() => import('./pages/super-admin/sales/Leads'));
 const SalesPipeline = lazy(() => import('./pages/super-admin/sales/Pipeline'));
 const LeadDetail = lazy(() => import('./pages/super-admin/sales/LeadDetail'));
+const SalesQuotes = lazy(() => import('./pages/super-admin/sales/Quotes'));
+const SalesTeam = lazy(() => import('./pages/super-admin/sales/SalesTeam'));
 const PlatformTasks = lazy(() => import('./pages/super-admin/Tasks'));
 const HealthBoard = lazy(() => import('./pages/super-admin/success/HealthBoard'));
 const SupportDesk = lazy(() => import('./pages/super-admin/support/SupportDesk'));
@@ -94,6 +96,7 @@ const SignUp = lazy(() => import('./pages/SignUp'));
 const Help = lazy(() => import('./pages/Help'));
 const WhatsNew = lazy(() => import('./pages/WhatsNew'));
 const StatusPage = lazy(() => import('./pages/Status'));
+const QuotePublic = lazy(() => import('./pages/QuotePublic'));
 const PlatformHelpCenter = lazy(() => import('./pages/super-admin/comms/HelpCenter'));
 const PlatformChangelog = lazy(() => import('./pages/super-admin/comms/Changelog'));
 const PlatformStatusAdmin = lazy(() => import('./pages/super-admin/comms/StatusAdmin'));
@@ -191,6 +194,7 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/request-demo" element={<RequestDemo />} />
         <Route path="/status" element={<StatusPage />} />
+        <Route path="/quote/:token" element={<QuotePublic />} />
         <Route path="/pub-signup" element={<SignUp kind="partner" />} />
         <Route path="/adv-signup" element={<SignUp kind="advertiser" />} />
         <Route path="/reset-password" element={<ResetPassword />} />
@@ -214,6 +218,8 @@ export default function App() {
           <Route path="/admin/sales/leads" element={<PlatformGate section="sales"><SalesLeads /></PlatformGate>} />
           <Route path="/admin/sales/leads/:id" element={<PlatformGate section="sales"><LeadDetail /></PlatformGate>} />
           <Route path="/admin/sales/pipeline" element={<PlatformGate section="sales"><SalesPipeline /></PlatformGate>} />
+          <Route path="/admin/sales/quotes" element={<PlatformGate section="sales"><SalesQuotes /></PlatformGate>} />
+          <Route path="/admin/sales/team" element={<PlatformGate section="sales"><SalesTeam /></PlatformGate>} />
           <Route path="/admin/tasks" element={<PlatformGate><PlatformTasks /></PlatformGate>} />
           <Route path="/admin/success" element={<PlatformGate section="success"><HealthBoard /></PlatformGate>} />
           <Route path="/admin/support" element={<PlatformGate section="support"><SupportDesk /></PlatformGate>} />

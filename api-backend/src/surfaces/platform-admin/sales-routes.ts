@@ -2,7 +2,8 @@
  * Super Admin › Sales — the platform's own pipeline of prospective tenant networks.
  *
  * - Dashboard (/sales/summary): pipeline by stage, the weighted forecast, won this month, win rate and
- *   sales cycle (90 days), leads by source, the leaderboard, trials to convert, my open tasks, recent activity.
+ *   sales cycle (90 days), leads by source, the leaderboard, trials to convert, my open tasks, recent activity,
+ *   my quota this month (sales-team-routes.ts).
  * - Leads: list (search, stage / owner / source filters, sort) and CSV, the kanban (/sales/pipeline),
  *   create (an open lead with the same email → 409 naming it), edit — stage and owner changes land on the
  *   lead's timeline; lost needs a reason; a converted lead stays won — and delete (not a converted one).
@@ -29,6 +30,7 @@ import { assignPlan } from '../../lib/billing/subscriptions.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
 import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
 import { STAGES, OPEN_STAGES, SOURCES, LOGGED_ACTIVITIES, logLeadActivity, salesKpis } from '../../lib/platform/sales.js';
+import { myQuota } from '../../lib/platform/sales-comp.js';
 import { requirePerm, can, networkScope, leadScope } from './auth.js';
 import { UUID_RE, optText, optEmail, optMoney, optDateTime, meId } from './fields.js';
 
@@ -99,7 +101,7 @@ const SORT: Record<z.infer<typeof listSchema>['sort'], string> = {
   value: 'l.expected_mrr DESC NULLS LAST, l.updated_at DESC', company: 'lower(l.company) ASC',
 };
 
-async function loadLead(req: Request, id: string): Promise<LeadRow> {
+export async function loadLead(req: Request, id: string): Promise<LeadRow> {
   if (!UUID_RE.test(id)) throw notFound('Lead not found');
   const sc = leadScope(req, 'l', 2);
   const row = (await query<LeadRow>(
@@ -215,6 +217,7 @@ export function salesRoutes(): Router {
       myTasks: tasks.rows,
       recent: recent.rows,
       trials,
+      myQuota: await myQuota(me),
     });
   }));
 

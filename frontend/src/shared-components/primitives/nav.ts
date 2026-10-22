@@ -39,6 +39,8 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Sales dashboard', description: 'Pipeline, forecast, win rate and the leaderboard', to: '/admin/sales', icon: Lucide.Target, perm: 'sales' },
         { label: 'Leads', description: 'Every prospective network — search, filter, export', to: '/admin/sales/leads', icon: Lucide.Contact, perm: 'sales' },
         { label: 'Pipeline', description: 'Deals by stage — drag a card to move it', to: '/admin/sales/pipeline', icon: Lucide.SquareKanban, perm: 'sales' },
+        { label: 'Quotes', description: 'Priced proposals sent to leads, and their answers', to: '/admin/sales/quotes', icon: Lucide.FileText, perm: 'sales' },
+        { label: 'Team & quotas', description: 'Quotas, attainment and commission statements', to: '/admin/sales/team', icon: Lucide.Trophy, perm: 'sales' },
       ],
     },
     {

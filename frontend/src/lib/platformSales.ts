@@ -35,7 +35,7 @@ export interface Lead {
 }
 
 export interface LeadActivity {
-  id: string; kind: 'note' | 'call' | 'email' | 'meeting' | 'stage' | 'owner' | 'created' | 'converted' | 'inbound' | 'task';
+  id: string; kind: 'note' | 'call' | 'email' | 'meeting' | 'stage' | 'owner' | 'created' | 'converted' | 'inbound' | 'task' | 'quote';
   body: string | null; meta: Record<string, unknown>; created_at: string; actor_id: string | null; actor_name: string | null;
 }
 
@@ -83,3 +83,59 @@ export const useStaff = () => useQuery<StaffMember[]>('/platform/staff');
 
 /** The total behind a paged list (lib/api.ts puts the pagination meta on the array). */
 export const totalOf = (rows: unknown): number => ((rows as { pagination?: { total?: number } } | null)?.pagination?.total ?? (Array.isArray(rows) ? rows.length : 0));
+
+// ---------- Quotes ----------
+export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined' | 'expired';
+export type BillingInterval = 'month' | 'year' | 'once';
+export interface QuoteLine { description: string; quantity: number; unitPrice: string; amount: string }
+/** A quote as staff see it (GET /platform/sales/quotes…). `status` already reads 'expired' when it is. */
+export interface Quote {
+  id: string; number: string; lead_id: string; title: string; currency: string; lines: QuoteLine[];
+  subtotal: string; discount_pct: string; discount: string; tax_rate: string; tax: string; total: string;
+  billing_interval: BillingInterval; notes: string | null; terms: string | null; valid_until: string; status: QuoteStatus;
+  public_token: string; sent_at: string | null; sent_to: string | null; viewed_at: string | null; responded_at: string | null;
+  responder_name: string | null; decline_reason: string | null; created_at: string; link: string | null;
+  company?: string; owner_name?: string | null;
+}
+export const QUOTE_STATUS: Record<QuoteStatus, { label: string; chip: string }> = {
+  draft: { label: 'Draft', chip: 'bg-page text-fg-secondary ring-1 ring-inset ring-border' },
+  sent: { label: 'Sent', chip: 'bg-info-bg text-info-text' },
+  accepted: { label: 'Accepted', chip: 'bg-success-bg text-success-text' },
+  declined: { label: 'Declined', chip: 'bg-danger-bg text-danger-text' },
+  expired: { label: 'Expired', chip: 'bg-warning-bg text-warning-text' },
+};
+export const INTERVALS: { value: BillingInterval; label: string; suffix: string }[] = [
+  { value: 'month', label: 'Monthly', suffix: 'per month' }, { value: 'year', label: 'Yearly', suffix: 'per year' }, { value: 'once', label: 'One-off', suffix: 'one-off' },
+];
+export const intervalSuffix = (v: string) => INTERVALS.find((i) => i.value === v)?.suffix ?? '';
+
+/**
+ * The quote's totals while it's being written — the same integer-cent, half-up rules as the API
+ * (lib/platform/quotes.ts quoteTotals), which is what's saved. null while a field isn't a valid amount yet.
+ */
+export function previewQuoteTotals(lines: { quantity: string; unitPrice: string }[], discountPct: string, taxRate: string): { subtotal: string; discount: string; tax: string; total: string } | null {
+  const cents = (t: string) => { const m = /^(\d{1,10})(?:\.(\d{1,2}))?$/.exec(t.trim()); return m ? BigInt(m[1]!) * 100n + BigInt((m[2] ?? '').padEnd(2, '0')) : null; };
+  const text = (c: bigint) => `${c / 100n}.${String(c % 100n).padStart(2, '0')}`;
+  let subtotal = 0n;
+  for (const l of lines) {
+    const unit = cents(l.unitPrice);
+    if (unit === null || !/^\d+$/.test(l.quantity.trim())) return null;
+    subtotal += unit * BigInt(l.quantity.trim());
+  }
+  const d = cents(discountPct || '0');
+  const t = cents(taxRate || '0');
+  if (d === null || t === null) return null;
+  const discount = (subtotal * d + 5000n) / 10000n;
+  const tax = ((subtotal - discount) * t + 5000n) / 10000n;
+  return { subtotal: text(subtotal), discount: text(discount), tax: text(tax), total: text(subtotal - discount + tax) };
+}
+
+// ---------- Team: quotas and commissions ----------
+export interface SalesTeamMember {
+  id: string; name: string; email: string; role_name: string;
+  comp: { commissionPct: string; commissionMonths: number | null } | null;
+  quota: { currency: string; target: string }[];
+  won: { currency: string; amount: string; deals: number }[];
+  commission: { currency: string; paid: string; amount: string }[];
+}
+export interface CommissionMonth { month: string; currency: string; paid: string; invoices: number; commission: string }

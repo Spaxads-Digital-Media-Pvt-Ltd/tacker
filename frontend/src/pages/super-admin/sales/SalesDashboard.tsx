@@ -21,7 +21,14 @@ interface Summary extends SalesHeadline {
   myTasks: { id: string; title: string; priority: string; due_at: string | null; lead_id: string | null; lead_company: string | null; network_id: string | null; network_name: string | null }[];
   recent: { id: string; kind: string; body: string | null; meta: Record<string, unknown>; created_at: string; lead_id: string; company: string; actor_name: string | null }[];
   trials: { network_id: string; network_name: string; trial_ends_at: string; plan_name: string; sales_owner: string | null }[] | null;
+  myQuota: { currency: string; target: string; won: string }[];
 }
+
+/** "Your quota USD 1,000.00 — 40%" for each currency you have a quota in this month. */
+const quotaLine = (q: Summary['myQuota']): string => q.map((x) => {
+  const t = Math.round(Number(x.target) * 100);
+  return `your quota ${money(x.target, x.currency)}${t > 0 ? ` — ${Math.round((Math.round(Number(x.won) * 100) / t) * 100)}%` : ''}`;
+}).join(' · ');
 
 const recentLine = (r: Summary['recent'][number]): string => {
   const m = r.meta as Record<string, string>;
@@ -60,7 +67,8 @@ export default function SalesDashboard() {
         <KpiTile label="Weighted forecast" icon={TrendingUp} tone="info" hint="Open value × each stage’s chance of closing">
           <PerCurrency rows={s.forecast} render={(f) => money(f.weighted, f.currency)} none="—" />
         </KpiTile>
-        <KpiTile label="Won this month" icon={Trophy} tone="success" hint={`${k.won_this_month} deal(s) closed this month`}>
+        <KpiTile label="Won this month" icon={Trophy} tone="success" to={s.myQuota?.length ? '/admin/sales/team' : undefined}
+          hint={`${k.won_this_month} deal(s) closed this month${s.myQuota?.length ? ` · ${quotaLine(s.myQuota)}` : ''}`}>
           <PerCurrency rows={s.wonThisMonth} render={(w) => <>{money(w.amount, w.currency)}<span className="text-base font-normal text-fg-secondary"> MRR</span></>} none="None yet" />
         </KpiTile>
         <KpiTile label="New leads this month" icon={UserPlus} to="/admin/sales/leads">{k.new_this_month.toLocaleString()}</KpiTile>

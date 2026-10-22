@@ -1,17 +1,18 @@
 /**
  * Super Admin › Sales › a lead: the stage bar (click a stage to move it; Lost asks why), the deal and the
  * contact, its owner, its timeline (log a note, call, email or meeting — stage, owner and conversion are
- * recorded on their own), its tasks, and "Convert to customer" (a network + owner login + plan/trial).
+ * recorded on their own), its tasks, its quotes (QuoteParts.tsx), and "Convert to customer" (a network + owner
+ * login + plan/trial).
  */
 import { useState, type FormEvent, type ElementType } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowRightLeft, Building2, CalendarClock, CheckCircle2, Globe, Inbox, Mail, MessageSquare, Phone, Sparkles, UserRound, Users } from 'lucide-react';
+import { ArrowRightLeft, Building2, CalendarClock, CheckCircle2, FileText, Globe, Inbox, Mail, MessageSquare, Phone, Sparkles, UserRound, Users } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useMutation, useQuery } from '../../../lib/useApi';
 import { usePlatformMe } from '../../../lib/platformMe';
 import { money } from '../../../lib/platformBilling';
 import { relTime, isOverdue } from '../../../lib/relativeTime';
-import { OPEN_STAGES, stageOf, sourceLabel, useStaff, type Lead, type LeadActivity, type PlatformTask, type Stage } from '../../../lib/platformSales';
+import { OPEN_STAGES, stageOf, sourceLabel, useStaff, type Lead, type LeadActivity, type PlatformTask, type Quote, type Stage } from '../../../lib/platformSales';
 import { useConfirm } from '../../../shared-components/primitives/confirm';
 import { PageHeader, Spinner, StateBlock } from '../../../shared-components/primitives/ui';
 import { Avatar, Panel } from '../kit';
@@ -19,6 +20,7 @@ import { TaskList, TaskForm } from '../TaskList';
 import { StageChip, StaffSelect, LostReasonModal, WonChoice } from './parts';
 import { LeadForm } from './LeadForm';
 import { ConvertLead } from './ConvertLead';
+import { QuoteForm, QuoteList, QuoteModal } from './QuoteParts';
 
 type Detail = Lead & { activities: LeadActivity[]; tasks: PlatformTask[] };
 
@@ -26,7 +28,7 @@ const KIND: Record<LeadActivity['kind'], { icon: ElementType; label: string }> =
   note: { icon: MessageSquare, label: 'Note' }, call: { icon: Phone, label: 'Call' }, email: { icon: Mail, label: 'Email' },
   meeting: { icon: Users, label: 'Meeting' }, stage: { icon: ArrowRightLeft, label: 'Stage' }, owner: { icon: UserRound, label: 'Owner' },
   created: { icon: Sparkles, label: 'Created' }, converted: { icon: Building2, label: 'Converted' }, inbound: { icon: Inbox, label: 'Demo request' },
-  task: { icon: CheckCircle2, label: 'Task done' },
+  task: { icon: CheckCircle2, label: 'Task done' }, quote: { icon: FileText, label: 'Quote' },
 };
 
 function describe(a: LeadActivity): string {
@@ -38,6 +40,7 @@ function describe(a: LeadActivity): string {
     case 'converted': return `converted it into the network ${m['networkName']}${m['plan'] ? ` on ${m['plan']}` : ''}${m['trialDays'] ? ` (${m['trialDays']}-day trial)` : ''}`;
     case 'inbound': return m['again'] ? 'asked for a demo again on the website' : 'asked for a demo on the website';
     case 'task': return 'completed a task';
+    case 'quote': return m['event'] === 'sent' ? `sent quote Q-${m['number']} to ${m['to']}` : `${m['event'] === 'accepted' ? 'accepted' : 'declined'} quote Q-${m['number']}`;
     default: return `logged a ${KIND[a.kind].label.toLowerCase()}`;
   }
 }
@@ -55,6 +58,9 @@ export default function LeadDetail() {
   const [losing, setLosing] = useState(false);
   const [winning, setWinning] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
+  const quotes = useQuery<Quote[]>(`/platform/sales/quotes?leadId=${id}`);
+  const [quoting, setQuoting] = useState(false);
+  const [openQuote, setOpenQuote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [kind, setKind] = useState<'note' | 'call' | 'email' | 'meeting'>('note');
   const [body, setBody] = useState('');
@@ -159,7 +165,7 @@ export default function LeadDetail() {
                 <div key={a.id} className="flex gap-3 px-4 py-3 text-small">
                   <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full ${logged ? 'bg-accent-subtle text-accent-text' : 'bg-page text-fg-secondary'}`}><Icon size={14} /></span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-fg-secondary"><span className="font-medium text-fg">{a.actor_name ?? (a.kind === 'inbound' ? l.contact_name ?? 'The contact' : 'System')}</span> {describe(a)}
+                    <p className="text-fg-secondary"><span className="font-medium text-fg">{a.actor_name ?? (a.kind === 'inbound' ? l.contact_name ?? 'The contact' : a.kind === 'quote' ? String(a.meta['by'] ?? l.contact_name ?? 'The prospect') : 'System')}</span> {describe(a)}
                       <span className="ml-2 text-tiny text-fg-muted" title={new Date(a.created_at).toLocaleString()}>{relTime(a.created_at)}</span></p>
                     {a.body && a.kind !== 'stage' && <p className="mt-1 whitespace-pre-wrap text-fg">{a.body}</p>}
                   </div>
@@ -193,6 +199,9 @@ export default function LeadDetail() {
               {l.tags.length > 0 && <div className="flex flex-wrap gap-1">{l.tags.map((t) => <span key={t} className="rounded-full bg-page px-2 py-0.5 text-tiny text-fg-secondary ring-1 ring-inset ring-border">{t}</span>)}</div>}
             </dl>
           </Panel>
+          <Panel title="Quotes" action={canEdit ? <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setQuoting(true)}>New quote</button> : undefined}>
+            <QuoteList quotes={quotes.data ?? []} onOpen={(q) => setOpenQuote(q.id)} empty="No quotes yet." />
+          </Panel>
           <Panel title="Contact">
             <div className="space-y-2 px-4 py-3 text-small">
               <p className="font-medium text-fg">{l.contact_name ?? '—'}</p>
@@ -214,6 +223,9 @@ export default function LeadDetail() {
       {winning && <WonChoice company={l.company} onClose={() => setWinning(false)}
         onJustWon={() => { setWinning(false); void patch({ stage: 'won' }); }} onConvert={() => { setWinning(false); setConverting(true); }} />}
       {losing && <LostReasonModal company={l.company} onClose={() => setLosing(false)} onSubmit={async (reason) => { const err = await patch({ stage: 'lost', lostReason: reason }); if (!err) setLosing(false); return err; }} />}
+      {quoting && <QuoteForm lead={l} onClose={() => setQuoting(false)} onSaved={(q) => { setQuoting(false); quotes.refetch(); setOpenQuote(q.id); }} />}
+      {openQuote && <QuoteModal key={openQuote} id={openQuote} lead={l} canEdit={canEdit} onClose={() => setOpenQuote(null)}
+        onChanged={(next) => { quotes.refetch(); lead.refetch(); if (next) setOpenQuote(next); }} />}
       {addingTask && <TaskForm defaults={{ kind: 'sales', leadId: l.id, about: l.company }} onClose={() => setAddingTask(false)} onSaved={() => { setAddingTask(false); lead.refetch(); }} />}
     </>
   );

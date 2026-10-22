@@ -17,7 +17,7 @@ export const STAGE_PROBABILITY: Record<(typeof OPEN_STAGES)[number], number> = {
 export const SOURCES = ['website', 'referral', 'event', 'outbound', 'partner', 'inbound', 'manual', 'other'] as const;
 /** What a person logs on a lead's timeline (the rest — stage, owner, created, converted, inbound, task done — the system writes). */
 export const LOGGED_ACTIVITIES = ['note', 'call', 'email', 'meeting'] as const;
-export type ActivityKind = (typeof LOGGED_ACTIVITIES)[number] | 'stage' | 'owner' | 'created' | 'converted' | 'inbound' | 'task';
+export type ActivityKind = (typeof LOGGED_ACTIVITIES)[number] | 'stage' | 'owner' | 'created' | 'converted' | 'inbound' | 'task' | 'quote';
 
 type Db = Pick<PoolClient, 'query'>;
 
