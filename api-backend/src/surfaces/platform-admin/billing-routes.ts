@@ -20,7 +20,7 @@ import {
   INVOICE_SELECT, issueInvoice, invoiceLines, markInvoicePaid, extendInvoiceDeadline, voidInvoice, type PlatformInvoice,
 } from '../../lib/billing/invoices.js';
 import { assignPlan, cancelSubscription, resumeSubscription, extendTrial } from '../../lib/billing/subscriptions.js';
-import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
+import { notifyInvoiceIssued, notifyInvoicePaid } from '../../lib/platform/notify.js';
 import { runBilling } from '../../lib/billing/engine.js';
 import {
   createPlanSchema, updatePlanSchema, assignSubscriptionSchema, cancelSubscriptionSchema, extendTrialSchema,
@@ -226,6 +226,7 @@ export function billingRoutes(): Router {
       action: 'invoice.mark_paid', entityType: 'platform_invoice', entityId: id,
       before: { status: out.before.status }, after: { number: out.after.number, paidAmount: out.after.paid_amount, method: out.after.payment_method, reference: out.after.payment_reference, ...out.settled },
     });
+    await notifyInvoicePaid(id);
     sendOk(res, { invoice: out.after, ...out.settled });
   }));
 

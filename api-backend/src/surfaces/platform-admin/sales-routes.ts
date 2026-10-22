@@ -28,7 +28,7 @@ import { writePlatformAudit } from '../../lib/audit.js';
 import { createNetwork } from '../../lib/networks/create.js';
 import { assignPlan } from '../../lib/billing/subscriptions.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
-import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
+import { notifyInvoiceIssued, notifyNetworkCreated } from '../../lib/platform/notify.js';
 import { STAGES, OPEN_STAGES, SOURCES, LOGGED_ACTIVITIES, logLeadActivity, salesKpis } from '../../lib/platform/sales.js';
 import { myQuota } from '../../lib/platform/sales-comp.js';
 import { requirePerm, can, networkScope, leadScope } from './auth.js';
@@ -389,6 +389,7 @@ export function salesRoutes(): Router {
       salesOwnerId: lead.owner_id ?? meId(req), accountManagerId: b.accountManagerId ?? null,
     });
     await writePlatformAudit(req, network.id, { action: 'network.create', entityType: 'network', entityId: network.id, after: { ...network, fromLead: lead.id } });
+    await notifyNetworkCreated(network.id, null, lead.company);
 
     // The lead is won and linked to the network at once — a plan problem below can't leave it unlinked.
     await withTransaction(async (c) => {

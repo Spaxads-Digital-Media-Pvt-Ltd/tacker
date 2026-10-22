@@ -3,6 +3,7 @@
  * and the tenant's Settings › Billing. Amounts arrive as decimal text and are shown without ever passing
  * through a float. Pure — no React (lib/__tests__/platformBilling.test.ts).
  */
+import type { NetworkOverrides } from '../types';
 
 export interface PlatformPlan {
   id: string;
@@ -142,3 +143,24 @@ const BADGE_OF: Record<string, { value: string; label: string }> = {
   canceled: { value: 'inactive', label: 'Canceled' },
 };
 export const billingBadge = (state: string): { value: string; label: string } => BADGE_OF[state] ?? { value: state, label: state };
+
+// ---------- A network's own deal (plan overrides) ----------
+export const OVERRIDE_LIMITS = [
+  { key: 'clicks', label: 'Clicks per period' }, { key: 'conversions', label: 'Conversions per period' }, { key: 'events', label: 'Events per period' },
+  { key: 'offers', label: 'Offers' }, { key: 'seats', label: 'Team seats' },
+] as const;
+
+/** "Own price USD 49.50 · billing exempt · clicks 5,000 · offers unlimited". */
+export function overridesSummary(o: NetworkOverrides | null | undefined, currency: string | undefined): string | null {
+  if (!o) return null;
+  const parts: string[] = [];
+  if (o.price !== null) parts.push(`own price ${currency ?? ''} ${o.price}`.replace('  ', ' '));
+  if (o.billingExempt) parts.push('billing exempt');
+  for (const k of OVERRIDE_LIMITS) {
+    const v = o.limits[k.key];
+    if (v === undefined) continue;
+    parts.push(`${k.key} ${v === null ? 'unlimited' : v.toLocaleString()}`);
+  }
+  return parts.length ? parts.join(' · ') : null;
+}
+

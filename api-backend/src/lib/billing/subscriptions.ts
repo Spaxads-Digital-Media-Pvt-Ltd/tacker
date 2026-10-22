@@ -14,6 +14,7 @@ import { badRequest, conflict, notFound } from '../http/errors.js';
 import { billingSettings } from './settings.js';
 import { issueInvoice, type PlatformInvoice } from './invoices.js';
 import { periodDescription, subscriptionLines, useDiscount, type OverageConfig } from './charges.js';
+import { effectivePlan, networkOverrides } from './overrides.js';
 
 export interface PlanRow {
   id: string;
@@ -56,8 +57,10 @@ export async function assignPlan(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const plan = (await client.query<PlanRow>('SELECT * FROM subscription_plans WHERE id = $1', [planId])).rows[0];
-    if (!plan) throw badRequest('That plan does not exist.');
+    const planRow = (await client.query<PlanRow>('SELECT * FROM subscription_plans WHERE id = $1', [planId])).rows[0];
+    if (!planRow) throw badRequest('That plan does not exist.');
+    // As this network pays for it (a custom price, billing exempt).
+    const plan = effectivePlan(planRow, await networkOverrides(networkId, client));
     if (plan.status !== 'active') throw badRequest(`The plan "${plan.name}" is archived — unarchive it, or choose another.`);
     const net = (await client.query<{ status: string }>('SELECT status FROM networks WHERE id = $1 FOR UPDATE', [networkId])).rows[0];
     if (!net) throw notFound('Network not found');
@@ -88,7 +91,7 @@ export async function assignPlan(
       [networkId, planId, trial ? 'trialing' : 'active', now, trialDays, plan.billing_interval])).rows[0]!;
 
     let invoice: PlatformInvoice | null = null;
-    if (!trial && plan.price_cents > 0) {
+    if (!trial && plan.billable) {
       const period = { start: subscription.current_period_start!, end: subscription.current_period_end! };
       const { lines, subtotal, discount } = await subscriptionLines(client, networkId, plan, period, null);
       invoice = await issueInvoice(client, {

@@ -1,8 +1,8 @@
 /**
  * Platform revenue (Super Admin › Revenue): what each network pays per month and how that moves.
  *
- * - NETWORK_MRR_SQL — each paying network's MRR now (active / past due, a price above 0; a yearly price as a
- *   twelfth), net of a recurring discount (a 'once' coupon isn't recurring revenue). The one definition used
+ * - NETWORK_MRR_SQL — each paying network's MRR now (active / past due, a price above 0 — its own price when
+ *   it has one, never a billing-exempt network (lib/billing/overrides.ts); a yearly price as a twelfth), net of a recurring discount (a 'once' coupon isn't recurring revenue). The one definition used
  *   by the Overview and the Revenue page.
  * - snapshotMrr — run with the billing worker (every 15 min): today's MRR per paying network
  *   (platform_mrr_snapshots), and its movement against the previous day the snapshot ran
@@ -18,14 +18,16 @@ export const NETWORK_MRR_SQL = `
     FROM subscriptions s
     JOIN subscription_plans p ON p.id = s.plan_id
     JOIN networks nn ON nn.id = s.network_id AND nn.status <> 'deleted'
-    CROSS JOIN LATERAL (SELECT (CASE WHEN p.billing_interval = 'year' THEN p.price_cents::numeric / 12 ELSE p.price_cents::numeric END) / 100 AS m) base
+    LEFT JOIN network_plan_overrides o ON o.network_id = s.network_id
+    CROSS JOIN LATERAL (SELECT COALESCE(o.price_cents, p.price_cents) AS cents) price
+    CROSS JOIN LATERAL (SELECT (CASE WHEN p.billing_interval = 'year' THEN price.cents::numeric / 12 ELSE price.cents::numeric END) / 100 AS m) base
     LEFT JOIN LATERAL (
       SELECT CASE WHEN c.kind = 'percent' THEN base.m * c.percent_off / 100
                   WHEN c.kind = 'amount' AND upper(c.currency) = upper(p.currency)
                     THEN LEAST(base.m, c.amount_off / CASE WHEN p.billing_interval = 'year' THEN 12 ELSE 1 END) END AS off
         FROM subscription_discounts d JOIN platform_coupons c ON c.id = d.coupon_id
        WHERE d.network_id = s.network_id AND d.ended_at IS NULL AND c.duration <> 'once') disc ON true
-   WHERE s.status IN ('active', 'past_due') AND p.price_cents > 0`;
+   WHERE s.status IN ('active', 'past_due') AND price.cents > 0 AND NOT COALESCE(o.billing_exempt, false)`;
 
 export type MovementKind = 'new' | 'expansion' | 'contraction' | 'churn' | 'reactivation';
 

@@ -17,6 +17,7 @@ import { query } from '../db/pool.js';
 import { raiseAlert } from '../fraud/alerts.js';
 import { logger } from '../logger.js';
 import { rejectedClickSql } from '../click-rejections.js';
+import { mergeLimits, networkOverrides } from '../billing/overrides.js';
 
 export const METERED = ['clicks', 'conversions', 'events'] as const;
 export type MeteredMetric = (typeof METERED)[number];
@@ -75,6 +76,7 @@ export async function usageVsPlan(networkId: string, now: Date = new Date()): Pr
   const period = billingPeriod(sub, now);
   const limits: LimitStatus[] = [];
   if (!sub) return { plan: null, period, limits };
+  sub.limits = mergeLimits(sub.limits, await networkOverrides(networkId)); // this network's own limits, if it has any
 
   const want = (k: LimitKey): number | null => {
     const v = Number(sub.limits?.[k]);

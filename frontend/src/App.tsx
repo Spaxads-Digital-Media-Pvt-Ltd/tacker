@@ -74,6 +74,7 @@ const SalesPipeline = lazy(() => import('./pages/super-admin/sales/Pipeline'));
 const LeadDetail = lazy(() => import('./pages/super-admin/sales/LeadDetail'));
 const SalesQuotes = lazy(() => import('./pages/super-admin/sales/Quotes'));
 const SalesTeam = lazy(() => import('./pages/super-admin/sales/SalesTeam'));
+const PlatformReports = lazy(() => import('./pages/super-admin/Reports'));
 const PlatformTasks = lazy(() => import('./pages/super-admin/Tasks'));
 const HealthBoard = lazy(() => import('./pages/super-admin/success/HealthBoard'));
 const SupportDesk = lazy(() => import('./pages/super-admin/support/SupportDesk'));
@@ -220,6 +221,7 @@ export default function App() {
           <Route path="/admin/sales/pipeline" element={<PlatformGate section="sales"><SalesPipeline /></PlatformGate>} />
           <Route path="/admin/sales/quotes" element={<PlatformGate section="sales"><SalesQuotes /></PlatformGate>} />
           <Route path="/admin/sales/team" element={<PlatformGate section="sales"><SalesTeam /></PlatformGate>} />
+          <Route path="/admin/reports" element={<PlatformGate section="networks"><PlatformReports /></PlatformGate>} />
           <Route path="/admin/tasks" element={<PlatformGate><PlatformTasks /></PlatformGate>} />
           <Route path="/admin/success" element={<PlatformGate section="success"><HealthBoard /></PlatformGate>} />
           <Route path="/admin/support" element={<PlatformGate section="support"><SupportDesk /></PlatformGate>} />

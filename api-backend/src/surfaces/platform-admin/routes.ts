@@ -3,7 +3,7 @@
  * per-network subscriptions, and usage dashboards. Uses raw queries (platform admins have no
  * ScopedDb tenant context) and audits every action via writePlatformAudit.
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
@@ -31,13 +31,15 @@ import {
  purgeNetworkSchema, type PurgeNetwork,
 } from './schemas.js';
 import { once } from 'node:events';
-import { softDeleteNetwork, exportNetwork, exportLedgerCsv, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
+import { softDeleteNetwork, setNetworkStatus, exportNetwork, exportLedgerCsv, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { requirePerm, networkScope, assertNetworkInScope } from './auth.js';
 import { ipAllowed, recordLogin } from '../../lib/platform/staff-security.js';
-import { networkStateChanged } from '../../lib/networks/state.js';
 import { createNetwork } from '../../lib/networks/create.js';
 import { usageVsPlan } from '../../lib/usage/meter.js';
+import { networkOverrides } from '../../lib/billing/overrides.js';
+import { centsToDecimal } from '../../lib/billing/invoices.js';
+import { notifyNetworkCreated } from '../../lib/platform/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -48,6 +50,12 @@ function clientIp(req: { ip?: string; socket?: { remoteAddress?: string } }): st
 const userAgentOf = (req: { get(h: string): string | undefined }) => req.get('user-agent') ?? null;
 
 /** Public (no auth) routes — login only. */
+
+/** The signed-in member's name, for messages. */
+const memberName = async (req: Request): Promise<string | null> => {
+ const id = (req.identity as PlatformAdminIdentity | undefined)?.platformAdminId;
+ return id ? (await query<{ name: string }>('SELECT COALESCE(name, email) AS name FROM platform_admins WHERE id = $1', [id])).rows[0]?.name ?? null : null;
+};
 export function publicPlatformRoutes(): Router {
  const r = Router();
 
@@ -212,6 +220,7 @@ export function platformRoutes(): Router {
  query(`SELECT host, mode, status, is_primary FROM tracking_domains WHERE network_id = $1 ORDER BY is_primary DESC, host`, [id]),
  usageVsPlan(id),
  ]);
+ const overrides = await networkOverrides(id);
  sendOk(res, {
  ...net,
  purge_after: net['deleted_at'] ? purgeAfter(new Date(net['deleted_at'] as string)) : null,
@@ -220,6 +229,7 @@ export function platformRoutes(): Router {
  counts: counts.rows[0],
  trackingDomains: domains.rows,
  usage,
+ overrides: overrides && { price: overrides.priceCents === null ? null : centsToDecimal(overrides.priceCents), billingExempt: overrides.billingExempt, limits: overrides.limits, note: overrides.note },
  });
  }),
  );
@@ -321,6 +331,7 @@ export function platformRoutes(): Router {
  asyncHandler(async (req, res) => {
  const { network, ownerUserId } = await createNetwork(req.body as CreateNetwork);
  await writePlatformAudit(req, network.id, { action: 'network.create', entityType: 'network', entityId: network.id, after: network });
+ await notifyNetworkCreated(network.id, await memberName(req));
  sendOk(res, { ...network, ownerUserId }, undefined, 201);
  }),
  );
@@ -332,25 +343,16 @@ export function platformRoutes(): Router {
  validateBody(updateNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as UpdateNetwork;
- const before = (await query(`SELECT * FROM networks WHERE id = $1`, [req.params.id])).rows[0];
+ await assertNetworkInScope(req, req.params.id!);
+ const id = req.params.id!;
+ const before = (await query(`SELECT * FROM networks WHERE id = $1`, [id])).rows[0];
  if (!before) throw notFound('Network not found');
- const sets: string[] = [];
- const params: unknown[] = [];
- if (b.name !== undefined) { params.push(b.name); sets.push(`name = $${params.length}`); }
- if (b.status !== undefined) {
- params.push(b.status); sets.push(`status = $${params.length}`);
- // 'deleted' is the soft delete (F-26); any other status restores it.
- sets.push(b.status === 'deleted' ? 'deleted_at = COALESCE(deleted_at, now())' : 'deleted_at = NULL');
- // A Super Admin's suspension is 'manual' (only a Super Admin lifts it; billing never does).
- sets.push(b.status === 'suspended' ? `suspended_reason = 'manual'` : 'suspended_reason = NULL');
- }
- if (sets.length === 0) throw badRequest('Nothing to update');
- params.push(req.params.id);
- const { rows } = await query(`UPDATE networks SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
- // Suspend / delete / restore applies at once: tracking hosts and the cached state are dropped.
- if (b.status !== undefined && b.status !== before.status) await networkStateChanged(req.params.id!);
- await writePlatformAudit(req, req.params.id ?? null, { action: 'network.update', entityType: 'network', entityId: req.params.id, before, after: rows[0] });
- sendOk(res, rows[0]);
+ if (b.name === undefined && b.status === undefined) throw badRequest('Nothing to update');
+ if (b.name !== undefined) await query('UPDATE networks SET name = $2 WHERE id = $1', [id, b.name]);
+ if (b.status !== undefined) await setNetworkStatus(id, b.status);
+ const after = (await query(`SELECT * FROM networks WHERE id = $1`, [id])).rows[0];
+ await writePlatformAudit(req, id, { action: 'network.update', entityType: 'network', entityId: id, before, after });
+ sendOk(res, after);
  }),
  );
 
@@ -360,6 +362,7 @@ export function platformRoutes(): Router {
  '/networks/:id',
  requirePerm('networks', 'full'),
  asyncHandler(async (req, res) => {
+ await assertNetworkInScope(req, req.params.id!);
  const { before, after } = await softDeleteNetwork(req.params.id!);
  await writePlatformAudit(req, req.params.id ?? null, { action: 'network.delete', entityType: 'network', entityId: req.params.id, before, after: { status: after.status, deletedAt: after.deleted_at, soft: true } });
  sendOk(res, {
@@ -374,6 +377,7 @@ export function platformRoutes(): Router {
  '/networks/:id/export',
  requirePerm('networks', 'full'),
  asyncHandler(async (req, res) => {
+ await assertNetworkInScope(req, req.params.id!);
  const net = (await query<{ slug: string }>(`SELECT slug FROM networks WHERE id = $1`, [req.params.id])).rows[0];
  if (!net) throw notFound('Network not found');
  res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
@@ -394,6 +398,7 @@ export function platformRoutes(): Router {
  validateBody(purgeNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as PurgeNetwork;
+ await assertNetworkInScope(req, req.params.id!);
  const { before, result } = await purgeNetwork(req.params.id!, { ...b, purgedBy: (req.identity as PlatformAdminIdentity | undefined)?.platformAdminId ?? null });
  await writePlatformAudit(req, null, {
  action: 'network.purge', entityType: 'network', entityId: req.params.id,
@@ -426,6 +431,7 @@ export function platformRoutes(): Router {
  asyncHandler(async (req, res) => {
  const id = req.params.id!;
  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw notFound('Network not found');
+ await assertNetworkInScope(req, id);
  const net = (await query<{ slug: string }>(
  `SELECT slug FROM networks WHERE id = $1 UNION ALL SELECT slug FROM purged_networks WHERE id = $1 LIMIT 1`, [id])).rows[0];
  if (!net) throw notFound('Network not found');

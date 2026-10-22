@@ -19,9 +19,10 @@ import { useAllPages } from '../../hooks/useAllPages';
 import { useInvoiceActions } from './invoiceActions';
 import { NewInvoice } from './Billing';
 import { AssignPlanModal, ExtendTrialModal } from './subscriptionActions';
-import { money as amountMoney, planPrice, billingBadge, invoiceState, type PlatformInvoice } from '../../lib/platformBilling';
+import { money as amountMoney, planPrice, billingBadge, invoiceState, overridesSummary, type PlatformInvoice } from '../../lib/platformBilling';
 import type { NetworkDetail as Detail, NetworkTeamMember, PlatformActivityRow } from '../../types';
 import { NetworkAccount } from './success/NetworkAccount';
+import { OverridesModal } from './NetworkOverrides';
 import { NetworkDiscount } from './money/NetworkDiscount';
 import { WhiteLabelForm } from '../../shared-components/panels/WhiteLabelForm';
 import type { Reseller } from '../../lib/platformResellers';
@@ -64,6 +65,7 @@ export default function NetworkDetail() {
   const invoices = useAllPages<PlatformInvoice>(`/platform/invoices?networkId=${id}&status=all`);
   const invoiceActions = useInvoiceActions(() => { invoices.refetch(); net.refetch(); activity.refetch(); });
   const [planModal, setPlanModal] = useState(false);
+  const [overridesModal, setOverridesModal] = useState(false);
   const [trialModal, setTrialModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -206,6 +208,14 @@ export default function NetworkDetail() {
                 : <InfoRow label={sub.status === 'trialing' ? 'Trial period' : 'Current period'}>{day(sub.current_period_start)} – {day(sub.current_period_end)}</InfoRow>}
             </dl>
           ) : <p className="mb-3 text-small text-fg-secondary">No plan assigned.</p>}
+          {(overridesSummary(n.overrides, sub?.currency) || (canPlans && n.status !== 'deleted')) && (
+            <p className="mb-3 text-small">
+              <span className="text-fg-secondary">Its own deal: </span>
+              {overridesSummary(n.overrides, sub?.currency) ?? <span className="text-fg-muted">none — the plan as it is</span>}
+              {n.overrides?.note && <span className="text-tiny text-fg-muted"> ({n.overrides.note})</span>}
+              {canPlans && n.status !== 'deleted' && <button className="ml-2 text-tiny font-medium text-accent-text hover:underline" onClick={() => setOverridesModal(true)}>Edit</button>}
+            </p>
+          )}
           {live && sub && canPlans && (
             <div className="mb-4 flex flex-wrap gap-3">
               {sub.status === 'trialing' && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setTrialModal(true)}>Extend trial</button>}
@@ -260,6 +270,7 @@ export default function NetworkDetail() {
       </div>
 
       {invoiceActions.modal}
+      {overridesModal && <OverridesModal network={n} onClose={() => setOverridesModal(false)} onSaved={() => { setOverridesModal(false); setNotice('Its deal was saved — it applies from its next invoice.'); net.refetch(); }} />}
       {planModal && <AssignPlanModal networkId={n.id} networkName={n.name} live={live} currentPlanId={live ? sub?.plan_id ?? null : null} onClose={() => setPlanModal(false)} onDone={done} />}
       {trialModal && <ExtendTrialModal networkId={n.id} onClose={() => setTrialModal(false)} onDone={done} />}
       {newInvoice && <NewInvoice networkId={n.id} onClose={() => setNewInvoice(false)} onCreated={(num) => done(`Invoice ${num} issued.`)} />}
