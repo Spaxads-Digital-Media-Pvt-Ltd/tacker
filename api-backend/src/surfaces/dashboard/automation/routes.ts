@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound, validationFailed } from '../../../lib/http/errors.js';
+import { conflict, notFound, validationFailed } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
@@ -22,8 +22,8 @@ import {
   parsePartnerIds as partnerIdsOf, scheduledActionParams, validateScheduledAction, scheduledActionDtoExtras,
   type ScheduledActionParams,
 } from '../../../lib/automation/scheduled-actions.js';
-import { parseConditions } from '../../../lib/automation/alert-rules.js';
-import { parseWebhookEvents, invalidateWebhookSubscriptions, WEBHOOK_EVENTS } from '../../../lib/automation/webhooks.js';
+import { parseConditions, CONDITIONS_HELP, RULE_METRICS, RULE_OPS, RULE_SCOPES } from '../../../lib/automation/alert-rules.js';
+import { parseWebhookEvents, invalidateWebhookSubscriptions, redeliverWebhook, sendTestWebhook, WEBHOOK_EVENTS } from '../../../lib/automation/webhooks.js';
 import {
   createScheduledActionSchema,
   updateScheduledActionSchema,
@@ -484,6 +484,30 @@ export function automationRoutes(): Router {
   }));
 
   // Delivery log (F-17a): the latest 100 deliveries of one webhook.
+  // The rule builder's vocabulary and the webhook events — one source with the parser / emitter.
+  r.get('/meta', asyncHandler(async (_req, res) => {
+    sendOk(res, { ruleMetrics: RULE_METRICS, ruleOps: RULE_OPS, ruleScopes: RULE_SCOPES, conditionsHelp: CONDITIONS_HELP, webhookEvents: WEBHOOK_EVENTS });
+  }));
+
+  r.post('/webhooks/:id/test', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    const hook = await db.selectOne<WebhookRow>(WEBHOOKS_TABLE, { id: req.params.id ?? '' });
+    if (!hook) throw notFound('Webhook not found');
+    if (hook.status !== 'active') throw validationFailed('Activate the webhook to send it a test.');
+    const deliveryId = await sendTestWebhook(req.scope!.networkId, hook.id);
+    await writeAudit(req, { action: 'automation_webhook.test', entityType: 'automation_webhook', entityId: hook.id });
+    sendOk(res, { queued: true, deliveryId }, undefined, 202);
+  }));
+
+  r.post('/webhooks/:id/deliveries/:deliveryId/retry', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {
+    const db = dbForRequest(req);
+    if (!(await db.selectOne<WebhookRow>(WEBHOOKS_TABLE, { id: req.params.id ?? '' }))) throw notFound('Webhook not found');
+    const ok = await redeliverWebhook(req.scope!.networkId, req.params.id!, req.params.deliveryId!);
+    if (!ok) throw conflict('Only a failed or blocked delivery can be retried.');
+    await writeAudit(req, { action: 'automation_webhook.redeliver', entityType: 'automation_webhook', entityId: req.params.id, after: { deliveryId: req.params.deliveryId } });
+    sendOk(res, { queued: true }, undefined, 202);
+  }));
+
   r.get('/webhooks/:id/deliveries', asyncHandler(async (req, res) => {
     const db = dbForRequest(req);
     const id = req.params.id ?? '';

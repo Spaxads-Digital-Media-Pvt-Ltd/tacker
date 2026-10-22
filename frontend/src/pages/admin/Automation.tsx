@@ -11,6 +11,7 @@ import { createdByLabel } from '../../lib/createdBy';
 import { PageHeader, Tabs } from '../../shared-components/primitives/ui';
 import { EmptyShellTable, type ShellRow, type AddField } from '../../shared-components/primitives/EmptyShellTable';
 import type { Offer, Publisher } from '../../types';
+import { AlertRuleModal, DeliveriesModal, WebhookModal, type AlertRuleForm, type WebhookForm } from './AutomationForms';
 
 const TOP_TABS = ['Scheduled Actions', 'Alerts', 'Webhooks'] as const;
 
@@ -64,7 +65,6 @@ interface Webhook {
   createdAt: string; updatedAt: string;
 }
 
-const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 type StatusFilter = 'All' | 'Active' | 'Inactive' | 'Deleted';
 
 // Scheduled actions are only ever pending or cancelled (nothing executes them yet), so an
@@ -86,12 +86,6 @@ function tabFromParam(raw: string | null): string {
   if (raw === 'alerts') return 'Alerts';
   if (raw === 'scheduled-actions') return 'Scheduled Actions';
   return 'Scheduled Actions';
-}
-
-function normalizeUrl(raw: string): string {
-  const t = raw.trim();
-  if (!t) return '';
-  return /^https?:\/\//i.test(t) ? t : `https://${t}`;
 }
 
 function fmt(iso: string | null): string {
@@ -196,6 +190,7 @@ function AlertsPanel() {
     `/api/automation/alert-rules?status=${ruleStatusParam(statusFilter)}`,
   );
   const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/automation/alert-rules/${id}`));
+  const [editing, setEditing] = useState<AlertRuleForm | null | 'new'>(null);
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
     id: r.id,
@@ -224,25 +219,11 @@ function AlertsPanel() {
         onStatusFilterChange={(v) => setStatusFilter(v as StatusFilter)}
         rows={rows}
         loading={loading}
-        onAddSubmit={async (v) => {
-          const name = v['Name']?.trim();
-          const conditions = v['Conditions']?.trim();
-          if (!name) return 'Rule name is required.';
-          if (!conditions) return 'At least one condition is required.';
-          const inApp = !v['In App'] || /yes|true|1/i.test(v['In App']);
-          const email = /yes|true|1/i.test(v['Email'] ?? '');
-          await api.post('/api/automation/alert-rules', {
-            name,
-            conditions,
-            inApp,
-            email,
-            status: 'active',
-          });
-          refetch();
-          return true;
-        }}
+        onAddClick={() => setEditing('new')}
+        rowActions={(row) => [{ label: 'Edit', onClick: () => { const r = (data ?? []).find((x) => x.id === row.id); if (r) setEditing({ id: r.id, name: r.name, conditions: r.conditions, inApp: r.inApp, email: r.email }); } }]}
         onDelete={async (id) => { await runDelete(id); refetch(); }}
       />
+      {editing && <AlertRuleModal initial={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={refetch} />}
     </>
   );
 }
@@ -253,6 +234,8 @@ function WebhooksPanel() {
     `/api/automation/webhooks?status=${ruleStatusParam(statusFilter)}`,
   );
   const { runOrThrow: runDelete } = useMutation((id: string) => api.del(`/api/automation/webhooks/${id}`));
+  const [editing, setEditing] = useState<WebhookForm | null | 'new'>(null);
+  const [deliveriesOf, setDeliveriesOf] = useState<{ id: string; name: string } | null>(null);
 
   const rows: ShellRow[] = (data ?? []).map((r) => ({
     id: r.id,
@@ -277,26 +260,18 @@ function WebhooksPanel() {
         onStatusFilterChange={(v) => setStatusFilter(v as StatusFilter)}
         rows={rows}
         loading={loading}
-        onAddSubmit={async (v) => {
-          const name = v['Name']?.trim();
-          const urlRaw = v['URL']?.trim();
-          if (!name) return 'Webhook name is required.';
-          if (!urlRaw) return 'Webhook URL is required.';
-          const url = normalizeUrl(urlRaw);
-          const rawMethod = (v['HTTP Method']?.trim() || 'POST').toUpperCase();
-          const httpMethod = HTTP_METHODS.has(rawMethod) ? rawMethod : 'POST';
-          await api.post('/api/automation/webhooks', {
-            name,
-            events: v['Events']?.trim() || '',
-            httpMethod,
-            url,
-            status: 'active',
-          });
-          refetch();
-          return true;
+        onAddClick={() => setEditing('new')}
+        rowActions={(row) => {
+          const w = (data ?? []).find((x) => x.id === row.id);
+          return w ? [
+            { label: 'Deliveries', onClick: () => setDeliveriesOf({ id: w.id, name: w.name }) },
+            { label: 'Edit', onClick: () => setEditing({ id: w.id, name: w.name, url: w.url, httpMethod: w.httpMethod, events: w.events }) },
+          ] : [];
         }}
         onDelete={async (id) => { await runDelete(id); refetch(); }}
       />
+      {editing && <WebhookModal initial={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={refetch} />}
+      {deliveriesOf && <DeliveriesModal webhook={deliveriesOf} onClose={() => setDeliveriesOf(null)} />}
     </>
   );
 }

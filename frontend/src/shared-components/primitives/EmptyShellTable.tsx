@@ -243,7 +243,7 @@ export interface ShellRow {
 
 export function EmptyShellTable({
   columns, addLabel, entityName, search = true, status, statusFilter, onStatusFilterChange, statusOptions, left,
-  rows, loading, error: tableError, onAddSubmit, onDelete, addFields,
+  rows, loading, error: tableError, onAddSubmit, onDelete, addFields, onAddClick, rowActions,
 }: {
   columns: string[]; addLabel?: string; entityName?: string; search?: boolean; status?: string; left?: ReactNode;
   statusFilter?: string;
@@ -256,6 +256,10 @@ export function EmptyShellTable({
   onDelete?: (id: string) => Promise<void>;
   /** The add form's fields, when they aren't simply the columns as text inputs. */
   addFields?: AddField[];
+  /** A page with its own add form: the "+ Add" button calls this instead of the built-in text form. */
+  onAddClick?: () => void;
+  /** Extra per-row actions, shown before Delete. */
+  rowActions?: (row: ShellRow) => { label: string; onClick: () => void }[];
 }) {
   const confirm = useConfirm();
   const [q, setQ] = useState('');
@@ -292,7 +296,7 @@ export function EmptyShellTable({
       )}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         {left ?? (addLabel ? (
-          <button className="btn-primary" onClick={() => setAdding(true)}>+ {addLabel}</button>
+          <button className="btn-primary" onClick={() => (onAddClick ? onAddClick() : setAdding(true))}>+ {addLabel}</button>
         ) : <span />)}
         {search && (
           <div className="flex items-center gap-2">
@@ -319,21 +323,24 @@ export function EmptyShellTable({
         ) : (
           <table className="premium-table">
             <thead>
-              <tr>{shown.map((c) => <th key={c}>{c}</th>)}{onDelete && <th />}</tr>
+              <tr>{shown.map((c) => <th key={c}>{c}</th>)}{(onDelete || rowActions) && <th />}</tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">Loading…</td></tr>
+                <tr><td colSpan={shown.length + (onDelete || rowActions ? 1 : 0)} className="text-center italic text-fg-muted">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={shown.length + (onDelete ? 1 : 0)} className="text-center italic text-fg-muted">No Record Found</td></tr>
+                <tr><td colSpan={shown.length + (onDelete || rowActions ? 1 : 0)} className="text-center italic text-fg-muted">No Record Found</td></tr>
               ) : pageRows.map((row) => (
                 <tr key={row.id}>
                   {shown.map((c) => (
                     <td key={c}>{row.cells[c] ?? '—'}</td>
                   ))}
-                  {onDelete && (
-                    <td className="text-right">
-                      <button type="button" className="text-tiny text-danger-text hover:underline"
+                  {(onDelete || rowActions) && (
+                    <td className="space-x-3 whitespace-nowrap text-right">
+                      {rowActions?.(row).map((a) => (
+                        <button key={a.label} type="button" className="text-tiny text-accent-text hover:underline" onClick={a.onClick}>{a.label}</button>
+                      ))}
+                      {onDelete && <button type="button" className="text-tiny text-danger-text hover:underline"
                         onClick={() => {
                           setDeleteError(null);
                           const first = row.cells[shown[0] ?? ''];
@@ -342,7 +349,7 @@ export function EmptyShellTable({
                             title: 'Delete record?', message: `Delete ${label}? This can’t be undone.`, confirmLabel: 'Delete', destructive: true,
                             onConfirm: () => onDelete(row.id).catch((e: unknown) => setDeleteError(e instanceof Error ? e.message : 'Delete failed')),
                           });
-                        }}>Delete</button>
+                        }}>Delete</button>}
                     </td>
                   )}
                 </tr>

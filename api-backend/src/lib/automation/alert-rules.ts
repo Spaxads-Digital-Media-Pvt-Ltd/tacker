@@ -39,6 +39,17 @@ const ALIASES: Record<string, RuleMetric> = {
   cr: 'cr', conversion_rate: 'cr', invalid_rate: 'invalid_rate', fraud_rate: 'invalid_rate',
   payout: 'payout', revenue: 'revenue', margin: 'margin', profit: 'margin', epc: 'epc',
 };
+/** What the rule builder offers (GET /api/automation/meta) — the same names parseConditions reads. */
+export const RULE_METRICS: readonly { key: RuleMetric; label: string; kind: 'count' | 'percent' | 'money' | 'ratio' }[] = [
+  { key: 'clicks', label: 'Clicks', kind: 'count' }, { key: 'unique_clicks', label: 'Unique clicks', kind: 'count' },
+  { key: 'conversions', label: 'Conversions', kind: 'count' }, { key: 'invalid_clicks', label: 'Invalid clicks', kind: 'count' },
+  { key: 'cr', label: 'Conversion rate (%)', kind: 'percent' }, { key: 'invalid_rate', label: 'Invalid click rate (%)', kind: 'percent' },
+  { key: 'payout', label: 'Payout', kind: 'money' }, { key: 'revenue', label: 'Revenue', kind: 'money' },
+  { key: 'margin', label: 'Margin (profit)', kind: 'money' }, { key: 'epc', label: 'EPC', kind: 'ratio' },
+];
+export const RULE_OPS = ['>', '>=', '<', '<=', '=', '!='] as const;
+export const RULE_SCOPES = ['offer', 'partner', 'advertiser'] as const;
+
 const PERCENT: ReadonlySet<RuleMetric> = new Set(['cr', 'invalid_rate']);
 const MONEY: ReadonlySet<RuleMetric> = new Set(['payout', 'revenue', 'margin']);
 const COUNT: ReadonlySet<RuleMetric> = new Set(['clicks', 'unique_clicks', 'conversions', 'invalid_clicks']);

@@ -79,12 +79,7 @@ export async function emitAutomationEvent(
     for (const event of Array.isArray(events) ? events : [events]) {
       for (const s of subs.filter((x) => listensTo(x.events, event))) {
         const job: WebhookJob = { deliveryId: randomUUID(), networkId, webhookId: s.id, event, payload: { event, occurredAt, data } };
-        await getQueue(QUEUE.automationWebhook).add('webhook', job, {
-          attempts: WEBHOOK_ATTEMPTS,
-          backoff: { type: 'exponential', delay: 2000 },
-          removeOnComplete: 1000,
-          removeOnFail: 5000,
-        });
+        await getQueue(QUEUE.automationWebhook).add('webhook', job, QUEUE_OPTS);
         queued++;
       }
     }
@@ -93,6 +88,37 @@ export async function emitAutomationEvent(
     logger.warn({ err, networkId, events }, 'automation webhook emit failed');
     return 0;
   }
+}
+
+const QUEUE_OPTS = { attempts: WEBHOOK_ATTEMPTS, backoff: { type: 'exponential' as const, delay: 2000 }, removeOnComplete: 1000, removeOnFail: 5000 };
+
+/**
+ * Send a delivery again (Automation › Webhooks › Deliveries › Retry): the same payload and delivery id
+ * (so a receiver that already processed it can tell), a fresh set of attempts. Only a failed or blocked
+ * one — a pending delivery is still being retried, a successful one arrived. Returns false when there is
+ * nothing to retry.
+ */
+export async function redeliverWebhook(networkId: string, webhookId: string, deliveryId: string): Promise<boolean> {
+  const { rows } = await query<{ event: string; payload: WebhookJob['payload'] }>(
+    `UPDATE automation_webhook_deliveries SET status = 'pending', attempts = 0, status_code = NULL, error = NULL
+      WHERE network_id = $1 AND webhook_id = $2 AND id = $3 AND status IN ('failed', 'blocked')
+      RETURNING event, payload`, [networkId, webhookId, deliveryId]);
+  const d = rows[0];
+  if (!d) return false;
+  await getQueue(QUEUE.automationWebhook).add('webhook', { deliveryId, networkId, webhookId, event: d.event, payload: d.payload } satisfies WebhookJob, QUEUE_OPTS);
+  return true;
+}
+
+/** A test delivery to one webhook (event `webhook.test`) — to check the URL before real events flow. */
+export async function sendTestWebhook(networkId: string, webhookId: string): Promise<string> {
+  const deliveryId = randomUUID();
+  const job: WebhookJob = {
+    deliveryId, networkId, webhookId, event: 'webhook.test',
+    payload: { event: 'webhook.test', occurredAt: new Date().toISOString(), data: { test: true, message: 'A test delivery from Automation › Webhooks.' } },
+  };
+  await logDelivery(job, 0, 'pending', null, null);
+  await getQueue(QUEUE.automationWebhook).add('webhook', job, QUEUE_OPTS);
+  return deliveryId;
 }
 
 type DeliveryStatus = 'pending' | 'success' | 'failed' | 'blocked';
