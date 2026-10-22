@@ -19,6 +19,7 @@
    *     spec's positive-chip pair (teal-100 / teal-700): light tint bg + dark teal text
    *     (#0F766E on #CCFBF1 ≈ 4.86:1 AA). --text also rides on white ≈ 5.47:1. --- */
   --accent: 13 148 136;          /* #0D9488 teal-600 */
+  --chart: 13 148 136;           /* data series (bg-chart / text-chart) — teal-600, the accent's hue */
   --accent-hover: 15 118 110;    /* #0F766E teal-700 — white text ≈ 5.47:1 */
   --accent-subtle: 204 251 241;  /* #CCFBF1 teal-100 */
   --accent-text: 15 118 110;     /* #0F766E teal-700 */
@@ -105,6 +106,7 @@
    *     stays ≈ 5.47:1 (AA) as the original navy dark accent did; --text is bright teal-300
    *     for links (≈ 10:1 on cards). --- */
   --accent: 15 118 110;        /* #0F766E teal-700 — fills; white text ≈ 5.47:1 */
+  --chart: 45 212 191;         /* teal-400 — a data series that reads on the dark surface */
   --accent-hover: 17 94 89;    /* #115E59 teal-800 — darker on hover */
   --accent-subtle: 19 78 74;   /* #134E4A — deep teal tint: hover fills / active nav / chips */
   --accent-text: 94 234 212;   /* #5EEAD4 teal-300 — links / emphasis on dark surfaces */
