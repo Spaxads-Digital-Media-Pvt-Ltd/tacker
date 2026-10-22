@@ -102,7 +102,7 @@ export function opsRoutes(): Router {
                 COUNT(*) FILTER (WHERE status = 'suspended')::int AS suspended,
                 COUNT(*) FILTER (WHERE status = 'suspended' AND suspended_reason = 'billing')::int AS suspended_for_billing,
                 COUNT(*) FILTER (WHERE status = 'deleted')::int AS deleted,
-                COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now()))::int AS new_this_month
+                COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now(), 'UTC'))::int AS new_this_month
            FROM networks n WHERE ${sc.sql}`, p),
       query(
         `SELECT COUNT(*) FILTER (WHERE s.status = 'trialing')::int AS trialing,
@@ -123,7 +123,7 @@ export function opsRoutes(): Router {
                 COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open'), 0)::text AS open_total,
                 COUNT(*) FILTER (WHERE i.status = 'open' AND i.due_at <= now())::int AS overdue_count,
                 COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open' AND i.due_at <= now()), 0)::text AS overdue_total,
-                COALESCE(SUM(i.paid_amount) FILTER (WHERE i.status = 'paid' AND i.paid_at >= date_trunc('month', now())), 0)::text AS collected_this_month
+                COALESCE(SUM(i.paid_amount) FILTER (WHERE i.status = 'paid' AND i.paid_at >= date_trunc('month', now(), 'UTC')), 0)::text AS collected_this_month
            FROM platform_invoices i LEFT JOIN networks n ON n.id = i.network_id WHERE ${sc.sql} GROUP BY i.currency ORDER BY i.currency`, p) : null,
       query(
         `SELECT (SELECT COUNT(*) FROM clicks WHERE created_at >= now() - interval '24 hours' AND network_id IN (${scopedNetworks}))::int AS clicks24h,
@@ -156,13 +156,13 @@ export function opsRoutes(): Router {
         `SELECT to_char(d, 'YYYY-MM-DD') AS day,
                 COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'clicks'), 0)::text AS clicks,
                 COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'conversions'), 0)::text AS conversions
-           FROM generate_series(CURRENT_DATE - 13, CURRENT_DATE, interval '1 day') d
-           LEFT JOIN usage_records u ON u.period_date = d::date AND u.network_id IN (${scopedNetworks})
+           FROM (SELECT (now() AT TIME ZONE 'UTC')::date - g AS d FROM generate_series(0, 13) g) days
+           LEFT JOIN usage_records u ON u.period_date = days.d AND u.network_id IN (${scopedNetworks})
           GROUP BY d ORDER BY d`, p),
       // New networks per month, the last 6 (this one so far).
       query<{ month: string; created: number }>(
-        `SELECT to_char(mo, 'YYYY-MM') AS month, COUNT(n.id)::int AS created
-           FROM generate_series(date_trunc('month', now()) - interval '5 months', date_trunc('month', now()), interval '1 month') mo
+        `SELECT to_char(mo AT TIME ZONE 'UTC', 'YYYY-MM') AS month, COUNT(n.id)::int AS created
+           FROM generate_series(date_trunc('month', now(), 'UTC') - interval '5 months', date_trunc('month', now(), 'UTC'), interval '1 month') mo
            LEFT JOIN networks n ON n.created_at >= mo AND n.created_at < mo + interval '1 month' AND ${sc.sql}
           GROUP BY mo ORDER BY mo`, p),
       // The busiest networks of those 14 days.
@@ -171,7 +171,7 @@ export function opsRoutes(): Router {
                 COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'clicks'), 0)::text AS clicks,
                 COALESCE(SUM(u.value) FILTER (WHERE u.metric = 'conversions'), 0)::text AS conversions
            FROM usage_records u JOIN networks n ON n.id = u.network_id
-          WHERE u.period_date >= CURRENT_DATE - 13 AND n.status <> 'deleted' AND ${sc.sql}
+          WHERE u.period_date >= (now() AT TIME ZONE 'UTC')::date - 13 AND n.status <> 'deleted' AND ${sc.sql}
           GROUP BY n.id HAVING SUM(u.value) FILTER (WHERE u.metric = 'clicks') > 0
           ORDER BY SUM(u.value) FILTER (WHERE u.metric = 'clicks') DESC LIMIT 6`, p),
       // The panels' headline numbers — the same functions their own pages use, so both always agree.
@@ -208,7 +208,7 @@ export function opsRoutes(): Router {
       `SELECT network_id,
               COALESCE(SUM(value) FILTER (WHERE metric = 'clicks'), 0)::text AS clicks,
               COALESCE(SUM(value) FILTER (WHERE metric = 'conversions'), 0)::text AS conversions
-         FROM usage_records WHERE period_date >= CURRENT_DATE - INTERVAL '30 days' AND network_id = ANY($1::uuid[]) GROUP BY network_id`,
+         FROM usage_records WHERE period_date >= (now() AT TIME ZONE 'UTC')::date - 30 AND network_id = ANY($1::uuid[]) GROUP BY network_id`,
       [nets.map((n) => n.id)])).rows.map((t) => [t.network_id, t]));
     const usage: UsageVsPlan[] = [];
     for (let i = 0; i < nets.length; i += 10) usage.push(...await Promise.all(nets.slice(i, i + 10).map((n) => usageVsPlan(n.id))));

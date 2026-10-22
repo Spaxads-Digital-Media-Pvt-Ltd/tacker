@@ -166,19 +166,19 @@ export function salesRoutes(): Router {
            FROM sales_leads l WHERE l.created_at >= now() - interval '180 days' AND ${sc.sql} GROUP BY l.source ORDER BY leads DESC`, p),
       query(
         `WITH w AS (SELECT l.owner_id, l.currency, SUM(l.expected_mrr) AS amount FROM sales_leads l
-                     WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now()) AND ${sc.sql} GROUP BY l.owner_id, l.currency)
+                     WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now(), 'UTC') AND ${sc.sql} GROUP BY l.owner_id, l.currency)
          SELECT pa.id, COALESCE(pa.name, pa.email) AS name,
                 COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost'))::int AS open,
-                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()))::int AS won_this_month,
-                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now()))::int AS won_this_quarter,
+                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now(), 'UTC'))::int AS won_this_month,
+                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now(), 'UTC'))::int AS won_this_quarter,
                 COALESCE((SELECT json_agg(json_build_object('currency', w.currency, 'amount', w.amount::text) ORDER BY w.currency) FROM w WHERE w.owner_id = pa.id), '[]'::json) AS won_mrr_quarter
            FROM sales_leads l JOIN platform_admins pa ON pa.id = l.owner_id
           WHERE ${sc.sql} GROUP BY pa.id ORDER BY won_this_quarter DESC, open DESC LIMIT 10`, p),
       query<{ week: string; created: number; won: number }>(
-        `SELECT to_char(w, 'YYYY-MM-DD') AS week,
+        `SELECT to_char(w AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS week,
                 (SELECT COUNT(*) FROM sales_leads l WHERE l.created_at >= w AND l.created_at < w + interval '7 days' AND ${sc.sql})::int AS created,
                 (SELECT COUNT(*) FROM sales_leads l WHERE l.stage = 'won' AND l.won_at >= w AND l.won_at < w + interval '7 days' AND ${sc.sql})::int AS won
-           FROM generate_series(date_trunc('week', now()) - interval '11 weeks', date_trunc('week', now()), interval '1 week') w ORDER BY w`, p),
+           FROM generate_series(date_trunc('week', now(), 'UTC') - interval '11 weeks', date_trunc('week', now(), 'UTC'), interval '1 week') w ORDER BY w`, p),
       query(
         `SELECT t.id, t.title, t.priority, t.due_at, t.lead_id, t.network_id, l.company AS lead_company, n.name AS network_name
            FROM platform_tasks t LEFT JOIN sales_leads l ON l.id = t.lead_id LEFT JOIN networks n ON n.id = t.network_id

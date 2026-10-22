@@ -178,7 +178,7 @@ export function billingRoutes(): Router {
               COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open'), 0)::text AS open_total,
               COUNT(*) FILTER (WHERE i.status = 'open' AND i.due_at <= now())::int AS overdue_count,
               COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open' AND i.due_at <= now()), 0)::text AS overdue_total,
-              COALESCE(SUM(i.paid_amount) FILTER (WHERE i.status = 'paid' AND i.paid_at >= date_trunc('month', now())), 0)::text AS collected_this_month
+              COALESCE(SUM(i.paid_amount) FILTER (WHERE i.status = 'paid' AND i.paid_at >= date_trunc('month', now(), 'UTC')), 0)::text AS collected_this_month
          FROM platform_invoices i LEFT JOIN networks n ON n.id = i.network_id
         WHERE ($1::uuid IS NULL OR i.network_id = $1) AND ${scope.sql} GROUP BY i.currency ORDER BY i.currency`, [networkId, ...scope.params]);
     sendOk(res, rows);

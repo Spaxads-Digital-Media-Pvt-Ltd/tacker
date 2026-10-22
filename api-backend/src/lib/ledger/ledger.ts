@@ -455,9 +455,9 @@ export async function settlementPosition(
          FROM ledger_entries
         WHERE network_id = $1 AND account_type = $2 AND account_id = $3 AND currency = $4 AND status = 'approved'
      ), t AS (
-       SELECT COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at < $7::date), 0) AS before,
-              COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at >= $7::date
-                                           AND created_at < ($8::date + interval '1 day')), 0) AS within,
+       SELECT COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at < ($7::date::timestamp AT TIME ZONE 'UTC')), 0) AS before,
+              COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at >= ($7::date::timestamp AT TIME ZONE 'UTC')
+                                           AND created_at < (($8::date + interval '1 day') AT TIME ZONE 'UTC')), 0) AS within,
               COALESCE(-SUM(owed) FILTER (WHERE entry_type = $6), 0) AS settled,
               COALESCE(SUM(owed), 0) AS outstanding
          FROM e

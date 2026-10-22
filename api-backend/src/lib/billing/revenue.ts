@@ -82,8 +82,8 @@ export async function snapshotMrr(now: Date = new Date()): Promise<{ paying: num
 export async function mrrTrend(ids: string[] | null): Promise<{ month: string; currency: string; mrr: string; customers: number }[]> {
   return (await query<{ month: string; currency: string; mrr: string; customers: number }>(
     `SELECT to_char(mo, 'YYYY-MM') AS month, s.currency, SUM(s.mrr)::text AS mrr, COUNT(*)::int AS customers
-       FROM generate_series(date_trunc('month', now()) - interval '11 months', date_trunc('month', now()), interval '1 month') mo
-       JOIN LATERAL (SELECT max(day) AS d FROM platform_mrr_days WHERE day >= mo AND day < mo + interval '1 month') last ON last.d IS NOT NULL
+       FROM (SELECT (date_trunc('month', now() AT TIME ZONE 'UTC') - make_interval(months => g))::date AS mo FROM generate_series(0, 11) g) months
+       JOIN LATERAL (SELECT max(day) AS d FROM platform_mrr_days WHERE day >= mo AND day < (mo + interval '1 month')::date) last ON last.d IS NOT NULL
        JOIN platform_mrr_snapshots s ON s.day = last.d AND ($1::uuid[] IS NULL OR s.network_id = ANY($1::uuid[]))
       GROUP BY 1, s.currency ORDER BY 1, s.currency`, [ids])).rows;
 }

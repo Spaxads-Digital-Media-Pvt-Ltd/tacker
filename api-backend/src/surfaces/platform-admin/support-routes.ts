@@ -121,10 +121,10 @@ export function supportRoutes(): Router {
       supportCounts(meId(req), sc2),
       query(`SELECT t.category, COUNT(*)::int AS n FROM ${from} WHERE t.status IN ('open', 'pending', 'on_hold') AND ${sc1.sql} GROUP BY t.category ORDER BY n DESC`, sc1.params),
       query(`SELECT t.priority, COUNT(*)::int AS n FROM ${from} WHERE t.status IN ('open', 'pending', 'on_hold') AND ${sc1.sql} GROUP BY t.priority`, sc1.params),
-      query(`SELECT to_char(d, 'YYYY-MM-DD') AS day,
+      query(`SELECT to_char(d AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
                     (SELECT COUNT(*) FROM ${from} WHERE t.created_at >= d AND t.created_at < d + interval '1 day' AND ${sc1.sql})::int AS created,
                     (SELECT COUNT(*) FROM ${from} WHERE t.resolved_at >= d AND t.resolved_at < d + interval '1 day' AND ${sc1.sql})::int AS resolved
-               FROM generate_series(date_trunc('day', now()) - interval '13 days', date_trunc('day', now()), interval '1 day') d ORDER BY d`, sc1.params),
+               FROM generate_series(date_trunc('day', now(), 'UTC') - interval '13 days', date_trunc('day', now(), 'UTC'), interval '1 day') d ORDER BY d`, sc1.params),
       query(`SELECT pa.id, COALESCE(pa.name, pa.email) AS name,
                     COUNT(t.id) FILTER (WHERE t.status IN ('open', 'pending', 'on_hold'))::int AS active,
                     COUNT(t.id) FILTER (WHERE t.status = 'open')::int AS open,

@@ -46,8 +46,8 @@ export async function salesKpis(scope: LeadScope): Promise<{
   const [kpis, forecast, won] = await Promise.all([
     query<Omit<SalesKpis, 'win_rate_90d'>>(
       `SELECT COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost'))::int AS open,
-              COUNT(*) FILTER (WHERE l.created_at >= date_trunc('month', now()))::int AS new_this_month,
-              COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()))::int AS won_this_month,
+              COUNT(*) FILTER (WHERE l.created_at >= date_trunc('month', now(), 'UTC'))::int AS new_this_month,
+              COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now(), 'UTC'))::int AS won_this_month,
               COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= now() - interval '90 days')::int AS won_90d,
               COUNT(*) FILTER (WHERE l.stage = 'lost' AND l.lost_at >= now() - interval '90 days')::int AS lost_90d,
               ROUND(AVG(EXTRACT(EPOCH FROM (l.won_at - l.created_at)) / 86400) FILTER (WHERE l.stage = 'won' AND l.won_at >= now() - interval '90 days'))::int AS avg_cycle_days,
@@ -59,7 +59,7 @@ export async function salesKpis(scope: LeadScope): Promise<{
          FROM sales_leads l WHERE l.stage NOT IN ('won', 'lost') AND ${scope.sql} GROUP BY l.currency ORDER BY l.currency`, scope.params),
     query<{ currency: string; amount: string; deals: number }>(
       `SELECT l.currency, COALESCE(SUM(l.expected_mrr), 0)::text AS amount, COUNT(*)::int AS deals
-         FROM sales_leads l WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()) AND ${scope.sql} GROUP BY l.currency ORDER BY l.currency`, scope.params),
+         FROM sales_leads l WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now(), 'UTC') AND ${scope.sql} GROUP BY l.currency ORDER BY l.currency`, scope.params),
   ]);
   const k = kpis.rows[0]!;
   const closed = k.won_90d + k.lost_90d;

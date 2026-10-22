@@ -122,11 +122,11 @@ export async function computeHealth(ids: string[] | null = null, now: Date = new
             td.first_domain, COALESCE(us.users, 0) AS users, us.second_user, pb.first_postback, na.health_status AS prev_status
        FROM networks n
        LEFT JOIN LATERAL (
-         SELECT SUM(value) FILTER (WHERE metric = 'clicks' AND period_date BETWEEN ($2::timestamptz)::date - 7 AND ($2::timestamptz)::date - 1) AS c7,
-                SUM(value) FILTER (WHERE metric = 'clicks' AND period_date BETWEEN ($2::timestamptz)::date - 14 AND ($2::timestamptz)::date - 8) AS c_prev7,
-                SUM(value) FILTER (WHERE metric = 'clicks' AND period_date = ($2::timestamptz)::date) AS c_today,
-                SUM(value) FILTER (WHERE metric = 'clicks' AND period_date > ($2::timestamptz)::date - 30) AS c30,
-                SUM(value) FILTER (WHERE metric = 'conversions' AND period_date > ($2::timestamptz)::date - 7) AS v7,
+         SELECT SUM(value) FILTER (WHERE metric = 'clicks' AND period_date BETWEEN ($2::timestamptz AT TIME ZONE 'UTC')::date - 7 AND ($2::timestamptz AT TIME ZONE 'UTC')::date - 1) AS c7,
+                SUM(value) FILTER (WHERE metric = 'clicks' AND period_date BETWEEN ($2::timestamptz AT TIME ZONE 'UTC')::date - 14 AND ($2::timestamptz AT TIME ZONE 'UTC')::date - 8) AS c_prev7,
+                SUM(value) FILTER (WHERE metric = 'clicks' AND period_date = ($2::timestamptz AT TIME ZONE 'UTC')::date) AS c_today,
+                SUM(value) FILTER (WHERE metric = 'clicks' AND period_date > ($2::timestamptz AT TIME ZONE 'UTC')::date - 30) AS c30,
+                SUM(value) FILTER (WHERE metric = 'conversions' AND period_date > ($2::timestamptz AT TIME ZONE 'UTC')::date - 7) AS v7,
                 MIN(period_date) FILTER (WHERE metric = 'clicks' AND value > 0) AS first_click,
                 MIN(period_date) FILTER (WHERE metric = 'conversions' AND value > 0) AS first_conversion
            FROM usage_records WHERE network_id = n.id) u ON true
@@ -188,7 +188,7 @@ export async function computeHealth(ids: string[] | null = null, now: Date = new
           batch.map((x) => JSON.stringify(x.signals)), batch.map((x) => JSON.stringify(x.onboarding)), batch.map((x) => x.onboardingPct), batch.map(() => now)]);
       await c.query(
         `INSERT INTO network_health_history (network_id, day, score, status)
-         SELECT id, ($4::timestamptz)::date, score, status FROM unnest($1::uuid[], $2::int[], $3::text[]) AS t(id, score, status)
+         SELECT id, ($4::timestamptz AT TIME ZONE 'UTC')::date, score, status FROM unnest($1::uuid[], $2::int[], $3::text[]) AS t(id, score, status)
          ON CONFLICT (network_id, day) DO UPDATE SET score = EXCLUDED.score, status = EXCLUDED.status`,
         [batch.map((x) => x.r.id), batch.map((x) => x.score), batch.map((x) => x.status), now]);
       // Fell to "at risk": a check-in for the account manager (not on a network's first computation).
@@ -209,5 +209,5 @@ export async function computeHealth(ids: string[] | null = null, now: Date = new
 
 /** Keep the history bounded (a year). */
 export async function pruneHealthHistory(days = 400): Promise<number> {
-  return (await query(`DELETE FROM network_health_history WHERE day < CURRENT_DATE - $1::int`, [days])).rowCount;
+  return (await query(`DELETE FROM network_health_history WHERE day < (now() AT TIME ZONE 'UTC')::date - $1::int`, [days])).rowCount;
 }

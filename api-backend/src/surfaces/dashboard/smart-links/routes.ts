@@ -21,6 +21,7 @@ import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { invalidateSmartLinkConfig } from '../../tracking/smart-link-cache.js';
 import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
+import { networkTimeZone } from '../../../lib/reporting/network-zone.js';
 
 const LINKS = 'smart_links';
 const ITEMS = 'smart_link_items';
@@ -98,12 +99,15 @@ export function smartLinksRoutes(): Router {
   r.get('/', asyncHandler(async (req, res) => {
     const rows = await dbForRequest(req).selectMany<LinkRow>(LINKS, { where: {}, orderBy: 'created_at', limit: LIST_CAP, maxLimit: LIST_CAP });
     warnIfCapped(rows, LIST_CAP, 'smart-links.list');
+    // "Today" is the network's report-zone day (D7), whatever the database session's zone.
+    const tz = await networkTimeZone(req.scope!.networkId);
     const { rows: revRows } = await query<{ smart_link_id: string; revenue: string }>(
       `SELECT cl.smart_link_id, COALESCE(SUM(c.revenue), 0)::text AS revenue
        FROM clicks cl JOIN conversions c ON c.click_id = cl.click_id AND c.network_id = cl.network_id
-       WHERE cl.network_id = $1 AND cl.smart_link_id IS NOT NULL AND cl.created_at::date = CURRENT_DATE
+       WHERE cl.network_id = $1 AND cl.smart_link_id IS NOT NULL
+         AND cl.created_at >= (date_trunc('day', now() AT TIME ZONE $2) AT TIME ZONE $2)
        GROUP BY cl.smart_link_id`,
-      [req.scope!.networkId],
+      [req.scope!.networkId, tz],
     );
     const revByLink = new Map(revRows.map((x) => [x.smart_link_id, x.revenue]));
     sendOk(res, rows.map((row) => ({ ...linkDTO(row), todayRevenue: revByLink.get(row.id) ?? '0' })));
