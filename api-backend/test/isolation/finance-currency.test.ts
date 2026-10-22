@@ -145,20 +145,20 @@ d('ledger currency safety (live DB)', () => {
       expect(res.body.data.lines).toHaveLength(2);
     });
 
-    it('a repeat run pays nothing (balances are zero); network B is never touched', async () => {
+    it('a repeat run pays nothing (409 nothing_payable, no batch); network B is never touched', async () => {
       const res = await runBatch({});
-      expect(res.status).toBe(201);
-      expect(res.body.data).toMatchObject({ currency: 'USD', total: '0.0000', lines: [], skipped: [], otherCurrencies: [] });
+      expect(res.status).toBe(409);
+      expect(res.body.error.details).toMatchObject({ reason: 'nothing_payable', currency: 'USD', skipped: [], otherCurrencies: [] });
       const c = await counts(fx.networkA);
-      expect(c).toEqual({ batches: 3, payouts: 3, debits: 3, matched: 3 }); // one ledger debit per payout line
+      expect(c).toEqual({ batches: 2, payouts: 3, debits: 3, matched: 3 }); // one ledger debit per payout line
       expect(await counts(fx.networkB)).toEqual({ batches: 0, payouts: 0, debits: 0, matched: 0 });
       expect(await accountBalances(fx.networkB, 'publisher', fx.pubB1)).toEqual([{ currency: 'USD', balance: '100.0000' }]);
       expect((await reconcileLedger()).filter((r) => r.networkId === fx.networkA)).toEqual([]);
     });
 
     it("another network's publisherId in a restricted run pays nothing (ledger reads are network-scoped)", async () => {
-      const r = await createPayoutRun(fx.networkA, { publisherIds: [fx.pubB1], currency: 'USD' });
-      expect(r.lines).toEqual([]);
+      const err = await createPayoutRun(fx.networkA, { publisherIds: [fx.pubB1], currency: 'USD' }).catch((e: unknown) => e) as { status: number };
+      expect(err.status).toBe(409); // nothing payable in network A for that id → no batch
       expect(await accountBalances(fx.networkB, 'publisher', fx.pubB1)).toEqual([{ currency: 'USD', balance: '100.0000' }]);
     });
   });
@@ -171,12 +171,13 @@ d('ledger currency safety (live DB)', () => {
       expect([r.currency, r.total, r.lines]).toEqual(['EUR', '4.2500', [{ publisherId: fx.pubA1, amount: '4.2500' }]]);
     });
 
-    it("no payable balance → an empty run in the network's default currency", async () => {
+    it("no payable balance → 409 nothing_payable in the network's default currency, no batch", async () => {
       const fx = await fixture();
       await query(`UPDATE networks SET default_currency = 'GBP' WHERE id = $1`, [fx.networkA]);
-      const r = await createPayoutRun(fx.networkA);
-      expect(r).toMatchObject({ currency: 'GBP', total: '0.0000', lines: [], skipped: [], otherCurrencies: [] });
-      expect(await counts(fx.networkA)).toMatchObject({ batches: 1, payouts: 0, debits: 0 });
+      const err = await createPayoutRun(fx.networkA).catch((e: unknown) => e) as { status: number; details: unknown };
+      expect(err.status).toBe(409);
+      expect(err.details).toMatchObject({ reason: 'nothing_payable', currency: 'GBP', otherCurrencies: [], skipped: [] });
+      expect(await counts(fx.networkA)).toMatchObject({ batches: 0, payouts: 0, debits: 0 });
     });
 
     it('a negative balance is never paid (nor reported as payable elsewhere)', async () => {
@@ -202,8 +203,8 @@ d('ledger currency safety (live DB)', () => {
         { publisherId: fx.pubA1, currency: '', amount: '6.0000' },
         { publisherId: fx.pubA2, currency: 'usd', amount: '1.0000' },
       ]);
-      const again = await createPayoutRun(fx.networkA);
-      expect([again.lines, again.skipped.length]).toEqual([[], 2]); // still unpaid, still reported
+      const again = await createPayoutRun(fx.networkA).catch((e: unknown) => e) as { status: number; details: { skipped: unknown[] } };
+      expect([again.status, again.details.skipped.length]).toEqual([409, 2]); // still unpaid, still reported
       expect((await counts(fx.networkA)).debits).toBe(1);
     });
   });
@@ -216,13 +217,16 @@ d('ledger currency safety (live DB)', () => {
       // Pre-warm the pool so every run gets a live connection at once and the runs truly overlap
       // (otherwise connection setup alone can serialise them and hide a race).
       await Promise.all(Array.from({ length: 8 }, () => query('SELECT pg_sleep(0.05)')));
-      const results = await Promise.all([1, 2, 3, 4].map(() => createPayoutRun(fx.networkA, { currency: 'USD' })));
+      const settled = await Promise.allSettled([1, 2, 3, 4].map(() => createPayoutRun(fx.networkA, { currency: 'USD' })));
+      const results = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
+      // The first run pays; the other three find nothing payable (409) and write no batch.
+      expect(settled.filter((s) => s.status === 'rejected').map((s) => (s as PromiseRejectedResult).reason.status)).toEqual([409, 409, 409]);
       const lines = results.flatMap((r) => r.lines);
       expect(lines).toHaveLength(2);
       expect(lines).toEqual(expect.arrayContaining([
         { publisherId: fx.pubA1, amount: '50.0000' }, { publisherId: fx.pubA2, amount: '25.0000' }]));
-      expect(results.filter((r) => r.lines.length > 0)).toHaveLength(1);
-      expect(await counts(fx.networkA)).toEqual({ batches: 4, payouts: 2, debits: 2, matched: 2 });
+      expect(results).toHaveLength(1);
+      expect(await counts(fx.networkA)).toEqual({ batches: 1, payouts: 2, debits: 2, matched: 2 });
       for (const p of [fx.pubA1, fx.pubA2]) {
         expect(await accountBalances(fx.networkA, 'publisher', p)).toEqual([{ currency: 'USD', balance: '0.0000' }]);
       }

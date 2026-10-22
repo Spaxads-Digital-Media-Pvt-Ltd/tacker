@@ -16,7 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool, query } from '../db/pool.js';
-import { conflict, validationFailed } from '../http/errors.js';
+import { AppError, conflict, validationFailed } from '../http/errors.js';
 import { CURRENCY_RE, absMoney, addMoney, moneySign, subMoney } from '../money.js';
 
 export type AccountType = 'publisher' | 'advertiser';
@@ -371,6 +371,14 @@ export async function createPayoutRun(
       others.set(b.currency, { publishers: o.publishers + 1, total: addMoney(o.total, b.bal) });
     }
     const otherCurrencies = [...others].map(([c, o]) => ({ currency: c, publishers: o.publishers, total: o.total }));
+
+    // Nothing owed in this currency → no batch at all (an empty "paid" batch of 0.00 only cluttered
+    // the history). Nothing has been written; the catch below rolls back and releases the lock.
+    if (!eligible.some((b) => b.currency === currency)) {
+      const elsewhere = otherCurrencies.length ? ` Balances are owed in ${otherCurrencies.map((o) => o.currency).join(', ')} — run the payout in that currency.` : '';
+      throw new AppError('conflict', `Nothing is payable in ${currency} — no payout batch was created.${elsewhere}`,
+        { reason: 'nothing_payable', currency, otherCurrencies, skipped });
+    }
 
     const batch = (await client.query<{ id: string }>(
       `INSERT INTO payout_batches (network_id, status, currency, fx_rate, note, created_by)

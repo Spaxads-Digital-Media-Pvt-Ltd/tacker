@@ -160,19 +160,30 @@ describe('createPayoutRun — one currency per run', () => {
     expect(sqlOf(calls(/FROM ledger_entries/)[0]!)).toMatch(/account_id = ANY\(\$2::uuid\[\]\)/);
   });
 
-  it('no payable balance → empty run in the network default currency', async () => {
+  it('no payable balance → 409 nothing_payable in the network default currency, no batch written', async () => {
     wirePayoutTx([], 'GBP');
-    const r = await ledger.createPayoutRun(NET);
-    expect(r).toEqual({ batchId: 'batch-1', currency: 'GBP', total: '0.0000', lines: [], skipped: [], otherCurrencies: [] });
-    expect(calls(/INSERT INTO payouts|INSERT INTO ledger_entries/)).toHaveLength(0);
+    const err = await ledger.createPayoutRun(NET).catch((e: unknown) => e) as { status: number; message: string; details: { reason: string; currency: string } };
+    expect(err.status).toBe(409);
+    expect(err.details).toMatchObject({ reason: 'nothing_payable', currency: 'GBP' });
+    expect(err.message).toMatch(/Nothing is payable in GBP/);
+    expect(calls(/INSERT INTO payout_batches|INSERT INTO payouts|INSERT INTO ledger_entries/)).toHaveLength(0);
   });
 
-  it('only invalid-code balances → empty run, all reported as skipped (never paid)', async () => {
+  it('balances only in another currency → 409 naming that currency, no batch written', async () => {
+    wirePayoutTx([{ account_id: PUB1, currency: 'EUR', bal: '10.0000' }], 'USD');
+    const err = await ledger.createPayoutRun(NET, { currency: 'USD' }).catch((e: unknown) => e) as { status: number; message: string; details: { otherCurrencies: unknown } };
+    expect(err.status).toBe(409);
+    expect(err.message).toMatch(/owed in EUR/);
+    expect(err.details.otherCurrencies).toEqual([{ currency: 'EUR', publishers: 1, total: '10.0000' }]);
+    expect(calls(/INSERT INTO payout_batches/)).toHaveLength(0);
+  });
+
+  it('only invalid-code balances → 409, all reported as skipped (never paid)', async () => {
     wirePayoutTx([{ account_id: PUB1, currency: 'usd', bal: '5.0000' }, { account_id: PUB2, currency: '', bal: '1.0000' }], 'EUR');
-    const r = await ledger.createPayoutRun(NET);
-    expect(r.currency).toBe('EUR');
-    expect(r.lines).toEqual([]);
-    expect(r.skipped).toEqual([
+    const err = await ledger.createPayoutRun(NET).catch((e: unknown) => e) as { status: number; details: { currency: string; skipped: unknown } };
+    expect(err.status).toBe(409);
+    expect(err.details.currency).toBe('EUR');
+    expect(err.details.skipped).toEqual([
       { publisherId: PUB1, currency: 'usd', amount: '5.0000' },
       { publisherId: PUB2, currency: '', amount: '1.0000' },
     ]);
@@ -180,7 +191,7 @@ describe('createPayoutRun — one currency per run', () => {
 
   it('the balance query only takes POSITIVE approved publisher balances, per (publisher, currency), network-scoped', async () => {
     wirePayoutTx([]);
-    await ledger.createPayoutRun(NET);
+    await ledger.createPayoutRun(NET).catch(() => undefined); // nothing payable → 409 after the read
     const sql = sqlOf(calls(/FROM ledger_entries/)[0]!);
     expect(sql).toMatch(/WHERE network_id = \$1 AND account_type = 'publisher' AND status = 'approved'/);
     expect(sql).toMatch(/GROUP BY account_id, currency HAVING SUM\(CASE direction WHEN 'credit' THEN amount ELSE -amount END\) > 0/);
