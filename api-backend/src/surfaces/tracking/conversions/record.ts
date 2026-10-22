@@ -35,7 +35,7 @@ import {
 import { duplicateModeOf, type DuplicateMode } from '../../../lib/offer-settings/index.js';
 import { getStoredClick, type StoredClick } from '../click-store.js';
 import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
-import { getFraudConfig } from '../../../lib/fraud/rules.js';
+import { getFraudConfigCached } from '../../../lib/fraud/rules.js';
 import { findMatchingControl } from '../../../lib/postback-controls/evaluate.js';
 import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.js';
 import {
@@ -394,7 +394,8 @@ async function recordAttributed(
  reason = 'outside_attribution_window';
  }
 
- const cfg = await getFraudConfig(input.networkId);
+ // Redis load-through (5 min, busted on save) — no Postgres read per postback.
+ const cfg = await getFraudConfigCached(input.networkId);
  const fraudFlags: string[] = [];
  let fraudScore = 0;
  if (cfg.enabled && !input.click && ageS < cfg.minClickToConversionSeconds) {

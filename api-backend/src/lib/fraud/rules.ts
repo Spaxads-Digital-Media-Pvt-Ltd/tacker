@@ -27,6 +27,10 @@ export interface FraudConfig {
   velocityPerMinute: number;
   /** Fraction (0..1) of a publisher's clicks from datacenter IPs to raise an alert. */
   datacenterRatioThreshold: number;
+  /** Fraction (0..1) of a publisher's clicks flagged as bots (bot / no user agent, IPQS bot) to raise an alert. */
+  botRatioThreshold: number;
+  /** Fraction (0..1) of a publisher's clicks from proxies / VPNs / Tor (IPQS verdicts) to raise an alert. */
+  proxyRatioThreshold: number;
   /** A conversion faster than this many seconds after its click is suspicious. */
   minClickToConversionSeconds: number;
   /** Conversion rate above this (with enough volume) is a CR spike. */
@@ -55,6 +59,8 @@ export const DEFAULT_FRAUD_CONFIG: FraudConfig = {
   enabled: true,
   velocityPerMinute: 30,
   datacenterRatioThreshold: 0.5,
+  botRatioThreshold: 0.3,
+  proxyRatioThreshold: 0.3,
   minClickToConversionSeconds: 5,
   crSpikeThreshold: 0.5,
   minClicksForCrAlert: 20,
