@@ -15,6 +15,8 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
 const Impersonate = lazy(() => import('./pages/Impersonate'));
 const DashboardHome = lazy(() => import('./pages/DashboardHome'));
+const MyPartners = lazy(() => import('./pages/admin/my/MyPartners'));
+const MyAdvertisers = lazy(() => import('./pages/admin/my/MyAdvertisers'));
 const Advertisers = lazy(() => import('./pages/admin/Advertisers'));
 const AdvertisersBulkEdit = lazy(() => import('./pages/admin/AdvertisersBulkEdit'));
 const AdvertiserDetail = lazy(() => import('./pages/admin/AdvertiserDetail'));
@@ -246,6 +248,10 @@ export default function App() {
         {/* Admin / Network */}
         <Route element={<ProtectedRoute allow="admin"><AppShell /></ProtectedRoute>}>
           <Route path="/app" element={<DashboardHome />} />
+          <Route path="/app/my/partners" element={<MyPartners />} />
+          <Route path="/app/my/partners/:id" element={<MyPartners />} />
+          <Route path="/app/my/advertisers" element={<MyAdvertisers />} />
+          <Route path="/app/my/advertisers/:id" element={<MyAdvertisers />} />
           <Route path="/app/offers" element={<Offers />} />
           <Route path="/app/offers/new" element={<OfferCreate />} />
           <Route path="/app/offers/bulk-edit" element={<OffersBulkEdit />} />

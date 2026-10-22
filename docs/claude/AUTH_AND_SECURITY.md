@@ -14,7 +14,7 @@
 - **Custom claims**: Stored in Supabase `app_metadata`:
  - `network_id` — tenant ID
  - `kind` — `admin` / `publisher` / `advertiser`
- - `role` — `admin` / `manager` / `finance` / `read_only` (admin users). For a team member with a `users` row, that row is what's enforced: `dashboardAuth` reads its `role` + `status` per request (`lib/auth/staff-state.ts`, cached 15 s), so a role change applies on their next request and `status = disabled` is refused (403) even with a valid token. Edits (`PATCH /api/control-center/users/:id`) also update the login (role claim; a ban while disabled) when Supabase Auth is configured
+ - `role` — `admin` / `manager` / `finance` / `read_only` / `affiliate_manager` / `advertiser_manager` (admin users; the last two are gated to their own panels). For a team member with a `users` row, that row is what's enforced: `dashboardAuth` reads its `role` + `status` per request (`lib/auth/staff-state.ts`, cached 15 s), so a role change applies on their next request and `status = disabled` is refused (403) even with a valid token. Edits (`PATCH /api/control-center/users/:id`) also update the login (role claim; a ban while disabled) when Supabase Auth is configured
  - Partner / advertiser logins: `dashboardAuth` checks the account row per request too (`lib/auth/portal-state.ts`, cached 15 s; the editing process forgets it at once). A deleted account → 401 (`details.reason: account_deleted`), an `inactive` one → 403 (`account_inactive`); `pending` keeps access. The login follows (`lib/auth/login-sync.ts`): banned while inactive, deleted with the account. An admin may still impersonate an inactive account (support), not a deleted one. The SPA ends the session on these reasons (and `account_disabled` for team members) and shows why on the login page
  - `owner_id` — Party ID (publisher/advertiser portals)
 - **JWKS endpoint**: `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`
@@ -95,6 +95,8 @@ Network staff and demo data are still script-based:
 | `manager` | `/app/*` | Limited admin |
 | `finance` | `/app/*` | Finance views only |
 | `read_only` | `/app/*` | Read-only access |
+| `affiliate_manager` | `/app/my/partners` | Their own partners only (migration 102): the dashboard API lets them reach `/api/me…`, `/api/my…`, `/api/help…` and announcement dismissal — everything else → 403 `scoped_role` (deny by default, `SCOPED_ALLOWED` in `dashboard/auth.ts`); they answer their partners' offer applications |
+| `advertiser_manager` | `/app/my/advertisers` | Their own advertisers only (account or sales manager) — same gate |
 | `publisher` | `/publisher/*` | Publisher portal (own data) |
 | `advertiser` | `/advertiser/*` | Advertiser portal (own data) |
 

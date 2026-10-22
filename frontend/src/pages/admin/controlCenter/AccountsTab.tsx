@@ -95,6 +95,8 @@ function AddAccountForm({ onCancel, onCreated }: { onCancel: () => void; onCreat
             <option value="manager">Manager</option>
             <option value="finance">Finance</option>
             <option value="read_only">Read Only</option>
+            <option value="affiliate_manager">Affiliate Manager (my partners only)</option>
+            <option value="advertiser_manager">Advertiser Manager (my advertisers only)</option>
           </select>
         </Field>
         <Field label="Business Unit"><input className="input" value={businessUnit} onChange={(e) => setBusinessUnit(e.target.value)} /></Field>
@@ -199,6 +201,8 @@ function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onC
             <option value="manager">Manager</option>
             <option value="finance">Finance</option>
             <option value="read_only">Read Only</option>
+            <option value="affiliate_manager">Affiliate Manager (my partners only)</option>
+            <option value="advertiser_manager">Advertiser Manager (my advertisers only)</option>
           </select>
         </Field>
         <Field label="Status *">

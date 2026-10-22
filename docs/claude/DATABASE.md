@@ -40,7 +40,7 @@ Dashboard auth users (linked to Supabase Auth).
 | `auth_user_id` | text | Supabase Auth user ID |
 | `name` | text | Display name |
 | `email` | text | Login email |
-| `role` | enum | admin/manager/finance/read_only/super_admin |
+| `role` | text | admin / manager / finance / read_only / affiliate_manager / advertiser_manager (the last two since migration 102 — their own partners / advertisers only) |
 | `status` | enum | active/inactive |
 | `metadata` | jsonb | Profile fields (phone, address, theme, notifications, etc.) |
 | `created_at` | timestamptz | |

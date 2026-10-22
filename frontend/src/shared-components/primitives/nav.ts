@@ -29,6 +29,16 @@ export interface NavEntry {
  * doesn't, `to` is omitted and the item renders inert-but-interactive (title="Not available yet"),
  * same convention used everywhere else in this app for backend-less features.
  */
+/**
+ * The rail of a team member whose role works with their own accounts only (Affiliate / Advertiser Manager):
+ * their panels — the API refuses everything else to them.
+ */
+export const SCOPED_NAV: Record<'affiliate_manager' | 'advertiser_manager', NavEntry[]> = {
+  affiliate_manager: [{ to: '/app/my/partners', label: 'My partners', icon: 'manager' }],
+  advertiser_manager: [{ to: '/app/my/advertisers', label: 'My advertisers', icon: 'building' }],
+};
+export const isScopedRole = (r: string | null | undefined): r is keyof typeof SCOPED_NAV => r === 'affiliate_manager' || r === 'advertiser_manager';
+
 export const NAV: Record<Role, NavEntry[]> = {
   // The platform team's console — each item shows only for roles that may read its section (lib/platformMe).
   super_admin: [
@@ -106,6 +116,7 @@ export const NAV: Record<Role, NavEntry[]> = {
     {
       group: 'Manage', label: 'Partners', icon: 'manager', flyout: [
         { label: 'Manage', description: 'View and approve Partners', to: '/app/publishers', icon: Lucide.Settings },
+        { label: 'My partners', description: 'The partners you manage — their numbers and requests', to: '/app/my/partners', icon: Lucide.UserCheck },
         { label: 'Add', description: 'Set up a new Partner', to: '/app/publishers/new', icon: Lucide.PlusSquare },
         { label: 'Postbacks', description: 'Fire conversion data to Partners', to: '/app/aff-postbacks', icon: Lucide.Send },
         { label: 'Tiers', description: 'Payout & visibility by tier', to: '/app/aff-tiers', icon: Lucide.Layers },
@@ -120,6 +131,7 @@ export const NAV: Record<Role, NavEntry[]> = {
     {
       group: 'Manage', label: 'Advertisers', icon: 'building', flyout: [
         { label: 'Manage', description: 'View and manage Advertisers', to: '/app/advertisers', icon: Lucide.Settings },
+        { label: 'My advertisers', description: 'The advertisers you manage — their offers and numbers', to: '/app/my/advertisers', icon: Lucide.BriefcaseBusiness },
         { label: 'Add', description: 'Set up a new Advertiser', to: '/app/advertisers/new', icon: Lucide.PlusSquare },
         { label: 'Link Templates', description: 'Default landing page templates', to: '/app/adv-link-templates', icon: Lucide.Link },
         { label: 'Postback Controls', description: 'Auto-approve or reject conversions', to: '/app/adv-postback-controls', icon: Lucide.Filter },

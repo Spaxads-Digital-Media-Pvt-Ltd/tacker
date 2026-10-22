@@ -22,9 +22,22 @@ import { staffState } from '../../lib/auth/staff-state.js';
 import {
  portalAccountStatus, portalAccessAllowed, inactiveAccountMessage, deletedAccountMessage,
 } from '../../lib/auth/portal-state.js';
-import type { DashboardKind, AdminRole } from '../../middleware/types.js';
+import { SCOPED_ADMIN_ROLES, type DashboardKind, type AdminRole } from '../../middleware/types.js';
 
-const ROLES: readonly AdminRole[] = ['admin', 'manager', 'finance', 'read_only'];
+const ROLES: readonly AdminRole[] = ['admin', 'manager', 'finance', 'read_only', 'affiliate_manager', 'advertiser_manager'];
+
+/**
+ * What an Affiliate / Advertiser Manager may reach — deny by default: their own account (/api/me…), their
+ * panels (/api/my…), help and announcements. Everything else in the dashboard is refused (403
+ * scoped_role), so no other route can show them accounts they don't manage.
+ */
+const SCOPED_ALLOWED: readonly RegExp[] = [
+ /^GET \/api\/me$/, /^[A-Z]+ \/api\/me\//, /^[A-Z]+ \/api\/my(\/|$)/, /^GET \/api\/help(\/|$)/, /^POST \/api\/announcements\/[^/]+\/dismiss$/,
+];
+const scopedAllowed = (req: Request): boolean => {
+ const key = `${req.method} ${req.originalUrl.split('?')[0]!.replace(/\/+$/, '')}`;
+ return SCOPED_ALLOWED.some((re) => re.test(key));
+};
 
 /**
  * What a login still on its temporary password (an invite — `must_change_password` in its claims)
@@ -140,6 +153,9 @@ export async function dashboardAuth(req: Request, _res: Response, next: NextFunc
  return next(new AppError('forbidden', 'This account is disabled. Ask an admin of your network to re-enable it.', { reason: 'account_disabled' }));
  }
  if (staff && (ROLES as readonly string[]).includes(staff.role)) id.role = staff.role as AdminRole;
+ if (SCOPED_ADMIN_ROLES.includes(id.role) && !scopedAllowed(req)) {
+ return next(new AppError('forbidden', 'Your role works with your own partners or advertisers only.', { reason: 'scoped_role' }));
+ }
  }
  // Partners / advertisers: the account row decides too — a deleted account, or one set inactive,
  // loses portal access on its next request. An admin may still impersonate an inactive account

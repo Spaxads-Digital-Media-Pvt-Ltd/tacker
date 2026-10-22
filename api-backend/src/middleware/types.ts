@@ -15,7 +15,9 @@ export type Surface = 'dashboard' | 'public-api' | 'platform-admin';
 export type ApiAudience = 'advertiser' | 'publisher' | 'network';
 
 /** Admin (network staff) RBAC roles (spec §4 users). */
-export type AdminRole = 'admin' | 'manager' | 'finance' | 'read_only';
+export type AdminRole = 'admin' | 'manager' | 'finance' | 'read_only' | 'affiliate_manager' | 'advertiser_manager';
+/** Roles that see only their own accounts — the dashboard lets them into "My partners / My advertisers" only. */
+export const SCOPED_ADMIN_ROLES: readonly AdminRole[] = ['affiliate_manager', 'advertiser_manager'];
 
 /**
  * The Dashboard surface serves THREE kinds of human logins (spec §0): the network admin and

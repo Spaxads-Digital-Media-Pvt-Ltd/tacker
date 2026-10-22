@@ -5,7 +5,7 @@
  * (the pair the portal's offer-visibility gate already checks); Reject sets 'rejected' + 'deny'.
  * Tenant-scoped by network_id (§3A).
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
@@ -63,6 +63,41 @@ const SELECT = `
     LEFT JOIN questionnaires q ON q.id = o.questionnaire_id AND q.network_id = a.network_id
 `;
 
+/** One application with its partner, offer, partner manager and questionnaire (network-scoped), or null. */
+export async function applicationById(networkId: string, id: string) {
+  const { rows } = await query<ListRow>(`${SELECT} WHERE a.id = $1 AND a.network_id = $2`, [id, networkId]);
+  return rows[0] ? dto(rows[0]) : null;
+}
+
+/** Pending applications from the partners `partnerManagerId` manages (My partners). */
+export async function pendingApplicationsFor(networkId: string, partnerManagerId: string) {
+  const { rows } = await query<ListRow>(`${SELECT} WHERE a.network_id = $1 AND p.partner_manager_id = $2 AND a.approval_status = 'pending' ORDER BY a.created_at DESC LIMIT ${LIST_CAP}`,
+    [networkId, partnerManagerId]);
+  return rows.map(dto);
+}
+
+/**
+ * Approve (access allow) or reject (deny) an application: the click path's cached offer config is dropped,
+ * it's audited, and the partner is emailed when the decision changed. Shared by Offer Applications and My partners.
+ */
+export async function decideApplication(req: Request, id: string, status: 'approved' | 'rejected') {
+  const db = dbForRequest(req);
+  const before = await db.selectOne<{ id: string; offer_id: string; publisher_id: string; approval_status: string }>(TABLE, { id });
+  if (!before) throw notFound('Application not found');
+  const access = status === 'approved' ? 'allow' : 'deny';
+  const [row] = await db.update(TABLE, { approval_status: status, access }, { id });
+  if (!row) throw notFound('Application not found');
+  // The click path reads the deny list from the cached offer config — apply the decision now.
+  await invalidateOfferConfig(db.scope.networkId, before.offer_id);
+  await writeAudit(req, {
+    action: status === 'approved' ? 'offer_application.approve' : 'offer_application.reject',
+    entityType: 'offer_application', entityId: id, before, after: row,
+  });
+  // Offer Application Approved / Denied email to the partner (O11) — only when the decision changed.
+  if (before.approval_status !== status) void notifyOfferApplication(db.scope.networkId, before.publisher_id, before.offer_id, status === 'approved');
+  return applicationById(db.scope.networkId, id);
+}
+
 export function offerApplicationsRoutes(): Router {
   const r = Router();
 
@@ -81,23 +116,7 @@ export function offerApplicationsRoutes(): Router {
   const decisionSchema = z.object({ status: z.enum(['approved', 'rejected']) });
 
   r.patch('/:id', requireRole('admin', 'manager'), validateBody(decisionSchema), asyncHandler(async (req, res) => {
-    const db = dbForRequest(req);
-    const before = await db.selectOne<{ id: string; offer_id: string; publisher_id: string; approval_status: string }>(TABLE, { id: req.params.id });
-    if (!before) throw notFound('Application not found');
-    const b = req.body as z.infer<typeof decisionSchema>;
-    const access = b.status === 'approved' ? 'allow' : 'deny';
-    const [row] = await db.update(TABLE, { approval_status: b.status, access }, { id: req.params.id });
-    if (!row) throw notFound('Application not found');
-    // The click path reads the deny list from the cached offer config — apply the decision now.
-    await invalidateOfferConfig(db.scope.networkId, before.offer_id);
-    await writeAudit(req, {
-      action: b.status === 'approved' ? 'offer_application.approve' : 'offer_application.reject',
-      entityType: 'offer_application', entityId: req.params.id, before, after: row,
-    });
-    // Offer Application Approved / Denied email to the partner (O11) — only when the decision changed.
-    if (before.approval_status !== b.status) void notifyOfferApplication(db.scope.networkId, before.publisher_id, before.offer_id, b.status === 'approved');
-    const { rows } = await query<ListRow>(`${SELECT} WHERE a.id = $1 AND a.network_id = $2`, [req.params.id, req.scope!.networkId]);
-    sendOk(res, rows[0] ? dto(rows[0]) : null);
+    sendOk(res, await decideApplication(req, req.params.id!, (req.body as z.infer<typeof decisionSchema>).status));
   }));
 
   r.get('/:id/history', asyncHandler(async (req, res) => {

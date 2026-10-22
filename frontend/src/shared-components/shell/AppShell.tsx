@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Search, ChevronRight, X } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { type Role } from '../../auth/roles';
-import { NAV, type NavEntry } from '../primitives/nav';
+import { NAV, SCOPED_NAV, isScopedRole, type NavEntry } from '../primitives/nav';
 import { Icon } from '../primitives/icons';
 import { Brandmark } from '../primitives/Brandmark';
 import { PageTitleProvider, usePageTitleValue } from '../primitives/PageTitle';
@@ -241,7 +241,7 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   // O12: the network's logo / favicon (staff and portals; the Super Admin console has no network).
-  const { logoUrl, overdueInvoice, features, announcements } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
+  const { logoUrl, overdueInvoice, features, announcements, teamRole } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
   const platform = usePlatformMe();
 
   // ⌘K / Ctrl+K opens the search.
@@ -267,7 +267,12 @@ export function AppShell() {
   if (!session) return null;
 
   // Super Admin: only what the member's role may read (an item's / flyout item's `perm`).
-  const items = session.role === 'super_admin' ? permittedNav(NAV.super_admin, platform.can) : featuredNav(NAV[session.role], features);
+  // An Affiliate / Advertiser Manager has their own panels only (the API refuses the rest to them).
+  const scoped = session.role === 'admin' && isScopedRole(teamRole) ? teamRole : null;
+  const items = session.role === 'super_admin' ? permittedNav(NAV.super_admin, platform.can)
+    : scoped ? SCOPED_NAV[scoped] : featuredNav(NAV[session.role], features);
+  const scopedHome = scoped === 'affiliate_manager' ? '/app/my/partners' : '/app/my/advertisers';
+  const scopedPathOk = /^\/app\/(my\/|profile|help|whats-new)/.test(location.pathname);
   const initials = session.displayName
     .split(' ')
     .map((w) => w[0])
@@ -355,7 +360,7 @@ export function AppShell() {
         <div className={labeled ? 'w-full space-y-1 border-t border-[rgb(var(--sidebar-accent))]/20 px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[rgb(var(--sidebar-accent))]/20 pt-2'}>
           {/* N1: the bell is network staff's (their audit feed + notification preferences); partner /
               advertiser portals have neither. The Super Admin console has its own (notices for the member). */}
-          {session.role === 'admin' && <NotificationsBell expanded={labeled} />}
+          {session.role === 'admin' && !scoped && <NotificationsBell expanded={labeled} />}
           {session.role === 'super_admin' && <PlatformBell expanded={labeled} />}
           <HelpMenu expanded={labeled} />
           <AccountLink expanded={labeled} />
@@ -377,13 +382,13 @@ export function AppShell() {
           onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
         <main className="flex-1 overflow-auto px-12 pt-4 pb-12">
           <div className="w-full animate-fade-in">
-            <SectionTabs role={session.role} />
-            <Outlet />
+            {!scoped && <SectionTabs role={session.role} />}
+            {scoped && !scopedPathOk ? <Navigate to={scopedHome} replace /> : <Outlet />}
           </div>
         </main>
       </div>
     </div>
-    {searchOpen && (session.role === 'super_admin'
+    {searchOpen && !scoped && (session.role === 'super_admin'
       ? <PlatformSearchModal onClose={() => setSearchOpen(false)} />
       : <SearchModal onClose={() => setSearchOpen(false)} />)}
     </PageTitleProvider>

@@ -19,10 +19,12 @@ export interface Announcement {
 
 export function useNetworkBranding(enabled: boolean): {
   logoUrl: string | null; overdueInvoice: OverdueInvoice | null; features: Record<string, boolean>; announcements: Announcement[];
+  /** A staff member's team role (admin, manager, …, affiliate_manager, advertiser_manager) — null until loaded / for portals. */
+  teamRole: string | null;
 } {
   const { data } = useQuery<{
     branding?: { logoUrl: string | null; faviconUrl: string | null }; billing?: { overdue: OverdueInvoice | null };
-    features?: Record<string, boolean>; announcements?: Announcement[];
+    features?: Record<string, boolean>; announcements?: Announcement[]; identity?: { kind?: string; role?: string };
   }>(enabled ? '/api/me' : null);
   const logoUrl = data?.branding?.logoUrl ?? null;
   const faviconUrl = data?.branding?.faviconUrl ?? null;
@@ -35,5 +37,6 @@ export function useNetworkBranding(enabled: boolean): {
     link.href = faviconUrl;
     return () => { if (added) link.remove(); else link.href = before; };
   }, [faviconUrl]);
-  return { logoUrl, overdueInvoice: data?.billing?.overdue ?? null, features: data?.features ?? {}, announcements: data?.announcements ?? [] };
+  const teamRole = data?.identity?.kind === 'admin' ? data.identity.role ?? null : null;
+  return { logoUrl, overdueInvoice: data?.billing?.overdue ?? null, features: data?.features ?? {}, announcements: data?.announcements ?? [], teamRole };
 }

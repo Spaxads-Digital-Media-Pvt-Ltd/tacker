@@ -82,6 +82,7 @@ import { signupRoutes } from './signup/routes.js';
 import { whiteLabelRoutes, publicBrandRoutes } from './white-label/routes.js';
 import { helpRoutes, publicStatusRoutes } from './help/routes.js';
 import { publicQuoteRoutes } from './quotes/routes.js';
+import { myRoutes } from './my/routes.js';
 import { networkTimeZone } from '../../lib/reporting/network-zone.js';
 import { IMAGE_MAX_BYTES, IMAGE_UPLOAD_CONTENT_TYPES, assertImageValue, imageTypesFor, imageTypesText, uploadContentType, uploadImage } from '../../lib/storage/images.js';
 import { networkBranding } from './control-center/config.js';
@@ -459,6 +460,7 @@ export function buildDashboardApp(): Express {
   authed.use('/report-requests', requireAdmin, reportRequestsRoutes());
   authed.use('/white-label', requireAdmin, whiteLabelRoutes());
   authed.use('/help', helpRoutes());
+  authed.use('/my', requireAdmin, myRoutes());
   authed.use('/offline', requireAdmin, offlineRoutes());
   authed.use('/import-export', requireAdmin, importExportRoutes());
   authed.use('/catalog', requireAdmin, catalogRoutes());
