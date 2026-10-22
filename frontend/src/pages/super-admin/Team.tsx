@@ -1,7 +1,8 @@
 /**
  * Super Admin › Team & roles — the platform's own team. Members: who has access and with which role; add,
  * change role, disable / enable (never yourself — a disabled member is out at once), reset another's
- * password, change your own. Roles: the built-in ones (Owner, Admin, Sales, Account Manager, Support,
+ * password, change your own; see where a member is signed in and their sign-ins, sign them out everywhere;
+ * your own sessions (sign one out / every other one) and sign-ins. Roles: the built-in ones (Owner, Admin, Sales, Account Manager, Support,
  * Finance, Read-only) and custom ones — each section Hidden / Read / Full (Everflow-style), all networks or
  * only the ones a member manages or sold, and the page it lands on. Roles and the Owner role are an Owner's.
  */
@@ -13,6 +14,7 @@ import { useConfirm } from '../../shared-components/primitives/confirm';
 import { PageHeader, Table, Badge, Modal, Field, Spinner, StateBlock, Tabs, type Column } from '../../shared-components/primitives/ui';
 import { PASSWORD_HINT, PASSWORD_MIN } from '../../auth/passwordPolicy';
 import { TwoFactorCard } from '../../shared-components/panels/TwoFactorCard';
+import { YourSessions, MemberAccess } from './platform/StaffSecurity';
 
 interface Member {
   id: string; email: string; name: string | null; status: 'active' | 'disabled'; created_at: string; last_login_at: string | null;
@@ -37,6 +39,7 @@ export default function Team() {
   const confirm = useConfirm();
   const [adding, setAdding] = useState(false);
   const [resetting, setResetting] = useState<Member | null>(null);
+  const [viewing, setViewing] = useState<Member | null>(null);
   const [editingRole, setEditingRole] = useState<Role | 'new' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,13 +85,14 @@ export default function Team() {
     { header: 'Two-factor', cell: (m) => (m.two_factor ? <span className="text-success-text">On</span> : <span className="text-fg-muted">Off</span>) },
     { header: 'Last sign-in', cell: (m) => (m.last_login_at ? new Date(m.last_login_at).toLocaleString() : <span className="text-fg-muted">never</span>) },
     {
-      header: '', className: 'text-right', cell: (m) => (!manage || m.you ? null : (
+      header: '', className: 'text-right', cell: (m) => (m.you ? null : (
         <span className="flex justify-end gap-3 whitespace-nowrap">
-          {(owner || m.role_key !== 'owner') && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setResetting(m)}>Reset password</button>}
-          {m.two_factor && (owner || m.role_key !== 'owner') && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => reset2fa(m)}>Reset two-factor</button>}
-          {m.status === 'active'
+          <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setViewing(m)}>Sessions</button>
+          {manage && (owner || m.role_key !== 'owner') && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setResetting(m)}>Reset password</button>}
+          {manage && m.two_factor && (owner || m.role_key !== 'owner') && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => reset2fa(m)}>Reset two-factor</button>}
+          {manage && (m.status === 'active'
             ? <button className="text-tiny font-medium text-danger-text hover:underline" onClick={() => setStatus(m, 'disabled')}>Disable</button>
-            : <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setStatus(m, 'active')}>Enable</button>}
+            : <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setStatus(m, 'active')}>Enable</button>)}
         </span>
       )),
     },
@@ -111,6 +115,7 @@ export default function Team() {
           <div className="mt-6 grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
             <OwnPassword onDone={() => setNotice('Your password was changed. Use it at your next sign-in.')} />
             <TwoFactorCard onChanged={() => members.refetch()} />
+            <div className="xl:col-span-2"><YourSessions /></div>
           </div>
         </>
       ) : roles.loading ? <StateBlock><Spinner /></StateBlock>
@@ -151,6 +156,7 @@ export default function Team() {
         )}
 
       {adding && <AddMember roles={roleOptions('')} onClose={() => setAdding(false)} onDone={(email) => { setAdding(false); setNotice(`${email} can now sign in to the Super Admin console.`); members.refetch(); roles.refetch(); }} />}
+      {viewing && <MemberAccess member={viewing} canSignOut={manage && (owner || viewing.role_key !== 'owner')} onClose={() => setViewing(null)} />}
       {resetting && <ResetPassword member={resetting} onClose={() => setResetting(null)} onDone={() => { setNotice(`${resetting.email}’s password was reset — pass it to them.`); setResetting(null); }} />}
       {editingRole && <RoleForm role={editingRole === 'new' ? null : editingRole} sections={me?.sections ?? []} onClose={() => setEditingRole(null)} onSaved={(name) => { setEditingRole(null); setNotice(`Role ${name} saved — it applies at once.`); roles.refetch(); }} />}
     </>

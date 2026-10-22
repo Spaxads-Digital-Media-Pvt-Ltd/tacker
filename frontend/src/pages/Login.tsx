@@ -35,6 +35,8 @@ const ENDED: Record<string, string> = {
   network_deleted: 'Your network has been deleted, so you have been signed out. It can still be restored for a while — contact the platform administrator if this is a mistake.',
   network_purged: 'Your network no longer exists — it was deleted and its data removed.',
   session_expired: 'Your sign-in ended. Please sign in again.',
+  session_ended: 'This session was signed out (from another session, or by an Owner). Please sign in again.',
+  ip_not_allowed: 'The console can only be used from the platform’s allowed addresses. Connect from an allowed network and sign in again.',
 };
 
 export default function Login() {

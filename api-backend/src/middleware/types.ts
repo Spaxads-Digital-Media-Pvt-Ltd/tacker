@@ -82,6 +82,8 @@ export interface PlatformAdminIdentity {
   email?: string;
   role?: { key: string; name: string; scope: 'all' | 'assigned'; home: string };
   permissions?: Partial<Record<string, 'none' | 'read' | 'full'>>;
+  /** The session the request's token belongs to (platform_sessions.id). */
+  sessionId?: string;
 }
 
 export type Identity = DashboardIdentity | ApiKeyIdentity | PlatformAdminIdentity;

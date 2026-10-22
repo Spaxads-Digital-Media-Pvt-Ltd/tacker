@@ -80,8 +80,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       const platformPath = path.startsWith('/platform/');
       if (session?.role === 'super_admin' || platformPath) {
         if (session?.role === 'super_admin' && platformPath) {
+          // "Signed out" from another session / by an Owner → say so on the login page.
+          const why = ((await res.json().catch(() => ({}))) as Envelope<unknown>).error?.details as { reason?: string } | undefined;
           clearSession();
-          if (!location.pathname.startsWith('/login')) location.href = '/login';
+          if (!location.pathname.startsWith('/login')) location.href = why?.reason === 'session_ended' ? '/login?ended=session_ended' : '/login';
         }
         throw new ApiError('unauthorized', platformPath ? 'Session expired' : 'Not available to Super Admin', 401);
       }
@@ -102,6 +104,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       const err = body.error ?? { code: res.status >= 500 ? 'unavailable' : 'unknown', message: httpFailureMessage(res.status, res.statusText) };
       const reason = (err.details as { reason?: unknown } | undefined)?.reason;
       if (typeof reason === 'string' && ENDED_REASONS.has(reason) && isOwnSession(session)) endSession(reason);
+      // Super Admin used from outside the platform's IP allowlist — every request would be refused.
+      if (reason === 'ip_not_allowed' && session?.role === 'super_admin' && path.startsWith('/platform/')) {
+        clearSession();
+        if (!location.pathname.startsWith('/login')) location.href = '/login?ended=ip_not_allowed';
+      }
       if (reason === 'password_change_required' && !location.pathname.startsWith('/change-password')) location.href = '/change-password';
       throw new ApiError(err.code, err.message, res.status, err.details);
     }

@@ -9,13 +9,20 @@ import { query } from '../db/pool.js';
 import { decryptSecret } from '../crypto/secret-box.js';
 import { hashRecoveryCode, looksLikeRecoveryCode, verifyTotp } from '../auth/totp.js';
 
-export interface SecuritySettings { requireTwoFactor: boolean }
+export interface SecuritySettings {
+  requireTwoFactor: boolean;
+  /** Addresses / CIDR ranges the team may use the console from; empty = anywhere (staff-security.ts). */
+  ipAllowlist: string[];
+}
 let cache: { at: number; value: SecuritySettings } | null = null;
 
 export async function securitySettings(): Promise<SecuritySettings> {
   if (cache && Date.now() - cache.at < 10_000) return cache.value;
   const v = (await query<{ value: Partial<SecuritySettings> }>(`SELECT value FROM platform_settings WHERE key = 'security'`)).rows[0]?.value ?? {};
-  const value = { requireTwoFactor: v.requireTwoFactor === true };
+  const value = {
+    requireTwoFactor: v.requireTwoFactor === true,
+    ipAllowlist: Array.isArray(v.ipAllowlist) ? v.ipAllowlist.filter((x): x is string => typeof x === 'string') : [],
+  };
   cache = { at: Date.now(), value };
   return value;
 }

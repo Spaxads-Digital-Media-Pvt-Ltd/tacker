@@ -106,7 +106,7 @@ d('platform two-factor sign-in (live DB)', () => {
     const owner = await member(OWNER);
     expect((await request(platform).put('/platform/settings/security').set(owner.auth).send({ requireTwoFactor: true })).status).toBe(409); // owner first
     await enable(owner);
-    expect((await request(platform).put('/platform/settings/security').set(owner.auth).send({ requireTwoFactor: true })).body.data).toEqual({ requireTwoFactor: true });
+    expect((await request(platform).put('/platform/settings/security').set(owner.auth).send({ requireTwoFactor: true })).body.data).toEqual({ requireTwoFactor: true, ipAllowlist: [] });
     try {
       const rep = await member(SALES);
       const blocked = await request(platform).get('/platform/sales/leads').set(rep.auth);

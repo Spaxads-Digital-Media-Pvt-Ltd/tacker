@@ -146,9 +146,9 @@ describe('AUTH-1/AUTH-2: verifySupabaseJwt hardening', () => {
  });
 
  it('platform-admin auth unaffected (separate module, separate secret)', async () => {
- const { signPlatformAdminToken, verifyPlatformAdminToken } =
+ const { signPlatformSessionToken, verifyPlatformAdminToken } =
  await import('../../src/lib/auth/platform-admin-token.js');
- const token = await signPlatformAdminToken('admin-1');
+ const token = await signPlatformSessionToken('admin-1', 'session-1');
  const payload = await verifyPlatformAdminToken(token);
  expect(payload.pa_sub).toBe('admin-1');
  expect(payload.kind).toBe('platform_admin');

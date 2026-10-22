@@ -9,7 +9,7 @@ import { Brandmark } from '../primitives/Brandmark';
 import { PageTitleProvider, usePageTitleValue } from '../primitives/PageTitle';
 import { ProfileMenu } from './ProfileMenu';
 import { ThemeToggle } from '../../theme/ThemeToggle';
-import { NotificationsBell, AccountLink, HelpMenu } from './SidebarUtilityMenu';
+import { NotificationsBell, PlatformBell, AccountLink, HelpMenu } from './SidebarUtilityMenu';
 import { SectionTabs } from './SectionTabs';
 import { NavFlyout } from './NavFlyout';
 import { SearchModal } from './SearchModal';
@@ -354,8 +354,9 @@ export function AppShell() {
 
         <div className={labeled ? 'w-full space-y-1 border-t border-[rgb(var(--sidebar-accent))]/20 px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[rgb(var(--sidebar-accent))]/20 pt-2'}>
           {/* N1: the bell is network staff's (their audit feed + notification preferences); partner /
-              advertiser portals and the Super Admin console have neither, so they don't show it. */}
+              advertiser portals have neither. The Super Admin console has its own (notices for the member). */}
           {session.role === 'admin' && <NotificationsBell expanded={labeled} />}
+          {session.role === 'super_admin' && <PlatformBell expanded={labeled} />}
           <HelpMenu expanded={labeled} />
           <AccountLink expanded={labeled} />
         </div>

@@ -2,16 +2,17 @@
  * Platform-admin JWT token unit tests (A-1 finding) — runs in ALL environments, no DB needed.
  */
 import { describe, it, expect } from 'vitest';
-import { signPlatformAdminToken, verifyPlatformAdminToken } from '../../src/lib/auth/platform-admin-token.js';
+import { signPlatformSessionToken, verifyPlatformAdminToken } from '../../src/lib/auth/platform-admin-token.js';
 import { hashPassword, verifyPassword } from '../../src/lib/auth/platform-admin-password.js';
 import jwt from 'jsonwebtoken';
 
 describe('Platform-admin token (A-1) — unit', () => {
- it('round-trips: sign then verify returns pa_sub and kind=platform_admin', async () => {
- const token = await signPlatformAdminToken('admin-123');
+ it('round-trips: sign then verify returns pa_sub, kind=platform_admin and the session id (jti)', async () => {
+ const token = await signPlatformSessionToken('admin-123', 'session-1');
  const payload = await verifyPlatformAdminToken(token);
  expect(payload.pa_sub).toBe('admin-123');
  expect(payload.kind).toBe('platform_admin');
+ expect(payload.jti).toBe('session-1');
  });
 
  it('rejects a tenant Supabase JWT even with forged kind=platform_admin claim', async () => {

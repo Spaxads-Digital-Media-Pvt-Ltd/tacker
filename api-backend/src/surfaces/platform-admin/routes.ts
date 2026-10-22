@@ -8,7 +8,7 @@ import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../lib/http/pagination.js';
-import { badRequest, notFound, unauthorized, forbidden, tooMany, conflict, serviceUnavailable } from '../../lib/http/errors.js';
+import { AppError, badRequest, notFound, unauthorized, forbidden, tooMany, conflict, serviceUnavailable } from '../../lib/http/errors.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { impersonationConfigured, signSupportSessionToken } from '../../lib/auth/impersonation-token.js';
@@ -16,7 +16,7 @@ import { query } from '../../lib/db/pool.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
 import { signPlatformAdminToken, signMfaChallenge, verifyMfaChallenge } from '../../lib/auth/platform-admin-token.js';
-import { checkSecondFactor } from '../../lib/platform/twofactor.js';
+import { checkSecondFactor, securitySettings } from '../../lib/platform/twofactor.js';
 import { z } from 'zod';
 import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import {
@@ -34,15 +34,18 @@ import { once } from 'node:events';
 import { softDeleteNetwork, exportNetwork, exportLedgerCsv, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { requirePerm, networkScope, assertNetworkInScope } from './auth.js';
+import { ipAllowed, recordLogin } from '../../lib/platform/staff-security.js';
 import { networkStateChanged } from '../../lib/networks/state.js';
 import { createNetwork } from '../../lib/networks/create.js';
 import { usageVsPlan } from '../../lib/usage/meter.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function clientIp(req: { socket?: { remoteAddress?: string } }): string {
- return req.socket?.remoteAddress ?? 'unknown';
+/** The visitor's address (req.ip honours the trusted proxies — O2; the socket's otherwise). */
+function clientIp(req: { ip?: string; socket?: { remoteAddress?: string } }): string {
+ return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
 }
+const userAgentOf = (req: { get(h: string): string | undefined }) => req.get('user-agent') ?? null;
 
 /** Public (no auth) routes — login only. */
 export function publicPlatformRoutes(): Router {
@@ -53,29 +56,50 @@ export function publicPlatformRoutes(): Router {
  const normalizedEmail = b.email.trim().toLowerCase();
  const ip = clientIp(req);
 
+ const ua = userAgentOf(req);
  const preCheck = await checkLoginRateLimit(ip, normalizedEmail);
- if (preCheck.limited) throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
+ if (preCheck.limited) {
+ await recordLogin({ email: normalizedEmail, ip, userAgent: ua, outcome: 'locked' });
+ throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
+ }
+ // Settings › Security › IP allowlist: from anywhere else, no sign-in at all.
+ if (!ipAllowed((await securitySettings()).ipAllowlist, ip)) {
+ await recordLogin({ email: normalizedEmail, ip, userAgent: ua, outcome: 'blocked_ip' });
+ throw new AppError('forbidden', 'Signing in to the console is only possible from the platform’s allowed addresses.', { reason: 'ip_not_allowed' });
+ }
 
  const { rows } = await query<{ id: string; email: string; status: string; password_hash: string; auth_provider: string; totp_enabled_at: Date | null }>(
  `SELECT id, email, status, password_hash, auth_provider, totp_enabled_at FROM platform_admins WHERE lower(email) = lower($1) LIMIT 1`,
  [b.email],
  );
  const admin = rows[0];
- if (!admin) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
- if (admin.auth_provider !== 'local') { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
- if (admin.status !== 'active') throw forbidden('Account is disabled.');
+ if (!admin || admin.auth_provider !== 'local') {
+ await recordLoginFailure(ip, normalizedEmail);
+ await recordLogin({ adminId: admin?.id ?? null, email: normalizedEmail, ip, userAgent: ua, outcome: 'unknown_email' });
+ throw unauthorized('Invalid email or password.');
+ }
+ if (admin.status !== 'active') {
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'disabled' });
+ throw forbidden('Account is disabled.');
+ }
 
  const valid = await verifyPassword(b.password, admin.password_hash);
- if (!valid) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
+ if (!valid) {
+ await recordLoginFailure(ip, normalizedEmail);
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'bad_password' });
+ throw unauthorized('Invalid email or password.');
+ }
 
  await resetLoginCounter(normalizedEmail);
  // Two-factor on: the password was right — now the authenticator code (POST /login/2fa), no session yet.
  if (admin.totp_enabled_at) {
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'mfa_required' });
  return sendOk(_res, { twoFactorRequired: true, challenge: await signMfaChallenge(admin.id), admin: { email: admin.email } });
  }
  await query('UPDATE platform_admins SET last_login_at = now() WHERE id = $1', [admin.id]);
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'success' });
 
- const token = await signPlatformAdminToken(admin.id);
+ const token = await signPlatformAdminToken(admin.id, { ip, userAgent: ua });
  return sendOk(_res, { token, admin: { id: admin.id, email: admin.email } });
  }));
 
@@ -94,13 +118,15 @@ export function publicPlatformRoutes(): Router {
  if (admin.status !== 'active') throw forbidden('Account is disabled.');
  const used = await checkSecondFactor(id, b.code);
  if (!used) {
+ await recordLogin({ adminId: id, email: admin.email, ip, userAgent: userAgentOf(req), outcome: 'mfa_failed' });
  await recordLoginFailure(ip, key);
  throw unauthorized('That code isn’t right — enter the current 6-digit code from your authenticator app (check its clock), or a recovery code.');
  }
  await resetLoginCounter(key);
  await query('UPDATE platform_admins SET last_login_at = now() WHERE id = $1', [id]);
  const left = (await query<{ n: number }>('SELECT cardinality(recovery_code_hashes)::int AS n FROM platform_admins WHERE id = $1', [id])).rows[0]?.n ?? 0;
- return sendOk(res, { token: await signPlatformAdminToken(id), admin: { id, email: admin.email }, usedRecoveryCode: used === 'recovery', recoveryCodesLeft: left });
+ await recordLogin({ adminId: id, email: admin.email, ip, userAgent: userAgentOf(req), outcome: 'success' });
+ return sendOk(res, { token: await signPlatformAdminToken(id, { ip, userAgent: userAgentOf(req) }), admin: { id, email: admin.email }, usedRecoveryCode: used === 'recovery', recoveryCodesLeft: left });
  }));
 
  return r;

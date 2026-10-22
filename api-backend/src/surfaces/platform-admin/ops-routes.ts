@@ -11,7 +11,8 @@ import { randomBytes } from 'node:crypto';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
-import { badRequest, conflict, forbidden, notFound } from '../../lib/http/errors.js';
+import { AppError, badRequest, conflict, forbidden, notFound, validationFailed } from '../../lib/http/errors.js';
+import { allowlistEntryError, ipAllowed } from '../../lib/platform/staff-security.js';
 import { paginationSchema } from '../../lib/http/pagination.js';
 import { query } from '../../lib/db/pool.js';
 import { containsPattern } from '../../lib/db/like.js';
@@ -367,14 +368,32 @@ export function opsRoutes(): Router {
     sendOk(res, { reset: true });
   }));
 
-  r.get('/settings/security', requirePerm('settings', 'read'), asyncHandler(async (_req, res) => { sendOk(res, await securitySettings()); }));
-  r.put('/settings/security', requirePerm('settings', 'full'), validateBody(z.object({ requireTwoFactor: z.boolean() }).strict()), asyncHandler(async (req, res) => {
-    const b = req.body as { requireTwoFactor: boolean };
+  // `yourIp`: the address this request came from — what the allowlist must include.
+  r.get('/settings/security', requirePerm('settings', 'read'), asyncHandler(async (req, res) => {
+    sendOk(res, { ...(await securitySettings()), yourIp: typeof req.ip === 'string' ? req.ip.replace(/^::ffff:/, '') : null });
+  }));
+  const securitySchema = z.object({
+    requireTwoFactor: z.boolean().optional(),
+    ipAllowlist: z.array(z.string().trim().min(1).max(64)).max(200).optional(),
+  }).strict();
+  r.put('/settings/security', requirePerm('settings', 'full'), validateBody(securitySchema), asyncHandler(async (req, res) => {
+    const b = req.body as z.infer<typeof securitySchema>;
+    const before = await securitySettings();
+    const next = { requireTwoFactor: b.requireTwoFactor ?? before.requireTwoFactor, ipAllowlist: b.ipAllowlist ?? before.ipAllowlist };
     if (b.requireTwoFactor) {
       const mine = (await query<{ on: boolean }>('SELECT totp_enabled_at IS NOT NULL AS on FROM platform_admins WHERE id = $1', [me(req)])).rows[0];
       if (!mine?.on) throw conflict('Turn on two-factor sign-in for your own account first (Team › Your account).');
     }
-    const after = await saveSecuritySettings(b, me(req));
+    if (b.ipAllowlist) {
+      const bad = b.ipAllowlist.map(allowlistEntryError).filter(Boolean);
+      if (bad.length) throw validationFailed(bad.slice(0, 3).join(' · '), { field: 'ipAllowlist' });
+      // Never a list that would lock out the person saving it.
+      const here = typeof req.ip === 'string' ? req.ip : null;
+      if (b.ipAllowlist.length && !ipAllowed(b.ipAllowlist, here)) {
+        throw new AppError('conflict', `Your current address (${here ?? 'unknown'}) isn't on the list — saving it would lock you out. Add it first.`, { reason: 'would_lock_out', ip: here });
+      }
+    }
+    const after = await saveSecuritySettings(next, me(req));
     await writePlatformAudit(req, null, { action: 'settings.security', entityType: 'platform_settings', entityId: 'security', after });
     sendOk(res, after);
   }));

@@ -58,6 +58,8 @@ export interface RetentionResult {
  kpiRunsDeleted?: number;
  /** Requested reports (and their files) older than REPORT_REQUEST_RETENTION_DAYS. */
  reportRequestsDeleted?: number;
+ /** Platform staff sign-in events (180 days), ended sessions (30 days), read bell notices (90 days). */
+ staffSecurityDeleted?: number;
 }
 
 /** YYYYMM → integer month-key. Postgres partition naming uses `_YYYY_MM` (zero-padded). */
@@ -255,6 +257,11 @@ export async function runRetention(now: Date = new Date()): Promise<RetentionRes
  // 6. Requested reports (Reporting › Saved & Scheduled) with their files.
  result.reportRequestsDeleted = (await query(
  `DELETE FROM report_requests WHERE created_at < $1`, [cutoff(REPORT_REQUEST_RETENTION_DAYS, now)])).rowCount ?? 0;
+ // 7. Platform staff security: sign-in history, ended sessions, read notices.
+ result.staffSecurityDeleted =
+ ((await query(`DELETE FROM platform_login_events WHERE created_at < $1`, [cutoff(180, now)])).rowCount ?? 0)
+ + ((await query(`DELETE FROM platform_sessions WHERE (revoked_at IS NOT NULL OR expires_at < now()) AND created_at < $1`, [cutoff(30, now)])).rowCount ?? 0)
+ + ((await query(`DELETE FROM platform_notifications WHERE read_at IS NOT NULL AND created_at < $1`, [cutoff(90, now)])).rowCount ?? 0);
 
  log.info(
  { ...result, networks: networks.length },

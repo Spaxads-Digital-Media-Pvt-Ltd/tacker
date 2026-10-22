@@ -7,12 +7,13 @@
  */
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, User, HelpCircle, BookOpen, Keyboard, Mail, Sparkles, Activity } from 'lucide-react';
 import { Modal } from '../primitives/ui';
 import { ROLE_HOME } from '../../auth/roles';
 import { changelogSeenAt, hasUnread } from '../../lib/changelogSeen';
 import { useQuery } from '../../lib/useApi';
+import { api } from '../../lib/api';
 import { useAuth } from '../../auth/AuthContext';
 
 interface HistoryRow {
@@ -196,6 +197,61 @@ export function NotificationsBell({ expanded }: { expanded: boolean }) {
             >
               Notification Preferences
             </Link>
+          </div>
+        </Popover>
+      )}
+    </div>
+  );
+}
+
+
+interface PlatformNotice { id: string; kind: string; title: string; body: string | null; link: string | null; read_at: string | null; created_at: string }
+
+/** The Super Admin console's bell — notices for this member (a ticket, a reply, a lead or a task for them). */
+export function PlatformBell({ expanded }: { expanded: boolean }) {
+  const { open, setOpen, ref, panelRef } = usePopover();
+  const navigate = useNavigate();
+  const q = useQuery<{ unread: number; items: PlatformNotice[] }>('/platform/notifications');
+  const { refetch } = q;
+  useEffect(() => {
+    const t = window.setInterval(refetch, 60_000);
+    return () => window.clearInterval(t);
+  }, [refetch]);
+  const unread = q.data?.unread ?? 0;
+  const items = q.data?.items ?? [];
+  const openNotice = async (n: PlatformNotice) => {
+    setOpen(false);
+    if (!n.read_at) await api.post(`/platform/notifications/${n.id}/read`, {}).catch(() => undefined);
+    refetch();
+    if (n.link?.startsWith('/')) navigate(n.link);
+  };
+  const readAll = async () => { await api.post('/platform/notifications/read-all', {}).catch(() => undefined); refetch(); };
+
+  return (
+    <div className="relative" ref={ref}>
+      <RailIconButton expanded={expanded} label={unread ? `Notifications (${unread} unread)` : 'Notifications'} onClick={() => { setOpen((o) => !o); if (!open) refetch(); }} badge={unread > 0}>
+        <Bell size={18} />
+      </RailIconButton>
+      {open && (
+        <Popover anchorRef={ref} panelRef={panelRef}>
+          <div className="flex items-center justify-between border-b border-border px-3.5 py-3">
+            <h3 className="text-small font-semibold text-fg">Notifications{unread > 0 && <span className="ml-1.5 text-fg-muted">· {unread} new</span>}</h3>
+            {unread > 0 && <button type="button" onClick={() => void readAll()} className="text-tiny font-medium text-accent-text hover:underline">Mark all read</button>}
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {items.length === 0 ? (
+              <p className="px-3.5 py-6 text-center text-small text-fg-muted">Nothing for you yet.</p>
+            ) : items.map((n) => (
+              <button key={n.id} type="button" onClick={() => void openNotice(n)}
+                className={`block w-full border-b border-border px-3.5 py-2.5 text-left last:border-0 hover:bg-accent-subtle ${n.read_at ? '' : 'bg-accent-subtle/40'}`}>
+                <p className="text-small text-fg">
+                  {!n.read_at && <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-accent align-middle" aria-label="Unread" />}
+                  {n.title}
+                </p>
+                {n.body && <p className="mt-0.5 line-clamp-2 text-tiny text-fg-secondary">{n.body}</p>}
+                <p className="mt-0.5 text-tiny text-fg-muted">{n.kind} · {timeAgo(n.created_at)}</p>
+              </button>
+            ))}
           </div>
         </Popover>
       )}

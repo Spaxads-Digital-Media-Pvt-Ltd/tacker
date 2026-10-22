@@ -10,6 +10,7 @@ import { logger } from '../logger.js';
 import { BRAND } from '../../config/branding.js';
 import { appUrl } from '../app-url.js';
 import { escapeHtml as e } from '../email/transactional.js';
+import { notifyStaffInApp } from './staff-security.js';
 import { enqueuePlatformEmails } from '../email/outbox.js';
 import { platformSmtpConfigError } from '../mailer.js';
 import { notificationOn, type NotificationKey } from './email.js';
@@ -62,6 +63,7 @@ async function notifyTicketCreatedImpl(ticketId: string): Promise<void> {
        FROM support_tickets t JOIN networks n ON n.id = t.network_id LEFT JOIN platform_admins a ON a.id = t.assignee_id WHERE t.id = $1`, [ticketId])).rows[0];
   if (!t) return;
   const to = t.assignee_email ? [t.assignee_email] : await sectionTeam('support');
+  await notifyStaffInApp({ emails: to }, { kind: 'ticket', title: `New ticket from ${t.network_name}: ${t.subject}`, link: `/admin/support/${ticketId}` });
   await send('ticketCreated', 'support.ticket_created', to, {
     subject: `[#${t.number}] ${t.network_name}: ${t.subject}`,
     html: layout({
@@ -77,7 +79,9 @@ async function notifyCustomerReplyImpl(ticketId: string, body: string): Promise<
     `SELECT t.number::text, t.subject, t.network_id, n.name AS network_name, a.email AS assignee_email
        FROM support_tickets t JOIN networks n ON n.id = t.network_id LEFT JOIN platform_admins a ON a.id = t.assignee_id WHERE t.id = $1`, [ticketId])).rows[0];
   if (!t) return;
-  await send('customerReply', 'support.customer_reply', t.assignee_email ? [t.assignee_email] : await sectionTeam('support'), {
+  const replyTo = t.assignee_email ? [t.assignee_email] : await sectionTeam('support');
+  await notifyStaffInApp({ emails: replyTo }, { kind: 'ticket_reply', title: `${t.network_name} replied on #${t.number}`, body: body.slice(0, 200), link: `/admin/support/${ticketId}` });
+  await send('customerReply', 'support.customer_reply', replyTo, {
     subject: `Re: [#${t.number}] ${t.subject}`,
     html: layout({ heading: `${t.network_name} replied`, paragraphs: [quote(body)], button: { label: 'Answer', url: appUrl(`/admin/support/${ticketId}`) } }),
   }, t.network_id);
@@ -102,7 +106,9 @@ async function notifyLeadInboundImpl(leadId: string): Promise<void> {
   const l = (await query<{ company: string; contact_name: string | null; email: string | null; message: string | null; owner_email: string | null }>(
     `SELECT l.company, l.contact_name, l.email, l.message, o.email AS owner_email FROM sales_leads l LEFT JOIN platform_admins o ON o.id = l.owner_id WHERE l.id = $1`, [leadId])).rows[0];
   if (!l) return;
-  await send('leadInbound', 'sales.lead_inbound', l.owner_email ? [l.owner_email] : await sectionTeam('sales'), {
+  const leadTo = l.owner_email ? [l.owner_email] : await sectionTeam('sales');
+  await notifyStaffInApp({ emails: leadTo }, { kind: 'lead', title: `${l.company} asked for a demo`, link: `/admin/sales/leads/${leadId}` });
+  await send('leadInbound', 'sales.lead_inbound', leadTo, {
     subject: `New demo request: ${l.company}`,
     html: layout({
       heading: `${l.company} asked for a demo`,
@@ -116,6 +122,7 @@ async function notifyTaskAssignedImpl(taskId: string, byName: string | null): Pr
   const t = (await query<{ title: string; due_at: Date | null; assignee_email: string | null; notes: string | null }>(
     `SELECT t.title, t.due_at, a.email AS assignee_email, t.notes FROM platform_tasks t LEFT JOIN platform_admins a ON a.id = t.assignee_id WHERE t.id = $1`, [taskId])).rows[0];
   if (!t?.assignee_email) return;
+  await notifyStaffInApp({ emails: [t.assignee_email] }, { kind: 'task', title: `${byName ?? 'Someone'} gave you a task: ${t.title}`, link: '/admin/tasks' });
   await send('taskAssigned', 'tasks.assigned', [t.assignee_email], {
     subject: `New task: ${t.title}`,
     html: layout({
