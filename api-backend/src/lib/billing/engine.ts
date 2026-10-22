@@ -20,6 +20,7 @@ import { networkStateChanged } from '../networks/state.js';
 import { billingSettings, type BillingSettings } from './settings.js';
 import { issueInvoice } from './invoices.js';
 import { subscriptionLines, useDiscount } from './charges.js';
+import { effectivePlan, networkOverrides } from './overrides.js';
 import { notifyInvoiceIssued, notifyInvoiceOverdue, notifyNetworkSuspended } from '../platform/notify.js';
 import { PLUS_INTERVAL, periodDescription, type PlanRow, type SubscriptionRow } from './subscriptions.js';
 
@@ -47,7 +48,8 @@ async function advance(subscriptionId: string, now: Date, settings: BillingSetti
          FROM subscriptions s JOIN subscription_plans p ON p.id = s.plan_id JOIN networks n ON n.id = s.network_id
         WHERE s.id = $1 FOR UPDATE OF s SKIP LOCKED`, [subscriptionId])).rows[0];
     if (!row || row.network_status === 'deleted') { await client.query('ROLLBACK'); return null; }
-    const plan = row.plan;
+    // The plan as this network pays for it (a custom price, billing exempt, limit overrides).
+    const plan = effectivePlan(row.plan, await networkOverrides(row.network_id, client));
     const trialOver = row.status === 'trialing' && row.trial_ends_at !== null && new Date(row.trial_ends_at) <= now;
     const periodOver = (row.status === 'active' || row.status === 'past_due') && row.current_period_end !== null && new Date(row.current_period_end) <= now;
     if (!trialOver && !periodOver) { await client.query('ROLLBACK'); return null; }
@@ -66,7 +68,7 @@ async function advance(subscriptionId: string, now: Date, settings: BillingSetti
           WHERE id = $1 RETURNING *`, [row.id, plan.billing_interval])).rows[0]!;
       let invoiced = false;
       let invoiceId: string | null = null;
-      if (plan.price_cents > 0) {
+      if (plan.billable) {
         // The next period in advance; overage for the period that just ended (not after a trial).
         const period = { start: new Date(next.current_period_start!), end: new Date(next.current_period_end!) };
         const usagePeriod = trialOver || !row.current_period_start || !row.current_period_end

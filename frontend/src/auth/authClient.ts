@@ -81,6 +81,28 @@ export const requestDemo = (body: {
   name: string; email: string; company: string; phone?: string; website?: string; country?: string; monthlyClicks?: number; message?: string; website_url?: string;
 }): Promise<void> => authPost('/api/signup/demo', body);
 
+/** What the public sign-up / login pages may know about a network (GET /api/signup/network/:slug). */
+export interface PublicNetwork { name: string; logoUrl: string | null; partnerSignup: boolean; advertiserSignup: boolean }
+export async function publicNetwork(slug: string): Promise<PublicNetwork> {
+  const res = await authFetch(`/api/signup/network/${encodeURIComponent(slug)}`, { method: 'GET', credentials: 'include' });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw authError(json, res);
+  return json.data as PublicNetwork;
+}
+
+/** Self-serve sign-up (partner or advertiser): the login details are emailed. */
+export interface SignUpResult { status: 'pending' | 'active'; emailed: boolean; message: string; credentials?: { email: string; temporaryPassword: string } }
+export async function signUp(kind: 'partner' | 'advertiser', body: {
+  network: string; name: string; email: string; contactName?: string; website?: string; trafficSource?: string; country?: string;
+}): Promise<SignUpResult> {
+  const res = await authFetch(`/api/signup/${kind}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw authError(json, res);
+  return json.data as SignUpResult;
+}
+
 /** "Forgot password?" — the server answers the same for any address (it never says which exist). */
 export const requestPasswordReset = (email: string): Promise<void> => authPost('/api/auth/forgot-password', { email });
 

@@ -7,9 +7,10 @@ import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound, badRequest, conflict } from '../../../lib/http/errors.js';
+import { AppError, notFound, badRequest, conflict, serviceUnavailable } from '../../../lib/http/errors.js';
 import { forgetStaffState } from '../../../lib/auth/staff-state.js';
-import { syncLogin } from '../../../lib/auth/login-sync.js';
+import { syncLogin, changeLoginEmail } from '../../../lib/auth/login-sync.js';
+import { sendTransactional, escapeHtml, networkName } from '../../../lib/email/transactional.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
 import { getTableScope } from '../../../lib/db/table-registry.js';
@@ -76,7 +77,7 @@ const statusListQuery = z.object({
 const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(120),
-  role: z.enum(['admin', 'manager', 'finance', 'read_only']).default('read_only'),
+  role: z.enum(['admin', 'manager', 'finance', 'read_only', 'affiliate_manager', 'advertiser_manager']).default('read_only'),
   businessUnit: z.string().max(120).optional(),
   partnerManager: z.boolean().optional(),
   advertiserManager: z.boolean().optional(),
@@ -177,6 +178,19 @@ export function controlCenterRoutes(): Router {
         if (Number(others.rows[0]?.n ?? 0) === 0) throw conflict("This is the network's only active admin — make someone else an admin first.");
       }
       const patch: Record<string, unknown> = {};
+      // A new email is the person's new sign-in address: no other team member may have it, and their
+      // login moves with it (before the row, so a refused login change leaves nothing half-done).
+      const newEmail = b.email?.trim().toLowerCase();
+      const emailChanged = newEmail !== undefined && newEmail !== before.email.trim().toLowerCase();
+      if (emailChanged) {
+        const dup = await query('SELECT 1 FROM users WHERE network_id = $1 AND lower(email) = $2 AND id <> $3', [networkId, newEmail, id]);
+        if (dup.rows.length) throw new AppError('conflict', `Another team member already uses ${newEmail}.`, { reason: 'email_in_use' });
+        const moved = await changeLoginEmail(before.auth_user_id, newEmail);
+        if (moved === 'not_configured') throw serviceUnavailable("Changing a sign-in email needs Supabase's service key (SUPABASE_SERVICE_ROLE_KEY) — the email wasn't changed.");
+        if (moved === 'taken') throw new AppError('conflict', `${newEmail} already has a login for another account.`, { reason: 'email_in_use' });
+        if (moved === 'failed') throw serviceUnavailable("The sign-in email couldn't be changed right now — nothing was saved; try again.");
+        patch['email'] = newEmail;
+      }
       if (b.name !== undefined) patch['name'] = b.name;
       if (b.role !== undefined) patch['role'] = b.role;
       if (b.status !== undefined) patch['status'] = b.status;
@@ -193,6 +207,13 @@ export function controlCenterRoutes(): Router {
         ...(b.status !== undefined && b.status !== before.status ? { blocked: b.status === 'disabled' } : {}),
       });
       await writeAudit(req, { action: 'user.update', entityType: 'users', entityId: id, before, after: updated });
+      if (emailChanged) {
+        // Both addresses hear about it — the old one so an unexpected change doesn't go unnoticed.
+        const net = escapeHtml(await networkName(networkId));
+        const html = `<p>The sign-in email for your ${net} team account was changed from <strong>${escapeHtml(before.email)}</strong> to <strong>${escapeHtml(newEmail!)}</strong> by an admin. Sign in with the new address and your current password.</p><p>If you didn't expect this, contact your network admin.</p>`;
+        void sendTransactional(networkId, 'login_email_changed', [before.email, newEmail], { subject: `${await networkName(networkId)}: your sign-in email was changed`, html })
+          .catch(() => undefined);
+      }
       sendOk(res, { ...userDto(updated ?? before), loginSync });
     }),
   );

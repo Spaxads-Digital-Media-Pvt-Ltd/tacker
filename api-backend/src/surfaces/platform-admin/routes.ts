@@ -3,12 +3,12 @@
  * per-network subscriptions, and usage dashboards. Uses raw queries (platform admins have no
  * ScopedDb tenant context) and audits every action via writePlatformAudit.
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { asyncHandler } from '../../lib/http/async-handler.js';
 import { sendOk } from '../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../lib/http/validate.js';
 import { paginationSchema, type PaginationQuery } from '../../lib/http/pagination.js';
-import { badRequest, notFound, unauthorized, forbidden, tooMany, conflict, serviceUnavailable } from '../../lib/http/errors.js';
+import { AppError, badRequest, notFound, unauthorized, forbidden, tooMany, conflict, serviceUnavailable } from '../../lib/http/errors.js';
 import { containsPattern } from '../../lib/db/like.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { impersonationConfigured, signSupportSessionToken } from '../../lib/auth/impersonation-token.js';
@@ -16,7 +16,7 @@ import { query } from '../../lib/db/pool.js';
 import { writePlatformAudit } from '../../lib/audit.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
 import { signPlatformAdminToken, signMfaChallenge, verifyMfaChallenge } from '../../lib/auth/platform-admin-token.js';
-import { checkSecondFactor } from '../../lib/platform/twofactor.js';
+import { checkSecondFactor, securitySettings } from '../../lib/platform/twofactor.js';
 import { z } from 'zod';
 import { verifyPassword } from '../../lib/auth/platform-admin-password.js';
 import {
@@ -31,20 +31,31 @@ import {
  purgeNetworkSchema, type PurgeNetwork,
 } from './schemas.js';
 import { once } from 'node:events';
-import { softDeleteNetwork, exportNetwork, exportLedgerCsv, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
+import { softDeleteNetwork, setNetworkStatus, exportNetwork, exportLedgerCsv, purgeNetwork, purgeAfter } from '../../lib/networks/lifecycle.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { requirePerm, networkScope, assertNetworkInScope } from './auth.js';
-import { networkStateChanged } from '../../lib/networks/state.js';
+import { ipAllowed, recordLogin } from '../../lib/platform/staff-security.js';
 import { createNetwork } from '../../lib/networks/create.js';
 import { usageVsPlan } from '../../lib/usage/meter.js';
+import { networkOverrides } from '../../lib/billing/overrides.js';
+import { centsToDecimal } from '../../lib/billing/invoices.js';
+import { notifyNetworkCreated } from '../../lib/platform/notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function clientIp(req: { socket?: { remoteAddress?: string } }): string {
- return req.socket?.remoteAddress ?? 'unknown';
+/** The visitor's address (req.ip honours the trusted proxies — O2; the socket's otherwise). */
+function clientIp(req: { ip?: string; socket?: { remoteAddress?: string } }): string {
+ return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
 }
+const userAgentOf = (req: { get(h: string): string | undefined }) => req.get('user-agent') ?? null;
 
 /** Public (no auth) routes — login only. */
+
+/** The signed-in member's name, for messages. */
+const memberName = async (req: Request): Promise<string | null> => {
+ const id = (req.identity as PlatformAdminIdentity | undefined)?.platformAdminId;
+ return id ? (await query<{ name: string }>('SELECT COALESCE(name, email) AS name FROM platform_admins WHERE id = $1', [id])).rows[0]?.name ?? null : null;
+};
 export function publicPlatformRoutes(): Router {
  const r = Router();
 
@@ -53,29 +64,50 @@ export function publicPlatformRoutes(): Router {
  const normalizedEmail = b.email.trim().toLowerCase();
  const ip = clientIp(req);
 
+ const ua = userAgentOf(req);
  const preCheck = await checkLoginRateLimit(ip, normalizedEmail);
- if (preCheck.limited) throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
+ if (preCheck.limited) {
+ await recordLogin({ email: normalizedEmail, ip, userAgent: ua, outcome: 'locked' });
+ throw tooMany(loginRateLimitMessage(preCheck), { retryAfter: preCheck.retryAfterSeconds });
+ }
+ // Settings › Security › IP allowlist: from anywhere else, no sign-in at all.
+ if (!ipAllowed((await securitySettings()).ipAllowlist, ip)) {
+ await recordLogin({ email: normalizedEmail, ip, userAgent: ua, outcome: 'blocked_ip' });
+ throw new AppError('forbidden', 'Signing in to the console is only possible from the platform’s allowed addresses.', { reason: 'ip_not_allowed' });
+ }
 
  const { rows } = await query<{ id: string; email: string; status: string; password_hash: string; auth_provider: string; totp_enabled_at: Date | null }>(
  `SELECT id, email, status, password_hash, auth_provider, totp_enabled_at FROM platform_admins WHERE lower(email) = lower($1) LIMIT 1`,
  [b.email],
  );
  const admin = rows[0];
- if (!admin) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
- if (admin.auth_provider !== 'local') { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
- if (admin.status !== 'active') throw forbidden('Account is disabled.');
+ if (!admin || admin.auth_provider !== 'local') {
+ await recordLoginFailure(ip, normalizedEmail);
+ await recordLogin({ adminId: admin?.id ?? null, email: normalizedEmail, ip, userAgent: ua, outcome: 'unknown_email' });
+ throw unauthorized('Invalid email or password.');
+ }
+ if (admin.status !== 'active') {
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'disabled' });
+ throw forbidden('Account is disabled.');
+ }
 
  const valid = await verifyPassword(b.password, admin.password_hash);
- if (!valid) { await recordLoginFailure(ip, normalizedEmail); throw unauthorized('Invalid email or password.'); }
+ if (!valid) {
+ await recordLoginFailure(ip, normalizedEmail);
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'bad_password' });
+ throw unauthorized('Invalid email or password.');
+ }
 
  await resetLoginCounter(normalizedEmail);
  // Two-factor on: the password was right — now the authenticator code (POST /login/2fa), no session yet.
  if (admin.totp_enabled_at) {
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'mfa_required' });
  return sendOk(_res, { twoFactorRequired: true, challenge: await signMfaChallenge(admin.id), admin: { email: admin.email } });
  }
  await query('UPDATE platform_admins SET last_login_at = now() WHERE id = $1', [admin.id]);
+ await recordLogin({ adminId: admin.id, email: normalizedEmail, ip, userAgent: ua, outcome: 'success' });
 
- const token = await signPlatformAdminToken(admin.id);
+ const token = await signPlatformAdminToken(admin.id, { ip, userAgent: ua });
  return sendOk(_res, { token, admin: { id: admin.id, email: admin.email } });
  }));
 
@@ -94,13 +126,15 @@ export function publicPlatformRoutes(): Router {
  if (admin.status !== 'active') throw forbidden('Account is disabled.');
  const used = await checkSecondFactor(id, b.code);
  if (!used) {
+ await recordLogin({ adminId: id, email: admin.email, ip, userAgent: userAgentOf(req), outcome: 'mfa_failed' });
  await recordLoginFailure(ip, key);
  throw unauthorized('That code isn’t right — enter the current 6-digit code from your authenticator app (check its clock), or a recovery code.');
  }
  await resetLoginCounter(key);
  await query('UPDATE platform_admins SET last_login_at = now() WHERE id = $1', [id]);
  const left = (await query<{ n: number }>('SELECT cardinality(recovery_code_hashes)::int AS n FROM platform_admins WHERE id = $1', [id])).rows[0]?.n ?? 0;
- return sendOk(res, { token: await signPlatformAdminToken(id), admin: { id, email: admin.email }, usedRecoveryCode: used === 'recovery', recoveryCodesLeft: left });
+ await recordLogin({ adminId: id, email: admin.email, ip, userAgent: userAgentOf(req), outcome: 'success' });
+ return sendOk(res, { token: await signPlatformAdminToken(id, { ip, userAgent: userAgentOf(req) }), admin: { id, email: admin.email }, usedRecoveryCode: used === 'recovery', recoveryCodesLeft: left });
  }));
 
  return r;
@@ -164,8 +198,9 @@ export function platformRoutes(): Router {
  if (!UUID_RE.test(id)) throw notFound('Network not found');
  await assertNetworkInScope(req, id);
  const net = (await query(
- `SELECT id, ref, name, slug, status, suspended_reason, default_currency, created_at, updated_at, deleted_at, exported_at
- FROM networks WHERE id = $1`, [id])).rows[0];
+ `SELECT n.id, n.ref, n.name, n.slug, n.status, n.suspended_reason, n.default_currency, n.created_at, n.updated_at, n.deleted_at, n.exported_at,
+ n.reseller_id, r.name AS reseller_name
+ FROM networks n LEFT JOIN platform_resellers r ON r.id = n.reseller_id WHERE n.id = $1`, [id])).rows[0];
  if (!net) throw notFound('Network not found');
  const [sub, owner, counts, domains, usage] = await Promise.all([
  query(
@@ -185,6 +220,7 @@ export function platformRoutes(): Router {
  query(`SELECT host, mode, status, is_primary FROM tracking_domains WHERE network_id = $1 ORDER BY is_primary DESC, host`, [id]),
  usageVsPlan(id),
  ]);
+ const overrides = await networkOverrides(id);
  sendOk(res, {
  ...net,
  purge_after: net['deleted_at'] ? purgeAfter(new Date(net['deleted_at'] as string)) : null,
@@ -193,6 +229,7 @@ export function platformRoutes(): Router {
  counts: counts.rows[0],
  trackingDomains: domains.rows,
  usage,
+ overrides: overrides && { price: overrides.priceCents === null ? null : centsToDecimal(overrides.priceCents), billingExempt: overrides.billingExempt, limits: overrides.limits, note: overrides.note },
  });
  }),
  );
@@ -294,6 +331,7 @@ export function platformRoutes(): Router {
  asyncHandler(async (req, res) => {
  const { network, ownerUserId } = await createNetwork(req.body as CreateNetwork);
  await writePlatformAudit(req, network.id, { action: 'network.create', entityType: 'network', entityId: network.id, after: network });
+ await notifyNetworkCreated(network.id, await memberName(req));
  sendOk(res, { ...network, ownerUserId }, undefined, 201);
  }),
  );
@@ -305,25 +343,16 @@ export function platformRoutes(): Router {
  validateBody(updateNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as UpdateNetwork;
- const before = (await query(`SELECT * FROM networks WHERE id = $1`, [req.params.id])).rows[0];
+ await assertNetworkInScope(req, req.params.id!);
+ const id = req.params.id!;
+ const before = (await query(`SELECT * FROM networks WHERE id = $1`, [id])).rows[0];
  if (!before) throw notFound('Network not found');
- const sets: string[] = [];
- const params: unknown[] = [];
- if (b.name !== undefined) { params.push(b.name); sets.push(`name = $${params.length}`); }
- if (b.status !== undefined) {
- params.push(b.status); sets.push(`status = $${params.length}`);
- // 'deleted' is the soft delete (F-26); any other status restores it.
- sets.push(b.status === 'deleted' ? 'deleted_at = COALESCE(deleted_at, now())' : 'deleted_at = NULL');
- // A Super Admin's suspension is 'manual' (only a Super Admin lifts it; billing never does).
- sets.push(b.status === 'suspended' ? `suspended_reason = 'manual'` : 'suspended_reason = NULL');
- }
- if (sets.length === 0) throw badRequest('Nothing to update');
- params.push(req.params.id);
- const { rows } = await query(`UPDATE networks SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
- // Suspend / delete / restore applies at once: tracking hosts and the cached state are dropped.
- if (b.status !== undefined && b.status !== before.status) await networkStateChanged(req.params.id!);
- await writePlatformAudit(req, req.params.id ?? null, { action: 'network.update', entityType: 'network', entityId: req.params.id, before, after: rows[0] });
- sendOk(res, rows[0]);
+ if (b.name === undefined && b.status === undefined) throw badRequest('Nothing to update');
+ if (b.name !== undefined) await query('UPDATE networks SET name = $2 WHERE id = $1', [id, b.name]);
+ if (b.status !== undefined) await setNetworkStatus(id, b.status);
+ const after = (await query(`SELECT * FROM networks WHERE id = $1`, [id])).rows[0];
+ await writePlatformAudit(req, id, { action: 'network.update', entityType: 'network', entityId: id, before, after });
+ sendOk(res, after);
  }),
  );
 
@@ -333,6 +362,7 @@ export function platformRoutes(): Router {
  '/networks/:id',
  requirePerm('networks', 'full'),
  asyncHandler(async (req, res) => {
+ await assertNetworkInScope(req, req.params.id!);
  const { before, after } = await softDeleteNetwork(req.params.id!);
  await writePlatformAudit(req, req.params.id ?? null, { action: 'network.delete', entityType: 'network', entityId: req.params.id, before, after: { status: after.status, deletedAt: after.deleted_at, soft: true } });
  sendOk(res, {
@@ -347,6 +377,7 @@ export function platformRoutes(): Router {
  '/networks/:id/export',
  requirePerm('networks', 'full'),
  asyncHandler(async (req, res) => {
+ await assertNetworkInScope(req, req.params.id!);
  const net = (await query<{ slug: string }>(`SELECT slug FROM networks WHERE id = $1`, [req.params.id])).rows[0];
  if (!net) throw notFound('Network not found');
  res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
@@ -367,6 +398,7 @@ export function platformRoutes(): Router {
  validateBody(purgeNetworkSchema),
  asyncHandler(async (req, res) => {
  const b = req.body as PurgeNetwork;
+ await assertNetworkInScope(req, req.params.id!);
  const { before, result } = await purgeNetwork(req.params.id!, { ...b, purgedBy: (req.identity as PlatformAdminIdentity | undefined)?.platformAdminId ?? null });
  await writePlatformAudit(req, null, {
  action: 'network.purge', entityType: 'network', entityId: req.params.id,
@@ -399,6 +431,7 @@ export function platformRoutes(): Router {
  asyncHandler(async (req, res) => {
  const id = req.params.id!;
  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw notFound('Network not found');
+ await assertNetworkInScope(req, id);
  const net = (await query<{ slug: string }>(
  `SELECT slug FROM networks WHERE id = $1 UNION ALL SELECT slug FROM purged_networks WHERE id = $1 LIMIT 1`, [id])).rows[0];
  if (!net) throw notFound('Network not found');
@@ -420,7 +453,7 @@ export function platformRoutes(): Router {
  const { rows } = await query(
  `SELECT metric, SUM(value)::bigint AS total
  FROM usage_records
- WHERE network_id = $1 AND period_date >= (CURRENT_DATE - INTERVAL '30 days')
+ WHERE network_id = $1 AND period_date >= ((now() AT TIME ZONE 'UTC')::date - 30)
  GROUP BY metric`,
  [req.params.id],
  );

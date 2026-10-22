@@ -106,7 +106,7 @@ function CardList({ cards, onConfigure }: { cards: CatalogCard[]; onConfigure: (
 // ── Configure modals ─────────────────────────────────────────────────────────
 
 interface FraudConfig {
-  enabled: boolean; velocityPerMinute: number; datacenterRatioThreshold: number;
+  enabled: boolean; velocityPerMinute: number; datacenterRatioThreshold: number; botRatioThreshold: number; proxyRatioThreshold: number;
   minClickToConversionSeconds: number; crSpikeThreshold: number; minClicksForCrAlert: number; scanWindowHours: number;
   /** F-23: clicks scoring at least this are diverted at /click (null = flag only). */
   blockScore: number | null;
@@ -224,6 +224,7 @@ function ConfigureModals({
     const pick = (k: keyof FraudConfig) => fraudForm[k] ?? rules?.[k];
     const body: Record<string, unknown> = {
       enabled: pick('enabled'), velocityPerMinute: pick('velocityPerMinute'), datacenterRatioThreshold: pick('datacenterRatioThreshold'),
+      botRatioThreshold: pick('botRatioThreshold'), proxyRatioThreshold: pick('proxyRatioThreshold'),
       minClickToConversionSeconds: pick('minClickToConversionSeconds'), crSpikeThreshold: pick('crSpikeThreshold'),
       minClicksForCrAlert: pick('minClicksForCrAlert'), scanWindowHours: pick('scanWindowHours'),
       blockScore: fraudExtras.blockScore.trim() === '' ? null : Number(fraudExtras.blockScore),
@@ -298,7 +299,7 @@ function ConfigureModals({
               <input className="input" type="number" value={fraudForm[k] ?? rules?.[k] ?? ''} onChange={(e) => setFraudForm((f) => ({ ...f, [k]: Number(e.target.value) }))} />
             </Field>
           ))}
-          {(['datacenterRatioThreshold', 'crSpikeThreshold'] as const).map((k) => (
+          {(['datacenterRatioThreshold', 'botRatioThreshold', 'proxyRatioThreshold', 'crSpikeThreshold'] as const).map((k) => (
             <Field key={k} label={k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())}>
               <input className="input" type="number" step="0.01" min="0" max="1" value={fraudForm[k] ?? rules?.[k] ?? ''} onChange={(e) => setFraudForm((f) => ({ ...f, [k]: Number(e.target.value) }))} />
             </Field>

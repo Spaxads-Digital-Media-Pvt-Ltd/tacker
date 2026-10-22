@@ -1,7 +1,7 @@
 /**
  * Async fraud scan (spec §10 — "heavy scoring runs async"). Aggregates recent clicks/conversions
- * per publisher and raises alerts for datacenter-heavy traffic, conversion-rate spikes, and
- * fast-conversion clusters — all against the network's configurable thresholds. Runs off the hot
+ * per publisher and raises alerts for datacenter-heavy, bot and proxy / VPN traffic, conversion-rate
+ * spikes, and fast-conversion clusters — all against the network's configurable thresholds. Runs off the hot
  * path (scheduled repeatable job + `npm run fraud-scan`). Alerts feed the AI ops layer (Phase 7).
  */
 import { query } from '../db/pool.js';
@@ -15,7 +15,12 @@ export interface ScanResult {
   alertsRaised: number;
 }
 
-interface ClickAgg { publisher_id: string; clicks: number; dc: number }
+interface ClickAgg { publisher_id: string; clicks: number; dc: number; bot: number; proxy: number }
+
+/** Click flags that mean "not a human": a bot / headless / scripted user agent, none at all, or IPQS's bot verdict. */
+export const BOT_FLAGS = ['bot_user_agent', 'no_user_agent', 'ipqs_bot'] as const;
+/** IPQualityScore verdicts that hide the visitor's real address. */
+export const PROXY_FLAGS = ['ipqs_proxy', 'ipqs_vpn', 'ipqs_tor'] as const;
 interface ConvAgg { publisher_id: string; conv: number; fast: number }
 
 async function scanNetwork(networkId: string): Promise<number> {
@@ -27,11 +32,13 @@ async function scanNetwork(networkId: string): Promise<number> {
   const clicks = (await query<ClickAgg>(
     `SELECT publisher_id,
             COUNT(*)::int AS clicks,
-            COUNT(*) FILTER (WHERE 'datacenter_ip' = ANY(fraud_flags))::int AS dc
+            COUNT(*) FILTER (WHERE 'datacenter_ip' = ANY(fraud_flags))::int AS dc,
+            COUNT(*) FILTER (WHERE fraud_flags && $3::text[])::int AS bot,
+            COUNT(*) FILTER (WHERE fraud_flags && $4::text[])::int AS proxy
        FROM clicks
       WHERE network_id = $1 AND publisher_id IS NOT NULL AND created_at >= $2
       GROUP BY publisher_id`,
-    [networkId, since],
+    [networkId, since, [...BOT_FLAGS], [...PROXY_FLAGS]],
   )).rows;
 
   const convs = (await query<ConvAgg>(
@@ -64,6 +71,26 @@ async function scanNetwork(networkId: string): Promise<number> {
         title: 'High datacenter traffic',
         description: `${(dcRatio * 100).toFixed(0)}% of ${c.clicks} clicks came from datacenter IPs.`,
         metadata: { clicks: c.clicks, datacenter: c.dc, ratio: Number(dcRatio.toFixed(3)) },
+      });
+    }
+
+    const botRatio = c.clicks > 0 ? c.bot / c.clicks : 0;
+    if (c.bot > 0 && botRatio >= cfg.botRatioThreshold) {
+      await raise({
+        type: 'bot_traffic', severity: 'high', entityType: 'publisher', entityId: c.publisher_id,
+        title: 'Bot traffic',
+        description: `${(botRatio * 100).toFixed(0)}% of ${c.clicks} clicks came from bots (bot or missing user agent, IPQS bot verdict).`,
+        metadata: { clicks: c.clicks, bot: c.bot, ratio: Number(botRatio.toFixed(3)) },
+      });
+    }
+
+    const proxyRatio = c.clicks > 0 ? c.proxy / c.clicks : 0;
+    if (c.proxy > 0 && proxyRatio >= cfg.proxyRatioThreshold) {
+      await raise({
+        type: 'proxy_traffic', severity: 'medium', entityType: 'publisher', entityId: c.publisher_id,
+        title: 'Proxy / VPN traffic',
+        description: `${(proxyRatio * 100).toFixed(0)}% of ${c.clicks} clicks came through a proxy, VPN or Tor (IPQualityScore).`,
+        metadata: { clicks: c.clicks, proxy: c.proxy, ratio: Number(proxyRatio.toFixed(3)) },
       });
     }
 

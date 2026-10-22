@@ -16,7 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool, query } from '../db/pool.js';
-import { conflict, validationFailed } from '../http/errors.js';
+import { AppError, conflict, validationFailed } from '../http/errors.js';
 import { CURRENCY_RE, absMoney, addMoney, moneySign, subMoney } from '../money.js';
 
 export type AccountType = 'publisher' | 'advertiser';
@@ -372,6 +372,14 @@ export async function createPayoutRun(
     }
     const otherCurrencies = [...others].map(([c, o]) => ({ currency: c, publishers: o.publishers, total: o.total }));
 
+    // Nothing owed in this currency → no batch at all (an empty "paid" batch of 0.00 only cluttered
+    // the history). Nothing has been written; the catch below rolls back and releases the lock.
+    if (!eligible.some((b) => b.currency === currency)) {
+      const elsewhere = otherCurrencies.length ? ` Balances are owed in ${otherCurrencies.map((o) => o.currency).join(', ')} — run the payout in that currency.` : '';
+      throw new AppError('conflict', `Nothing is payable in ${currency} — no payout batch was created.${elsewhere}`,
+        { reason: 'nothing_payable', currency, otherCurrencies, skipped });
+    }
+
     const batch = (await client.query<{ id: string }>(
       `INSERT INTO payout_batches (network_id, status, currency, fx_rate, note, created_by)
        VALUES ($1, 'paid', $2, 1, $3, $4) RETURNING id`,
@@ -447,9 +455,9 @@ export async function settlementPosition(
          FROM ledger_entries
         WHERE network_id = $1 AND account_type = $2 AND account_id = $3 AND currency = $4 AND status = 'approved'
      ), t AS (
-       SELECT COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at < $7::date), 0) AS before,
-              COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at >= $7::date
-                                           AND created_at < ($8::date + interval '1 day')), 0) AS within,
+       SELECT COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at < ($7::date::timestamp AT TIME ZONE 'UTC')), 0) AS before,
+              COALESCE(SUM(owed) FILTER (WHERE entry_type <> $6 AND created_at >= ($7::date::timestamp AT TIME ZONE 'UTC')
+                                           AND created_at < (($8::date + interval '1 day') AT TIME ZONE 'UTC')), 0) AS within,
               COALESCE(-SUM(owed) FILTER (WHERE entry_type = $6), 0) AS settled,
               COALESCE(SUM(owed), 0) AS outstanding
          FROM e

@@ -3,8 +3,10 @@
 # city database, GEO rules (allow / block countries, per-country payouts) and geo targeting are NOT
 # enforced — every country is let through.
 #
-#   MaxMind GeoLite2 (recommended)  — free account at maxmind.com → Manage License Keys → put
-#                                     MAXMIND_LICENSE_KEY=… in api-backend/.env. Updated twice a week.
+#   MaxMind GeoLite2 (recommended)  — free account at maxmind.com/en/geolite2/signup → Manage License Keys →
+#                                     put MAXMIND_ACCOUNT_ID=… and MAXMIND_LICENSE_KEY=… in api-backend/.env.
+#                                     Updated twice a week. (Without the account id the older key-only
+#                                     download link is used.)
 #   DB-IP Lite (fallback, no account) — used when there is no MaxMind key. Updated monthly, CC BY 4.0
 #                                     (credit "IP Geolocation by DB-IP" with a link to db-ip.com).
 #
@@ -20,11 +22,10 @@ mkdir -p "$DEST"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# The key from the environment, else from .env (that line only — .env is never sourced).
-KEY="${MAXMIND_LICENSE_KEY:-}"
-if [[ -z "$KEY" && -f .env ]]; then
-  KEY="$(grep -E '^MAXMIND_LICENSE_KEY=' .env | tail -1 | cut -d= -f2- | tr -d '"'"'"' ' || true)"
-fi
+# The key / account id from the environment, else from .env (those lines only — .env is never sourced).
+from_env_file() { [[ -f .env ]] && grep -E "^$1=" .env | tail -1 | cut -d= -f2- | tr -d '"'"'"' ' || true; }
+KEY="${MAXMIND_LICENSE_KEY:-$(from_env_file MAXMIND_LICENSE_KEY)}"
+ACCOUNT="${MAXMIND_ACCOUNT_ID:-$(from_env_file MAXMIND_ACCOUNT_ID)}"
 
 # Atomic replace: the tracker never opens a half-written file.
 install_db() { mv -f "$1" "$DEST/$2.tmp" && mv -f "$DEST/$2.tmp" "$DEST/$2"; echo "  -> $DEST/$2"; }
@@ -32,7 +33,11 @@ install_db() { mv -f "$1" "$DEST/$2.tmp" && mv -f "$DEST/$2.tmp" "$DEST/$2"; ech
 if [[ -n "$KEY" ]]; then
   for edition in GeoLite2-City GeoLite2-ASN; do
     echo "Downloading MaxMind ${edition}…"
-    curl -sSfL "https://download.maxmind.com/app/geoip_download?edition_id=${edition}&license_key=${KEY}&suffix=tar.gz" -o "$TMP/$edition.tar.gz"
+    if [[ -n "$ACCOUNT" ]]; then  # MaxMind's current link: HTTP basic auth (account id : license key)
+      curl -sSfL -u "${ACCOUNT}:${KEY}" "https://download.maxmind.com/geoip/databases/${edition}/download?suffix=tar.gz" -o "$TMP/$edition.tar.gz"
+    else
+      curl -sSfL "https://download.maxmind.com/app/geoip_download?edition_id=${edition}&license_key=${KEY}&suffix=tar.gz" -o "$TMP/$edition.tar.gz"
+    fi
     mkdir -p "$TMP/$edition"
     tar -xzf "$TMP/$edition.tar.gz" -C "$TMP/$edition"            # portable: no GNU-only --wildcards
     found="$(find "$TMP/$edition" -name "$edition.mmdb" -type f | head -1)"

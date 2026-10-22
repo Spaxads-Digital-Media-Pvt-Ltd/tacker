@@ -66,10 +66,12 @@ describe('buildAuditLogWhere', () => {
     expect(Math.max(...placeholders)).toBe(params.length);
   });
 
-  it('Scheduled Action filters on the system actor (bound)', () => {
-    const { where, params } = buildAuditLogWhere(NET, { method: 'Scheduled Action' });
-    expect(where).toBe('al.network_id = $1 AND al.actor_type = $2');
-    expect(params).toEqual([NET, 'system']);
+  it('a system method (Scheduled Action / Sign-up / Automatic) filters on the system actor and what it did (bound)', () => {
+    for (const method of ['Scheduled Action', 'Sign-up', 'Automatic'] as const) {
+      const { where, params } = buildAuditLogWhere(NET, { method });
+      expect(where).toMatch(/^al\.network_id = \$1 AND al\.actor_type = \$2 AND CASE WHEN al\.action LIKE '%\.signup' THEN 'Sign-up' .* END = \$3$/);
+      expect(params).toEqual([NET, 'system', method]);
+    }
   });
 });
 

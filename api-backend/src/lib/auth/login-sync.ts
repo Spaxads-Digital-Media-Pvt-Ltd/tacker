@@ -35,6 +35,22 @@ export async function syncLogin(
 }
 
 /**
+ * Move a login to a new email (a team member's email changed by an admin): confirmed at once, as an
+ * admin action — the person signs in with the new address and their password. `taken` = another login
+ * already has that address.
+ */
+export async function changeLoginEmail(authUserId: string | null | undefined, email: string): Promise<'synced' | 'no_login' | 'not_configured' | 'taken' | 'failed'> {
+  if (!authUserId) return 'no_login';
+  let sb: ReturnType<typeof getSupabaseAdmin>;
+  try { sb = getSupabaseAdmin(); } catch { return 'not_configured'; }
+  const { error } = await sb.auth.admin.updateUserById(authUserId, { email, email_confirm: true });
+  if (!error) return 'synced';
+  if (error.code === 'email_exists' || /already (been )?registered/i.test(error.message)) return 'taken';
+  logger.warn({ err: error.message, authUserId }, 'login email change failed');
+  return 'failed';
+}
+
+/**
  * Delete a login whose account is gone (a deleted partner / advertiser): its refresh tokens die with
  * it, and the email is free to be invited again. A login that's already gone counts as removed.
  */

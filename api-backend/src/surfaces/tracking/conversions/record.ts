@@ -35,7 +35,7 @@ import {
 import { duplicateModeOf, type DuplicateMode } from '../../../lib/offer-settings/index.js';
 import { getStoredClick, type StoredClick } from '../click-store.js';
 import { writeConversionLedger } from '../../../lib/ledger/ledger.js';
-import { getFraudConfig } from '../../../lib/fraud/rules.js';
+import { getFraudConfigCached } from '../../../lib/fraud/rules.js';
 import { findMatchingControl } from '../../../lib/postback-controls/evaluate.js';
 import { applyTieredCommission } from '../../../lib/tiered-commissions/evaluate.js';
 import {
@@ -394,7 +394,8 @@ async function recordAttributed(
  reason = 'outside_attribution_window';
  }
 
- const cfg = await getFraudConfig(input.networkId);
+ // Redis load-through (5 min, busted on save) — no Postgres read per postback.
+ const cfg = await getFraudConfigCached(input.networkId);
  const fraudFlags: string[] = [];
  let fraudScore = 0;
  if (cfg.enabled && !input.click && ageS < cfg.minClickToConversionSeconds) {
@@ -599,6 +600,8 @@ async function recordAttributed(
  );
  if (prior.rows.length > 0) duplicateReason = 'duplicate_click_event';
  }
+ // The price before Customer Value and the throttle — what an over-cap conversion is held at (below).
+ const basePrice = { payout, revenue };
  // 2. Customer Value, under the per-customer lock, every query on THIS transaction's client (never
  // the pool): the firing check sees any firing committed by an earlier holder of the lock, and this
  // conversion's own firing is inserted below before the lock is released at COMMIT.
@@ -628,7 +631,13 @@ async function recordAttributed(
  applicableSettings(offer?.customSettings, 'caps', click.publisher_id, clickAttrs, new Date()), payout, revenue, capTz);
  }
  }
- if (overCap) { status = 'pending'; reason = overCap; throttled = false; }
+ // Held over cap: back to the base price, no Customer Value firing, not throttled. A bonus the rule
+ // would have paid isn't recorded as fired (so it isn't "used up" by a held conversion), and a throttle
+ // zero never sticks to a conversion an admin approves later.
+ if (overCap) {
+ status = 'pending'; reason = overCap; throttled = false;
+ payout = basePrice.payout; revenue = basePrice.revenue; cvAppliedId = null;
+ }
  const ins = duplicateReason ? { rows: [] as { conversion_id: string }[] } : await client.query<{ conversion_id: string }>(
  `INSERT INTO conversions (
  conversion_id, network_id, click_id, offer_id, publisher_id, advertiser_id,

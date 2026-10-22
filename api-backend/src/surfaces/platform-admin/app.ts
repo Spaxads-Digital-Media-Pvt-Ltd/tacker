@@ -10,6 +10,11 @@ import { platformRoutes, publicPlatformRoutes } from './routes.js';
 import { billingRoutes } from './billing-routes.js';
 import { opsRoutes } from './ops-routes.js';
 import { salesRoutes } from './sales-routes.js';
+import { salesTeamRoutes } from './sales-team-routes.js';
+import { quoteRoutes } from './quote-routes.js';
+import { networkAdminRoutes } from './network-admin-routes.js';
+import { reportRoutes } from './report-routes.js';
+import { slackRoutes } from './slack-routes.js';
 import { taskRoutes } from './task-routes.js';
 import { successRoutes } from './success-routes.js';
 import { supportRoutes } from './support-routes.js';
@@ -18,6 +23,9 @@ import { flagsRoutes } from './flags-routes.js';
 import { systemRoutes } from './system-routes.js';
 import { trustRoutes } from './trust-routes.js';
 import { emailRoutes } from './email-routes.js';
+import { resellerRoutes } from './reseller-routes.js';
+import { commsRoutes } from './comms-routes.js';
+import { securityRoutes } from './security-routes.js';
 
 export function buildPlatformAdminApp(): Express {
  const app = createBaseApp('platform-admin');
@@ -32,6 +40,11 @@ export function buildPlatformAdminApp(): Express {
  authed.use('/', billingRoutes());
  authed.use('/', opsRoutes());
  authed.use('/', salesRoutes());
+ authed.use('/', salesTeamRoutes());
+ authed.use('/', quoteRoutes());
+ authed.use('/', networkAdminRoutes());
+ authed.use('/', reportRoutes());
+ authed.use('/', slackRoutes());
  authed.use('/', taskRoutes());
  authed.use('/', successRoutes());
  authed.use('/', supportRoutes());
@@ -40,6 +53,9 @@ export function buildPlatformAdminApp(): Express {
  authed.use('/', systemRoutes());
  authed.use('/', trustRoutes());
  authed.use('/', emailRoutes());
+ authed.use('/', resellerRoutes());
+ authed.use('/', commsRoutes());
+ authed.use('/', securityRoutes());
 
  app.use('/platform', authed);
 

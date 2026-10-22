@@ -5,7 +5,7 @@
  * and "auto-approve partners" approves a member's access request on a linked offer at once. Labels
  * reuse the existing generic tags/taggings system (entity_type 'partner_tier'). Tenant-scoped (§3A).
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
@@ -19,6 +19,7 @@ import { writeAudit } from '../../../lib/audit.js';
 import { findOrCreateTag } from '../../../lib/db/tags.js';
 import { requireRole } from '../auth.js';
 import { invalidateOfferConfig, invalidateNetworkOfferConfigs } from '../../tracking/offer-cache.js';
+import { approvePendingTierRequests } from '../../../lib/partner-tier-approvals.js';
 
 const TABLE = 'partner_tiers';
 
@@ -102,6 +103,18 @@ async function labelsFor(networkId: string, tierId: string): Promise<string[]> {
   return rows.map((r) => r.name);
 }
 
+/** Approve what the tier now auto-approves (lib/partner-tiers.ts) and audit each approval. */
+async function autoApproveForTier(req: Request, tierId: string): Promise<number> {
+  const approved = await approvePendingTierRequests(req.scope!.networkId, tierId);
+  for (const a of approved) {
+    await writeAudit(req, {
+      action: 'offer.access.auto_approve', entityType: 'offer_publisher_access', entityId: a.id,
+      after: { offerId: a.offerId, publisherId: a.publisherId, by: 'partner_tier', tierId },
+    });
+  }
+  return approved.length;
+}
+
 export function partnerTiersRoutes(): Router {
   const r = Router();
 
@@ -146,6 +159,7 @@ export function partnerTiersRoutes(): Router {
     await setLabels(db, row.id, b.labels);
     await setMembers(db, req.scope!.networkId, row.id, b.partnerIds);
     await writeAudit(req, { action: 'partner_tier.create', entityType: 'partner_tier', entityId: row.id, after: row });
+    await autoApproveForTier(req, row.id);
     sendOk(res, dto({ ...row, partners_preview: [], partners_total: b.partnerIds.length, labels: b.labels }), undefined, 201);
   }));
 
@@ -180,6 +194,8 @@ export function partnerTiersRoutes(): Router {
       await invalidateNetworkOfferConfigs(req.scope!.networkId);
     }
     await writeAudit(req, { action: 'partner_tier.update', entityType: 'partner_tier', entityId: req.params.id, before, after: row });
+    // New members, or the tier (re)activated: their pending requests on auto-approve offers go through now.
+    if (b.partnerIds !== undefined || b.status === 'active') await autoApproveForTier(req, row.id);
     const labels = await labelsFor(req.scope!.networkId, row.id);
     const { rows: countRows } = await query<{ count: string }>(
       `SELECT COUNT(*)::text AS count FROM partner_tier_members WHERE tier_id = $1 AND network_id = $2`, [row.id, req.scope!.networkId],
@@ -257,7 +273,8 @@ export function partnerTiersRoutes(): Router {
     }
     await invalidateOfferConfig(req.scope!.networkId, b.offerId);
     await writeAudit(req, { action: 'partner_tier.offer.link', entityType: 'partner_tier', entityId: req.params.id, after: b });
-    sendOk(res, { linked: true });
+    const approved = b.autoApprovePartners ? await autoApproveForTier(req, req.params.id!) : 0;
+    sendOk(res, { linked: true, approvedRequests: approved });
   }));
 
   r.delete('/:id/offers/:offerId', requireRole('admin', 'manager'), asyncHandler(async (req, res) => {

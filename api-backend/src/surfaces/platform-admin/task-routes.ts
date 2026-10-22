@@ -119,8 +119,8 @@ export function taskRoutes(): Router {
       AND (CASE $1::text WHEN 'all' THEN TRUE WHEN 'unassigned' THEN t.assignee_id IS NULL ELSE t.assignee_id::text = $1::text END)
       AND ($2::text = 'all' OR t.status = $2::text)
       AND (CASE $3::text WHEN 'overdue' THEN t.status = 'open' AND t.due_at < now()
-                         WHEN 'today' THEN t.due_at < date_trunc('day', now()) + interval '1 day'
-                         WHEN 'week' THEN t.due_at < date_trunc('day', now()) + interval '7 days' ELSE TRUE END)
+                         WHEN 'today' THEN t.due_at < date_trunc('day', now(), 'UTC') + interval '1 day'
+                         WHEN 'week' THEN t.due_at < date_trunc('day', now(), 'UTC') + interval '7 days' ELSE TRUE END)
       AND ($4::text IS NULL OR t.kind = $4::text)
       AND ($5::uuid IS NULL OR t.lead_id = $5::uuid)
       AND ($6::uuid IS NULL OR t.network_id = $6::uuid)`;

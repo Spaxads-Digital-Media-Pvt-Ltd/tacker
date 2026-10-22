@@ -97,7 +97,7 @@ async function billedAmountFor(networkId: string, advertiserId: string, currency
        FROM ledger_entries
       WHERE network_id = $1 AND account_type = 'advertiser' AND account_id = $2 AND status = 'approved'
         AND entry_type <> 'receipt' AND currency = $5
-        AND created_at >= $3::date AND created_at < ($4::date + interval '1 day')`,
+        AND created_at >= ($3::date::timestamp AT TIME ZONE 'UTC') AND created_at < (($4::date + interval '1 day') AT TIME ZONE 'UTC')`,
     [networkId, advertiserId, periodStart, periodEnd, currency],
   );
   return rows[0]?.total ?? '0.00';
@@ -314,7 +314,7 @@ export function advertiserInvoicesRoutes(): Router {
          FROM ledger_entries
         WHERE network_id = $1 AND account_type = 'advertiser' AND account_id = $2 AND status = 'approved'
           AND currency = $5
-          AND created_at >= $3::date AND created_at < ($4::date + interval '1 day')
+          AND created_at >= ($3::date::timestamp AT TIME ZONE 'UTC') AND created_at < (($4::date + interval '1 day') AT TIME ZONE 'UTC')
         ORDER BY created_at DESC LIMIT 500`,
       [req.scope!.networkId, invoice.advertiser_id, dateOnly(invoice.period_start), dateOnly(invoice.period_end), invoice.currency],
     );

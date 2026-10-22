@@ -34,7 +34,7 @@ export function subscriptionRoutes(): Router {
       const usage = (await query(
         `SELECT metric, SUM(value)::bigint AS total
            FROM usage_records
-          WHERE network_id = $1 AND period_date >= (CURRENT_DATE - INTERVAL '30 days')
+          WHERE network_id = $1 AND period_date >= ((now() AT TIME ZONE 'UTC')::date - 30)
           GROUP BY metric`,
         [networkId],
       )).rows;

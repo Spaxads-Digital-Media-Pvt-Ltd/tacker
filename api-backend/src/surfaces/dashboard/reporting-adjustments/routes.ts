@@ -53,12 +53,12 @@ async function originalByDay(networkId: string, publisherId: string, offerId: st
   // Clicks contribute COUNTS only. clicks.resolved_revenue/payout are the per-conversion rates
   // frozen for later attribution — not money earned — so summing them double-counted revenue/payout.
   const { rows: clickRows } = await query<{ day: string; total_clicks: string; unique_clicks: string }>(
-    `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
+    `SELECT to_char((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day,
             COUNT(*)::text AS total_clicks,
             COUNT(*) FILTER (WHERE is_unique)::text AS unique_clicks
        FROM clicks
       WHERE network_id = $1 AND publisher_id = $2 AND offer_id = $3
-        AND created_at >= $4::date AND created_at < ($5::date + interval '1 day')
+        AND created_at >= ($4::date::timestamp AT TIME ZONE 'UTC') AND created_at < (($5::date + interval '1 day') AT TIME ZONE 'UTC')
       GROUP BY 1`,
     [networkId, publisherId, offerId, dateFrom, dateTo],
   );
@@ -69,13 +69,13 @@ async function originalByDay(networkId: string, publisherId: string, offerId: st
   }
 
   const { rows: convRows } = await query<{ day: string; conversions: string; revenue: string; payout: string }>(
-    `SELECT to_char(created_at::date, 'YYYY-MM-DD') AS day,
+    `SELECT to_char((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day,
             COUNT(*)::text AS conversions,
             COALESCE(SUM(revenue), 0)::text AS revenue,
             COALESCE(SUM(payout), 0)::text AS payout
        FROM conversions
       WHERE network_id = $1 AND publisher_id = $2 AND offer_id = $3 AND status = 'approved'
-        AND created_at >= $4::date AND created_at < ($5::date + interval '1 day')
+        AND created_at >= ($4::date::timestamp AT TIME ZONE 'UTC') AND created_at < (($5::date + interval '1 day') AT TIME ZONE 'UTC')
       GROUP BY 1`,
     [networkId, publisherId, offerId, dateFrom, dateTo],
   );

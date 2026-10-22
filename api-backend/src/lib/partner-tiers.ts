@@ -30,3 +30,4 @@ export async function tierAutoApproves(networkId: string, offerId: string, publi
     [networkId, offerId, publisherId]);
   return rows.length > 0;
 }
+

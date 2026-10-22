@@ -1,8 +1,9 @@
 /**
  * Manage Advertisers — paged list (`GET /api/advertisers?paged=1`). Schema + PURE SQL builder,
  * network id always `$1`, every value bound. Semantics mirror the page's former client-side filters:
- *   - Tabs: pending = status pending; existing = not pending + linked portal account; unverified =
- *     not pending + no portal account.
+ *   - Tabs: pending = status pending; existing = every account that isn't pending (with or without a
+ *     portal login — an admin-made account without one used to be missing from Existing); unverified =
+ *     not pending + no portal login yet (a sub-list of Existing: who still needs an invite).
  *   - Search: name contains (case-insensitive).
  * Foreign ids (another network's user/tag) simply match nothing.
  */
@@ -38,7 +39,7 @@ export type AdvertiserListQuery = z.infer<typeof advertiserListQuerySchema>;
 function tabWhere(tab: AdvertiserListQuery['tab']): string | null {
   if (tab === 'pending') return `a.status = 'pending'`;
   if (tab === 'unverified') return `(a.status <> 'pending' AND a.auth_user_id IS NULL)`;
-  if (tab === 'existing') return `(a.status <> 'pending' AND a.auth_user_id IS NOT NULL)`;
+  if (tab === 'existing') return `a.status <> 'pending'`;
   return null;
 }
 

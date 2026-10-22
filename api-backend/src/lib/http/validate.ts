@@ -6,6 +6,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { z, type ZodTypeAny } from 'zod';
 import { validationFailed } from './errors.js';
+import './zod-messages.js'; // plain-English messages for every schema (zod's global error map)
 
 export function validateBody<S extends ZodTypeAny>(schema: S) {
   return (req: Request, _res: Response, next: NextFunction): void => {
@@ -40,14 +41,16 @@ const MAX_SHOWN = 3;
 
 /**
  * The message a person reads: the first few problems, each naming its field — "Password must be at
- * least 12 characters." / "Email: Invalid email" / "Daily conversion cap: Expected number, received
- * string" — instead of "Request body failed validation". A message that already starts with the
+ * least 12 characters." / "Email must be a valid email address" / "Daily conversion cap must be a
+ * number" (lib/http/zod-messages.ts) — instead of "Request body failed validation". A message that already starts with the
  * field's name isn't prefixed again. The full list stays in `details` for programs.
  */
 export function describeIssues(err: z.ZodError, fallback: string): string {
   const parts = err.issues.slice(0, MAX_SHOWN).map((i) => {
     if (!i.path.length) return i.message;
     const label = fieldLabel(i.path);
+    // The plain-English map's messages ("must be a number") read on from the field's name.
+    if (/^[a-z]/.test(i.message)) return `${label} ${i.message}`;
     const last = String(i.path[i.path.length - 1]).replace(/_/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
     return i.message.toLowerCase().startsWith(last) ? i.message : `${label}: ${i.message}`;
   }).filter(Boolean);

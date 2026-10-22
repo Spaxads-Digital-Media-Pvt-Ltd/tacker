@@ -37,7 +37,7 @@ import { userDto, type UserRow } from '../control-center/routes.js';
 const createUserSchema = z.object({
   name: z.string().min(1).max(200),
   email: z.string().email().max(200),
-  role: z.enum(['admin', 'manager', 'finance', 'read_only']).default('read_only'),
+  role: z.enum(['admin', 'manager', 'finance', 'read_only', 'affiliate_manager', 'advertiser_manager']).default('read_only'),
   businessUnit: z.string().max(100).optional(),
   partnerManager: z.boolean().optional(),
   advertiserManager: z.boolean().optional(),

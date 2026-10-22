@@ -4,6 +4,9 @@
  * `SENT_SYSTEM_EMAILS` are the ones that actually send (F-24 transactional layer; the partner
  * notifications in lib/email/notifications.ts and the alert emails, O11). The rest have no send
  * behind them, so the API leaves them out of the list (O11: hidden until they're wired).
+ *
+ * Most are on until a network turns them off. `defaultOn: false` = off until turned on: the advertiser
+ * digests (lib/email/advertiser-digest.ts) — an hourly email to every advertiser shouldn't start on its own.
  */
 export const SYSTEM_EMAIL_CATALOG = [
   { key: 'partner_signup_approved', label: 'Partner Sign-Up Approved', category: 'partner' },
@@ -15,8 +18,8 @@ export const SYSTEM_EMAIL_CATALOG = [
   { key: 'partner_offer_now_unavailable', label: 'Partner Offer Now Unavailable', category: 'partner' },
   { key: 'partner_invoice_generated', label: 'Partner Invoice Generated', category: 'partner' },
   { key: 'advertiser_invoice_generated', label: 'Advertiser Invoice Generated', category: 'advertiser' },
-  { key: 'advertiser_postback_received', label: 'Advertiser Postback Received', category: 'advertiser' },
-  { key: 'new_conversion_recorded', label: 'New Conversion Recorded', category: 'advertiser' },
+  { key: 'advertiser_postback_received', label: 'Advertiser Postback Received (hourly digest)', category: 'advertiser', defaultOn: false },
+  { key: 'new_conversion_recorded', label: 'New Conversion Recorded (hourly digest)', category: 'advertiser', defaultOn: false },
   { key: 'alert_threshold_triggered', label: 'Alert Threshold Triggered', category: 'misc' },
   { key: 'payout_batch_completed', label: 'Payout Batch Completed', category: 'misc' },
   { key: 'fraud_rule_triggered', label: 'Fraud Rule Triggered', category: 'misc' },
@@ -36,7 +39,15 @@ export const SENT_SYSTEM_EMAILS: ReadonlySet<SystemEmailKey> = new Set<SystemEma
   'partner_signup_approved', 'partner_signup_rejected', 'offer_application_approved', 'offer_application_denied',
   'new_offer_creative_available', 'partner_offer_now_available', 'partner_offer_now_unavailable',
   'payout_batch_completed', 'alert_threshold_triggered', 'fraud_rule_triggered',
+  // The hourly advertiser digests (lib/email/advertiser-digest.ts).
+  'advertiser_postback_received', 'new_conversion_recorded',
 ]);
+
+/** Whether a system email is on when the network hasn't set it. */
+export function systemEmailDefault(key: string): boolean {
+  const e = SYSTEM_EMAIL_CATALOG.find((x) => x.key === key) as { defaultOn?: boolean } | undefined;
+  return e?.defaultOn ?? true;
+}
 
 /** The toggles shown: only emails that actually send (unwired ones stay hidden until they are). */
 export const VISIBLE_SYSTEM_EMAILS = SYSTEM_EMAIL_CATALOG.filter((e) => SENT_SYSTEM_EMAILS.has(e.key));

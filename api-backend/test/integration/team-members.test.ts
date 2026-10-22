@@ -12,11 +12,17 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Express } from 'express';
 
-const sb = vi.hoisted(() => ({ updates: [] as { id: string; attrs: Record<string, unknown> }[], configured: true }));
+const sb = vi.hoisted(() => ({ updates: [] as { id: string; attrs: Record<string, unknown> }[], configured: true, takenEmails: new Set<string>() }));
 vi.mock('../../src/lib/supabase.js', () => ({
   getSupabaseAdmin: () => {
     if (!sb.configured) throw new Error('Supabase admin client requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
-    return { auth: { admin: { updateUserById: async (id: string, attrs: Record<string, unknown>) => { sb.updates.push({ id, attrs }); return { data: { user: { id } }, error: null }; } } } };
+    return { auth: { admin: { updateUserById: async (id: string, attrs: Record<string, unknown>) => {
+      if (typeof attrs['email'] === 'string' && sb.takenEmails.has(attrs['email'])) {
+        return { data: { user: null }, error: { code: 'email_exists', status: 422, message: 'A user with this email address has already been registered' } };
+      }
+      sb.updates.push({ id, attrs });
+      return { data: { user: { id } }, error: null };
+    } } } };
   },
 }));
 
@@ -48,7 +54,7 @@ d('team member edits take effect (live DB, fake Supabase)', () => {
     fx = await seedFixture(`team-${randomUUID().slice(0, 8)}`);
     dash = buildDashboardApp();
   });
-  beforeEach(() => { sb.updates.length = 0; sb.configured = true; });
+  beforeEach(() => { sb.updates.length = 0; sb.configured = true; sb.takenEmails.clear(); });
 
   it('a role change applies on the next request (same token), and the login’s role claim follows', async () => {
     const admin = await member('admin');
@@ -112,5 +118,43 @@ d('team member edits take effect (live DB, fake Supabase)', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.loginSync).toBe('not_configured');
     expect((await request(dash).get('/api/offers').set(fin.auth)).status).toBe(403);
+  });
+
+  it('a new email becomes their sign-in address: the login moves (confirmed), both addresses are told; duplicates and failures change nothing', async () => {
+    await query(`UPDATE networks SET settings = COALESCE(settings, '{}'::jsonb) || $2::jsonb WHERE id = $1`, [fx.networkA, JSON.stringify({
+      smtp: { host: 'smtp.example.test', port: 587, username: 'u', password: 'p', fromEmail: 'n@example.test', fromName: 'N' } })]);
+    const admin = await member('admin');
+    const m = await member('manager');
+    const other = await member('finance');
+    const emailOf = async (id: string) => (await query<{ email: string }>('SELECT email FROM users WHERE id = $1', [id])).rows[0]!.email;
+    const before = await emailOf(m.id);
+    const fresh = `moved-${randomUUID().slice(0, 6)}@example.com`;
+
+    const ok = await edit(admin.auth, m.id, { email: fresh.toUpperCase() });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.email).toBe(fresh);
+    expect(await emailOf(m.id)).toBe(fresh);
+    expect(sb.updates).toEqual([{ id: m.authId, attrs: { email: fresh, email_confirm: true } }]);
+    await new Promise((r) => setTimeout(r, 100)); // the notice is queued after the response
+    const told = (await query<{ recipient: string }>(`SELECT recipient FROM email_outbox WHERE network_id = $1 AND event = 'login_email_changed' ORDER BY recipient`, [fx.networkA])).rows;
+    expect(told.map((r) => r.recipient).sort()).toEqual([before, fresh].sort());
+
+    // Same address in another case: nothing to change.
+    sb.updates.length = 0;
+    expect((await edit(admin.auth, m.id, { email: fresh.toUpperCase() })).status).toBe(200);
+    expect(sb.updates).toEqual([]);
+
+    // Another team member's address → 409, nothing touched.
+    const dup = await edit(admin.auth, m.id, { email: await emailOf(other.id) });
+    expect([dup.status, dup.body.error.details]).toEqual([409, { reason: 'email_in_use' }]);
+    // A login elsewhere already has it → 409, row unchanged.
+    sb.takenEmails.add('someone@example.com');
+    expect((await edit(admin.auth, m.id, { email: 'someone@example.com' })).status).toBe(409);
+    // Supabase not configured → 503, row unchanged.
+    sb.configured = false;
+    const down = await edit(admin.auth, m.id, { email: 'later@example.com' });
+    expect(down.status).toBe(503);
+    expect(down.body.error.message).toMatch(/SUPABASE_SERVICE_ROLE_KEY/);
+    expect(await emailOf(m.id)).toBe(fresh);
   });
 });

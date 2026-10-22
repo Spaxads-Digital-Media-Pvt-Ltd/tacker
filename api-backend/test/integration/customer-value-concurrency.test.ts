@@ -117,6 +117,8 @@ d('Customer Value under concurrent conversions (live DB + Redis)', () => {
     expect(await firings(env, heldUser)).toBe(0);
     const held = await conversionsFor(env, heldUser);
     expect(held.map((c) => c.status)).toEqual(['pending']);
+    // Held at the base price: the rule's bonus isn't recorded as fired, so it isn't stored either.
+    expect(held.map((c) => c.payout)).toEqual([BASE_PAYOUT]);
     expect((await earnings(env, held.map((c) => c.conversion_id))).size).toBe(0);
   }, 60_000);
 

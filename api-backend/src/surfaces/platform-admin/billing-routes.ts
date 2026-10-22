@@ -20,7 +20,7 @@ import {
   INVOICE_SELECT, issueInvoice, invoiceLines, markInvoicePaid, extendInvoiceDeadline, voidInvoice, type PlatformInvoice,
 } from '../../lib/billing/invoices.js';
 import { assignPlan, cancelSubscription, resumeSubscription, extendTrial } from '../../lib/billing/subscriptions.js';
-import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
+import { notifyInvoiceIssued, notifyInvoicePaid } from '../../lib/platform/notify.js';
 import { runBilling } from '../../lib/billing/engine.js';
 import {
   createPlanSchema, updatePlanSchema, assignSubscriptionSchema, cancelSubscriptionSchema, extendTrialSchema,
@@ -178,7 +178,7 @@ export function billingRoutes(): Router {
               COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open'), 0)::text AS open_total,
               COUNT(*) FILTER (WHERE i.status = 'open' AND i.due_at <= now())::int AS overdue_count,
               COALESCE(SUM(i.total) FILTER (WHERE i.status = 'open' AND i.due_at <= now()), 0)::text AS overdue_total,
-              COALESCE(SUM(i.paid_amount) FILTER (WHERE i.status = 'paid' AND i.paid_at >= date_trunc('month', now())), 0)::text AS collected_this_month
+              COALESCE(SUM(i.paid_amount) FILTER (WHERE i.status = 'paid' AND i.paid_at >= date_trunc('month', now(), 'UTC')), 0)::text AS collected_this_month
          FROM platform_invoices i LEFT JOIN networks n ON n.id = i.network_id
         WHERE ($1::uuid IS NULL OR i.network_id = $1) AND ${scope.sql} GROUP BY i.currency ORDER BY i.currency`, [networkId, ...scope.params]);
     sendOk(res, rows);
@@ -226,6 +226,7 @@ export function billingRoutes(): Router {
       action: 'invoice.mark_paid', entityType: 'platform_invoice', entityId: id,
       before: { status: out.before.status }, after: { number: out.after.number, paidAmount: out.after.paid_amount, method: out.after.payment_method, reference: out.after.payment_reference, ...out.settled },
     });
+    await notifyInvoicePaid(id);
     sendOk(res, { invoice: out.after, ...out.settled });
   }));
 

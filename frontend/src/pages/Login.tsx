@@ -1,11 +1,13 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_HOME } from '../auth/roles';
 import { loadSession } from '../auth/session';
 import { api } from '../lib/api';
+import { publicNetwork, type PublicNetwork } from '../auth/authClient';
 import { Brandmark } from '../shared-components/primitives/Brandmark';
 import { BRAND } from '../config/branding';
+import { useHostBrand } from '../lib/hostBrand';
 
 /** Decorative "tracking flow" motif for the brand panel — clicks (small dots) travelling a rising
  * path and landing as a conversion (the larger dot). Pure token-free white-on-accent; sits behind
@@ -33,12 +35,28 @@ const ENDED: Record<string, string> = {
   network_deleted: 'Your network has been deleted, so you have been signed out. It can still be restored for a while — contact the platform administrator if this is a mistake.',
   network_purged: 'Your network no longer exists — it was deleted and its data removed.',
   session_expired: 'Your sign-in ended. Please sign in again.',
+  session_ended: 'This session was signed out (from another session, or by an Owner). Please sign in again.',
+  ip_not_allowed: 'The console can only be used from the platform’s allowed addresses. Connect from an allowed network and sign in again.',
 };
 
 export default function Login() {
   const { signIn, signInPlatform, completePlatformSignIn } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  // White-label: on a network's dashboard domain its brand replaces the platform's, and its sign-up links show.
+  const hostBrand = useHostBrand();
+  const brandName = hostBrand?.brandName ?? BRAND.name;
+  const platformHidden = hostBrand?.hidePlatformBranding ?? false;
+  // A network's own login link (?network=<slug>, from its sign-up pages / profile) — or its own domain: its
+  // sign-up links, when open.
+  const networkSlug = params.get('network')?.trim() || hostBrand?.networkSlug || '';
+  const [signupNet, setSignupNet] = useState<{ slug: string; info: PublicNetwork } | null>(null);
+  useEffect(() => {
+    if (!networkSlug) return;
+    let live = true;
+    publicNetwork(networkSlug).then((info) => { if (live) setSignupNet({ slug: networkSlug, info }); }).catch(() => { /* unknown network: plain login */ });
+    return () => { live = false; };
+  }, [networkSlug]);
   const ended = ENDED[params.get('ended') ?? ''] ?? null;
   const resetDone = params.get('reset') === 'done';
   const [email, setEmail] = useState('');
@@ -107,7 +125,7 @@ export default function Login() {
               <path d="M3 17l6-6 4 4 8-8" /><path d="M17 7h4v4" />
             </svg>
           </span>
-          <span className="text-xl font-bold tracking-tight">{BRAND.name}</span>
+          <span className="text-xl font-bold tracking-tight">{brandName}</span>
         </div>
         <div className="relative max-w-md text-white">
           <h2 className="text-h1 font-bold leading-tight tracking-tight">
@@ -186,12 +204,20 @@ export default function Login() {
             </form>
             )}
 
-            {!challenge && <button type="button" onClick={() => { setAsSuperAdmin((v) => !v); setError(null); }}
+            {!challenge && !platformHidden && <button type="button" onClick={() => { setAsSuperAdmin((v) => !v); setError(null); }}
               className="mt-4 w-full text-center text-tiny font-medium text-accent-text hover:underline">
               {asSuperAdmin ? 'Back to regular sign in' : 'Sign in as Super Admin'}
             </button>}
 
-            {!asSuperAdmin && (
+            {!asSuperAdmin && signupNet && (signupNet.info.partnerSignup || signupNet.info.advertiserSignup) && (
+              <p className="mt-4 text-center text-tiny text-fg-secondary">
+                New to {signupNet.info.name}?{' '}
+                {signupNet.info.partnerSignup && <Link to={`/pub-signup?network=${encodeURIComponent(signupNet.slug)}`} className="font-medium text-accent-text hover:underline">Sign up as a partner</Link>}
+                {signupNet.info.partnerSignup && signupNet.info.advertiserSignup && ' · '}
+                {signupNet.info.advertiserSignup && <Link to={`/adv-signup?network=${encodeURIComponent(signupNet.slug)}`} className="font-medium text-accent-text hover:underline">Sign up as an advertiser</Link>}
+              </p>
+            )}
+            {!asSuperAdmin && !signupNet && !hostBrand && (
               <p className="mt-4 text-center text-tiny text-fg-secondary">
                 New to {BRAND.name}? <Link to="/request-demo" className="font-medium text-accent-text hover:underline">Request a demo</Link>
               </p>

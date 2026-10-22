@@ -37,6 +37,10 @@ const MAX_BATCHES = 1_000; // safety valve: at most 5M rows/table/run on the cti
 
 /** How long the email log (email_outbox, O11) keeps its records. */
 export const EMAIL_LOG_RETENTION_DAYS = 90;
+/** How long a smart link's Run Record (smart_link_kpi_runs) keeps its runs. */
+export const KPI_RUN_RETENTION_DAYS = 90;
+/** How long Requested Reports keep a request and its file (lib/reporting/report-requests.ts holds the same number). */
+export const REPORT_REQUEST_RETENTION_DAYS = 30;
 
 export interface RetentionResult {
  clicksDeleted: number;
@@ -50,6 +54,12 @@ export interface RetentionResult {
  partitionsDropped: string[];
  /** Email log rows older than EMAIL_LOG_RETENTION_DAYS (O11). */
  emailLogDeleted?: number;
+ /** Smart-link KPI run records older than KPI_RUN_RETENTION_DAYS. */
+ kpiRunsDeleted?: number;
+ /** Requested reports (and their files) older than REPORT_REQUEST_RETENTION_DAYS. */
+ reportRequestsDeleted?: number;
+ /** Platform staff sign-in events (180 days), ended sessions (30 days), read bell notices (90 days). */
+ staffSecurityDeleted?: number;
 }
 
 /** YYYYMM → integer month-key. Postgres partition naming uses `_YYYY_MM` (zero-padded). */
@@ -241,6 +251,17 @@ export async function runRetention(now: Date = new Date()): Promise<RetentionRes
  // queued email that old was never going to send).
  result.emailLogDeleted = (await query(
  `DELETE FROM email_outbox WHERE created_at < $1`, [cutoff(EMAIL_LOG_RETENTION_DAYS, now)])).rowCount ?? 0;
+ // 5. Smart-link KPI run records.
+ result.kpiRunsDeleted = (await query(
+ `DELETE FROM smart_link_kpi_runs WHERE ran_at < $1`, [cutoff(KPI_RUN_RETENTION_DAYS, now)])).rowCount ?? 0;
+ // 6. Requested reports (Reporting › Saved & Scheduled) with their files.
+ result.reportRequestsDeleted = (await query(
+ `DELETE FROM report_requests WHERE created_at < $1`, [cutoff(REPORT_REQUEST_RETENTION_DAYS, now)])).rowCount ?? 0;
+ // 7. Platform staff security: sign-in history, ended sessions, read notices.
+ result.staffSecurityDeleted =
+ ((await query(`DELETE FROM platform_login_events WHERE created_at < $1`, [cutoff(180, now)])).rowCount ?? 0)
+ + ((await query(`DELETE FROM platform_sessions WHERE (revoked_at IS NOT NULL OR expires_at < now()) AND created_at < $1`, [cutoff(30, now)])).rowCount ?? 0)
+ + ((await query(`DELETE FROM platform_notifications WHERE read_at IS NOT NULL AND created_at < $1`, [cutoff(90, now)])).rowCount ?? 0);
 
  log.info(
  { ...result, networks: networks.length },

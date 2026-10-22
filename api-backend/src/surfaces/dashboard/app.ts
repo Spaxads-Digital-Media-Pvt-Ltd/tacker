@@ -44,6 +44,7 @@ import { customFieldRoutes } from './custom-fields/routes.js';
 import { settingsRoutes } from './settings/routes.js';
 import { smartLinksRoutes } from './smart-links/routes.js';
 import { savedReportsRoutes } from './saved-reports/routes.js';
+import { reportRequestsRoutes } from './report-requests/routes.js';
 import { offlineRoutes } from './offline/routes.js';
 import { importExportRoutes } from './import-export/routes.js';
 import { catalogRoutes, invoiceRoutes } from './catalog/routes.js';
@@ -78,6 +79,10 @@ import { advertiserInvoicesRoutes } from './advertiser-invoices/routes.js';
 import { tieredCommissionsRoutes } from './tiered-commissions/routes.js';
 import { controlCenterRoutes } from './control-center/routes.js';
 import { signupRoutes } from './signup/routes.js';
+import { whiteLabelRoutes, publicBrandRoutes } from './white-label/routes.js';
+import { helpRoutes, publicStatusRoutes } from './help/routes.js';
+import { publicQuoteRoutes } from './quotes/routes.js';
+import { myRoutes } from './my/routes.js';
 import { networkTimeZone } from '../../lib/reporting/network-zone.js';
 import { IMAGE_MAX_BYTES, IMAGE_UPLOAD_CONTENT_TYPES, assertImageValue, imageTypesFor, imageTypesText, uploadContentType, uploadImage } from '../../lib/storage/images.js';
 import { networkBranding } from './control-center/config.js';
@@ -90,6 +95,9 @@ export function buildDashboardApp(): Express {
   // Everything else requires an identity.
   app.use('/api/auth', authRoutes());
   app.use('/api/signup', signupRoutes());
+  app.use('/api/public', publicBrandRoutes());
+  app.use('/api/public', publicStatusRoutes());
+  app.use('/api/public', publicQuoteRoutes());
 
   const authed = Router();
   authed.use(dashboardAuth);
@@ -449,6 +457,10 @@ export function buildDashboardApp(): Express {
   authed.use('/settings', requireAdmin, settingsRoutes());
   authed.use('/smart-links', requireAdmin, smartLinksRoutes());
   authed.use('/saved-reports', requireAdmin, savedReportsRoutes());
+  authed.use('/report-requests', requireAdmin, reportRequestsRoutes());
+  authed.use('/white-label', requireAdmin, whiteLabelRoutes());
+  authed.use('/help', helpRoutes());
+  authed.use('/my', requireAdmin, myRoutes());
   authed.use('/offline', requireAdmin, offlineRoutes());
   authed.use('/import-export', requireAdmin, importExportRoutes());
   authed.use('/catalog', requireAdmin, catalogRoutes());

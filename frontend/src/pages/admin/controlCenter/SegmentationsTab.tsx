@@ -8,6 +8,7 @@ import { api } from '../../../lib/api';
 import { cc } from '../../../lib/controlCenter';
 import { useQuery } from '../../../lib/useApi';
 import { StateBlock, Spinner, Tabs } from '../../../shared-components/primitives/ui';
+import { useConfirm } from '../../../shared-components/primitives/confirm';
 
 const SUB_TABS = ['Categories', 'Channels', 'Labels', 'Business Unit'] as const;
 
@@ -140,6 +141,8 @@ function CrudSub({ resource, addLabel, columns, desc }: {
 }
 
 function LabelsSub() {
+  const confirm = useConfirm();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -174,6 +177,7 @@ function LabelsSub() {
   return (
     <div>
       <p className="mb-3 text-small text-fg-secondary">Set custom tags to link with a Partner, Advertiser, or Offer for internal reporting, searching, or filtering.</p>
+      {deleteError && <p className="mb-3 text-small text-danger-text">{deleteError}</p>}
       {adding && (
         <div className="card mb-3 flex flex-wrap items-end gap-2">
           {saveError && <p className="text-small text-danger-text">{saveError}</p>}
@@ -200,7 +204,11 @@ function LabelsSub() {
               <td className="px-4 py-3">0</td>
               <td className="px-4 py-3">{t.partnerTiers}</td>
               <td className="px-4 py-3 text-right">
-                <button className="text-tiny text-danger-text hover:underline" onClick={async () => { await api.del(`/api/tags/${t.id}`); refetch(); }}>Delete</button>
+                <button className="text-tiny text-danger-text hover:underline" onClick={() => { setDeleteError(null); void confirm({
+                  title: 'Delete label?', message: `Delete the label "${t.name}"? It is removed from every advertiser, partner, offer and tier using it.`,
+                  confirmLabel: 'Delete', destructive: true,
+                  onConfirm: async () => { try { await api.del(`/api/tags/${t.id}`); refetch(); } catch (e) { setDeleteError(e instanceof Error ? e.message : 'Delete failed'); } },
+                }); }}>Delete</button>
               </td>
             </tr>
           ))}

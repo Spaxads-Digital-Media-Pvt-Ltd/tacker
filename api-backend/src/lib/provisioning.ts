@@ -13,6 +13,7 @@ import { getSupabaseAdmin } from './supabase.js';
 import { query } from './db/pool.js';
 import { AppError, serviceUnavailable } from './http/errors.js';
 import { generateSecureCode } from './security-code.js';
+import type { AdminRole } from '../middleware/types.js';
 
 export interface ProvisionResult {
  authUserId: string;
@@ -53,7 +54,7 @@ const firstSignInChange = (on: boolean | undefined) => (on ? { must_change_passw
 
 /** Admin (network staff) login. Claims: network_id, kind=admin, role. */
 export function provisionAdmin(
- args: BaseArgs & { networkId: string; role: 'admin' | 'manager' | 'finance' | 'read_only'; mustChangePassword?: boolean },
+ args: BaseArgs & { networkId: string; role: AdminRole; mustChangePassword?: boolean },
 ): Promise<string> {
  return createAuthUser(args, { kind: 'admin', network_id: args.networkId, role: args.role, ...firstSignInChange(args.mustChangePassword) });
 }

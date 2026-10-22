@@ -19,6 +19,7 @@ import { useConfirm } from '../../shared-components/primitives/confirm';
 import type { NetworkRow, PurgedNetworkRow } from '../../types';
 import { HealthChip } from './success/parts';
 import { billingBadge } from '../../lib/platformBilling';
+import { NetworkBulkBar } from './NetworkBulk';
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString() : '—');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -45,6 +46,15 @@ export default function Networks() {
   const [purging, setPurging] = useState<NetworkRow | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const confirm = useConfirm();
+  // Ticked networks for a bulk change — cleared whenever the filters change.
+  const canBulk = canManage || can('success', 'full') || can('plans', 'full') || can('resellers', 'full');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const filterKey = `${search}|${statusFilter}|${planFilter}`;
+  const [selectedFor, setSelectedFor] = useState(filterKey);
+  if (selectedFor !== filterKey) { setSelectedFor(filterKey); setSelected(new Set()); }
+  const shown = data ?? [];
+  const allShown = shown.length > 0 && shown.every((n) => selected.has(n.id));
+  const toggle = (id: string) => setSelected((s) => { const x = new Set(s); if (x.has(id)) x.delete(id); else x.add(id); return x; });
 
   const setStatus = (n: NetworkRow, status: 'active' | 'suspended', verb: string, message: string) => confirm({
     title: `${verb} ${n.name}?`, message, confirmLabel: verb, destructive: status === 'suspended',
@@ -62,6 +72,7 @@ export default function Networks() {
   };
 
   const columns: Column<NetworkRow>[] = [
+    ...(canBulk ? [{ header: '', cell: (n: NetworkRow) => <input type="checkbox" className="h-4 w-4" checked={selected.has(n.id)} onChange={() => toggle(n.id)} aria-label={`Select ${n.name}`} /> }] : []),
     {
       header: 'Network',
       cell: (n) => (
@@ -140,7 +151,16 @@ export default function Networks() {
       {loading ? <StateBlock><Spinner /></StateBlock>
         : error ? <StateBlock>{error}</StateBlock>
         : !data || data.length === 0 ? <StateBlock>{filtered ? 'No networks match these filters.' : 'No networks yet.'}</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(n) => n.id} />}
+        : <>
+          {canBulk && (
+            <label className="mb-2 flex items-center gap-2 text-small text-fg-secondary">
+              <input type="checkbox" className="h-4 w-4" checked={allShown} onChange={() => setSelected(allShown ? new Set() : new Set(shown.map((n) => n.id)))} />
+              Select all {shown.length} shown
+            </label>
+          )}
+          {canBulk && <NetworkBulkBar ids={[...selected]} onDone={refetch} onClear={() => setSelected(new Set())} />}
+          <Table columns={columns} rows={data} rowKey={(n) => n.id} stickyCol={canBulk ? 1 : 0} />
+        </>}
       {(purged.data?.length ?? 0) > 0 && (
         <div className="mt-8 space-y-3">
           <div>

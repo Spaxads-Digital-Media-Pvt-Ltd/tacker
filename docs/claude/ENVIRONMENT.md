@@ -36,7 +36,8 @@
 | `ANTHROPIC_API_KEY` | AI ops layer (Phase 7) | — |
 | `AI_DAILY_CHAT_LIMIT` | AI chats per network per UTC day on `/api/ai/chat`; `0` = no cap | `200` |
 | `AI_DAILY_TOKEN_LIMIT` | Model tokens (input + output, every tool-loop turn) per network per UTC day; `0` = no cap | `2000000` |
-| `MAXMIND_LICENSE_KEY` | GeoIP2 DB updates | — |
+| `MAXMIND_LICENSE_KEY` | GeoLite2 (free MaxMind account) downloads — `npm run geoip:download`; without it the script falls back to DB-IP Lite (no region codes / postal / DMA) | — |
+| `MAXMIND_ACCOUNT_ID` | With the key: MaxMind's current download link (HTTP basic auth); without it the older key-only link is used | — |
 | `TRACKER24_GATEWAY_URL` | The 24metrics gateway base (`{id}` = the offer's 24metrics tracker ID) — point it at `scripts/fake-24metrics.mjs` (`http://localhost:4799/{id}`) to test without an account | `https://{id}.gateway.go2link.co` |
 | `TRACKING_RL_CLICK_LIMIT` × 5 | `/impression` per IP per 5 min (a page can show several ads) — derived, not its own variable | `600` |
 | `CLICK_RETENTION_DAYS` | Default days to keep clicks + postback logs (a network can override in Settings › Retention; 0 = keep forever) | `90` |

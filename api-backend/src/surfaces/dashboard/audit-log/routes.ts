@@ -28,8 +28,15 @@ const PORTALS = ['Dashboard', 'API', 'Platform Admin', 'System'] as const;
 const ACTOR_BY_PORTAL: Record<(typeof PORTALS)[number], string> = {
   Dashboard: 'user', API: 'api_key', 'Platform Admin': 'platform_admin', System: 'system',
 };
-/** Method label → action suffixes (mirrors METHOD_BY_ACTION_SUFFIX); 'Scheduled Action' = system actor. */
-const METHODS = ['POST', 'PATCH', 'DELETE', 'Scheduled Action'] as const;
+/** Method label → action suffixes (mirrors METHOD_BY_ACTION_SUFFIX). A system actor's row is labelled by
+ * what it was (systemMethod): a self-serve 'Sign-up', a 'Scheduled Action' run, or 'Automatic' (SmartSwitch,
+ * billing, backfills) — every one of them used to read "Scheduled Action". */
+const METHODS = ['POST', 'PATCH', 'DELETE', 'Scheduled Action', 'Sign-up', 'Automatic'] as const;
+const SYSTEM_METHODS: readonly string[] = ['Scheduled Action', 'Sign-up', 'Automatic'];
+/** A system row's method label (JS twin of SYSTEM_METHOD_SQL). */
+const systemMethod = (action: string): string =>
+  action.endsWith('.signup') ? 'Sign-up' : action.includes('scheduled_action') ? 'Scheduled Action' : 'Automatic';
+const SYSTEM_METHOD_SQL = `CASE WHEN al.action LIKE '%.signup' THEN 'Sign-up' WHEN al.action LIKE '%scheduled\\_action%' THEN 'Scheduled Action' ELSE 'Automatic' END`;
 
 const METHOD_BY_ACTION_SUFFIX: Record<string, string> = {
   create: 'POST', update: 'PATCH', delete: 'DELETE', send: 'POST', toggle: 'PATCH', regenerate: 'POST', clear: 'DELETE',
@@ -80,7 +87,7 @@ export function buildAuditLogWhere(networkId: string, f: Omit<AuditLogQuery, 'li
   if (f.service) clauses.push(`${SERVICE_KEY_SQL} = ${bind(f.service)}`);
   if (f.portal) clauses.push(`al.actor_type = ${bind(ACTOR_BY_PORTAL[f.portal])}`);
   if (f.method) {
-    if (f.method === 'Scheduled Action') clauses.push(`al.actor_type = ${bind('system')}`);
+    if (SYSTEM_METHODS.includes(f.method)) clauses.push(`al.actor_type = ${bind('system')} AND ${SYSTEM_METHOD_SQL} = ${bind(f.method)}`);
     else clauses.push(`al.actor_type <> ${bind('system')} AND ${ACTION_SUFFIX_SQL} = ANY(${bind(SUFFIXES_BY_METHOD[f.method] ?? [])}::text[])`);
   }
   if (f.q) {
@@ -106,7 +113,7 @@ function toDTO(row: Row) {
     changes: `- ${entityLabel}`,
     isNew: suffix === 'create',
     employee: row.employee_name ?? row.employee_email ?? (row.platform_email ? `Super Admin ${row.platform_email}` : null) ?? row.actor_id ?? '—',
-    method: row.actor_type === 'system' ? 'Scheduled Action' : (METHOD_BY_ACTION_SUFFIX[suffix] ?? '—'),
+    method: row.actor_type === 'system' ? systemMethod(row.action) : (METHOD_BY_ACTION_SUFFIX[suffix] ?? '—'),
     portal: row.actor_type === 'user' ? 'Dashboard' : row.actor_type === 'api_key' ? 'API' : row.actor_type === 'platform_admin' ? 'Platform Admin' : 'System',
     userIp: row.ip, userAgent: row.user_agent,
   };

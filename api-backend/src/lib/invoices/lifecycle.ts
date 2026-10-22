@@ -56,7 +56,7 @@ export async function activityByCurrency(
        FROM ledger_entries
       WHERE network_id = $1 AND account_type = $2 AND account_id = $3 AND status = 'approved'
         AND entry_type <> $7
-        AND created_at >= $4::date AND created_at < ($5::date + interval '1 day')
+        AND created_at >= ($4::date::timestamp AT TIME ZONE 'UTC') AND created_at < (($5::date + interval '1 day') AT TIME ZONE 'UTC')
       GROUP BY currency
      HAVING SUM(CASE WHEN direction = $6 THEN amount ELSE -amount END) <> 0
       ORDER BY currency`,

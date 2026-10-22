@@ -57,7 +57,7 @@ const ACCOUNT_FROM = `networks n
   LEFT JOIN platform_admins so ON so.id = n.sales_owner_id
   LEFT JOIN subscriptions s ON s.network_id = n.id
   LEFT JOIN subscription_plans p ON p.id = s.plan_id
-  LEFT JOIN LATERAL (SELECT score FROM network_health_history h WHERE h.network_id = n.id AND h.day <= CURRENT_DATE - 7 ORDER BY h.day DESC LIMIT 1) h7 ON true`;
+  LEFT JOIN LATERAL (SELECT score FROM network_health_history h WHERE h.network_id = n.id AND h.day <= (now() AT TIME ZONE 'UTC')::date - 7 ORDER BY h.day DESC LIMIT 1) h7 ON true`;
 
 async function activeMember(id: string, what: string): Promise<void> {
   const row = (await query<{ name: string; status: string }>(`SELECT COALESCE(name, email) AS name, status FROM platform_admins WHERE id = $1`, [id])).rows[0];
@@ -89,7 +89,7 @@ export function successRoutes(): Router {
               WHERE ${live} AND na.health_status = 'at_risk' ORDER BY na.health_score, n.name LIMIT 8`, p),
       query(`SELECT n.id, n.name, na.health_score, h7.score AS score_7d_ago
                FROM networks n JOIN network_accounts na ON na.network_id = n.id
-               JOIN LATERAL (SELECT score FROM network_health_history h WHERE h.network_id = n.id AND h.day <= CURRENT_DATE - 7 ORDER BY h.day DESC LIMIT 1) h7 ON true
+               JOIN LATERAL (SELECT score FROM network_health_history h WHERE h.network_id = n.id AND h.day <= (now() AT TIME ZONE 'UTC')::date - 7 ORDER BY h.day DESC LIMIT 1) h7 ON true
               WHERE ${live} AND h7.score - na.health_score >= 10 ORDER BY (h7.score - na.health_score) DESC LIMIT 8`, p),
       query(`SELECT n.id, n.name, n.created_at, na.onboarding_pct, na.onboarding
                FROM networks n JOIN network_accounts na ON na.network_id = n.id
@@ -160,7 +160,7 @@ export function successRoutes(): Router {
       `SELECT ${ACCOUNT_COLS}, COALESCE(na.onboarding, '[]') AS onboarding FROM ${ACCOUNT_FROM} WHERE n.id = $1`, [id])).rows[0];
     if (!account) throw notFound('Network not found');
     const [history, notes] = await Promise.all([
-      query(`SELECT to_char(day, 'YYYY-MM-DD') AS day, score, status FROM network_health_history WHERE network_id = $1 AND day > CURRENT_DATE - 90 ORDER BY day`, [id]),
+      query(`SELECT to_char(day, 'YYYY-MM-DD') AS day, score, status FROM network_health_history WHERE network_id = $1 AND day > (now() AT TIME ZONE 'UTC')::date - 90 ORDER BY day`, [id]),
       query(`SELECT nn.id, nn.body, nn.pinned, nn.created_at, nn.updated_at, nn.author_id, COALESCE(pa.name, pa.email) AS author_name
                FROM network_notes nn LEFT JOIN platform_admins pa ON pa.id = nn.author_id WHERE nn.network_id = $1 ORDER BY nn.pinned DESC, nn.created_at DESC LIMIT 200`, [id]),
     ]);

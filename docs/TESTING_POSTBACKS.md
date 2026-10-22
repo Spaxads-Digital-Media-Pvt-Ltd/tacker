@@ -42,7 +42,9 @@ every country through. That's why allowed and blocked countries seemed to do not
    - or open the tunnel URL (section 2) on a phone or through a VPN. Real visitor IPs arrive through ngrok.
 5. Countries can be set in **two places**: Offer › GEO, and Edit Offer › Targeting › Country. A click has to
    pass both. If they don't overlap, for example GEO "allow US, CA" with Targeting "include IN", nothing gets
-   through. The offer API now returns `configWarnings` describing a conflict like this.
+   through. Offer Details and Edit Offer show a warning at the top when settings conflict like this — and when
+   this server's GeoIP database can't enforce what the offer asks for (no database, zip / DMA on DB-IP, carrier
+   without GeoIP2-ISP).
 6. Region rules (GEO with a region): enter the code (`CA` or `US-CA`) or the name (`California`). The most
    specific rule wins: country + region, then country, then `*`.
 

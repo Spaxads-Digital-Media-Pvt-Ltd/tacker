@@ -32,6 +32,8 @@ import { startAutomationWebhookWorker } from './processors/automation-webhook.js
 import { startSmartLinkKpiWorker, scheduleSmartLinkKpi } from './processors/smart-link-kpi.js';
 import { startReportingRollupWorker, scheduleReportingRollup } from './processors/reporting-rollup.js';
 import { startScheduledReportsWorker, scheduleScheduledReports } from './processors/scheduled-reports.js';
+import { startReportExportsWorker, scheduleReportExportSweep } from './processors/report-exports.js';
+import { startAdvertiserDigestWorker, scheduleAdvertiserDigest } from './processors/advertiser-digest.js';
 import { startUsageMeterWorker, scheduleUsageMeter } from './processors/usage-meter.js';
 import { startPlatformBillingWorker, schedulePlatformBilling } from './processors/platform-billing.js';
 import { startPlatformHealthWorker, schedulePlatformHealth } from './processors/platform-health.js';
@@ -66,6 +68,8 @@ const workers = [
  startSmartLinkKpiWorker(),
  startReportingRollupWorker(),
  startScheduledReportsWorker(),
+ startReportExportsWorker(),
+ startAdvertiserDigestWorker(),
  startUsageMeterWorker(),
  startPlatformBillingWorker(),
  startPlatformHealthWorker(),
@@ -84,6 +88,8 @@ void scheduleSmartSwitch().catch((err) => log.error({ err }, 'failed to schedule
 void scheduleSmartLinkKpi().catch((err) => log.error({ err }, 'failed to schedule smart link KPI scoring'));
 void scheduleReportingRollup().catch((err) => log.error({ err }, 'failed to schedule reporting rollups'));
 void scheduleScheduledReports().catch((err) => log.error({ err }, 'failed to schedule scheduled reports'));
+void scheduleReportExportSweep().catch((err) => log.error({ err }, 'failed to schedule the report export sweep'));
+void scheduleAdvertiserDigest().catch((err) => log.error({ err }, 'failed to schedule advertiser digests'));
 void scheduleUsageMeter().catch((err) => log.error({ err }, 'failed to schedule usage metering'));
 void schedulePlatformBilling().catch((err) => log.error({ err }, 'failed to schedule platform billing'));
 void schedulePlatformHealth().catch((err) => log.error({ err }, 'failed to schedule customer health'));

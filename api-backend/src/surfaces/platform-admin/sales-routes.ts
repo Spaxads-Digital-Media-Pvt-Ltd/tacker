@@ -2,7 +2,8 @@
  * Super Admin › Sales — the platform's own pipeline of prospective tenant networks.
  *
  * - Dashboard (/sales/summary): pipeline by stage, the weighted forecast, won this month, win rate and
- *   sales cycle (90 days), leads by source, the leaderboard, trials to convert, my open tasks, recent activity.
+ *   sales cycle (90 days), leads by source, the leaderboard, trials to convert, my open tasks, recent activity,
+ *   my quota this month (sales-team-routes.ts).
  * - Leads: list (search, stage / owner / source filters, sort) and CSV, the kanban (/sales/pipeline),
  *   create (an open lead with the same email → 409 naming it), edit — stage and owner changes land on the
  *   lead's timeline; lost needs a reason; a converted lead stays won — and delete (not a converted one).
@@ -27,8 +28,9 @@ import { writePlatformAudit } from '../../lib/audit.js';
 import { createNetwork } from '../../lib/networks/create.js';
 import { assignPlan } from '../../lib/billing/subscriptions.js';
 import { generateTemporaryPassword } from '../../lib/provisioning.js';
-import { notifyInvoiceIssued } from '../../lib/platform/notify.js';
+import { notifyInvoiceIssued, notifyNetworkCreated } from '../../lib/platform/notify.js';
 import { STAGES, OPEN_STAGES, SOURCES, LOGGED_ACTIVITIES, logLeadActivity, salesKpis } from '../../lib/platform/sales.js';
+import { myQuota } from '../../lib/platform/sales-comp.js';
 import { requirePerm, can, networkScope, leadScope } from './auth.js';
 import { UUID_RE, optText, optEmail, optMoney, optDateTime, meId } from './fields.js';
 
@@ -99,7 +101,7 @@ const SORT: Record<z.infer<typeof listSchema>['sort'], string> = {
   value: 'l.expected_mrr DESC NULLS LAST, l.updated_at DESC', company: 'lower(l.company) ASC',
 };
 
-async function loadLead(req: Request, id: string): Promise<LeadRow> {
+export async function loadLead(req: Request, id: string): Promise<LeadRow> {
   if (!UUID_RE.test(id)) throw notFound('Lead not found');
   const sc = leadScope(req, 'l', 2);
   const row = (await query<LeadRow>(
@@ -166,19 +168,19 @@ export function salesRoutes(): Router {
            FROM sales_leads l WHERE l.created_at >= now() - interval '180 days' AND ${sc.sql} GROUP BY l.source ORDER BY leads DESC`, p),
       query(
         `WITH w AS (SELECT l.owner_id, l.currency, SUM(l.expected_mrr) AS amount FROM sales_leads l
-                     WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now()) AND ${sc.sql} GROUP BY l.owner_id, l.currency)
+                     WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now(), 'UTC') AND ${sc.sql} GROUP BY l.owner_id, l.currency)
          SELECT pa.id, COALESCE(pa.name, pa.email) AS name,
                 COUNT(*) FILTER (WHERE l.stage NOT IN ('won', 'lost'))::int AS open,
-                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now()))::int AS won_this_month,
-                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now()))::int AS won_this_quarter,
+                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('month', now(), 'UTC'))::int AS won_this_month,
+                COUNT(*) FILTER (WHERE l.stage = 'won' AND l.won_at >= date_trunc('quarter', now(), 'UTC'))::int AS won_this_quarter,
                 COALESCE((SELECT json_agg(json_build_object('currency', w.currency, 'amount', w.amount::text) ORDER BY w.currency) FROM w WHERE w.owner_id = pa.id), '[]'::json) AS won_mrr_quarter
            FROM sales_leads l JOIN platform_admins pa ON pa.id = l.owner_id
           WHERE ${sc.sql} GROUP BY pa.id ORDER BY won_this_quarter DESC, open DESC LIMIT 10`, p),
       query<{ week: string; created: number; won: number }>(
-        `SELECT to_char(w, 'YYYY-MM-DD') AS week,
+        `SELECT to_char(w AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS week,
                 (SELECT COUNT(*) FROM sales_leads l WHERE l.created_at >= w AND l.created_at < w + interval '7 days' AND ${sc.sql})::int AS created,
                 (SELECT COUNT(*) FROM sales_leads l WHERE l.stage = 'won' AND l.won_at >= w AND l.won_at < w + interval '7 days' AND ${sc.sql})::int AS won
-           FROM generate_series(date_trunc('week', now()) - interval '11 weeks', date_trunc('week', now()), interval '1 week') w ORDER BY w`, p),
+           FROM generate_series(date_trunc('week', now(), 'UTC') - interval '11 weeks', date_trunc('week', now(), 'UTC'), interval '1 week') w ORDER BY w`, p),
       query(
         `SELECT t.id, t.title, t.priority, t.due_at, t.lead_id, t.network_id, l.company AS lead_company, n.name AS network_name
            FROM platform_tasks t LEFT JOIN sales_leads l ON l.id = t.lead_id LEFT JOIN networks n ON n.id = t.network_id
@@ -215,6 +217,7 @@ export function salesRoutes(): Router {
       myTasks: tasks.rows,
       recent: recent.rows,
       trials,
+      myQuota: await myQuota(me),
     });
   }));
 
@@ -386,6 +389,7 @@ export function salesRoutes(): Router {
       salesOwnerId: lead.owner_id ?? meId(req), accountManagerId: b.accountManagerId ?? null,
     });
     await writePlatformAudit(req, network.id, { action: 'network.create', entityType: 'network', entityId: network.id, after: { ...network, fromLead: lead.id } });
+    await notifyNetworkCreated(network.id, null, lead.company);
 
     // The lead is won and linked to the network at once — a plan problem below can't leave it unlinked.
     await withTransaction(async (c) => {

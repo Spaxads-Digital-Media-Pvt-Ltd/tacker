@@ -20,6 +20,7 @@ import { query } from '../../lib/db/pool.js';
 import { allows, normalizePermissions, sectionName, type Section } from '../../lib/platform/permissions.js';
 import type { PlatformAdminIdentity } from '../../middleware/types.js';
 import { securitySettings } from '../../lib/platform/twofactor.js';
+import { ipAllowed, sessionIsLive } from '../../lib/platform/staff-security.js';
 
 /** What a member who must set up two-factor may still reach. */
 const SETUP_PATHS = /^\/me(\/2fa(\/[a-z-]+)?|\/password)?\/?$/;
@@ -35,6 +36,8 @@ interface PlatformAdminRow {
  scope: 'all' | 'assigned';
  home: string;
 }
+
+const clientAddress = (req: Request): string | null => (typeof req.ip === 'string' ? req.ip : req.socket?.remoteAddress ?? null);
 
 export function platformAdminAuth(req: Request, _res: Response, next: NextFunction): void {
  const h = req.header('authorization');
@@ -56,8 +59,15 @@ export function platformAdminAuth(req: Request, _res: Response, next: NextFuncti
  if (!admin || admin.status !== 'active') {
  return next(forbidden('Platform administrator not found or disabled.'));
  }
+ // The session: a signed-out (revoked) or expired one ends here even though the JWT still verifies.
+ if (!payload.jti || !(await sessionIsLive(payload.jti, admin.id))) {
+ return next(new AppError('unauthorized', 'Your session has ended — please sign in again.', { reason: 'session_ended' }));
+ }
+ if (!ipAllowed((await securitySettings()).ipAllowlist, clientAddress(req))) {
+ return next(new AppError('forbidden', 'The console can only be used from the platform’s allowed addresses (Settings › Security).', { reason: 'ip_not_allowed' }));
+ }
  const identity: PlatformAdminIdentity = {
- surface: 'platform-admin', platformAdminId: admin.id, email: admin.email,
+ surface: 'platform-admin', platformAdminId: admin.id, email: admin.email, sessionId: payload.jti,
  role: { key: admin.role_key, name: admin.role_name, scope: admin.scope, home: admin.home },
  permissions: normalizePermissions(admin.permissions),
  };

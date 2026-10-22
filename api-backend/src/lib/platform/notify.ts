@@ -10,6 +10,8 @@ import { logger } from '../logger.js';
 import { BRAND } from '../../config/branding.js';
 import { appUrl } from '../app-url.js';
 import { escapeHtml as e } from '../email/transactional.js';
+import { notifyStaffInApp } from './staff-security.js';
+import { notifySlack } from './slack.js';
 import { enqueuePlatformEmails } from '../email/outbox.js';
 import { platformSmtpConfigError } from '../mailer.js';
 import { notificationOn, type NotificationKey } from './email.js';
@@ -54,6 +56,8 @@ async function sectionTeam(section: string): Promise<string[]> {
 const ownerEmail = async (networkId: string) => (await query<{ email: string }>(
   `SELECT email FROM users WHERE network_id = $1 AND role = 'admin' AND status = 'active' ORDER BY created_at LIMIT 1`, [networkId])).rows[0]?.email ?? null;
 
+const networkName = async (networkId: string) => (await query<{ name: string }>('SELECT name FROM networks WHERE id = $1', [networkId])).rows[0]?.name ?? 'A network';
+
 // ---------- Support ----------
 async function notifyTicketCreatedImpl(ticketId: string): Promise<void> {
   const t = (await query<{ number: string; subject: string; priority: string; network_id: string; network_name: string; assignee_email: string | null; body: string | null }>(
@@ -62,6 +66,8 @@ async function notifyTicketCreatedImpl(ticketId: string): Promise<void> {
        FROM support_tickets t JOIN networks n ON n.id = t.network_id LEFT JOIN platform_admins a ON a.id = t.assignee_id WHERE t.id = $1`, [ticketId])).rows[0];
   if (!t) return;
   const to = t.assignee_email ? [t.assignee_email] : await sectionTeam('support');
+  await notifyStaffInApp({ emails: to }, { kind: 'ticket', title: `New ticket from ${t.network_name}: ${t.subject}`, link: `/admin/support/${ticketId}` });
+  void notifySlack('ticketCreated', `:ticket: New ${t.priority === 'normal' ? '' : `${t.priority} `}ticket #${t.number} from ${t.network_name}: ${t.subject}`, { path: `/admin/support/${ticketId}`, label: 'Open the ticket' });
   await send('ticketCreated', 'support.ticket_created', to, {
     subject: `[#${t.number}] ${t.network_name}: ${t.subject}`,
     html: layout({
@@ -77,7 +83,9 @@ async function notifyCustomerReplyImpl(ticketId: string, body: string): Promise<
     `SELECT t.number::text, t.subject, t.network_id, n.name AS network_name, a.email AS assignee_email
        FROM support_tickets t JOIN networks n ON n.id = t.network_id LEFT JOIN platform_admins a ON a.id = t.assignee_id WHERE t.id = $1`, [ticketId])).rows[0];
   if (!t) return;
-  await send('customerReply', 'support.customer_reply', t.assignee_email ? [t.assignee_email] : await sectionTeam('support'), {
+  const replyTo = t.assignee_email ? [t.assignee_email] : await sectionTeam('support');
+  await notifyStaffInApp({ emails: replyTo }, { kind: 'ticket_reply', title: `${t.network_name} replied on #${t.number}`, body: body.slice(0, 200), link: `/admin/support/${ticketId}` });
+  await send('customerReply', 'support.customer_reply', replyTo, {
     subject: `Re: [#${t.number}] ${t.subject}`,
     html: layout({ heading: `${t.network_name} replied`, paragraphs: [quote(body)], button: { label: 'Answer', url: appUrl(`/admin/support/${ticketId}`) } }),
   }, t.network_id);
@@ -102,7 +110,10 @@ async function notifyLeadInboundImpl(leadId: string): Promise<void> {
   const l = (await query<{ company: string; contact_name: string | null; email: string | null; message: string | null; owner_email: string | null }>(
     `SELECT l.company, l.contact_name, l.email, l.message, o.email AS owner_email FROM sales_leads l LEFT JOIN platform_admins o ON o.id = l.owner_id WHERE l.id = $1`, [leadId])).rows[0];
   if (!l) return;
-  await send('leadInbound', 'sales.lead_inbound', l.owner_email ? [l.owner_email] : await sectionTeam('sales'), {
+  const leadTo = l.owner_email ? [l.owner_email] : await sectionTeam('sales');
+  await notifyStaffInApp({ emails: leadTo }, { kind: 'lead', title: `${l.company} asked for a demo`, link: `/admin/sales/leads/${leadId}` });
+  void notifySlack('leadInbound', `:wave: ${l.company} asked for a demo${l.contact_name ? ` (${l.contact_name})` : ''}`, { path: `/admin/sales/leads/${leadId}`, label: 'Open the lead' });
+  await send('leadInbound', 'sales.lead_inbound', leadTo, {
     subject: `New demo request: ${l.company}`,
     html: layout({
       heading: `${l.company} asked for a demo`,
@@ -112,10 +123,31 @@ async function notifyLeadInboundImpl(leadId: string): Promise<void> {
   });
 }
 
+async function notifyQuoteRespondedImpl(quoteId: string): Promise<void> {
+  const q = (await query<{ number: string; status: string; responder_name: string | null; decline_reason: string | null; lead_id: string; company: string; owner_email: string | null }>(
+    `SELECT q.number::text AS number, q.status, q.responder_name, q.decline_reason, l.id AS lead_id, l.company, o.email AS owner_email
+       FROM sales_quotes q JOIN sales_leads l ON l.id = q.lead_id LEFT JOIN platform_admins o ON o.id = l.owner_id WHERE q.id = $1`, [quoteId])).rows[0];
+  if (!q) return;
+  const to = q.owner_email ? [q.owner_email] : await sectionTeam('sales');
+  const verb = q.status === 'accepted' ? 'accepted' : 'declined';
+  const title = `${q.company} ${verb} quote Q-${q.number}`;
+  void notifySlack('quoteResponded', `${verb === 'accepted' ? ':tada:' : ':x:'} ${title}${q.responder_name ? ` — by ${q.responder_name}` : ''}`, { path: `/admin/sales/leads/${q.lead_id}`, label: 'Open the lead' });
+  await notifyStaffInApp({ emails: to }, { kind: 'quote', title, body: q.decline_reason ?? (q.responder_name ? `By ${q.responder_name}` : null), link: `/admin/sales/leads/${q.lead_id}` });
+  await send('quoteResponded', `sales.quote_${verb}`, to, {
+    subject: title,
+    html: layout({
+      heading: title,
+      paragraphs: [q.responder_name ? `${verb === 'accepted' ? 'Accepted' : 'Declined'} by ${e(q.responder_name)}.` : '', q.decline_reason ? quote(q.decline_reason) : ''],
+      button: { label: 'Open the lead', url: appUrl(`/admin/sales/leads/${q.lead_id}`) },
+    }),
+  });
+}
+
 async function notifyTaskAssignedImpl(taskId: string, byName: string | null): Promise<void> {
   const t = (await query<{ title: string; due_at: Date | null; assignee_email: string | null; notes: string | null }>(
     `SELECT t.title, t.due_at, a.email AS assignee_email, t.notes FROM platform_tasks t LEFT JOIN platform_admins a ON a.id = t.assignee_id WHERE t.id = $1`, [taskId])).rows[0];
   if (!t?.assignee_email) return;
+  await notifyStaffInApp({ emails: [t.assignee_email] }, { kind: 'task', title: `${byName ?? 'Someone'} gave you a task: ${t.title}`, link: '/admin/tasks' });
   await send('taskAssigned', 'tasks.assigned', [t.assignee_email], {
     subject: `New task: ${t.title}`,
     html: layout({
@@ -146,6 +178,7 @@ async function notifyInvoiceOverdueImpl(networkId: string): Promise<void> {
   const i = (await query<{ id: string; number: string; total: string; currency: string; suspend_at: Date }>(
     `SELECT id, number, total::text, currency, suspend_at FROM platform_invoices WHERE network_id = $1 AND status = 'open' AND due_at <= now() ORDER BY due_at LIMIT 1`, [networkId])).rows[0];
   if (!i) return;
+  void notifySlack('invoiceOverdue', `:hourglass: Invoice ${i.number} (${i.currency} ${i.total}) is overdue — ${await networkName(networkId)}`, { path: `/admin/invoices/${i.id}`, label: 'View the invoice' });
   await send('invoiceOverdue', 'billing.invoice_overdue', [await ownerEmail(networkId)], {
     subject: `Overdue: invoice ${i.number} (${i.currency} ${i.total})`,
     html: layout({
@@ -157,6 +190,7 @@ async function notifyInvoiceOverdueImpl(networkId: string): Promise<void> {
 }
 
 async function notifyNetworkSuspendedImpl(networkId: string, invoiceNumbers: string[]): Promise<void> {
+  void notifySlack('networkSuspended', `:no_entry: ${await networkName(networkId)} was suspended for unpaid invoice${invoiceNumbers.length > 1 ? 's' : ''} ${invoiceNumbers.join(', ')}`, { path: `/admin/networks/${networkId}`, label: 'Open the network' });
   await send('networkSuspended', 'billing.network_suspended', [await ownerEmail(networkId)], {
     subject: 'Your network is suspended for an unpaid invoice',
     html: layout({
@@ -167,11 +201,28 @@ async function notifyNetworkSuspendedImpl(networkId: string, invoiceNumbers: str
   }, networkId);
 }
 
+// ---------- Slack only (the platform team's channel) ----------
+async function notifyNetworkCreatedImpl(networkId: string, by: string | null, fromLead?: string | null): Promise<void> {
+  void notifySlack('networkCreated', `:rocket: New network: ${await networkName(networkId)}${fromLead ? ` (converted from the lead ${fromLead})` : ''}${by ? ` — by ${by}` : ''}`,
+    { path: `/admin/networks/${networkId}`, label: 'Open the network' });
+}
+
+async function notifyInvoicePaidImpl(invoiceId: string): Promise<void> {
+  const i = (await query<{ number: string; network_id: string; paid_amount: string | null; currency: string }>(
+    'SELECT number, network_id, paid_amount::text, currency FROM platform_invoices WHERE id = $1', [invoiceId])).rows[0];
+  if (!i) return;
+  void notifySlack('invoicePaid', `:moneybag: ${await networkName(i.network_id)} paid invoice ${i.number}${i.paid_amount ? ` — ${i.currency} ${i.paid_amount}` : ''}`,
+    { path: `/admin/invoices/${invoiceId}`, label: 'View the invoice' });
+}
+
+export const notifyNetworkCreated = safely('notifyNetworkCreated', notifyNetworkCreatedImpl);
+export const notifyInvoicePaid = safely('notifyInvoicePaid', notifyInvoicePaidImpl);
 export const notifyTicketCreated = safely('notifyTicketCreated', notifyTicketCreatedImpl);
 export const notifyCustomerReply = safely('notifyCustomerReply', notifyCustomerReplyImpl);
 export const notifyStaffReply = safely('notifyStaffReply', notifyStaffReplyImpl);
 export const notifyLeadInbound = safely('notifyLeadInbound', notifyLeadInboundImpl);
 export const notifyTaskAssigned = safely('notifyTaskAssigned', notifyTaskAssignedImpl);
+export const notifyQuoteResponded = safely('notifyQuoteResponded', notifyQuoteRespondedImpl);
 export const notifyInvoiceIssued = safely('notifyInvoiceIssued', notifyInvoiceIssuedImpl);
 export const notifyInvoiceOverdue = safely('notifyInvoiceOverdue', notifyInvoiceOverdueImpl);
 export const notifyNetworkSuspended = safely('notifyNetworkSuspended', notifyNetworkSuspendedImpl);

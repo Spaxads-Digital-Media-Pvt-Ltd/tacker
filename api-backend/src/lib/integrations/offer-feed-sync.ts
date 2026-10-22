@@ -5,8 +5,9 @@
 import { query } from '../db/pool.js';
 import { roundMoney, MoneyFormatError } from '../money.js';
 import { invalidateOfferConfig } from '../../surfaces/tracking/offer-cache.js';
-import { safeRequest, BlockedDestinationError, type SafeResponse } from '../net/safe-http.js';
+import { safeRequest, assertOutboundUrl, BlockedDestinationError, type SafeResponse } from '../net/safe-http.js';
 import { loadIntegrations, saveIntegrations, secretValue, type IntegrationSettings } from './settings.js';
+import { getRedirectUrlRejectReason } from '../url-security.js';
 
 export interface FeedOffer {
   id: string;
@@ -22,7 +23,8 @@ export interface SyncResult {
   pulled: number;
   created: number;
   updated: number;
-  /** Offers left out because an amount wasn't a usable decimal (O9) — never imported as 0. */
+  /** Offers left out: an amount wasn't a usable decimal (O9 — never imported as 0) or the landing page URL
+   * isn't a safe redirect (never stored, so /click never sends a visitor there). */
   skipped?: { id: string; reason: string }[];
   error?: string;
 }
@@ -63,6 +65,9 @@ function parseFeedPayload(json: unknown): FeedOffer[] {
     .filter((o): o is FeedOffer => o != null);
 }
 
+/** The longest landing page URL taken from a feed — the dashboard's offer form limit. */
+const FEED_URL_MAX = 2000;
+
 /** A feed is parsed whole, so its size is capped (tens of thousands of offers fit comfortably). */
 export const FEED_MAX_BYTES = 16 * 1024 * 1024;
 const FEED_TIMEOUT_MS = 30_000;
@@ -72,6 +77,25 @@ const FEED_TIMEOUT_MS = 30_000;
  * http(s) only, no redirects, and no loopback / private / link-local (cloud metadata) targets outside
  * NODE_ENV=development — checked on the address actually connected to. 30 s for the whole fetch.
  */
+/**
+ * Why a feed URL can't be saved, or null. Checked on save (Settings › Integrations) so a bad URL is
+ * refused there — it used to surface only at the next sync. demo://offer-feed is the local test feed.
+ * DNS isn't resolved here; fetchFeed still checks the address it actually connects to.
+ */
+export function offerFeedUrlProblem(raw: string): string | null {
+  if (raw === 'demo://offer-feed') return null;
+  if (raw.length > 2048) return 'Offer feed URL is too long (2048 characters at most).';
+  try {
+    assertOutboundUrl(raw);
+  } catch (err) {
+    const reason = err instanceof BlockedDestinationError ? err.reason : 'malformed_url';
+    return reason === 'private_address'
+      ? 'Offer feed URL points to a private address — feeds can only be fetched from public internet addresses.'
+      : `Offer feed URL isn't a valid http(s) address (${reason}).`;
+  }
+  return null;
+}
+
 export async function fetchFeed(url: string, apiKey: string | undefined): Promise<FeedOffer[]> {
   if (url === 'demo://offer-feed') return DEMO_FEED;
 
@@ -215,6 +239,12 @@ export async function syncOfferFeed(networkId: string): Promise<SyncResult> {
     let updated = 0;
     const skipped: { id: string; reason: string }[] = [];
     for (const offer of offers) {
+      // Same rule as an offer saved in the dashboard: http(s), a host, no control characters, ≤ 2000.
+      const urlProblem = getRedirectUrlRejectReason(offer.destinationUrl) ?? (offer.destinationUrl.length > FEED_URL_MAX ? 'too_long' : null);
+      if (urlProblem) {
+        skipped.push({ id: offer.id, reason: `landing page URL rejected: ${urlProblem}` });
+        continue;
+      }
       const currency = await resolveCurrency(networkId, cfg, offer);
       let result: 'created' | 'updated';
       try {
@@ -257,7 +287,7 @@ export async function syncOfferFeed(networkId: string): Promise<SyncResult> {
       offerFeedLastSyncDay: today,
       offerFeedLastSyncMonth: month,
       offerFeedLastSyncError: skipped.length
-        ? `${skipped.length} offer(s) skipped — an amount wasn't a usable decimal: ${skipped.slice(0, 5).map((x) => `${x.id} (${x.reason})`).join('; ')}`
+        ? `${skipped.length} offer(s) skipped: ${skipped.slice(0, 5).map((x) => `${x.id} (${x.reason})`).join('; ')}${skipped.length > 5 ? '; …' : ''}`
         : null,
       offerFeedModifiedAt: now,
       ...(cfg.offerFeedCreatedAt ? {} : { offerFeedCreatedAt: now }),

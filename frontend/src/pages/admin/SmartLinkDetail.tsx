@@ -5,19 +5,20 @@
  * the Smart Link Report), a mechanism-specific config card, an "Offers" card, and a top-right
  * "Smart Link Tracking Links" button.
  */
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Link2, Pencil, Copy } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../shared-components/primitives/ui';
-import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 import { METRICS_PARAM, deriveRow, pct, type AggResult } from '../../shared-components/primitives/ReportPageKit';
 import { useReportZone } from '../../lib/useReportZone';
 import { combineCurrencies, currenciesOf, moneyByCurrencyOf, withBreakdownMetrics } from '../../lib/reportCurrency';
 import { Money, MoneyPct } from '../../shared-components/primitives/ReportMoney';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
-import { fmtDateTime, REDIRECT_MECHANISMS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
+import { fmtDateTime, REDIRECT_MECHANISMS, KPI_DEFAULTS, type KpiRun, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
+import { formatMdyDateTime } from '../../lib/datetime';
+import { conversionMoney } from '../../lib/conversionReport';
 import { SmartLinkTrackingLinksModal } from './SmartLinkTrackingLinksModal';
 import type { Advertiser, Offer, TrackingDomain } from '../../types';
 
@@ -44,10 +45,94 @@ function HistoryTab({ id }: { id: string }) {
     : <div className="card"><Table columns={columns} rows={data} rowKey={(r) => r.id} /></div>;
 }
 
-function RunRecordTab() {
+const RUNS_PAGE = 25;
+
+/** An item's score as the metric reads: CVR as a percentage, EPC / Revenue per click. */
+function scoreText(score: string | null, metric: KpiRun['metric']): string {
+  if (score == null) return '—';
+  const n = Number(score);
+  return metric === 'CVR' ? `${(n * 100).toFixed(2)}%` : n.toFixed(4);
+}
+
+/** Run Record — every KPI scoring run of the link (newest first): who won, and what each offer scored. */
+function RunRecordTab({ id }: { id: string }) {
+  const zone = useReportZone();
+  const [page, setPage] = useState(0);
+  const [open, setOpen] = useState<string | null>(null);
+  const { data, loading, error } = useQuery<KpiRun[] & { pagination?: { total?: number } }>(`/api/smart-links/${id}/kpi-runs?limit=${RUNS_PAGE}&offset=${page * RUNS_PAGE}`);
+  if (loading) return <StateBlock><Spinner /></StateBlock>;
+  if (error) return <StateBlock>{error}</StateBlock>;
+  if (!data || data.length === 0) {
+    return <StateBlock>No runs yet. The KPI worker scores this link every Run Frequency once it is active — each run is listed here.</StateBlock>;
+  }
+  const total = data.pagination?.total ?? data.length; // api.ts keeps the envelope's pagination on the array
   return (
-    <div className="card">
-      <EmptyShellTable columns={['Run Time', 'Metric', 'Winning Offer', 'Clicks Evaluated']} />
+    <div className="card overflow-x-auto">
+      <table className="premium-table">
+        <thead className="border-b border-border bg-page text-tiny font-semibold uppercase text-fg-secondary">
+          <tr>
+            <th className="px-4 py-2" title={zone.tz}>Run Time ({zone.short})</th><th className="px-4 py-2">Metric</th>
+            <th className="px-4 py-2">Lookback</th><th className="px-4 py-2">Winning Offer</th><th className="px-4 py-2 text-right">Clicks Evaluated</th><th className="px-4 py-2" />
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((run) => {
+            const top = Math.max(0, ...run.items.map((i) => i.weight ?? 0));
+            const winners = run.weighted ? run.items.filter((i) => i.weight === top) : [];
+            const clicks = run.items.reduce((t, i) => t + i.clicks, 0);
+            const expanded = open === run.id;
+            return (
+              <Fragment key={run.id}>
+                <tr>
+                  <td className="px-4 py-2 tabular-nums">{formatMdyDateTime(run.ranAt, zone.tz)}</td>
+                  <td className="px-4 py-2">{run.metric}</td>
+                  <td className="px-4 py-2 text-fg-secondary">{run.lookbackHours} Hours</td>
+                  <td className="px-4 py-2">
+                    {winners.length ? winners.map((w) => w.offerName ?? w.offerId.slice(0, 8)).join(', ')
+                      : <span className="text-fg-muted">Even rotation — no offer has {run.minClicks} clicks and a score yet</span>}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{clicks}</td>
+                  <td className="px-4 py-2 text-right">
+                    <button className="text-tiny font-medium text-accent-text" onClick={() => setOpen(expanded ? null : run.id)}>{expanded ? 'Hide' : 'Details'}</button>
+                  </td>
+                </tr>
+                {expanded && (
+                  <tr>
+                    <td colSpan={6} className="bg-page px-4 py-3">
+                      <table className="w-full text-small">
+                        <thead className="text-tiny uppercase text-fg-secondary">
+                          <tr><th className="py-1 text-left">Offer</th><th className="py-1 text-right">Clicks</th><th className="py-1 text-right">Conversions</th>
+                            <th className="py-1 text-right">Payout</th><th className="py-1 text-right">Revenue</th><th className="py-1 text-right">Score ({run.metric})</th><th className="py-1 text-right">Traffic share</th></tr>
+                        </thead>
+                        <tbody>
+                          {run.items.map((i) => (
+                            <tr key={i.itemId}>
+                              <td className="py-1">{i.offerName ?? i.offerId}</td>
+                              <td className="py-1 text-right tabular-nums">{i.clicks}</td>
+                              <td className="py-1 text-right tabular-nums">{i.conversions}</td>
+                              <td className="py-1 text-right tabular-nums">{conversionMoney(i.payout, null).text}</td>
+                              <td className="py-1 text-right tabular-nums">{conversionMoney(i.revenue, null).text}</td>
+                              <td className="py-1 text-right tabular-nums">{scoreText(i.score, run.metric)}</td>
+                              <td className="py-1 text-right tabular-nums">{run.weighted && i.weight != null ? `${i.weight}%` : 'Even'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="flex items-center justify-between px-4 py-2 text-tiny text-fg-secondary">
+        <span>{page * RUNS_PAGE + 1}–{page * RUNS_PAGE + data.length} of {total}</span>
+        <span className="flex gap-2">
+          <button className="btn-ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Previous</button>
+          <button className="btn-ghost" disabled={(page + 1) * RUNS_PAGE >= total} onClick={() => setPage((p) => p + 1)}>Next</button>
+        </span>
+      </div>
     </div>
   );
 }
@@ -164,7 +249,7 @@ export default function SmartLinkDetail() {
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === 'History' ? <HistoryTab id={id} />
-        : tab === 'Run Record' ? <RunRecordTab />
+        : tab === 'Run Record' ? <RunRecordTab id={id} />
         : (
           <div className="space-y-4">
             <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
@@ -192,10 +277,10 @@ export default function SmartLinkDetail() {
             {data.redirectMechanism === 'kpi' && (
               <InfoCard title="KPI-based Smart Link Configuration" action={<span />}>
                 <InfoGrid>
-                  <InfoRow label="Run Frequency" value={data.kpiRunFrequencyHours ? `${data.kpiRunFrequencyHours} Hours` : undefined} />
-                  <InfoRow label="Data Lookback Window" value={data.kpiLookbackHours ? `${data.kpiLookbackHours} Hours` : undefined} />
-                  <InfoRow label="Metric" value={data.kpiMetric} />
-                  <InfoRow label="Data Collection Period Threshold" value={data.kpiMinClicks ? `${data.kpiMinClicks} Clicks` : undefined} />
+                  <InfoRow label="Run Frequency" value={`${data.kpiRunFrequencyHours ?? KPI_DEFAULTS.runFrequencyHours} Hours${data.kpiRunFrequencyHours ? '' : ' (default)'}`} />
+                  <InfoRow label="Data Lookback Window" value={`${data.kpiLookbackHours ?? KPI_DEFAULTS.lookbackHours} Hours${data.kpiLookbackHours ? '' : ' (default)'}`} />
+                  <InfoRow label="Metric" value={data.kpiMetric ?? 'CVR (default)'} />
+                  <InfoRow label="Data Collection Period Threshold" value={`${data.kpiMinClicks ?? KPI_DEFAULTS.minClicks} Clicks${data.kpiMinClicks ? '' : ' (default)'}`} />
                 </InfoGrid>
               </InfoCard>
             )}

@@ -19,10 +19,10 @@ import { query } from '../db/pool.js';
 import { sendNetworkEmail, smtpConfigError, type MailAttachment } from '../mailer.js';
 import { enqueueEmails } from './outbox.js';
 import { logger } from '../logger.js';
-import type { SystemEmailKey } from './system-emails.js';
+import { systemEmailDefault, type SystemEmailKey } from './system-emails.js';
 
 /** Sent regardless of the Communication Hub toggles. */
-export const ALWAYS_ON_EMAILS = ['scheduled_report', 'staff_invite', 'password_reset'] as const;
+export const ALWAYS_ON_EMAILS = ['scheduled_report', 'staff_invite', 'password_reset', 'login_email_changed'] as const;
 export type AlwaysOnEmail = (typeof ALWAYS_ON_EMAILS)[number];
 const alwaysOn = (e: string): e is AlwaysOnEmail => (ALWAYS_ON_EMAILS as readonly string[]).includes(e);
 
@@ -40,11 +40,11 @@ export interface TransactionalResult {
 export const escapeHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-/** Is this system email on for the network? (Unset = on, like the Communication Hub list shows.) */
+/** Is this system email on for the network? (Unset = its default — on for most; lib/email/system-emails.ts.) */
 export async function systemEmailEnabled(networkId: string, key: SystemEmailKey): Promise<boolean> {
   const { rows } = await query<{ on: boolean | null }>(
     `SELECT (settings->'communicationHub'->'systemEmails'->>$2)::boolean AS on FROM networks WHERE id = $1`, [networkId, key]);
-  return rows[0]?.on ?? true;
+  return rows[0]?.on ?? systemEmailDefault(key);
 }
 
 type Mail = { subject: string; html: string; attachments?: MailAttachment[] };

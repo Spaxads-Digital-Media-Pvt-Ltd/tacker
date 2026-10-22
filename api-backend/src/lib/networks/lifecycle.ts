@@ -36,7 +36,7 @@ const FKLESS = ['clicks', 'impressions', 'conversions', 'postback_logs', 'ledger
  * The platform team's own records about a network (sales leads, tasks, account notes…) reference it but
  * aren't its data: never in its export. (A purge still cascades / nulls them through their foreign keys.)
  */
-export const PLATFORM_ONLY_TABLES: readonly string[] = ['sales_leads', 'platform_tasks', 'network_accounts', 'network_health_history', 'network_notes', 'support_tickets', 'subscription_discounts', 'privacy_requests'];
+export const PLATFORM_ONLY_TABLES: readonly string[] = ['sales_leads', 'platform_tasks', 'network_accounts', 'network_health_history', 'network_notes', 'support_tickets', 'subscription_discounts', 'privacy_requests', 'network_plan_overrides'];
 /** Credentials never leave in an export. */
 const REDACT: Record<string, string[]> = {
   networks: ['postback_security_code'], api_keys: ['key_hash'], offers: ['security_code'],
@@ -59,6 +59,22 @@ export async function softDeleteNetwork(id: string): Promise<{ before: NetworkRo
   const { rows } = await query<NetworkRow>(
     `UPDATE networks SET status = 'deleted', deleted_at = COALESCE(deleted_at, now()) WHERE id = $1 RETURNING *`, [id]);
   await networkStateChanged(id);
+  return { before, after: rows[0]! };
+}
+
+/**
+ * Suspend / reactivate / soft-delete / restore. A Super Admin's suspension is 'manual' (only a Super Admin
+ * lifts it; billing never does); 'deleted' is the soft delete, any other status restores. Applies at once:
+ * tracking hosts and the cached state are dropped.
+ */
+export async function setNetworkStatus(id: string, status: 'active' | 'suspended' | 'deleted'): Promise<{ before: NetworkRow; after: NetworkRow }> {
+  const before = await loadNetwork(id);
+  const { rows } = await query<NetworkRow>(
+    `UPDATE networks SET status = $2,
+            deleted_at = CASE WHEN $2 = 'deleted' THEN COALESCE(deleted_at, now()) END,
+            suspended_reason = CASE WHEN $2 = 'suspended' THEN 'manual' END
+      WHERE id = $1 RETURNING *`, [id, status]);
+  if (before.status !== status) await networkStateChanged(id);
   return { before, after: rows[0]! };
 }
 

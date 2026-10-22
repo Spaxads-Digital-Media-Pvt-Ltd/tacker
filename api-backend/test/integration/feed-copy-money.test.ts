@@ -64,6 +64,46 @@ d('offer feed, copies and exact money (live DB, mocked feed)', () => {
     expect((await loadIntegrations(fx.networkA)).offerFeedLastSyncError).toMatch(/2 offer\(s\) skipped/);
   });
 
+  it('an unsafe landing page URL skips that offer (never stored for /click to redirect to)', async () => {
+    feed.body = JSON.stringify([
+      { id: `${tag}-u1`, name: 'Script', url: 'javascript:alert(1)', payout: '1', revenue: '2' },
+      { id: `${tag}-u2`, name: 'Data', url: 'data:text/html,<b>x</b>', payout: '1', revenue: '2' },
+      { id: `${tag}-u3`, name: 'Long', url: `https://long.example.com/?q=${'x'.repeat(2100)}`, payout: '1', revenue: '2' },
+      { id: `${tag}-u4`, name: 'Fine', url: 'https://ok.example.com/?c={click_id}', payout: '1', revenue: '2' },
+    ]);
+    const result = await syncOfferFeed(fx.networkA);
+    expect(result).toMatchObject({ pulled: 4, created: 1 });
+    expect(result.skipped).toEqual([
+      { id: `${tag}-u1`, reason: 'landing page URL rejected: unsafe_scheme' },
+      { id: `${tag}-u2`, reason: 'landing page URL rejected: unsafe_scheme' },
+      { id: `${tag}-u3`, reason: 'landing page URL rejected: too_long' },
+    ]);
+    expect(await offerByFeedId(`${tag}-u1`)).toEqual([]);
+    expect(await offerByFeedId(`${tag}-u4`)).toHaveLength(1);
+    expect((await loadIntegrations(fx.networkA)).offerFeedLastSyncError).toMatch(/3 offer\(s\) skipped: .*unsafe_scheme/);
+  });
+
+  it('Settings › Integrations refuses a bad feed URL on save (422), keeps a good one', async () => {
+    const put = (offerFeedUrl: unknown) => request(dash).put('/api/settings/integrations').set(admin).send({ values: { offerFeedUrl } });
+    for (const [url, msg] of [
+      ['http://127.0.0.1:4005/health', /private address/],
+      ['http://169.254.169.254/latest/meta-data/', /private address/],
+      ['ftp://feeds.example.com/x', /isn't a valid http\(s\) address \(unsupported_scheme\)/],
+      ['not a url', /isn't a valid http\(s\) address/],
+      [`https://feeds.example.com/?q=${'x'.repeat(2100)}`, /too long/],
+    ] as const) {
+      const res = await put(url);
+      expect(res.status, url).toBe(422);
+      expect(res.body.error.message).toMatch(msg);
+      expect(res.body.error.details).toMatchObject({ field: 'offerFeedUrl' });
+    }
+    expect((await loadIntegrations(fx.networkA)).offerFeedUrl).toBe('https://feeds.example.com/offers.json'); // unchanged
+    expect((await put('  https://feeds2.example.com/offers.json  ')).status).toBe(200);
+    expect((await loadIntegrations(fx.networkA)).offerFeedUrl).toBe('https://feeds2.example.com/offers.json');
+    expect((await put('demo://offer-feed')).status).toBe(200);
+    await saveIntegrations(fx.networkA, { offerFeedUrl: 'https://feeds.example.com/offers.json' });
+  });
+
   it("a re-sync keeps the offer's own settings; a copy is independent of the feed", async () => {
     feed.body = JSON.stringify([{ id: `${tag}-e`, name: 'E', url: 'https://e.example.com/', payout: '5', revenue: '9' }]);
     await syncOfferFeed(fx.networkA);

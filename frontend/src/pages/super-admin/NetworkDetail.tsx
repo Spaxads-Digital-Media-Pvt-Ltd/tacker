@@ -19,10 +19,13 @@ import { useAllPages } from '../../hooks/useAllPages';
 import { useInvoiceActions } from './invoiceActions';
 import { NewInvoice } from './Billing';
 import { AssignPlanModal, ExtendTrialModal } from './subscriptionActions';
-import { money as amountMoney, planPrice, billingBadge, invoiceState, type PlatformInvoice } from '../../lib/platformBilling';
+import { money as amountMoney, planPrice, billingBadge, invoiceState, overridesSummary, type PlatformInvoice } from '../../lib/platformBilling';
 import type { NetworkDetail as Detail, NetworkTeamMember, PlatformActivityRow } from '../../types';
 import { NetworkAccount } from './success/NetworkAccount';
+import { OverridesModal } from './NetworkOverrides';
 import { NetworkDiscount } from './money/NetworkDiscount';
+import { WhiteLabelForm } from '../../shared-components/panels/WhiteLabelForm';
+import type { Reseller } from '../../lib/platformResellers';
 
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString() : '—');
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString() : '—');
@@ -62,6 +65,7 @@ export default function NetworkDetail() {
   const invoices = useAllPages<PlatformInvoice>(`/platform/invoices?networkId=${id}&status=all`);
   const invoiceActions = useInvoiceActions(() => { invoices.refetch(); net.refetch(); activity.refetch(); });
   const [planModal, setPlanModal] = useState(false);
+  const [overridesModal, setOverridesModal] = useState(false);
   const [trialModal, setTrialModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -110,7 +114,7 @@ export default function NetworkDetail() {
         : m.has_login ? null : <span className="text-tiny text-fg-muted">no login yet</span>),
     },
   ];
-  const tabs = ['Overview', ...(can('success') ? ['Account'] : []), ...(can('billing') ? ['Billing'] : []), 'Team', 'Activity'];
+  const tabs = ['Overview', ...(can('success') ? ['Account'] : []), ...(can('billing') ? ['Billing'] : []), 'Team', 'White-label', 'Activity'];
   const tab = tabs.includes(params.get('tab') ?? '') ? params.get('tab')! : 'Overview';
   const setTab = (t: string) => setParams(t === 'Overview' ? {} : { tab: t }, { replace: true });
   const activityCols: Column<PlatformActivityRow>[] = [
@@ -164,6 +168,7 @@ export default function NetworkDetail() {
             <InfoRow label="Slug"><span className="font-mono text-xs">{n.slug}</span></InfoRow>
             <InfoRow label="Default currency">{n.default_currency}</InfoRow>
             <InfoRow label="Created">{day(n.created_at)}</InfoRow>
+            <InfoRow label="Reseller"><ResellerPicker networkId={n.id} resellerId={n.reseller_id ?? null} resellerName={n.reseller_name ?? null} onChanged={refreshAll} /></InfoRow>
             <InfoRow label="Owner">
               {n.owner ? <>{n.owner.email}<span className="ml-2 text-tiny font-normal text-fg-muted">last sign-in {n.owner.last_sign_in_at ? when(n.owner.last_sign_in_at) : 'never'}</span></>
                 : <span className="text-fg-muted">no admin yet</span>}
@@ -203,6 +208,14 @@ export default function NetworkDetail() {
                 : <InfoRow label={sub.status === 'trialing' ? 'Trial period' : 'Current period'}>{day(sub.current_period_start)} – {day(sub.current_period_end)}</InfoRow>}
             </dl>
           ) : <p className="mb-3 text-small text-fg-secondary">No plan assigned.</p>}
+          {(overridesSummary(n.overrides, sub?.currency) || (canPlans && n.status !== 'deleted')) && (
+            <p className="mb-3 text-small">
+              <span className="text-fg-secondary">Its own deal: </span>
+              {overridesSummary(n.overrides, sub?.currency) ?? <span className="text-fg-muted">none — the plan as it is</span>}
+              {n.overrides?.note && <span className="text-tiny text-fg-muted"> ({n.overrides.note})</span>}
+              {canPlans && n.status !== 'deleted' && <button className="ml-2 text-tiny font-medium text-accent-text hover:underline" onClick={() => setOverridesModal(true)}>Edit</button>}
+            </p>
+          )}
           {live && sub && canPlans && (
             <div className="mb-4 flex flex-wrap gap-3">
               {sub.status === 'trialing' && <button className="text-tiny font-medium text-accent-text hover:underline" onClick={() => setTrialModal(true)}>Extend trial</button>}
@@ -239,6 +252,10 @@ export default function NetworkDetail() {
               { header: '', className: 'text-right', cell: (i: PlatformInvoice) => invoiceActions.buttons(i) },
             ]} rows={invoices.data ?? []} rowKey={(i) => i.id} />}
         </Card>}
+        {tab === 'White-label' && <Card title="White-label">
+          <p className="mb-3 text-small text-fg-secondary">The network’s own brand on a dashboard domain of its own. Turn it on here; the network’s admin can then set it up from Control Center › Platform too.</p>
+          <WhiteLabelForm base={`/platform/networks/${n.id}/white-label`} platform canEdit={can('resellers', 'full')} />
+        </Card>}
         {tab === 'Team' && <Card title="Team">
           {tempPassword.error && <p className="mb-2 text-small text-danger-text">{tempPassword.error}</p>}
           {team.loading ? <Spinner /> : team.error ? <p className="text-small text-danger-text">{team.error}</p>
@@ -253,6 +270,7 @@ export default function NetworkDetail() {
       </div>
 
       {invoiceActions.modal}
+      {overridesModal && <OverridesModal network={n} onClose={() => setOverridesModal(false)} onSaved={() => { setOverridesModal(false); setNotice('Its deal was saved — it applies from its next invoice.'); net.refetch(); }} />}
       {planModal && <AssignPlanModal networkId={n.id} networkName={n.name} live={live} currentPlanId={live ? sub?.plan_id ?? null : null} onClose={() => setPlanModal(false)} onDone={done} />}
       {trialModal && <ExtendTrialModal networkId={n.id} onClose={() => setTrialModal(false)} onDone={done} />}
       {newInvoice && <NewInvoice networkId={n.id} onClose={() => setNewInvoice(false)} onCreated={(num) => done(`Invoice ${num} issued.`)} />}
@@ -269,5 +287,25 @@ export default function NetworkDetail() {
         )}
       </Modal>
     </>
+  );
+}
+
+/** Overview › Reseller: who sold the network (resellers:full can change it). */
+function ResellerPicker({ networkId, resellerId, resellerName, onChanged }: { networkId: string; resellerId: string | null; resellerName: string | null; onChanged: () => void }) {
+  const { can } = usePlatformMe();
+  const list = useQuery<Reseller[]>(can('resellers', 'read') ? '/platform/resellers' : null);
+  const [error, setError] = useState<string | null>(null);
+  if (!can('resellers', 'full')) return resellerId ? <Link to={`/admin/resellers/${resellerId}`} className="text-accent-text hover:underline">{resellerName}</Link> : <span className="text-fg-muted">direct</span>;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <select className="input !w-auto !py-1 text-small" value={resellerId ?? ''} onChange={async (e) => {
+        setError(null);
+        try { await api.put(`/platform/networks/${networkId}/reseller`, { resellerId: e.target.value || null }); onChanged(); } catch (err) { setError(err instanceof Error ? err.message : 'Could not change the reseller'); }
+      }}>
+        <option value="">Direct (no reseller)</option>
+        {(list.data ?? []).map((r) => <option key={r.id} value={r.id}>{r.name} ({Number(r.commissionPct)}%)</option>)}
+      </select>
+      {error && <span className="text-tiny text-danger-text">{error}</span>}
+    </span>
   );
 }

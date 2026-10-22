@@ -13,7 +13,9 @@
  * exp / iat — standard
  */
 
+import { randomUUID } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
+import { createSession } from '../platform/staff-security.js';
 import { env } from '../../config/env.js';
 
 const SECRET = new TextEncoder().encode(env.PLATFORM_ADMIN_JWT_SECRET);
@@ -22,6 +24,8 @@ export interface PlatformAdminTokenPayload {
  pa_sub: string;
  kind: 'platform_admin';
  iss: string;
+ /** The session (platform_sessions.id) — revocable server-side. */
+ jti?: string;
 }
 
 function assertSecret(): void {
@@ -30,11 +34,24 @@ function assertSecret(): void {
  }
 }
 
-export async function signPlatformAdminToken(platformAdminId: string): Promise<string> {
+/**
+ * A session token: a platform_sessions row is created first (Team › Your account lists it; revoking it
+ * ends the token at once) and its id is the token's jti.
+ */
+export async function signPlatformAdminToken(platformAdminId: string, meta: { ip?: string | null; userAgent?: string | null } = {}): Promise<string> {
+ assertSecret();
+ const sessionId = randomUUID();
+ await createSession(sessionId, platformAdminId, meta);
+ return signPlatformSessionToken(platformAdminId, sessionId);
+}
+
+/** The JWT for an existing session (no database work). */
+export async function signPlatformSessionToken(platformAdminId: string, sessionId: string): Promise<string> {
  assertSecret();
  const jwt = new SignJWT({ pa_sub: platformAdminId, kind: 'platform_admin', iss: 'tracker-platform-admin' });
  return jwt
  .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+ .setJti(sessionId)
  .setExpirationTime('1h')
  .sign(SECRET);
 }

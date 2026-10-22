@@ -4,7 +4,10 @@
  * the CSV attachment (formula-safe, entity names next to their ids), and who a run emails (D4).
  */
 import { describe, it, expect } from 'vitest';
-import { presetRange, savedReportRequest, reportCsv, deliveryFor, type ReportOwner } from '../../src/lib/reporting/saved-reports.js';
+import {
+  presetRange, savedReportRequest, reportCsv, deliveryFor, metricFiltersOf, applyMetricFilters, exportMetrics, datesRange, type ReportOwner,
+} from '../../src/lib/reporting/saved-reports.js';
+import type { ReportRow } from '../../src/lib/reporting/types.js';
 import type { ReportResult } from '../../src/lib/reporting/types.js';
 
 // 08:30 on Wed 14 Oct in Kolkata; still Tue 13 Oct (23:00) in New York.
@@ -44,7 +47,7 @@ describe('savedReportRequest', () => {
       orderBy: 'revenue', orderDir: 'asc', hiddenColumns: ['cr'],
     }, 'yesterday', NOW, 'Asia/Kolkata');
     expect(req).toMatchObject({
-      networkId: 'net-1', groupBy: ['publisher'], limit: 1000, offset: 0, orderBy: 'revenue', orderDir: 'asc',
+      networkId: 'net-1', groupBy: ['publisher'], limit: 5000, offset: 0, orderBy: 'revenue', orderDir: 'asc',
       timeZone: 'Asia/Kolkata', moneyFields: ['payout', 'revenue', 'margin'],
     });
     expect(req.filters).toEqual({
@@ -132,5 +135,62 @@ describe("deliveryFor — a run is emailed with its owner's permissions (D4)", (
   it('a disabled owner: nobody; no team-member row: the saved recipients, as before', () => {
     expect(deliveryFor(owner('admin', 'disabled'), saved)).toEqual({ refused: "Not sent: its owner's account is disabled." });
     expect(deliveryFor(null, saved)).toEqual({ recipients: saved, ownerOnly: false });
+  });
+});
+
+describe("the page's metric filters and hidden columns", () => {
+  const row = (m: Record<string, unknown>): ReportRow => ({ dimensions: {}, metrics: m as ReportRow['metrics'] });
+
+  it('reads the saved metric filters (both op spellings); drops unknown keys, ops and non-numbers', () => {
+    expect(metricFiltersOf({ metricFilters: {
+      clicks: { op: '>=', value: '10' }, cv: { op: 'gt', value: 2 }, payout: { op: '<', value: '' }, revenue: { op: '~', value: '5' },
+      fraudScore: { op: '<=', value: 'abc' }, bogus: { op: '>', value: '1' },
+    } })).toEqual([{ key: 'clicks', op: '>=', value: 10 }, { key: 'cv', op: '>', value: 2 }]);
+    expect(metricFiltersOf({})).toEqual([]);
+    expect(metricFiltersOf({ metricFilters: 'x' })).toEqual([]);
+  });
+
+  it('filters on the values the page shows: Clicks net of invalid, dup clicks, approved CV', () => {
+    const rows = [
+      row({ clicks: 12, invalid_clicks: 4, unique_clicks: 10, conversions: 1, total_conversions: 3, payout: '1', revenue: '2', currencies: ['USD'] }),
+      row({ clicks: 9, invalid_clicks: 0, unique_clicks: 5, conversions: 0, total_conversions: 0, payout: '0', revenue: '0', currencies: [] }),
+    ];
+    const keep = (mf: Record<string, unknown>) => applyMetricFilters(rows, metricFiltersOf({ metricFilters: mf })).rows.length;
+    expect(keep({ clicks: { op: '>', value: '8' } })).toBe(1); // 12 − 4 = 8 is not > 8; 9 is
+    expect(keep({ dupClicks: { op: '>=', value: '2' } })).toBe(2);
+    expect(keep({ cv: { op: '>=', value: '1' } })).toBe(1);
+    expect(keep({ totalCv: { op: '<', value: '1' } })).toBe(1);
+  });
+
+  it('a payout / revenue threshold is skipped when the rows span several currencies (other filters still apply)', () => {
+    const rows = [row({ clicks: 5, payout: '100', currencies: ['USD'] }), row({ clicks: 1, payout: '1', currencies: ['EUR'] })];
+    const r = applyMetricFilters(rows, metricFiltersOf({ metricFilters: { payout: { op: '>', value: '50' }, clicks: { op: '>', value: '2' } } }));
+    expect(r.moneySkipped).toBe(true);
+    expect(r.rows).toHaveLength(1);
+    const one = applyMetricFilters([rows[0]!], metricFiltersOf({ metricFilters: { payout: { op: '>', value: '500' } } }));
+    expect([one.moneySkipped, one.rows.length]).toEqual([false, 0]);
+  });
+
+  it('the Fraud filter asks for the average fraud score', () => {
+    const req = savedReportRequest('n', 'hourly-report', { metricFilters: { fraudScore: { op: '>', value: '20' } } }, 'yesterday', NOW, 'UTC');
+    expect(req.metrics).toContain('avg_fraud_score');
+    expect(savedReportRequest('n', 'hourly-report', {}, 'yesterday', NOW, 'UTC').metrics).not.toContain('avg_fraud_score');
+  });
+
+  it('hidden columns leave their metrics out of the CSV; currencies go only with the last money column', () => {
+    const metrics = ['clicks', 'unique_clicks', 'conversions', 'cr', 'payout', 'revenue', 'margin', 'epc', 'invalid_clicks', 'total_conversions', 'currencies'] as const;
+    expect(exportMetrics([...metrics], ['CVR', 'EPC', 'Uniq. Clicks'])).toEqual(['clicks', 'conversions', 'payout', 'revenue', 'margin', 'invalid_clicks', 'total_conversions', 'currencies']);
+    expect(exportMetrics([...metrics], ['Clicks'])).toContain('clicks'); // 'Gross Clicks' still shows it
+    expect(exportMetrics([...metrics], ['Clicks', 'Gross Clicks'])).not.toContain('clicks');
+    expect(exportMetrics([...metrics], ['Payout', 'Revenue', 'Profit'])).not.toContain('currencies');
+    expect(exportMetrics([...metrics], 'nonsense')).toEqual([...metrics]);
+    const csv = reportCsv({ groupBy: ['day'], metrics: ['clicks', 'cr'], total: 1, rows: [{ dimensions: { day: '2026-10-13' }, metrics: { clicks: 3, cr: '0.5' } }] }, ['clicks']);
+    expect(csv).toBe('day,clicks\r\n2026-10-13,3\r\n');
+  });
+
+  it('a date range is whole local days of the zone', () => {
+    expect(datesRange('2026-10-01', '2026-10-02', 'Asia/Kolkata'))
+      .toEqual({ from: '2026-09-30T18:30:00.000Z', to: '2026-10-02T18:29:59.999999Z', label: '2026-10-01 – 2026-10-02' });
+    expect(datesRange('2026-10-05', '2026-10-05', 'UTC').label).toBe('2026-10-05');
   });
 });

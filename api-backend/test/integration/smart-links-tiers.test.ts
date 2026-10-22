@@ -243,5 +243,37 @@ d('smart-link KPI rotation, /sl eligibility and partner tiers (live DB + Redis)'
       const c = await track.inject({ method: 'GET', url: `/click?offer_id=${o}&pub_id=${fx.pubA1}`, headers: { host: fx.host } });
       expect(c.statusCode).toBe(302);
     });
+
+    it('a request made before the tier applied is approved when the partner joins, the tier is linked or reactivated; a rejected one stays rejected', async () => {
+      const fx = await fixture();
+      const o = await offer(fx, { visibility: 'ask' });
+      const portal = (pub: string) => bearer(portalToken({ userId: randomUUID(), networkId: fx.networkA, kind: 'publisher', ownerId: pub }));
+      const ask = (pub: string) => request(dash).post(`/api/portal/offers/${o}/request`).set(portal(pub)).send({});
+      const statusOf = async (pub: string) => (await query<{ access: string; approval_status: string }>(
+        'SELECT access, approval_status FROM offer_publisher_access WHERE network_id = $1 AND offer_id = $2 AND publisher_id = $3', [fx.networkA, o, pub])).rows[0];
+      const pub3 = (await query<{ id: string }>(`INSERT INTO publishers (network_id, name, status) VALUES ($1, 'Third', 'active') RETURNING id`, [fx.networkA])).rows[0]!.id;
+
+      // Three requests made before any tier: all pending. An admin rejects pub3's.
+      for (const p of [fx.pubA1, fx.pubA2, pub3]) expect((await ask(p)).body.data.approvalStatus).toBe('pending');
+      await query(`UPDATE offer_publisher_access SET approval_status = 'rejected' WHERE network_id = $1 AND offer_id = $2 AND publisher_id = $3`, [fx.networkA, o, pub3]);
+
+      // 1. Tier with pubA1 → linked to the offer: pubA1's request goes through, pubA2's waits.
+      const tierId = await tier(fx, 10, [fx.pubA1], o);
+      expect(await statusOf(fx.pubA1)).toEqual({ access: 'allow', approval_status: 'approved' });
+      expect(await statusOf(fx.pubA2)).toEqual({ access: 'deny', approval_status: 'pending' });
+      const c = await track.inject({ method: 'GET', url: `/click?offer_id=${o}&pub_id=${fx.pubA1}`, headers: { host: fx.host } });
+      expect(c.statusCode).toBe(302); // the offer's cached config already knows
+
+      // 2. Pause the tier, add pubA2 and pub3 → nothing while paused.
+      await request(dash).patch(`/api/partner-tiers/${tierId}`).set(fx.auth).send({ status: 'paused', partnerIds: [fx.pubA1, fx.pubA2, pub3] }).expect(200);
+      expect((await statusOf(fx.pubA2))!.approval_status).toBe('pending');
+      // 3. Reactivate → pubA2 approved; pub3 (rejected by an admin) stays rejected.
+      await request(dash).patch(`/api/partner-tiers/${tierId}`).set(fx.auth).send({ status: 'active' }).expect(200);
+      expect(await statusOf(fx.pubA2)).toEqual({ access: 'allow', approval_status: 'approved' });
+      expect((await statusOf(pub3))!.approval_status).toBe('rejected');
+      const audit = (await query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM audit_log WHERE network_id = $1 AND action = 'offer.access.auto_approve'`, [fx.networkA])).rows[0]!.n;
+      expect(audit).toBe(2);
+    });
   });
 });

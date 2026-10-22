@@ -78,12 +78,12 @@ export function revenueRoutes(): Router {
     const ids = await scopedNetworkIds(req);
     const p = [ids];
     const inScope = (col: string) => `($1::uuid[] IS NULL OR ${col} = ANY($1::uuid[]))`;
-    const months = `generate_series(date_trunc('month', now()) - interval '11 months', date_trunc('month', now()), interval '1 month')`;
+    const months = `generate_series(date_trunc('month', now(), 'UTC') - interval '11 months', date_trunc('month', now(), 'UTC'), interval '1 month')`;
     const [mrr, moves, trend, churn, collected, invoiced, outstanding, byPlan, top, trials, renewals, since] = await Promise.all([
       query(`SELECT m.currency, SUM(m.mrr)::text AS amount, (SUM(m.mrr) * 12)::text AS arr, COUNT(*)::int AS customers,
                     round(SUM(m.mrr) / COUNT(*), 2)::text AS arpa
                FROM (${NETWORK_MRR_SQL}) m WHERE m.mrr > 0 AND ${inScope('m.network_id')} GROUP BY m.currency ORDER BY m.currency`, p),
-      query(`SELECT CASE WHEN day >= date_trunc('month', now()) THEN 'this' ELSE 'last' END AS month, currency,
+      query(`SELECT CASE WHEN day >= (date_trunc('month', now(), 'UTC') AT TIME ZONE 'UTC')::date THEN 'this' ELSE 'last' END AS month, currency,
                     COALESCE(SUM(amount) FILTER (WHERE kind = 'new'), 0)::text AS new,
                     COALESCE(SUM(amount) FILTER (WHERE kind = 'expansion'), 0)::text AS expansion,
                     COALESCE(SUM(amount) FILTER (WHERE kind = 'contraction'), 0)::text AS contraction,
@@ -91,17 +91,17 @@ export function revenueRoutes(): Router {
                     COALESCE(SUM(amount) FILTER (WHERE kind = 'reactivation'), 0)::text AS reactivation,
                     SUM(amount)::text AS net,
                     COUNT(*) FILTER (WHERE kind = 'new')::int AS new_count, COUNT(*) FILTER (WHERE kind = 'churn')::int AS churn_count
-               FROM platform_mrr_movements WHERE day >= date_trunc('month', now()) - interval '1 month' AND ${inScope('network_id')}
+               FROM platform_mrr_movements WHERE day >= ((date_trunc('month', now(), 'UTC') - interval '1 month') AT TIME ZONE 'UTC')::date AND ${inScope('network_id')}
               GROUP BY 1, currency ORDER BY 1 DESC, currency`, p),
       mrrTrend(ids),
       // Logo churn per month (3 complete + this): customers churned ÷ paying at the month's start.
-      query(`SELECT to_char(mo, 'YYYY-MM') AS month,
+      query(`SELECT to_char(mo AT TIME ZONE 'UTC', 'YYYY-MM') AS month,
                     (SELECT COUNT(DISTINCT s.network_id) FROM platform_mrr_snapshots s
-                      WHERE s.day = (SELECT max(day) FROM platform_mrr_days WHERE day < mo) AND ${inScope('s.network_id')})::int AS at_start,
+                      WHERE s.day = (SELECT max(day) FROM platform_mrr_days WHERE day < (mo AT TIME ZONE 'UTC')::date) AND ${inScope('s.network_id')})::int AS at_start,
                     (SELECT COUNT(DISTINCT m.network_id) FROM platform_mrr_movements m
-                      WHERE m.kind = 'churn' AND m.day >= mo AND m.day < mo + interval '1 month' AND ${inScope('m.network_id')})::int AS churned
-               FROM generate_series(date_trunc('month', now()) - interval '3 months', date_trunc('month', now()), interval '1 month') mo ORDER BY mo`, p),
-      query(`SELECT to_char(mo, 'YYYY-MM') AS month, x.currency, COALESCE(SUM(x.amount), 0)::text AS amount, COALESCE(SUM(x.refunded), 0)::text AS refunded
+                      WHERE m.kind = 'churn' AND m.day >= (mo AT TIME ZONE 'UTC')::date AND m.day < ((mo + interval '1 month') AT TIME ZONE 'UTC')::date AND ${inScope('m.network_id')})::int AS churned
+               FROM generate_series(date_trunc('month', now(), 'UTC') - interval '3 months', date_trunc('month', now(), 'UTC'), interval '1 month') mo ORDER BY mo`, p),
+      query(`SELECT to_char(mo AT TIME ZONE 'UTC', 'YYYY-MM') AS month, x.currency, COALESCE(SUM(x.amount), 0)::text AS amount, COALESCE(SUM(x.refunded), 0)::text AS refunded
                FROM ${months} mo JOIN LATERAL (
                  SELECT i.currency, i.paid_amount AS amount, 0::numeric AS refunded FROM platform_invoices i
                   WHERE i.status = 'paid' AND i.paid_at >= mo AND i.paid_at < mo + interval '1 month' AND ${inScope('i.network_id')}
@@ -109,8 +109,8 @@ export function revenueRoutes(): Router {
                  SELECT c.currency, -c.amount, c.amount FROM platform_credit_notes c
                   WHERE c.refunded AND c.created_at >= mo AND c.created_at < mo + interval '1 month' AND ${inScope('c.network_id')}) x ON true
               GROUP BY 1, x.currency ORDER BY 1, x.currency`, p),
-      query(`SELECT to_char(date_trunc('month', i.issued_at), 'YYYY-MM') AS month, i.currency, SUM(i.total)::text AS amount, COUNT(*)::int AS invoices
-               FROM platform_invoices i WHERE i.status <> 'void' AND i.issued_at >= date_trunc('month', now()) - interval '11 months' AND ${inScope('i.network_id')}
+      query(`SELECT to_char(i.issued_at AT TIME ZONE 'UTC', 'YYYY-MM') AS month, i.currency, SUM(i.total)::text AS amount, COUNT(*)::int AS invoices
+               FROM platform_invoices i WHERE i.status <> 'void' AND i.issued_at >= date_trunc('month', now(), 'UTC') - interval '11 months' AND ${inScope('i.network_id')}
               GROUP BY 1, i.currency ORDER BY 1, i.currency`, p),
       query(`SELECT i.currency, COALESCE(SUM(i.total), 0)::text AS open, COALESCE(SUM(i.total) FILTER (WHERE i.due_at <= now()), 0)::text AS overdue,
                     COUNT(*)::int AS open_count
@@ -312,7 +312,7 @@ export function revenueRoutes(): Router {
         WHERE ($1 = 'all' OR ($1 = 'overdue' AND i.status = 'open' AND i.due_at <= now()) OR ($1 <> 'overdue' AND i.status = $1))
           AND ($2::uuid IS NULL OR i.network_id = $2)
           AND ($3::text IS NULL OR i.number ILIKE $3 ESCAPE '\\' OR i.bill_to->>'name' ILIKE $3 ESCAPE '\\')
-          AND ($4::date IS NULL OR i.issued_at >= $4::date) AND ($5::date IS NULL OR i.issued_at < $5::date + 1)
+          AND ($4::date IS NULL OR i.issued_at >= $4::date::timestamp AT TIME ZONE 'UTC') AND ($5::date IS NULL OR i.issued_at < ($5::date + 1)::timestamp AT TIME ZONE 'UTC')
           AND ($6::uuid[] IS NULL OR i.network_id = ANY($6::uuid[]))
         ORDER BY i.issued_at DESC LIMIT 20000`,
       [f.status, f.networkId ?? null, f.q ? containsPattern(f.q) : null, f.from ?? null, f.to ?? null, ids]);

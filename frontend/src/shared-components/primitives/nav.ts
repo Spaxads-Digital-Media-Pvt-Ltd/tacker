@@ -29,6 +29,16 @@ export interface NavEntry {
  * doesn't, `to` is omitted and the item renders inert-but-interactive (title="Not available yet"),
  * same convention used everywhere else in this app for backend-less features.
  */
+/**
+ * The rail of a team member whose role works with their own accounts only (Affiliate / Advertiser Manager):
+ * their panels — the API refuses everything else to them.
+ */
+export const SCOPED_NAV: Record<'affiliate_manager' | 'advertiser_manager', NavEntry[]> = {
+  affiliate_manager: [{ to: '/app/my/partners', label: 'My partners', icon: 'manager' }],
+  advertiser_manager: [{ to: '/app/my/advertisers', label: 'My advertisers', icon: 'building' }],
+};
+export const isScopedRole = (r: string | null | undefined): r is keyof typeof SCOPED_NAV => r === 'affiliate_manager' || r === 'advertiser_manager';
+
 export const NAV: Record<Role, NavEntry[]> = {
   // The platform team's console — each item shows only for roles that may read its section (lib/platformMe).
   super_admin: [
@@ -39,6 +49,8 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'Sales dashboard', description: 'Pipeline, forecast, win rate and the leaderboard', to: '/admin/sales', icon: Lucide.Target, perm: 'sales' },
         { label: 'Leads', description: 'Every prospective network — search, filter, export', to: '/admin/sales/leads', icon: Lucide.Contact, perm: 'sales' },
         { label: 'Pipeline', description: 'Deals by stage — drag a card to move it', to: '/admin/sales/pipeline', icon: Lucide.SquareKanban, perm: 'sales' },
+        { label: 'Quotes', description: 'Priced proposals sent to leads, and their answers', to: '/admin/sales/quotes', icon: Lucide.FileText, perm: 'sales' },
+        { label: 'Team & quotas', description: 'Quotas, attainment and commission statements', to: '/admin/sales/team', icon: Lucide.Trophy, perm: 'sales' },
       ],
     },
     {
@@ -46,6 +58,8 @@ export const NAV: Record<Role, NavEntry[]> = {
         { label: 'All networks', description: 'Every tenant network — search, open, manage', to: '/admin/networks', icon: Lucide.Building2, perm: 'networks' },
         { label: 'Customer health', description: 'Health scores, at-risk accounts, onboarding, account managers', to: '/admin/success', icon: Lucide.HeartPulse, perm: 'success' },
         { label: 'Usage', description: 'Each network against its plan limits', to: '/admin/usage', icon: Lucide.Gauge, perm: 'networks' },
+        { label: 'Reports', description: 'Networks, usage and growth — on screen or as CSV', to: '/admin/reports', icon: Lucide.FileChartColumn, perm: 'networks' },
+        { label: 'Resellers', description: 'Agencies who sell the platform — their networks and commission', to: '/admin/resellers', icon: Lucide.Handshake, perm: 'resellers' },
       ],
     },
     {
@@ -72,6 +86,10 @@ export const NAV: Record<Role, NavEntry[]> = {
     {
       group: 'Platform', label: 'Platform', icon: 'settings', flyout: [
         { label: 'Announcements', description: 'Banners and maintenance windows in tenant dashboards', to: '/admin/announcements', icon: Lucide.Megaphone, perm: 'comms' },
+        { label: 'Help center', description: 'Articles in the app’s Help — staff, partners, advertisers', to: '/admin/help-center', icon: Lucide.BookOpen, perm: 'comms' },
+        { label: 'Changelog', description: '“What’s new” — new features, improvements and fixes', to: '/admin/changelog', icon: Lucide.Sparkles, perm: 'comms' },
+        { label: 'Status page', description: 'Components, incidents and maintenance at /status', to: '/admin/status-page', icon: Lucide.Activity, perm: 'comms' },
+        { label: 'Broadcasts', description: 'Email network teams by role, plan and status', to: '/admin/broadcasts', icon: Lucide.Mails, perm: 'comms' },
         { label: 'Feature flags', description: 'Turn features on or off per network, plan or rollout', to: '/admin/flags', icon: Lucide.Flag, perm: 'platform' },
         { label: 'System health', description: 'Database, Redis and the background queues', to: '/admin/system', icon: Lucide.ServerCog, perm: 'platform' },
         { label: 'Activity', description: 'What the team and billing did', to: '/admin/activity', icon: Lucide.History, perm: 'activity' },
@@ -98,6 +116,7 @@ export const NAV: Record<Role, NavEntry[]> = {
     {
       group: 'Manage', label: 'Partners', icon: 'manager', flyout: [
         { label: 'Manage', description: 'View and approve Partners', to: '/app/publishers', icon: Lucide.Settings },
+        { label: 'My partners', description: 'The partners you manage — their numbers and requests', to: '/app/my/partners', icon: Lucide.UserCheck },
         { label: 'Add', description: 'Set up a new Partner', to: '/app/publishers/new', icon: Lucide.PlusSquare },
         { label: 'Postbacks', description: 'Fire conversion data to Partners', to: '/app/aff-postbacks', icon: Lucide.Send },
         { label: 'Tiers', description: 'Payout & visibility by tier', to: '/app/aff-tiers', icon: Lucide.Layers },
@@ -112,6 +131,7 @@ export const NAV: Record<Role, NavEntry[]> = {
     {
       group: 'Manage', label: 'Advertisers', icon: 'building', flyout: [
         { label: 'Manage', description: 'View and manage Advertisers', to: '/app/advertisers', icon: Lucide.Settings },
+        { label: 'My advertisers', description: 'The advertisers you manage — their offers and numbers', to: '/app/my/advertisers', icon: Lucide.BriefcaseBusiness },
         { label: 'Add', description: 'Set up a new Advertiser', to: '/app/advertisers/new', icon: Lucide.PlusSquare },
         { label: 'Link Templates', description: 'Default landing page templates', to: '/app/adv-link-templates', icon: Lucide.Link },
         { label: 'Postback Controls', description: 'Auto-approve or reject conversions', to: '/app/adv-postback-controls', icon: Lucide.Filter },

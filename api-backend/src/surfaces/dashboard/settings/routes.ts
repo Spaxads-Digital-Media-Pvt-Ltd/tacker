@@ -11,13 +11,13 @@ import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
 import { validateBody, validateQuery } from '../../../lib/http/validate.js';
-import { notFound } from '../../../lib/http/errors.js';
+import { notFound, validationFailed } from '../../../lib/http/errors.js';
 import { query } from '../../../lib/db/pool.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { requireRole } from '../auth.js';
 import { generateSecureCode } from '../../../lib/security-code.js';
 import { syncPinApiKey, revokePinApiKey } from '../../../lib/integrations/pin-api.js';
-import { syncOfferFeed } from '../../../lib/integrations/offer-feed-sync.js';
+import { syncOfferFeed, offerFeedUrlProblem } from '../../../lib/integrations/offer-feed-sync.js';
 import { enqueueOfferFeedSync } from '../../../lib/integrations/enqueue.js';
 import { getIntegrationStatus } from '../../../lib/integrations/status.js';
 import { getCategoryCatalog, getAllCatalogs, categoryFromTab } from '../../../lib/integrations/catalog.js';
@@ -29,10 +29,10 @@ import { tzParam } from '../../../lib/reporting/request.js';
 import { env } from '../../../config/env.js';
 import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 
-interface NetworkRow { ref: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
+interface NetworkRow { ref: string; slug: string; name: string; default_currency: string; status: string; settings: Record<string, unknown> }
 
 async function loadNetwork(networkId: string): Promise<NetworkRow> {
-  const { rows } = await query<NetworkRow>('SELECT ref, name, default_currency, status, settings FROM networks WHERE id = $1', [networkId]);
+  const { rows } = await query<NetworkRow>('SELECT ref, slug, name, default_currency, status, settings FROM networks WHERE id = $1', [networkId]);
   const row = rows[0];
   if (!row) throw notFound('Network not found');
   return row;
@@ -100,7 +100,7 @@ export function settingsRoutes(): Router {
     const smtp = (s['smtp'] as Record<string, unknown> | undefined) ?? {};
     const { password, ...smtpSafe } = smtp as { password?: string };
     sendOk(res, {
-      general: { nid: Number(net.ref), name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
+      general: { nid: Number(net.ref), slug: net.slug, name: net.name, defaultCurrency: net.default_currency, status: net.status, ...(s['general'] as object ?? {}) },
       smtp: { ...smtpSafe, passwordSet: Boolean(password) },
       integrations: maskIntegrations((s['integrations'] as Record<string, unknown> | undefined) ?? {}),
       retention: retentionView(s),
@@ -167,6 +167,13 @@ export function settingsRoutes(): Router {
   r.put('/integrations', requireRole('admin'), validateBody(integrationsSchema), asyncHandler(async (req, res) => {
     const networkId = req.scope!.networkId;
     const b = req.body as z.infer<typeof integrationsSchema>;
+    // A bad feed URL is refused here, not discovered at the next sync.
+    const feedUrl = b.values['offerFeedUrl'];
+    if (feedUrl !== undefined && feedUrl !== null && feedUrl !== '') {
+      const problem = typeof feedUrl === 'string' ? offerFeedUrlProblem(feedUrl.trim()) : 'Offer feed URL must be text.';
+      if (problem) throw validationFailed(problem, { field: 'offerFeedUrl' });
+      b.values['offerFeedUrl'] = (feedUrl as string).trim();
+    }
     const net = await loadNetwork(networkId);
     const prev = (net.settings?.['integrations'] as Record<string, unknown> | undefined) ?? {};
     // Credentials are encrypted; '' keeps a stored one (the UI never gets them back to re-send).

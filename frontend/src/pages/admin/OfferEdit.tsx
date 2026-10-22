@@ -16,6 +16,7 @@ import { useOfferCategories } from '../../lib/useOfferCategories';
 import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column, Segmented } from '../../shared-components/primitives/ui';
+import { OfferConfigWarnings } from './offerDetail/ConfigWarnings';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
@@ -227,6 +228,7 @@ export default function OfferEdit() {
     <>
       <PageHeader title={`Edit Offer: ${offer.name}`} subtitle={`Offers › ${offer.name} › Edit`} />
       <div className="max-w-3xl mx-auto">
+      <OfferConfigWarnings warnings={offer.configWarnings} />
       <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
       <form onSubmit={submit} className="card space-y-6">
         {saveError && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{saveError}</p>}

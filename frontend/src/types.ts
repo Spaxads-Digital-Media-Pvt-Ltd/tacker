@@ -59,6 +59,8 @@ export interface DashboardUser {
 
 export interface Offer {
   id: string;
+  /** Settings that stop the offer getting traffic (GET /api/offers/:id only — lib/offer-settings/warnings.ts). */
+  configWarnings?: string[];
   ref?: number;
   advertiserId: string;
   name: string;
@@ -641,11 +643,19 @@ export interface NetworkRow {
 export interface PlanLimitStatus { key: string; used: number; limit: number; pct: number; state: 'ok' | 'near' | 'over' }
 
 /** GET /platform/networks/:id — one network as the Super Admin console shows it. */
+/** A network's plan overrides: its own price (text, the plan's currency), billing exempt, limits (null = unlimited). */
+export interface NetworkOverrides {
+  price: string | null; billingExempt: boolean; limits: Partial<Record<'clicks' | 'conversions' | 'events' | 'offers' | 'seats', number | null>>; note: string | null;
+}
+
 export interface NetworkDetail {
   id: string;
   ref: string;
   name: string;
   slug: string;
+  /** Super Admin › Resellers: who sold this network (null = direct). */
+  reseller_id?: string | null;
+  reseller_name?: string | null;
   status: 'active' | 'suspended' | 'deleted';
   default_currency: string;
   created_at: string;
@@ -664,6 +674,8 @@ export interface NetworkDetail {
   counts: { users: number; offers: number; partners: number; advertisers: number };
   trackingDomains: { host: string; mode: string; status: string; is_primary: boolean }[];
   usage: { plan: { code: string; name: string } | null; period: { start: string; end: string }; limits: PlanLimitStatus[] };
+  /** Super Admin › its deal when it differs from the plan (null = the plan as it is). */
+  overrides?: NetworkOverrides | null;
 }
 
 /** GET /platform/networks/:id/users — a network's team, as the Super Admin sees it. */

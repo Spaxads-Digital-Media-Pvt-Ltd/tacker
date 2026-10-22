@@ -34,7 +34,7 @@ import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { smtpConfigError } from '../../../lib/mailer.js';
 import { enqueueEmails, queueOutboxRow } from '../../../lib/email/outbox.js';
-import { SYSTEM_EMAIL_CATALOG, SENT_SYSTEM_EMAILS, VISIBLE_SYSTEM_EMAILS } from '../../../lib/email/system-emails.js';
+import { SYSTEM_EMAIL_CATALOG, SENT_SYSTEM_EMAILS, VISIBLE_SYSTEM_EMAILS, systemEmailDefault } from '../../../lib/email/system-emails.js';
 import type { Request } from 'express';
 
 const STATUSES = ['active', 'pending', 'inactive'] as const;
@@ -387,7 +387,7 @@ export function communicationHubRoutes(): Router {
     );
     const stored = (rows[0]?.settings?.['communicationHub'] as { systemEmails?: Record<string, boolean> } | undefined)?.systemEmails ?? {};
     // Only emails that actually send are listed (O11) — `wired` stays for API compatibility.
-    sendOk(res, VISIBLE_SYSTEM_EMAILS.map((e) => ({ ...e, enabled: stored[e.key] ?? true, wired: true })));
+    sendOk(res, VISIBLE_SYSTEM_EMAILS.map((e) => ({ ...e, enabled: stored[e.key] ?? systemEmailDefault(e.key), wired: true })));
   }));
   r.put('/system-emails/:key', requireRole('admin'), validateBody(z.object({ enabled: z.boolean() })), asyncHandler(async (req, res) => {
     const key = req.params.key ?? '';
@@ -454,5 +454,5 @@ export function communicationHubRoutes(): Router {
 function emailLabel(event: string): string {
   const known = SYSTEM_EMAIL_CATALOG.find((e) => e.key === event)?.label;
   if (known) return known;
-  return ({ communication_message: 'Email message', staff_invite: 'Team member invite', password_reset: 'Password reset', scheduled_report: 'Scheduled report' } as Record<string, string>)[event] ?? event;
+  return ({ communication_message: 'Email message', staff_invite: 'Team member invite', password_reset: 'Password reset', scheduled_report: 'Scheduled report', login_email_changed: 'Sign-in email changed' } as Record<string, string>)[event] ?? event;
 }

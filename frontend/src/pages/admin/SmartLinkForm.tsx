@@ -13,7 +13,7 @@ import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
 import { HelpIcon } from './controlCenter/shared';
-import { REDIRECT_MECHANISMS, KPI_METRICS, KPI_RUN_FREQUENCIES, KPI_LOOKBACK_WINDOWS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
+import { REDIRECT_MECHANISMS, KPI_METRICS, KPI_RUN_FREQUENCIES, KPI_LOOKBACK_WINDOWS, KPI_DEFAULTS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
 import type { Offer, TrackingDomain } from '../../types';
 
 interface Row { id: number; offerId: string; weight: number; position: number; offerUrl: string; country: string; open: boolean }
@@ -38,10 +38,10 @@ export default function SmartLinkForm() {
   const [catchAll, setCatchAll] = useState(false);
   const [catchAllOfferId, setCatchAllOfferId] = useState('');
   const [mechanism, setMechanism] = useState<Mechanism>('weight');
-  const [kpiRunFrequencyHours, setKpiRunFrequencyHours] = useState(12);
-  const [kpiLookbackHours, setKpiLookbackHours] = useState(24);
+  const [kpiRunFrequencyHours, setKpiRunFrequencyHours] = useState<number>(KPI_DEFAULTS.runFrequencyHours);
+  const [kpiLookbackHours, setKpiLookbackHours] = useState<number>(KPI_DEFAULTS.lookbackHours);
   const [kpiMetric, setKpiMetric] = useState<string>('CVR');
-  const [kpiMinClicks, setKpiMinClicks] = useState(100);
+  const [kpiMinClicks, setKpiMinClicks] = useState<number>(KPI_DEFAULTS.minClicks);
   const [rows, setRows] = useState<Row[]>([]);
   const nextId = useRef(1);
   const hydrated = useRef(false);
@@ -61,10 +61,10 @@ export default function SmartLinkForm() {
       setCatchAll(!!existing.catchAllOfferId);
       setCatchAllOfferId(existing.catchAllOfferId ?? '');
       setMechanism(existing.redirectMechanism);
-      setKpiRunFrequencyHours(existing.kpiRunFrequencyHours ?? 12);
-      setKpiLookbackHours(existing.kpiLookbackHours ?? 24);
+      setKpiRunFrequencyHours(existing.kpiRunFrequencyHours ?? KPI_DEFAULTS.runFrequencyHours);
+      setKpiLookbackHours(existing.kpiLookbackHours ?? KPI_DEFAULTS.lookbackHours);
       setKpiMetric(existing.kpiMetric ?? 'CVR');
-      setKpiMinClicks(existing.kpiMinClicks ?? 100);
+      setKpiMinClicks(existing.kpiMinClicks ?? KPI_DEFAULTS.minClicks);
       setRows(existing.items.map((it) => ({ id: nextId.current++, offerId: it.offerId, weight: it.weight, position: it.position ?? 1, offerUrl: it.offerUrl ?? '', country: it.country ?? '', open: true })));
     }
   }, [existing]);

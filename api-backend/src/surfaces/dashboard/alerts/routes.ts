@@ -31,6 +31,8 @@ const rulesSchema = z.object({
   enabled: z.boolean().optional(),
   velocityPerMinute: z.number().int().min(1).optional(),
   datacenterRatioThreshold: z.number().min(0).max(1).optional(),
+  botRatioThreshold: z.number().min(0).max(1).optional(),
+  proxyRatioThreshold: z.number().min(0).max(1).optional(),
   minClickToConversionSeconds: z.number().int().min(0).optional(),
   crSpikeThreshold: z.number().min(0).max(1).optional(),
   minClicksForCrAlert: z.number().int().min(1).optional(),

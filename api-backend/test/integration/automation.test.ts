@@ -351,6 +351,37 @@ d('automation execution (live DB + Redis)', () => {
       expect(gopts.body).toBeUndefined();
     });
 
+    it('meta lists the builder vocabulary; a test event and a retry of a failed delivery are queued and delivered', async () => {
+      const fx = await fixture();
+      const meta = (await request(dash).get('/api/automation/meta').set(fx.auth)).body.data;
+      expect(meta.webhookEvents).toContain('conversion.approved');
+      expect(meta.ruleMetrics.map((m: { key: string }) => m.key)).toEqual(expect.arrayContaining(['clicks', 'cr', 'payout', 'epc']));
+      expect(meta.ruleOps).toEqual(['>', '>=', '<', '<=', '=', '!=']);
+
+      const h = await createWebhook(fx, { url: `https://hooks.example.com/test/${run}`, events: 'alert.raised' });
+      const t = await request(dash).post(`/api/automation/webhooks/${h.id}/test`).set(fx.auth);
+      expect(t.status).toBe(202);
+      const [testJob] = (await webhookJobs(h.id)).filter((j) => j.event === 'webhook.test');
+      expect(testJob!.deliveryId).toBe(t.body.data.deliveryId);
+      hook.mockResolvedValueOnce({ status: 500, body: 'down' });
+      await expect(deliverWebhook(testJob!, 6, true)).rejects.toThrow('webhook http 500');
+      const failed = (await request(dash).get(`/api/automation/webhooks/${h.id}/deliveries`).set(fx.auth)).body.data[0];
+      expect(failed).toMatchObject({ event: 'webhook.test', status: 'failed', statusCode: 500 });
+
+      // Retry: same delivery id and payload, a fresh run; a successful one can't be retried.
+      expect((await request(dash).post(`/api/automation/webhooks/${h.id}/deliveries/${failed.id}/retry`).set(fx.auth)).status).toBe(202);
+      const again = (await webhookJobs(h.id)).filter((j) => j.deliveryId === failed.id);
+      expect(again.length).toBeGreaterThanOrEqual(2);
+      hook.mockResolvedValueOnce({ status: 200, body: 'ok' });
+      await deliverWebhook(again.at(-1)!, 1, false);
+      const ok = (await request(dash).get(`/api/automation/webhooks/${h.id}/deliveries`).set(fx.auth)).body.data.find((d: { id: string }) => d.id === failed.id);
+      expect(ok).toMatchObject({ status: 'success', attempts: 1, statusCode: 200 });
+      expect((await request(dash).post(`/api/automation/webhooks/${h.id}/deliveries/${failed.id}/retry`).set(fx.auth)).status).toBe(409);
+      // Read-only can't send tests or retries.
+      const ro = bearer(operatorToken({ userId: randomUUID(), networkId: fx.networkA, role: 'read_only' }));
+      expect((await request(dash).post(`/api/automation/webhooks/${h.id}/test`).set(ro)).status).toBe(403);
+    });
+
     it('a deactivated webhook gets nothing (its subscription cache is busted on update)', async () => {
       const fx = await fixture();
       const h = await createWebhook(fx, { url: 'https://hooks.example.com/off', events: 'alert.raised' });

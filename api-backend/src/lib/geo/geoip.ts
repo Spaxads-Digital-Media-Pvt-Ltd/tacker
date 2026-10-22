@@ -85,6 +85,17 @@ export async function refreshGeoIp(): Promise<void> {
   }
 }
 
+/**
+ * Which GeoIP databases this server has ON DISK (not what is loaded — the dashboard process never loads
+ * them; the tracking server, which uses them, reads the same files). For the offer page's warnings:
+ * `city` is the kind of city database — MaxMind GeoLite2 / GeoIP2 has postal and DMA codes, DB-IP Lite
+ * doesn't — and `isp` whether the paid GeoIP2-ISP database (mobile carriers) is there.
+ */
+export function geoFiles(): { city: 'maxmind' | 'dbip' | null; isp: boolean } {
+  const path = firstExisting(CITY_PATHS);
+  return { city: path ? (/dbip/i.test(path) ? 'dbip' : 'maxmind') : null, isp: firstExisting(ISP_PATHS) !== null };
+}
+
 /** Which databases are loaded (for /health and the docs' "is GEO working?" check). */
 export function geoStatus(): { city: string | null; asn: string | null; isp: string | null } {
   return { city: city?.path ?? null, asn: asn?.path ?? null, isp: isp?.path ?? null };
