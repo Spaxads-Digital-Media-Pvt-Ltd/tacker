@@ -12,6 +12,7 @@ import { usePlatformMe } from '../../lib/platformMe';
 import { relTime, isOverdue } from '../../lib/relativeTime';
 import { TASK_KINDS, useStaff, fromLocalInput, type PlatformTask } from '../../lib/platformSales';
 import { Modal, Field } from '../../shared-components/primitives/ui';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { Avatar, Chip, Empty } from './kit';
 import { StaffSelect } from './sales/parts';
 
@@ -19,6 +20,7 @@ export function TaskList({ tasks, onChanged, context = true, empty = 'Nothing to
   tasks: PlatformTask[]; onChanged: () => void; context?: boolean; empty?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
     try { await fn(); onChanged(); } catch (e) { setError(e instanceof Error ? e.message : 'Could not update the task'); }
@@ -49,7 +51,7 @@ export function TaskList({ tasks, onChanged, context = true, empty = 'Nothing to
             <span className="flex shrink-0 items-center gap-2">
               {t.assignee_name && <Avatar name={t.assignee_name} size="sm" />}
               <button type="button" className="text-fg-muted opacity-0 hover:text-danger-text group-hover:opacity-100 focus:opacity-100" aria-label={`Delete ${t.title}`}
-                onClick={() => void act(() => api.del(`/platform/tasks/${t.id}`))}><Trash2 size={14} /></button>
+                onClick={() => void confirm({ title: 'Delete task?', message: `Delete "${t.title}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: () => act(() => api.del(`/platform/tasks/${t.id}`)) })}><Trash2 size={14} /></button>
             </span>
           </div>
         );

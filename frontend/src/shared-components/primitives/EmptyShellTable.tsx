@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, Info } from 'lucide-react';
 import { Field, MenuPopover, Modal, ScrollReveal, TableScroll } from './ui';
 import { Pagination } from './ReportPageKit';
+import { useConfirm } from './confirm';
 
 /**
  * Static table shell for detail-page sub-tabs that have no backend yet. Matches the reference UI's
@@ -256,6 +257,7 @@ export function EmptyShellTable({
   /** The add form's fields, when they aren't simply the columns as text inputs. */
   addFields?: AddField[];
 }) {
+  const confirm = useConfirm();
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -332,7 +334,15 @@ export function EmptyShellTable({
                   {onDelete && (
                     <td className="text-right">
                       <button type="button" className="text-tiny text-danger-text hover:underline"
-                        onClick={() => { setDeleteError(null); onDelete(row.id).catch((e: unknown) => setDeleteError(e instanceof Error ? e.message : 'Delete failed')); }}>Delete</button>
+                        onClick={() => {
+                          setDeleteError(null);
+                          const first = row.cells[shown[0] ?? ''];
+                          const label = typeof first === 'string' || typeof first === 'number' ? `"${first}"` : 'this record';
+                          void confirm({
+                            title: 'Delete record?', message: `Delete ${label}? This can’t be undone.`, confirmLabel: 'Delete', destructive: true,
+                            onConfirm: () => onDelete(row.id).catch((e: unknown) => setDeleteError(e instanceof Error ? e.message : 'Delete failed')),
+                          });
+                        }}>Delete</button>
                     </td>
                   )}
                 </tr>

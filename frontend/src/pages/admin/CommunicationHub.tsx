@@ -10,6 +10,7 @@
  */
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Plus, Pencil, Trash2, Send } from 'lucide-react';
+import { useConfirm } from '../../shared-components/primitives/confirm';
 import { PageHeader, Tabs, Field, Modal, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { useQuery, useMutation } from '../../lib/useApi';
@@ -326,6 +327,7 @@ function EmailsTab() {
   const { data: audiencesData } = useQuery<AudienceRow[]>('/api/communication-hub/audiences');
   const { data: templatesData } = useQuery<TemplateRow[]>('/api/communication-hub/templates');
   const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/emails/${id}`));
+  const confirm = useConfirm();
   const { run: runSend, error: sendError } = useMutation((id: string) => api.post(`/api/communication-hub/emails/${id}/send`));
 
   const rows = data ?? [];
@@ -367,7 +369,7 @@ function EmailsTab() {
                       <div className="flex justify-end gap-1">
                         <button title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setComposing(e)}><Pencil size={14} /></button>
                         <button title="Send now" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={async () => { if (await runSend(e.id)) refetch(); }}><Send size={14} /></button>
-                        <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={async () => { if (await runDelete(e.id)) refetch(); }}><Trash2 size={14} /></button>
+                        <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={() => void confirm({ title: 'Delete draft?', message: `Delete the draft "${e.subject}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await runDelete(e.id)) refetch(); } })}><Trash2 size={14} /></button>
                       </div>
                     )}
                   </td>
@@ -481,6 +483,7 @@ function BannersTab() {
   const [editing, setEditing] = useState<BannerRow | null | 'new'>(null);
   const { data, loading, refetch } = useQuery<BannerRow[]>('/api/communication-hub/banners');
   const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/banners/${id}`));
+  const confirm = useConfirm();
 
   const filterKey = sub === 'Published' ? 'published' : sub === 'Scheduled' ? 'scheduled' : sub === 'Expired' ? 'expired' : 'draft';
   const rows = useMemo(() => (data ?? []).filter((b) => b.status === filterKey), [data, filterKey]);
@@ -520,7 +523,7 @@ function BannersTab() {
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-1">
                       <button title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setEditing(b)}><Pencil size={14} /></button>
-                      <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={async () => { if (await runDelete(b.id)) refetch(); }}><Trash2 size={14} /></button>
+                      <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={() => void confirm({ title: 'Delete banner?', message: `Delete the banner "${b.name}"? Partners stop seeing it.`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await runDelete(b.id)) refetch(); } })}><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -611,6 +614,7 @@ function AudiencesTab() {
   const [editing, setEditing] = useState<AudienceRow | null | 'new'>(null);
   const { data, loading, refetch } = useQuery<AudienceRow[]>('/api/communication-hub/audiences');
   const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/audiences/${id}`));
+  const confirm = useConfirm();
   const rows = data ?? [];
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -643,7 +647,7 @@ function AudiencesTab() {
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-1">
                       <button title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setEditing(a)}><Pencil size={14} /></button>
-                      <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={async () => { if (await runDelete(a.id)) refetch(); }}><Trash2 size={14} /></button>
+                      <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={() => void confirm({ title: 'Delete audience?', message: `Delete the audience "${a.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await runDelete(a.id)) refetch(); } })}><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -712,6 +716,7 @@ function TemplatesTab() {
   const [editing, setEditing] = useState<TemplateRow | null | 'new'>(null);
   const { data, loading, refetch } = useQuery<TemplateRow[]>('/api/communication-hub/templates');
   const { run: runDelete, error: deleteError } = useMutation((id: string) => api.del(`/api/communication-hub/templates/${id}`));
+  const confirm = useConfirm();
   const rows = data ?? [];
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -746,7 +751,7 @@ function TemplatesTab() {
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-1">
                       <button title="Edit" className="rounded p-1 text-fg-secondary hover:bg-accent-subtle hover:text-fg" onClick={() => setEditing(t)}><Pencil size={14} /></button>
-                      <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={async () => { if (await runDelete(t.id)) refetch(); }}><Trash2 size={14} /></button>
+                      <button title="Delete" className="rounded p-1 text-fg-secondary hover:bg-danger-subtle hover:text-danger-text" onClick={() => void confirm({ title: 'Delete template?', message: `Delete the template "${t.name}"?`, confirmLabel: 'Delete', destructive: true, onConfirm: async () => { if (await runDelete(t.id)) refetch(); } })}><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
