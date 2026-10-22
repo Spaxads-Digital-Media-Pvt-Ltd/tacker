@@ -5,10 +5,13 @@
  * popover to the right of its icon (matching RailTip's own `left-full` convention), closes on
  * outside-click/Esc.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
-import { Bell, User, HelpCircle, BookOpen, Keyboard, Mail } from 'lucide-react';
+import { Bell, User, HelpCircle, BookOpen, Keyboard, Mail, Sparkles, Activity } from 'lucide-react';
+import { Modal } from '../primitives/ui';
+import { ROLE_HOME } from '../../auth/roles';
+import { changelogSeenAt, hasUnread } from '../../lib/changelogSeen';
 import { useQuery } from '../../lib/useApi';
 import { useAuth } from '../../auth/AuthContext';
 
@@ -211,22 +214,36 @@ export function HelpMenu({ expanded }: { expanded: boolean }) {
   const { pathname } = useLocation();
   const tickets = useQuery<{ open: number; waiting_on_you: number }>(role === 'admin' ? '/api/support/summary' : null, { at: pathname.startsWith('/app/support') ? pathname : undefined });
   const waiting = tickets.data?.waiting_on_you ?? 0;
+  const home = role ? ROLE_HOME[role] : '/app';
+  // "What's new": a dot until the newest published entry has been seen (per browser).
+  const changelog = useQuery<{ published_at: string | null }[]>(role && role !== 'super_admin' ? '/api/help/changelog' : null);
+  const unread = hasUnread(changelog.data?.[0]?.published_at, changelogSeenAt());
+  const [shortcuts, setShortcuts] = useState(false);
   const itemCls = 'flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-small font-medium text-fg transition-colors hover:bg-accent-subtle';
   return (
     <div className="relative" ref={ref}>
-      <RailIconButton expanded={expanded} label="Help" onClick={() => setOpen((o) => !o)} badge={waiting > 0}><HelpCircle size={18} /></RailIconButton>
+      <RailIconButton expanded={expanded} label="Help" onClick={() => setOpen((o) => !o)} badge={waiting > 0 || unread}><HelpCircle size={18} /></RailIconButton>
       {open && (
         <Popover anchorRef={ref} panelRef={panelRef}>
           <div className="border-b border-border px-3.5 py-3">
             <h3 className="text-small font-semibold text-fg">Help &amp; Support</h3>
           </div>
           <div className="p-1.5">
-            <button type="button" disabled className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-left text-small font-medium text-fg-muted cursor-default opacity-60">
-              <BookOpen size={16} className="shrink-0" /> Documentation
+            <Link to={role === 'super_admin' ? '/admin/help-center' : `${home}/help`} onClick={() => setOpen(false)} className={itemCls}>
+              <BookOpen size={16} className="shrink-0 text-fg-secondary" /> {role === 'super_admin' ? 'Help center (manage)' : 'Help center'}
+            </Link>
+            {role !== 'super_admin' && (
+              <Link to={`${home}/whats-new`} onClick={() => setOpen(false)} className={itemCls}>
+                <Sparkles size={16} className="shrink-0 text-fg-secondary" /> What’s new
+                {unread && <span className="ml-auto h-2 w-2 rounded-full bg-accent" aria-label="New" />}
+              </Link>
+            )}
+            <button type="button" onClick={() => { setOpen(false); setShortcuts(true); }} className={itemCls}>
+              <Keyboard size={16} className="shrink-0 text-fg-secondary" /> Keyboard shortcuts
             </button>
-            <button type="button" disabled className="flex w-full items-center gap-2.5 rounded-[var(--radius)] px-2.5 py-2 text-left text-small font-medium text-fg-muted cursor-default opacity-60">
-              <Keyboard size={16} className="shrink-0" /> Keyboard Shortcuts
-            </button>
+            <a href="/status" target="_blank" rel="noreferrer" onClick={() => setOpen(false)} className={itemCls}>
+              <Activity size={16} className="shrink-0 text-fg-secondary" /> System status
+            </a>
             {role === 'admin' ? (
               <Link to="/app/support" onClick={() => setOpen(false)} className={itemCls}>
                 <Mail size={16} className="shrink-0 text-fg-secondary" /> Contact Support
@@ -244,6 +261,27 @@ export function HelpMenu({ expanded }: { expanded: boolean }) {
           </div>
         </Popover>
       )}
+      {shortcuts && (
+        <Modal open onClose={() => setShortcuts(false)} title="Keyboard shortcuts"
+          footer={<button type="button" className="btn-primary" onClick={() => setShortcuts(false)}>Close</button>}>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-small">
+            {SHORTCUTS.map(([keys, what]) => (
+              <Fragment key={what}>
+                <dt>{keys.map((k) => <kbd key={k} className="mr-1 rounded border border-border bg-page px-1.5 py-0.5 font-mono text-tiny">{k}</kbd>)}</dt>
+                <dd className="text-fg-secondary">{what}</dd>
+              </Fragment>
+            ))}
+          </dl>
+        </Modal>
+      )}
     </div>
   );
 }
+
+const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+const SHORTCUTS: [string[], string][] = [
+  [[MOD, 'K'], 'Search — offers, partners, advertisers, pages'],
+  [['Esc'], 'Close a dialog, menu or search'],
+  [['Enter'], 'Submit the focused form'],
+  [['Tab'], 'Move to the next field or button'],
+];

@@ -73,6 +73,10 @@ export const NAV: Record<Role, NavEntry[]> = {
     {
       group: 'Platform', label: 'Platform', icon: 'settings', flyout: [
         { label: 'Announcements', description: 'Banners and maintenance windows in tenant dashboards', to: '/admin/announcements', icon: Lucide.Megaphone, perm: 'comms' },
+        { label: 'Help center', description: 'Articles in the app’s Help — staff, partners, advertisers', to: '/admin/help-center', icon: Lucide.BookOpen, perm: 'comms' },
+        { label: 'Changelog', description: '“What’s new” — new features, improvements and fixes', to: '/admin/changelog', icon: Lucide.Sparkles, perm: 'comms' },
+        { label: 'Status page', description: 'Components, incidents and maintenance at /status', to: '/admin/status-page', icon: Lucide.Activity, perm: 'comms' },
+        { label: 'Broadcasts', description: 'Email network teams by role, plan and status', to: '/admin/broadcasts', icon: Lucide.Mails, perm: 'comms' },
         { label: 'Feature flags', description: 'Turn features on or off per network, plan or rollout', to: '/admin/flags', icon: Lucide.Flag, perm: 'platform' },
         { label: 'System health', description: 'Database, Redis and the background queues', to: '/admin/system', icon: Lucide.ServerCog, perm: 'platform' },
         { label: 'Activity', description: 'What the team and billing did', to: '/admin/activity', icon: Lucide.History, perm: 'activity' },

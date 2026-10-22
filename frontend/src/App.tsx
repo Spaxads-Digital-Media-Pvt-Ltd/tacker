@@ -91,6 +91,13 @@ const TrustBlocklist = lazy(() => import('./pages/super-admin/trust/Blocklist'))
 const PrivacyRequests = lazy(() => import('./pages/super-admin/trust/PrivacyRequests'));
 const RequestDemo = lazy(() => import('./pages/RequestDemo'));
 const SignUp = lazy(() => import('./pages/SignUp'));
+const Help = lazy(() => import('./pages/Help'));
+const WhatsNew = lazy(() => import('./pages/WhatsNew'));
+const StatusPage = lazy(() => import('./pages/Status'));
+const PlatformHelpCenter = lazy(() => import('./pages/super-admin/comms/HelpCenter'));
+const PlatformChangelog = lazy(() => import('./pages/super-admin/comms/Changelog'));
+const PlatformStatusAdmin = lazy(() => import('./pages/super-admin/comms/StatusAdmin'));
+const PlatformBroadcasts = lazy(() => import('./pages/super-admin/comms/Broadcasts'));
 const NetworkDetail = lazy(() => import('./pages/super-admin/NetworkDetail'));
 const PublisherOffers = lazy(() => import('./pages/portal/PublisherOffers'));
 const AdvertiserOffers = lazy(() => import('./pages/portal/AdvertiserOffers'));
@@ -183,6 +190,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/request-demo" element={<RequestDemo />} />
+        <Route path="/status" element={<StatusPage />} />
         <Route path="/pub-signup" element={<SignUp kind="partner" />} />
         <Route path="/adv-signup" element={<SignUp kind="advertiser" />} />
         <Route path="/reset-password" element={<ResetPassword />} />
@@ -213,6 +221,10 @@ export default function App() {
           <Route path="/admin/support/:id" element={<PlatformGate section="support"><TicketView /></PlatformGate>} />
           <Route path="/admin/revenue" element={<PlatformGate section="revenue"><PlatformRevenue /></PlatformGate>} />
           <Route path="/admin/coupons" element={<PlatformGate section="billing"><PlatformCoupons /></PlatformGate>} />
+          <Route path="/admin/help-center" element={<PlatformGate section="comms"><PlatformHelpCenter /></PlatformGate>} />
+          <Route path="/admin/changelog" element={<PlatformGate section="comms"><PlatformChangelog /></PlatformGate>} />
+          <Route path="/admin/status-page" element={<PlatformGate section="comms"><PlatformStatusAdmin /></PlatformGate>} />
+          <Route path="/admin/broadcasts" element={<PlatformGate section="comms"><PlatformBroadcasts /></PlatformGate>} />
           <Route path="/admin/resellers" element={<PlatformGate section="resellers"><PlatformResellers /></PlatformGate>} />
           <Route path="/admin/resellers/:id" element={<PlatformGate section="resellers"><PlatformReseller /></PlatformGate>} />
           <Route path="/admin/flags" element={<PlatformGate section="platform"><FeatureFlags /></PlatformGate>} />
@@ -355,6 +367,9 @@ export default function App() {
           <Route path="/app/control-center/:tab" element={<ControlCenter />} />
           <Route path="/app/billing" element={<NetworkBilling />} />
           <Route path="/app/support" element={<TenantSupport />} />
+          <Route path="/app/help" element={<Help />} />
+          <Route path="/app/help/:slug" element={<Help />} />
+          <Route path="/app/whats-new" element={<WhatsNew />} />
           <Route path="/app/support/:id" element={<TenantSupportTicket />} />
           <Route path="/app/billing/invoices/:id" element={<NetworkBillingInvoice />} />
           <Route path="/app/ai" element={<AiOps />} />
@@ -368,6 +383,9 @@ export default function App() {
         {/* Publisher portal */}
         <Route element={<ProtectedRoute allow="publisher"><AppShell /></ProtectedRoute>}>
           <Route path="/publisher" element={<DashboardHome />} />
+          <Route path="/publisher/help" element={<Help />} />
+          <Route path="/publisher/help/:slug" element={<Help />} />
+          <Route path="/publisher/whats-new" element={<WhatsNew />} />
           <Route path="/publisher/offers" element={<PublisherOffers />} />
           <Route path="/publisher/offers/:id" element={<PublisherOfferDetail />} />
           <Route path="/publisher/stats" element={<ReportView title="Stats" subtitle="Your clicks, conversions, CR, payout, EPC — your data only." basePath="/api/portal/publisher/stats" groupByOptions={['offer', 'country', 'device', 'day']} />} />
@@ -378,6 +396,9 @@ export default function App() {
         {/* Advertiser portal */}
         <Route element={<ProtectedRoute allow="advertiser"><AppShell /></ProtectedRoute>}>
           <Route path="/advertiser" element={<DashboardHome />} />
+          <Route path="/advertiser/help" element={<Help />} />
+          <Route path="/advertiser/help/:slug" element={<Help />} />
+          <Route path="/advertiser/whats-new" element={<WhatsNew />} />
           <Route path="/advertiser/offers" element={<AdvertiserOffers />} />
           <Route path="/advertiser/offers/:id" element={<AdvertiserOfferDetail />} />
           <Route path="/advertiser/stats" element={<ReportView title="Stats" subtitle="Your offers’ clicks, conversions, CR, revenue — your data only." basePath="/api/portal/advertiser/stats" groupByOptions={['offer', 'country', 'device', 'day']} />} />

@@ -20,7 +20,7 @@ export const SECTIONS = [
   { key: 'billing', name: 'Billing', description: 'Invoices, payments, credit notes, coupons; run billing.' },
   { key: 'plans', name: 'Plans & subscriptions', description: 'The plan catalog and each network’s subscription.' },
   { key: 'revenue', name: 'Revenue', description: 'MRR, churn, ARPA and the other revenue numbers.' },
-  { key: 'comms', name: 'Announcements', description: 'Banners and news shown in tenant dashboards.' },
+  { key: 'comms', name: 'Comms', description: 'Announcements, the help center, the changelog, the status page and email broadcasts.' },
   { key: 'platform', name: 'Platform', description: 'Feature flags and system health.' },
   { key: 'trust', name: 'Trust & safety', description: 'Fraud across networks, the platform blocklist and privacy (GDPR / CCPA) requests.' },
   { key: 'resellers', name: 'Resellers & white-label', description: 'Resellers and their commission; networks’ own brand and dashboard domain.' },
