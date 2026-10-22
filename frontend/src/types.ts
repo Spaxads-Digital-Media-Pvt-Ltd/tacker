@@ -59,6 +59,8 @@ export interface DashboardUser {
 
 export interface Offer {
   id: string;
+  /** Settings that stop the offer getting traffic (GET /api/offers/:id only — lib/offer-settings/warnings.ts). */
+  configWarnings?: string[];
   ref?: number;
   advertiserId: string;
   name: string;

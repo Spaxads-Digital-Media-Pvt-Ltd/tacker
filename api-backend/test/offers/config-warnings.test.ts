@@ -36,4 +36,16 @@ describe('offer config warnings', () => {
     expect(offerConfigWarnings({ ...base, visibility: 'private', approvedPartners: 2 })).toEqual([]);
     expect(offerConfigWarnings({ ...base, status: 'paused' })[0]).toMatch(/paused/);
   });
+
+  it('GeoIP: no database → GEO not enforced; DB-IP can’t do zip / DMA; carrier needs GeoIP2-ISP; nothing to say without geo settings', () => {
+    const none = { city: null, isp: false } as const;
+    expect(offerConfigWarnings({ ...base, geoRules: [geo('US')], geo: none })[0]).toMatch(/^GEO is not enforced: this server has no GeoIP database/);
+    expect(offerConfigWarnings({ ...base, targeting: { city: { mode: 'include', values: ['Paris'] } }, geo: none })[0]).toMatch(/GEO is not enforced/);
+    expect(offerConfigWarnings({ ...base, geo: none })).toEqual([]); // no geo settings → nothing to enforce
+    const dbip = { city: 'dbip', isp: false } as const;
+    expect(offerConfigWarnings({ ...base, targeting: { zip: { mode: 'include', values: ['10001'] } }, geo: dbip })[0]).toMatch(/Zip \/ DMA rejects every click/);
+    expect(offerConfigWarnings({ ...base, targeting: { dma: { mode: 'include', values: ['501'] } }, geo: { city: 'maxmind', isp: false } })).toEqual([]);
+    expect(offerConfigWarnings({ ...base, targeting: { mobileCarrier: { mode: 'include', values: ['Jio'] } }, geo: { city: 'maxmind', isp: false } })[0]).toMatch(/Mobile Carrier is ignored/);
+    expect(offerConfigWarnings({ ...base, targeting: { mobileCarrier: { mode: 'include', values: ['Jio'] } }, geo: { city: 'maxmind', isp: true } })).toEqual([]);
+  });
 });

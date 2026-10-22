@@ -13,7 +13,11 @@ export interface WarningInput {
   allowedTrafficTypes: string[] | null;
   targeting: OfferTargeting | null | undefined;
   geoRules: { country: string; region: string | null; action: string }[];
+  /** The GeoIP databases on this server (lib/geo/geoip.ts geoFiles) — absent = don't check. */
+  geo?: { city: 'maxmind' | 'dbip' | null; isp: boolean };
 }
+
+const GEO_TARGETING = ['country', 'region', 'city', 'dma', 'zip', 'isp', 'mobileCarrier'] as const;
 
 const MOBILE_OS = ['ios', 'android', 'ipados'];
 const DESKTOP_OS = ['windows', 'mac os', 'macos', 'linux', 'ubuntu', 'chrome os', 'chromium os'];
@@ -55,6 +59,20 @@ export function offerConfigWarnings(o: WarningInput): string[] {
     const handheldOnly = types.every((x) => x === 'mobile' || x === 'tablet');
     if (desktopOnly && os.every((v) => MOBILE_OS.includes(v))) out.push(`No click can get through: the offer allows desktop only, but Targeting › OS includes only ${list(p!.values)}.`);
     if (handheldOnly && os.every((v) => DESKTOP_OS.includes(v))) out.push(`No click can get through: the offer allows ${list(types)} only, but Targeting › OS includes only ${list(p!.values)}.`);
+  }
+  // GeoIP: what the tracking server can actually evaluate.
+  if (o.geo) {
+    const t2 = o.targeting as Record<string, { values?: string[] } | undefined> | null | undefined;
+    const uses = (k: string) => (t2?.[k]?.values?.length ?? 0) > 0;
+    if (!o.geo.city && (o.geoRules.length || GEO_TARGETING.some(uses))) {
+      out.push('GEO is not enforced: this server has no GeoIP database, so country / region / city rules and geo targeting let every visitor through. Run `npm run geoip:download` (set MAXMIND_LICENSE_KEY for MaxMind GeoLite2).');
+    }
+    if (o.geo.city === 'dbip' && (uses('zip') || uses('dma'))) {
+      out.push('Targeting › Zip / DMA rejects every click: the free DB-IP database has no postal or DMA codes. Use MaxMind GeoLite2 (free — set MAXMIND_LICENSE_KEY and run `npm run geoip:download`).');
+    }
+    if (!o.geo.isp && uses('mobileCarrier')) {
+      out.push('Targeting › Mobile Carrier is ignored: it needs the paid MaxMind GeoIP2-ISP database (data/geoip/GeoIP2-ISP.mmdb).');
+    }
   }
   return out;
 }

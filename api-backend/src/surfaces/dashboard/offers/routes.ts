@@ -37,6 +37,7 @@ import { offerStatusChanged, offerAccessChanged } from '../../../lib/email/notif
 import { generateSecureCode } from '../../../lib/security-code.js';
 import { mergeOfferMetadata, type OfferTargeting } from '../../../lib/offer-settings/index.js';
 import { offerConfigWarnings } from '../../../lib/offer-settings/warnings.js';
+import { geoFiles } from '../../../lib/geo/geoip.js';
 import {
  createOfferSchema,
  updateOfferSchema,
@@ -402,6 +403,7 @@ export function offersAdminRoutes(): Router {
  status: row.status, visibility: row.visibility ?? null, approvedPartners: approved.rows[0]?.n ?? 0,
  allowedTrafficTypes: row.allowed_traffic_types ?? null,
  targeting: (row.metadata as { targeting?: OfferTargeting } | null)?.targeting ?? null, geoRules: geo.rows,
+ geo: geoFiles(),
  });
  sendOk(res, { ...offerDtoFor(req)(row), configWarnings });
  }),

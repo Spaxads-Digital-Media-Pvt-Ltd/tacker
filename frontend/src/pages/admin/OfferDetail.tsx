@@ -4,6 +4,7 @@ import { Link2, Pencil, RefreshCw } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { recordView } from '../../lib/recentlyViewed';
 import { PageHeader, Spinner, StateBlock, Tabs, type Column } from '../../shared-components/primitives/ui';
+import { OfferConfigWarnings } from './offerDetail/ConfigWarnings';
 import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
 import { GeneralTab } from './offerDetail/GeneralTab';
 import { CustomSettingsTab } from './offerDetail/CustomSettingsTab';
@@ -59,6 +60,7 @@ export default function OfferDetail() {
         }
       />
 
+      <OfferConfigWarnings warnings={offer.configWarnings} />
       <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
 
       {tab === 'General' && <GeneralTab offer={offer} advName={advName} domains={domains ?? []} base={base} onSaved={refetch} />}
