@@ -121,6 +121,7 @@ function AddAccountForm({ onCancel, onCreated }: { onCancel: () => void; onCreat
  */
 function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onCancel: () => void; onSaved: (note: AccountNote | null) => void }) {
   const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
   const [role, setRole] = useState(user.role);
   const [status, setStatus] = useState(user.status);
   const [businessUnit, setBusinessUnit] = useState(user.businessUnit ?? '');
@@ -160,6 +161,7 @@ function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onC
     const body: Record<string, unknown> = {};
     const put = (k: string, now: unknown, was: unknown) => { if (now !== was) body[k] = now; };
     put('name', name.trim(), user.name);
+    if (email.trim().toLowerCase() !== user.email.trim().toLowerCase()) body['email'] = email.trim();
     put('role', role, user.role);
     put('status', status, user.status);
     put('businessUnit', businessUnit.trim(), user.businessUnit ?? '');
@@ -176,7 +178,7 @@ function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onC
       const res = await api.patch<{ loginSync?: string }>(`/api/control-center/users/${user.id}`, body);
       onSaved(res.loginSync === 'failed'
         ? { text: 'Saved. Their login could not be updated right now — access is still enforced from this account record.', tone: 'warn' }
-        : null);
+        : body['email'] ? { text: `Their sign-in email is now ${String(body['email']).toLowerCase()} — both addresses were told.`, tone: 'ok' } : null);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save account.');
     } finally {
@@ -190,7 +192,7 @@ function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onC
       {saveError && <p className="text-small text-danger-text">{saveError}</p>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} required /></Field>
-        <Field label="Email"><input className="input" value={user.email} disabled /></Field>
+        <Field label="Email (sign-in)"><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
         <Field label="Role *">
           <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="admin">Admin</option>
@@ -215,7 +217,7 @@ function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onC
         <label className="flex items-center gap-2"><input type="checkbox" checked={advertiserManager} onChange={(e) => setAdvertiserManager(e.target.checked)} className="h-4 w-4 rounded border-border" />Advertiser Manager</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={superUser} onChange={(e) => setSuperUser(e.target.checked)} className="h-4 w-4 rounded border-border" />Super User</label>
       </div>
-      <p className="text-tiny text-fg-muted">A role or status change applies on their next click — Disabled signs them out of the dashboard at once. You can’t disable or demote yourself, and the network always keeps an active admin.</p>
+      <p className="text-tiny text-fg-muted">A role or status change applies on their next click — Disabled signs them out of the dashboard at once. You can’t disable or demote yourself, and the network always keeps an active admin. A new email becomes their sign-in address (same password); the old and new addresses are both emailed.</p>
       <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
         {canInvite && (
           <button type="button" className="btn-ghost mr-auto" onClick={() => void access('invite')} disabled={busy}

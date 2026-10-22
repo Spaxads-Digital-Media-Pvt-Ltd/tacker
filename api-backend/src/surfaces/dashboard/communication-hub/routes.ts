@@ -454,5 +454,5 @@ export function communicationHubRoutes(): Router {
 function emailLabel(event: string): string {
   const known = SYSTEM_EMAIL_CATALOG.find((e) => e.key === event)?.label;
   if (known) return known;
-  return ({ communication_message: 'Email message', staff_invite: 'Team member invite', password_reset: 'Password reset', scheduled_report: 'Scheduled report' } as Record<string, string>)[event] ?? event;
+  return ({ communication_message: 'Email message', staff_invite: 'Team member invite', password_reset: 'Password reset', scheduled_report: 'Scheduled report', login_email_changed: 'Sign-in email changed' } as Record<string, string>)[event] ?? event;
 }

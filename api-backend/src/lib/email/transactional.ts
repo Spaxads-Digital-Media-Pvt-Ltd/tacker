@@ -22,7 +22,7 @@ import { logger } from '../logger.js';
 import { systemEmailDefault, type SystemEmailKey } from './system-emails.js';
 
 /** Sent regardless of the Communication Hub toggles. */
-export const ALWAYS_ON_EMAILS = ['scheduled_report', 'staff_invite', 'password_reset'] as const;
+export const ALWAYS_ON_EMAILS = ['scheduled_report', 'staff_invite', 'password_reset', 'login_email_changed'] as const;
 export type AlwaysOnEmail = (typeof ALWAYS_ON_EMAILS)[number];
 const alwaysOn = (e: string): e is AlwaysOnEmail => (ALWAYS_ON_EMAILS as readonly string[]).includes(e);
 
