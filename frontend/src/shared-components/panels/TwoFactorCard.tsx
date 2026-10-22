@@ -11,6 +11,7 @@ import { useMutation } from '../../lib/useApi';
 import { usePlatformMe } from '../../lib/platformMe';
 import { Field } from '../primitives/ui';
 import { CopyBox } from './CopyBox';
+import { QrCode } from '../primitives/QrCode';
 
 function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   const text = codes.join('\n');
@@ -81,7 +82,8 @@ export function TwoFactorCard({ onChanged }: { onChanged?: () => void }) {
       {codes ? <RecoveryCodes codes={codes} onDone={() => { setCodes(null); changed(); }} /> : !tf.enabled ? (
         setup ? (
           <form onSubmit={onEnable} className="space-y-3">
-            <p className="text-small text-fg">1. In your authenticator app, add an account with this key (or open the link on your phone):</p>
+            <p className="text-small text-fg">1. Scan this QR code with your authenticator app — or add an account with the key below (or open the link on your phone):</p>
+            <QrCode value={setup.otpauthUrl} title="Authenticator setup QR code" />
             <CopyBox value={setup.secret.replace(/(.{4})/g, '$1 ').trim()} />
             <a href={setup.otpauthUrl} className="text-tiny font-medium text-accent-text hover:underline">Open in my authenticator app</a>
             <p className="text-small text-fg">2. Enter the 6-digit code it shows:</p>
