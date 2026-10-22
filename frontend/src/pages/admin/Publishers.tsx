@@ -239,6 +239,9 @@ export default function Publishers() {
     <span className="inline-flex items-center gap-2">
       <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[p.status] ?? 'bg-fg-muted'}`} />
       <Link to={`/app/publishers/${p.id}`} className="font-medium text-accent-text hover:underline">{p.name}</Link>
+      {!p.hasPortalAccount && p.status !== 'pending' && (
+        <span className="rounded-full bg-page px-1.5 py-0.5 text-tiny text-fg-secondary" title="No portal login yet — send an invite from the row menu (⋮ › Invite)">No login</span>
+      )}
     </span>
   );
   const dash = <span className="text-fg-muted">—</span>;
@@ -356,6 +359,7 @@ export default function Publishers() {
             setTab(key); resetView();
             if (key !== 'pending') setStatuses((s) => s.filter((x) => x !== 'pending'));
           }}
+            title={key === 'existing' ? 'Every approved account, with or without a portal login' : key === 'unverified' ? 'Approved accounts with no portal login yet — invite them from the row menu' : 'Applications waiting for review'}
             className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-small font-medium transition-colors ${tab === key ? 'border-accent text-fg' : 'border-transparent text-fg-secondary hover:text-fg'}`}>
             {label}
             {count > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-fg px-1.5 text-tiny font-bold text-surface">{count}</span>}

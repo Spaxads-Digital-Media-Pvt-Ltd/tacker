@@ -367,6 +367,16 @@ d('portal logins are provisioned in-product (live DB, fake Supabase)', () => {
     });
   });
 
+  it('Manage Partners tabs: an account without a portal login is in Existing (and Unverified), never missing', async () => {
+    const created = await createPartner({}); // no contact email → no invite, no login
+    expect(created.status).toBe(201);
+    const id = created.body.data.id as string;
+    const tab = async (t: string) => ((await request(dash).get('/api/publishers').query({ paged: '1', tab: t, pageSize: 500 }).set(admin)).body.data.rows as { id: string }[]).map((r) => r.id);
+    expect(await tab('existing')).toContain(id);
+    expect(await tab('unverified')).toContain(id);
+    expect(await tab('pending')).not.toContain(id);
+  });
+
   describe('POST /api/signup/partner (unauthenticated)', () => {
     it('creates a pending partner (Partners › Pending) with a portal login that reaches the partner portal', async () => {
       const email = newEmail();

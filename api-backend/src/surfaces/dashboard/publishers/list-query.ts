@@ -1,8 +1,9 @@
 /**
  * Manage Partners — paged list (`GET /api/publishers?paged=1`). Schema + PURE SQL builder, network id
  * always `$1`, every value bound. Semantics mirror the page's former client-side filters:
- *   - Tabs: pending = status pending; existing = not pending + linked portal account; unverified =
- *     not pending + no portal account.
+ *   - Tabs: pending = status pending; existing = every account that isn't pending (with or without a
+ *     portal login — an admin-made account without one used to be missing from Existing); unverified =
+ *     not pending + no portal login yet (a sub-list of Existing: who still needs an invite).
  *   - Region: coarse buckets over the free-text `country` (ISO-2 code or English name, see
  *     COUNTRY_REGION); empty → "Unknown"; anything unmapped → "Other".
  *   - Payable (derived): portal account + payment method on file + active.
@@ -104,7 +105,7 @@ const PAYABLE = `(p.auth_user_id IS NOT NULL AND p.payment_method IS NOT NULL AN
 export function tabWhere(tab: PublisherListQuery['tab'], alias = 'p'): string | null {
   if (tab === 'pending') return `${alias}.status = 'pending'`;
   if (tab === 'unverified') return `(${alias}.status <> 'pending' AND ${alias}.auth_user_id IS NULL)`;
-  if (tab === 'existing') return `(${alias}.status <> 'pending' AND ${alias}.auth_user_id IS NOT NULL)`;
+  if (tab === 'existing') return `${alias}.status <> 'pending'`;
   return null;
 }
 
