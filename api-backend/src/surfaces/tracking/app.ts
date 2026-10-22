@@ -40,7 +40,7 @@ import {
  checkTrackingRateLimit, peekTrackingRateLimit, chargeTrackingRateLimit, CLICK_LIMIT, POSTBACK_LIMIT, POSTBACK_PER_CLICK_LIMIT,
 } from '../../lib/tracking-rate-limit.js';
 import { isClickCapped, isCustomClickCapped, clickCapReached } from './caps.js';
-import { getSmartLinkConfig } from './smart-link-cache.js';
+import { getSmartLinkConfig, smartLinkItemUrl } from './smart-link-cache.js';
 import { applicableSettings } from '../../lib/offer-settings/custom-settings.js';
 import { actionPricing } from '../../lib/offer-settings/billing.js';
 import { isAddressBlocked } from '../../lib/integrations/tracker24.js';
@@ -432,9 +432,11 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  );
 
  // 11. Build destination with macros and 302 out — the fastest exit.
- // A partner's custom landing page (Offer Custom Settings, F-12) beats a per-country destination.
+ // A partner's custom landing page (Offer Custom Settings, F-12) beats the smart-link item's own
+ // landing page (its Offer URL override), which beats a per-country destination.
  const customLanding = customFor('landing_pages').find((c) => c.landingPageUrl)?.landingPageUrl;
- const baseDest = customLanding ?? geoDecision.destinationOverride ?? offer.destinationUrl;
+ const baseDest = customLanding ?? (await smartLinkItemUrl(tenant.networkId, smartLinkId, firstStr(q['sli']), offer.id))
+ ?? geoDecision.destinationOverride ?? offer.destinationUrl;
  // A deep link (offer's "Allow deep links"): another page of the offer's OWN site the partner asked for
  // (&url= / &deep_link=), keeping the offer URL's parameters (the click id) — anything else is ignored.
  const deep = offer.deepLinkEnabled ? firstStr(q['url']) ?? firstStr(q['deep_link']) : null;
@@ -498,9 +500,12 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const pub = firstStr(q['pub_id']) ?? firstStr(q['aff_id']) ?? firstStr(q['p']);
 
  // Forward to /click, preserving pub_id + subs and tagging the smart link — for the picked offer
- // and for the catch-all alike (the catch-all used to lose the partner and subs).
- const forward = (offerId: string) => {
+ // and for the catch-all alike (the catch-all used to lose the partner and subs). `sli` names the
+ // picked item when it has its own landing page (Offer URL override): /click looks the URL up in the
+ // link's config — a URL is never taken from the query string.
+ const forward = (offerId: string, itemId?: string) => {
  const params = new URLSearchParams({ offer_id: offerId, sl: slId });
+ if (itemId) params.set('sli', itemId);
  if (pub) params.set('pub_id', pub);
  for (const i of [1, 2, 3, 4, 5]) { const s = firstStr(q[`sub${i}`]); if (s) params.set(`sub${i}`, s); }
  // Source ID too — Traffic Blocking rules can match on it at /click — and the ad click ids, so a
@@ -543,7 +548,11 @@ export function buildTrackingApp(opts: { rateLimits?: boolean } = {}): FastifyIn
  const chosen = link.mechanism === 'priority'
  ? pickByPriority(eligible.map((i) => ({ offer_id: i.offerId, position: i.position })))
  : pickWeighted(eligible.map((i) => ({ offer_id: i.offerId, weight: link.mechanism === 'kpi' ? (i.kpiWeight ?? 0) : i.weight })));
- return chosen ? forward(chosen) : catchAll();
+ if (!chosen) return catchAll();
+ // The picked offer's item with its own landing page (a country-targeted one first, like the targeting above).
+ const withUrl = eligible.filter((i) => i.offerId === chosen && i.offerUrl);
+ const item = withUrl.find((i) => i.country) ?? withUrl[0];
+ return forward(chosen, item?.id);
  });
 
  // ---- Conversion methods (spec §6) — all three normalize into recordConversion() ----

@@ -37,6 +37,8 @@ const MAX_BATCHES = 1_000; // safety valve: at most 5M rows/table/run on the cti
 
 /** How long the email log (email_outbox, O11) keeps its records. */
 export const EMAIL_LOG_RETENTION_DAYS = 90;
+/** How long a smart link's Run Record (smart_link_kpi_runs) keeps its runs. */
+export const KPI_RUN_RETENTION_DAYS = 90;
 
 export interface RetentionResult {
  clicksDeleted: number;
@@ -50,6 +52,8 @@ export interface RetentionResult {
  partitionsDropped: string[];
  /** Email log rows older than EMAIL_LOG_RETENTION_DAYS (O11). */
  emailLogDeleted?: number;
+ /** Smart-link KPI run records older than KPI_RUN_RETENTION_DAYS. */
+ kpiRunsDeleted?: number;
 }
 
 /** YYYYMM → integer month-key. Postgres partition naming uses `_YYYY_MM` (zero-padded). */
@@ -241,6 +245,9 @@ export async function runRetention(now: Date = new Date()): Promise<RetentionRes
  // queued email that old was never going to send).
  result.emailLogDeleted = (await query(
  `DELETE FROM email_outbox WHERE created_at < $1`, [cutoff(EMAIL_LOG_RETENTION_DAYS, now)])).rowCount ?? 0;
+ // 5. Smart-link KPI run records.
+ result.kpiRunsDeleted = (await query(
+ `DELETE FROM smart_link_kpi_runs WHERE ran_at < $1`, [cutoff(KPI_RUN_RETENTION_DAYS, now)])).rowCount ?? 0;
 
  log.info(
  { ...result, networks: networks.length },

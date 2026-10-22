@@ -210,6 +210,7 @@ API keys for the Public REST API.
 |---|---|
 | `smart_links` | Smart link definitions (weight / priority / kpi, catch-all, KPI settings, `kpi_computed_at` — migration 071) |
 | `smart_link_items` | Items within a smart link (offer_id, weight, position, country; KPI worker output `kpi_weight`, `kpi_score`, `kpi_clicks` — migration 071) |
+| `smart_link_kpi_runs` | Run Record — one row per KPI scoring run of a smart link (metric, lookback_hours, min_clicks, `items` jsonb with per-item clicks / conversions / payout / revenue (text) / score / weight, `weighted`); pruned after 90 days by retention (migration 095) |
 | `offer_geo_rules` | Per-offer geo targeting rules |
 | `impressions` | Ad impressions from `/impression` (migration 094) — like `clicks` (no FKs, written by the impression-persist worker, rejected ones flagged with the reason, `creative_id`); purged / pruned with clicks |
 | `impression_billing` | CPM counters: billable impressions per (offer, partner, day, country, device, currency, rates) and how many are `booked` — the impression-billing worker books the difference as a conversion (source `impression`) |

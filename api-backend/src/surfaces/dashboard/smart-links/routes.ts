@@ -11,7 +11,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { asyncHandler } from '../../../lib/http/async-handler.js';
 import { sendOk } from '../../../lib/http/envelope.js';
-import { validateBody } from '../../../lib/http/validate.js';
+import { validateBody, validateQuery } from '../../../lib/http/validate.js';
 import { notFound, badRequest } from '../../../lib/http/errors.js';
 import { dbForRequest } from '../../../lib/db/from-request.js';
 import { query } from '../../../lib/db/pool.js';
@@ -20,6 +20,7 @@ import { assertSameNetwork, assertAllSameNetwork } from '../../../lib/db/ownersh
 import { LIST_CAP, warnIfCapped } from '../../../lib/http/list-cap.js';
 import { requireRole } from '../auth.js';
 import { invalidateSmartLinkConfig } from '../../tracking/smart-link-cache.js';
+import { redirectUrlWithMax } from '../../../lib/url-schemas.js';
 
 const LINKS = 'smart_links';
 const ITEMS = 'smart_link_items';
@@ -35,6 +36,10 @@ interface LinkRow {
 interface ItemRow {
   id: string; smart_link_id: string; offer_id: string; weight: number; country: string | null; offer_url: string | null; position: number | null;
   kpi_weight?: number | null; kpi_score?: string | null; kpi_clicks?: number | null;
+}
+
+interface KpiRunItem {
+  itemId: string; offerId: string; clicks: number; conversions: number; payout: string; revenue: string; score: string | null; weight: number | null;
 }
 
 const linkDTO = (r: LinkRow) => ({
@@ -56,7 +61,8 @@ const itemInputSchema = z.object({
   weight: z.number().int().min(0).max(1000).default(1),
   position: z.number().int().min(1).nullable().optional(),
   country: z.string().max(3).nullable().optional(),
-  offerUrl: z.string().url().max(2000).nullable().optional(),
+  // A redirect destination: http(s) only (z.url() alone accepted javascript: / data: URLs).
+  offerUrl: redirectUrlWithMax(2000).nullable().optional(),
 });
 
 const createLinkSchema = z.object({
@@ -109,6 +115,28 @@ export function smartLinksRoutes(): Router {
     if (!link) throw notFound('Smart link not found');
     const items = await db.selectMany<ItemRow>(ITEMS, { where: { smart_link_id: req.params.id }, limit: 500 });
     sendOk(res, { ...linkDTO(link), items: items.map(itemDTO) });
+  }));
+
+  // Run Record: the KPI worker's scoring runs for this link, newest first (smart_link_kpi_runs), each
+  // item with its offer's name. `weighted: false` = nothing qualified yet, so /sl rotated evenly.
+  const runsQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), offset: z.coerce.number().int().min(0).default(0) });
+  r.get('/:id/kpi-runs', validateQuery(runsQuery), asyncHandler(async (req, res) => {
+    const networkId = req.scope!.networkId;
+    const { limit, offset } = res.locals.query as z.infer<typeof runsQuery>;
+    const link = await dbForRequest(req).selectOne<LinkRow>(LINKS, { id: req.params.id });
+    if (!link) throw notFound('Smart link not found');
+    const { rows } = await query<{ id: string; ran_at: string; metric: string; lookback_hours: number; min_clicks: number; weighted: boolean; items: KpiRunItem[]; total: number }>(
+      `SELECT id, ran_at, metric, lookback_hours, min_clicks, weighted, items, COUNT(*) OVER ()::int AS total
+         FROM smart_link_kpi_runs WHERE network_id = $1 AND smart_link_id = $2
+        ORDER BY ran_at DESC, id LIMIT $3 OFFSET $4`,
+      [networkId, link.id, limit, offset]);
+    const offerIds = [...new Set(rows.flatMap((r) => r.items.map((i) => i.offerId)))];
+    const names = new Map((await query<{ id: string; name: string }>(
+      'SELECT id, name FROM offers WHERE network_id = $1 AND id = ANY($2::uuid[])', [networkId, offerIds])).rows.map((o) => [o.id, o.name]));
+    sendOk(res, rows.map((r) => ({
+      id: r.id, ranAt: r.ran_at, metric: r.metric, lookbackHours: r.lookback_hours, minClicks: r.min_clicks, weighted: r.weighted,
+      items: r.items.map((i) => ({ ...i, offerName: names.get(i.offerId) ?? null })),
+    })), { limit, offset, total: rows[0]?.total ?? 0 });
   }));
 
   r.post('/', requireRole('admin', 'manager'), validateBody(createLinkSchema), asyncHandler(async (req, res) => {

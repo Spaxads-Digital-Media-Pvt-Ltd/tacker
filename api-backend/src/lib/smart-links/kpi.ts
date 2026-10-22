@@ -20,8 +20,8 @@ export interface KpiItemStats { id: string; clicks: number; conversions: number;
 export interface KpiResult { weight: number | null; score: number | null; clicks: number }
 
 export const DEFAULT_MIN_CLICKS = 50;
-const DEFAULT_LOOKBACK_H = 24;
-const DEFAULT_EVERY_H = 1;
+export const DEFAULT_LOOKBACK_H = 24;
+export const DEFAULT_EVERY_H = 1;
 const WINNER_SHARE = 80;
 const EXPLORE_SHARE = 20;
 
@@ -58,7 +58,7 @@ async function scoreLink(link: LinkRow, now: Date): Promise<void> {
   const to = now.toISOString();
   const from = new Date(now.getTime() - (link.kpi_lookback_hours ?? DEFAULT_LOOKBACK_H) * 3600_000).toISOString();
   // Per item: the link's clicks on its offer in the window, and those clicks' approved conversions.
-  const { rows } = await query<{ id: string; clicks: number; conversions: number; payout: string; revenue: string }>(
+  const { rows } = await query<{ id: string; offer_id: string; clicks: number; conversions: number; payout: string; revenue: string }>(
     `WITH k AS (
        SELECT offer_id, COUNT(*)::int AS clicks FROM clicks
         WHERE network_id = $1 AND smart_link_id = $2 AND created_at >= $3 AND created_at <= $4 AND NOT ${rejectedClickSql()}
@@ -71,7 +71,7 @@ async function scoreLink(link: LinkRow, now: Date): Promise<void> {
           AND cl.smart_link_id = $2 AND cl.created_at >= $3 AND cl.created_at <= $4
         GROUP BY cl.offer_id
      )
-     SELECT i.id, COALESCE(k.clicks, 0) AS clicks, COALESCE(c.conversions, 0) AS conversions,
+     SELECT i.id, i.offer_id, COALESCE(k.clicks, 0) AS clicks, COALESCE(c.conversions, 0) AS conversions,
             COALESCE(c.payout, '0') AS payout, COALESCE(c.revenue, '0') AS revenue
        FROM smart_link_items i
        LEFT JOIN k ON k.offer_id = i.offer_id
@@ -79,7 +79,8 @@ async function scoreLink(link: LinkRow, now: Date): Promise<void> {
       WHERE i.network_id = $1 AND i.smart_link_id = $2`,
     [link.network_id, link.id, from, to]);
   const metric: KpiMetric = link.kpi_metric === 'EPC' || link.kpi_metric === 'Revenue' ? link.kpi_metric : 'CVR';
-  const weights = kpiWeights(rows, metric, link.kpi_min_clicks ?? DEFAULT_MIN_CLICKS);
+  const minClicks = link.kpi_min_clicks ?? DEFAULT_MIN_CLICKS;
+  const weights = kpiWeights(rows, metric, minClicks);
   for (const [id, w] of weights) {
     await query(
       'UPDATE smart_link_items SET kpi_weight = $3, kpi_score = $4, kpi_clicks = $5 WHERE network_id = $1 AND id = $2',
@@ -87,6 +88,34 @@ async function scoreLink(link: LinkRow, now: Date): Promise<void> {
   }
   await query('UPDATE smart_links SET kpi_computed_at = $3 WHERE network_id = $1 AND id = $2', [link.network_id, link.id, now]);
   await invalidateSmartLinkConfig(link.network_id, link.id);
+  await recordRun(link, now, metric, minClicks, rows, weights);
+}
+
+/**
+ * The Run Record (smart_link_kpi_runs): what every item scored this run and the weight it got. Never
+ * fails the run — the weights above are what /sl uses; the record is history.
+ */
+async function recordRun(
+  link: LinkRow, now: Date, metric: KpiMetric, minClicks: number,
+  rows: { id: string; offer_id: string; clicks: number; conversions: number; payout: string; revenue: string }[],
+  weights: Map<string, KpiResult>,
+): Promise<void> {
+  const items = rows.map((r) => {
+    const w = weights.get(r.id);
+    return {
+      itemId: r.id, offerId: r.offer_id, clicks: r.clicks, conversions: r.conversions, payout: r.payout, revenue: r.revenue,
+      score: w?.score == null ? null : w.score.toFixed(8), weight: w?.weight ?? null,
+    };
+  });
+  try {
+    await query(
+      `INSERT INTO smart_link_kpi_runs (network_id, smart_link_id, ran_at, metric, lookback_hours, min_clicks, items, weighted)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [link.network_id, link.id, now, metric, link.kpi_lookback_hours ?? DEFAULT_LOOKBACK_H, minClicks,
+        JSON.stringify(items), items.some((i) => i.weight != null)]);
+  } catch (err) {
+    logger.warn({ err, smartLinkId: link.id }, 'smart link KPI run record not saved');
+  }
 }
 
 /** Re-score every active KPI link that is due (never scored, or scored kpi_run_frequency_hours ago). */
