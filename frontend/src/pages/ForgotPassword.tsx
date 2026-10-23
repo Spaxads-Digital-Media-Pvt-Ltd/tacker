@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { requestPasswordReset } from '../auth/authClient';
-import { AuthCard, AuthError } from '../shared-components/primitives/AuthCard';
+import { AuthCard, AuthError, AuthSubmit } from '../shared-components/primitives/AuthCard';
+import { Field } from '../shared-components/primitives/ui';
 
 /**
  * "Forgot password?" (O1): emails a one-time link to choose a new password, through the account's
@@ -44,14 +45,15 @@ export default function ForgotPassword() {
 
   return (
     <AuthCard title="Reset your password" subtitle="Enter the email you sign in with and we'll send you a link to choose a new password.">
-      {error && <AuthError>{error}</AuthError>}
+      <AuthError>{error}</AuthError>
       <form onSubmit={submit}>
         <div className="mt-6">
-          <label className="label" htmlFor="email">Email</label>
-          <input id="email" type="email" autoComplete="email" required className="input"
-            value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+          <Field label="Email">
+            <input id="email" type="email" autoComplete="email" required className="input"
+              value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+          </Field>
         </div>
-        <button type="submit" disabled={busy} className="btn-primary mt-6 w-full">{busy ? 'Sending…' : 'Send reset link'}</button>
+        <AuthSubmit busy={busy} busyLabel="Sending…" className="mt-6">Send reset link</AuthSubmit>
       </form>
       <Link to="/login" className="btn-ghost mt-3 w-full">← Back to sign in</Link>
     </AuthCard>

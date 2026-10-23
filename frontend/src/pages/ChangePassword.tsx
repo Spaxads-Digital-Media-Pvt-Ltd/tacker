@@ -5,7 +5,8 @@ import { ROLE_HOME } from '../auth/roles';
 import { changeInitialPassword, PASSWORD_SAVED_SIGN_IN_AGAIN } from '../auth/authClient';
 import { ApiError } from '../lib/api';
 import { PASSWORD_HINT, passwordProblem } from '../auth/passwordPolicy';
-import { AuthCard, AuthError } from '../shared-components/primitives/AuthCard';
+import { AuthCard, AuthError, AuthSubmit } from '../shared-components/primitives/AuthCard';
+import { Field } from '../shared-components/primitives/ui';
 
 /**
  * First sign-in with an invite's temporary password (O1): choose your own before anything else —
@@ -47,21 +48,19 @@ export default function ChangePassword() {
 
   return (
     <AuthCard title="Choose your password" subtitle={<>You signed in with a temporary password. Choose your own to continue.</>}>
-      {error && <AuthError>{error}</AuthError>}
+      <AuthError>{error}</AuthError>
       <form onSubmit={submit}>
         <div className="mt-6 space-y-4">
-          <div>
-            <label className="label" htmlFor="password">New password</label>
+          <Field label="New password">
             <input id="password" type="password" autoComplete="new-password" required className="input"
               value={password} onChange={(e) => setPassword(e.target.value)} placeholder={PASSWORD_HINT} />
-          </div>
-          <div>
-            <label className="label" htmlFor="confirm">Confirm new password</label>
+          </Field>
+          <Field label="Confirm new password">
             <input id="confirm" type="password" autoComplete="new-password" required className="input"
               value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-          </div>
+          </Field>
         </div>
-        <button type="submit" disabled={busy} className="btn-primary mt-6 w-full">{busy ? 'Saving…' : 'Save and continue'}</button>
+        <AuthSubmit busy={busy} busyLabel="Saving…" className="mt-6">Save and continue</AuthSubmit>
       </form>
       <p className="mt-5 text-center text-tiny text-fg-muted">
         Signed in as {session.email} ·{' '}

@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { resetPassword } from '../auth/authClient';
 import { ApiError } from '../lib/api';
 import { PASSWORD_HINT, passwordProblem } from '../auth/passwordPolicy';
-import { AuthCard, AuthError } from '../shared-components/primitives/AuthCard';
+import { AuthCard, AuthError, AuthSubmit } from '../shared-components/primitives/AuthCard';
+import { Field } from '../shared-components/primitives/ui';
 
 /**
  * The emailed reset link lands here (/reset-password?token=…, O1). The token is kept in memory and
@@ -54,21 +55,19 @@ export default function ResetPassword() {
 
   return (
     <AuthCard title="Choose a new password" subtitle="You'll be signed out on your other devices.">
-      {error && <AuthError>{error}</AuthError>}
+      <AuthError>{error}</AuthError>
       <form onSubmit={submit}>
         <div className="mt-6 space-y-4">
-          <div>
-            <label className="label" htmlFor="password">New password</label>
+          <Field label="New password">
             <input id="password" type="password" autoComplete="new-password" required className="input"
               value={password} onChange={(e) => setPassword(e.target.value)} placeholder={PASSWORD_HINT} />
-          </div>
-          <div>
-            <label className="label" htmlFor="confirm">Confirm new password</label>
+          </Field>
+          <Field label="Confirm new password">
             <input id="confirm" type="password" autoComplete="new-password" required className="input"
               value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-          </div>
+          </Field>
         </div>
-        <button type="submit" disabled={busy} className="btn-primary mt-6 w-full">{busy ? 'Saving…' : 'Set new password'}</button>
+        <AuthSubmit busy={busy} busyLabel="Saving…" className="mt-6">Set new password</AuthSubmit>
       </form>
     </AuthCard>
   );
