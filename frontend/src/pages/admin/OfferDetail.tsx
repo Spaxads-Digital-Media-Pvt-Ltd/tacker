@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { Link2, Pencil, RefreshCw } from 'lucide-react';
+import { ChevronLeft, Link2, Pencil, RefreshCw } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { recordView } from '../../lib/recentlyViewed';
-import { PageHeader, Spinner, StateBlock, Tabs, type Column } from '../../shared-components/primitives/ui';
+import { OFFER_STATUS_LABEL, OFFER_STATUS_TONE } from '../../lib/offerStatus';
+import { Badge, PageHeader, StateBlock, Tabs, type Column } from '../../shared-components/primitives/ui';
 import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
 import { GeneralTab } from './offerDetail/GeneralTab';
 import { CustomSettingsTab } from './offerDetail/CustomSettingsTab';
@@ -35,8 +36,9 @@ export default function OfferDetail() {
     if (offer) recordView('offer', offer.id, offer.name, offer.ref);
   }, [offer]);
 
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  if (error || !offer) return <StateBlock>{error ?? 'Offer not found'}</StateBlock>;
+  if (loading) return <StateBlock variant="loading" title="Loading offer…" rows={6} />;
+  if (error || !offer) return error ? <StateBlock variant="error" title="Couldn’t load this offer" hint={error} onRetry={refetch} />
+    : <StateBlock variant="empty" title="Offer not found" />;
 
   const advName = advertisers?.find((a) => a.id === offer.advertiserId)?.name ?? offer.advertiserId;
   const pubOptions = (publishers ?? []).map((p) => ({ value: p.id, label: p.name }));
@@ -47,19 +49,35 @@ export default function OfferDetail() {
       <PageHeader
         title={`Offer Details: ${offer.name}`}
         subtitle={`${offer.status} · ${offer.payoutModel} · ${offer.currency}`}
-        action={
-          <div className="flex items-center gap-2">
-            <Link to="/app/offers" className="btn-ghost">← All offers</Link>
-            <Link to={`/app/offers/${id}/edit`} className="btn-ghost"><Pencil size={14} /> Edit</Link>
-            <button className="btn-primary" onClick={() => setLinksOpen(true)}><Link2 size={15} /> Offer Tracking Links</button>
-            <button title="Refresh" onClick={() => refetch()} className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary transition-colors hover:bg-accent-subtle hover:text-fg">
-              <RefreshCw size={15} />
-            </button>
-          </div>
-        }
       />
 
-      <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
+      <Link to="/app/offers" className="mb-3 inline-flex items-center gap-1 text-small font-medium text-fg-secondary hover:text-fg">
+        <ChevronLeft size={16} aria-hidden /> All offers
+      </Link>
+      <section className="card mb-5 !p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <h2 className="min-w-0 break-words text-h2 font-bold text-fg">{offer.name}</h2>
+              <Badge value={offer.status} label={OFFER_STATUS_LABEL[offer.status] ?? offer.status} tone={OFFER_STATUS_TONE[offer.status]} />
+            </div>
+            <p className="mt-1 break-words font-mono text-tiny text-fg-muted">
+              {[offer.ref != null ? `#${offer.ref}` : null, advName, offer.payoutModel, offer.currency].filter(Boolean).join(' · ')}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" title="Refresh" aria-label="Refresh offer" onClick={() => refetch()} className="btn-ghost h-10 w-10 shrink-0 !px-0 !py-0 text-fg-secondary hover:text-fg">
+              <RefreshCw size={16} aria-hidden />
+            </button>
+            <Link to={`/app/offers/${id}/edit`} className="btn-ghost"><Pencil size={16} aria-hidden /> Edit</Link>
+            <button type="button" className="btn-primary" onClick={() => setLinksOpen(true)}><Link2 size={16} aria-hidden /> Offer Tracking Links</button>
+          </div>
+        </div>
+      </section>
+
+      <div className="mb-6 border-b border-border pb-2 [&>[role=tablist]]:mb-0">
+        <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
+      </div>
 
       {tab === 'General' && <GeneralTab offer={offer} advName={advName} domains={domains ?? []} base={base} onSaved={refetch} />}
 
@@ -155,6 +173,7 @@ export default function OfferDetail() {
       )}
 
       {tab === 'Tags' && (
+        // data colour — '#3b82f6' is only the Color field's example placeholder (user data, not a theme colour)
         <CollectionTab basePath={`${base}/tags`} addLabel="Add tag" emptyText="No tags."
           fields={[{ key: 'name', label: 'Tag name', required: true }, { key: 'color', label: 'Color', placeholder: '#3b82f6' }] as FieldDef[]}
           columns={[col('Tag', (r) => String(r.name)), col('Color', (r) => String(r.color ?? '—'))]} />

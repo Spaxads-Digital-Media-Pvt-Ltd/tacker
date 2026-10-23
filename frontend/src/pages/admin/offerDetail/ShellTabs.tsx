@@ -87,7 +87,7 @@ export function ScheduledActionsTab({ base, pubOptions = [] }: { base: string; p
   );
 }
 
-function PostbackLevel({ base, level, pubOptions }: { base: string; level: string; pubOptions: PubOptions }) {
+function PostbackLevel({ base, level, pubOptions, onChanged }: { base: string; level: string; pubOptions: PubOptions; onChanged: () => void }) {
   return (
     <CollectionTab
       basePath={`${base}/postbacks`}
@@ -95,6 +95,7 @@ function PostbackLevel({ base, level, pubOptions }: { base: string; level: strin
       addLabel="Add"
       emptyText={`No ${level} postbacks.`}
       editable
+      onChanged={onChanged}
       fields={[
         { key: 'publisherId', label: 'Partner', type: 'select', options: pubOptions, required: true },
         { key: 'level', label: '', type: 'hidden', default: level },
@@ -118,12 +119,14 @@ function PostbackLevel({ base, level, pubOptions }: { base: string; level: strin
 export function PostbacksTab({ base, pubOptions }: { base: string; pubOptions: PubOptions }) {
   const all = useQuery<Row[]>(`${base}/postbacks`);
   const count = (level: string) => all.data?.filter((r) => r.level === level).length;
+  // The header counts come from this tab-level list: refresh it whenever a section adds, edits or deletes.
+  const refreshCounts = all.refetch;
   return (
     <div className="space-y-4">
       <p className="text-small text-fg-secondary">Conversion and Event postbacks fire to the partner when a conversion is approved; CPC postbacks are stored for click-based setups and are not fired on conversions.</p>
-      <Accordion title="Conversion" count={count('conversion')}><PostbackLevel base={base} level="conversion" pubOptions={pubOptions} /></Accordion>
-      <Accordion title="Event" count={count('event')}><PostbackLevel base={base} level="event" pubOptions={pubOptions} /></Accordion>
-      <Accordion title="CPC" count={count('cpc')}><PostbackLevel base={base} level="cpc" pubOptions={pubOptions} /></Accordion>
+      <Accordion title="Conversion" count={count('conversion')}><PostbackLevel base={base} level="conversion" pubOptions={pubOptions} onChanged={refreshCounts} /></Accordion>
+      <Accordion title="Event" count={count('event')}><PostbackLevel base={base} level="event" pubOptions={pubOptions} onChanged={refreshCounts} /></Accordion>
+      <Accordion title="CPC" count={count('cpc')}><PostbackLevel base={base} level="cpc" pubOptions={pubOptions} onChanged={refreshCounts} /></Accordion>
     </div>
   );
 }

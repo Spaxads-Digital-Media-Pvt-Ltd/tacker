@@ -14,7 +14,9 @@ import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, Clock, 
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { useImpersonate } from '../../lib/impersonation';
-import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { TableActionsMenu, } from './AdvertisersTableActions';
@@ -22,7 +24,7 @@ import { useDropdown, TableRowMenu } from '../../shared-components/primitives/Ta
 import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
 import { pagedPath, fetchAllPages, useDebounced, sortParams, useTodaySoFarRange, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
-import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
+import { SortSelect, ExportNotice, type SortOption } from './PagedListControls';
 import type { Advertiser, DashboardUser, PagedList } from '../../types';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
@@ -31,7 +33,8 @@ interface AggResult { rows: { dimensions: Record<string, string | null>; metrics
 
 const STATUS_OPTS = ['active', 'pending', 'inactive'] as const;
 const STATUS_LABEL: Record<string, string> = { active: 'Active', pending: 'Pending', inactive: 'Inactive' };
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', pending: 'bg-warning', inactive: 'bg-fg-muted' };
+// Pending dot uses warning-text: plain --warning is 2.15:1 on white, under the 3:1 UI minimum.
+const STATUS_DOT: Record<string, string> = { active: 'bg-success', pending: 'bg-warning-text', inactive: 'bg-fg-muted' };
 const BILLING_FREQUENCIES = ['Weekly', 'Bimonthly', 'Monthly'];
 const PAGE_SIZE = 12;
 
@@ -42,11 +45,11 @@ function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; on
   const current = options.find((o) => o.value === value) ?? options[0]!;
   return (
     <div ref={ref} className="relative">
-      <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
-        <span className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" />
+      <button type="button" aria-label={`Status: ${current.label}`} aria-expanded={open} className="input !w-auto flex items-center gap-1.5 whitespace-nowrap" onClick={() => setOpen((o) => !o)}>
+        <span aria-hidden className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" aria-hidden />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+        <div className="absolute left-0 top-full z-popover mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
           {options.map((o) => (
             <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
@@ -57,27 +60,6 @@ function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; on
         </div>
       )}
     </div>
-  );
-}
-
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-function HistoryModal({ advertiserId, onClose }: { advertiserId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/advertisers/${advertiserId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Advertiser History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-    </Modal>
   );
 }
 
@@ -118,10 +100,10 @@ function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onCh
           </>
         )}
       </TableRowMenu>
-      {historyOpen && <HistoryModal advertiserId={advertiser.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Advertiser History" endpoint={`/api/advertisers/${advertiser.id}/history`} onClose={() => setHistoryOpen(false)} />}
       {(del.error || impersonate.error) && !errDismissed && createPortal(
         <button type="button" onClick={() => setErrDismissed(true)} title="Dismiss"
-          className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-left text-small text-danger-text shadow-elevated">
+          className="fixed bottom-6 right-6 z-50 max-w-sm rounded-card border border-danger/40 bg-danger-bg px-4 py-3 text-left text-small text-danger-text shadow-elevated">
           {del.error ?? impersonate.error}
         </button>,
         document.body,
@@ -238,12 +220,12 @@ export default function Advertisers() {
   const dash = <span className="text-fg-muted">—</span>;
   const nameCell = (a: Advertiser) => (
     <span className="inline-flex items-center gap-2">
-      <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[a.status] ?? 'bg-fg-muted'}`} />
+      <span role="img" aria-label={STATUS_LABEL[a.status] ?? a.status} title={STATUS_LABEL[a.status] ?? a.status} className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[a.status] ?? 'bg-fg-muted'}`} />
       <Link to={`/app/advertisers/${a.id}`} className="font-medium text-accent-text hover:underline">{a.name}{a.ref ? ` (${a.ref})` : ''}</Link>
     </span>
   );
 
-  const checkboxCol: Column<Advertiser> = { header: '', cell: (a) => <input type="checkbox" className="chk" checked={selected.has(a.id)} onChange={() => toggleRow(a.id)} /> };
+  const checkboxCol: Column<Advertiser> = { header: '', cell: (a) => <input type="checkbox" className="chk" aria-label={`Select advertiser ${a.name}`} checked={selected.has(a.id)} onChange={() => toggleRow(a.id)} /> };
   const actionsCol: Column<Advertiser> = { header: '', className: 'text-right', cell: (a) => <RowActionMenu advertiser={a} onChanged={refetch} /> };
 
   const ALL_COLUMNS = ['ID', 'Name', 'Account Manager', 'Sales Manager', 'Labels', 'Verification Token', "Today's Revenue", 'Contact', 'Billing Terms', 'Currency', 'Created', 'Modified'] as const;
@@ -263,7 +245,7 @@ export default function Advertisers() {
       },
     },
     'Verification Token': { header: 'Verification Token', cell: (a) => a.verificationToken ?? dash },
-    "Today's Revenue": { header: "Today's Revenue", className: 'text-right', cell: (a) => money(todayRevenueByAdv.get(a.id)) },
+    "Today's Revenue": { header: "Today's Revenue", className: 'text-right tabular-nums', cell: (a) => money(todayRevenueByAdv.get(a.id)) },
     Contact: { header: 'Contact', cell: (a) => a.contactEmail ?? dash },
     'Billing Terms': { header: 'Billing Terms', cell: (a) => a.billingTerms ?? dash },
     Currency: { header: 'Currency', cell: (a) => a.defaultCurrency },
@@ -321,43 +303,43 @@ export default function Advertisers() {
     <>
       <PageHeader title="Manage Advertisers" subtitle="Advertisers › Manage" />
 
-      <div className="mb-4 flex items-center gap-6 border-b border-border">
+      <div className="mb-4 flex items-center gap-6 overflow-x-auto border-b border-border">
         {([['existing', 'Existing', 0], ['pending', 'Pending', pendingCount], ['unverified', 'Unverified', unverifiedCount]] as const).map(([key, label, count]) => (
-          <button key={key} type="button" onClick={() => {
+          <button key={key} type="button" aria-pressed={tab === key} onClick={() => {
             setTab(key); resetView();
             if (key !== 'pending' && status === 'pending') setStatus('');
           }}
-            className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-small font-medium transition-colors ${tab === key ? 'border-accent text-fg' : 'border-transparent text-fg-secondary hover:text-fg'}`}>
+            className={`flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-3 text-small font-medium transition-colors duration-fast ${tab === key ? 'border-accent-text text-fg' : 'border-transparent text-fg-secondary hover:text-fg'}`}>
             {label}
-            {count > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-fg px-1.5 text-tiny font-bold text-surface">{count}</span>}
+            {count > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-fg px-1.5 text-tiny font-bold tabular-nums text-surface">{count}</span>}
           </button>
         ))}
       </div>
 
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <Link to="/app/advertisers/new" className="btn-primary max-sm:w-full">+ Advertiser</Link>
-        <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
-          <div className="relative max-sm:w-full">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-            <input className="input !w-full sm:!w-56 !pl-8" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
-          </div>
-          <StatusFilterSelect statusOpts={tabStatusOpts} value={status} onChange={(v) => { setStatus(v); resetView(); }} />
-          <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
-          <div className="relative">
-            <button type="button" onClick={() => setFilterOpen((o) => !o)}
-              className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
-              <SlidersHorizontal size={15} />
-              {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-            {filterOpen && (
-              <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
-                onApply={(v) => { setFilters(v); resetView(); }} onClose={() => setFilterOpen(false)} />
+      <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2">
+        <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[16rem] sm:flex-1 lg:max-w-sm">
+          <Search size={16} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" />
+          <input className="input !pl-9" aria-label="Search advertisers" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
+        </div>
+        <StatusFilterSelect statusOpts={tabStatusOpts} value={status} onChange={(v) => { setStatus(v); resetView(); }} />
+        <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
+        <div className="relative">
+          <button type="button" onClick={() => setFilterOpen((o) => !o)} className="btn-ghost whitespace-nowrap">
+            <SlidersHorizontal size={16} aria-hidden /> Filters
+            {activeFilterCount > 0 && (
+              <>
+                <span aria-hidden className="tabular-nums">· {activeFilterCount}</span>
+                <span className="sr-only">({activeFilterCount} applied)</span>
+              </>
             )}
-          </div>
+          </button>
+          {filterOpen && (
+            <CategoryFilterDrawer categories={FILTER_CATEGORIES} values={filters}
+              onApply={(v) => { setFilters(v); resetView(); }} onClose={() => setFilterOpen(false)} />
+          )}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <Link to="/app/advertisers/new" className="btn-primary whitespace-nowrap">+ Advertiser</Link>
           <TableActionsMenu
             selectedIds={visibleSelected.map((a) => a.id)}
             allColumns={ALL_COLUMNS}
@@ -375,22 +357,28 @@ export default function Advertisers() {
         </div>
       </div>
 
-      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-3" />
+      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-4" />
       <ExportNotice message={exportNote} onDismiss={() => setExportNote(null)} />
 
-      {loading && !data ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !rows.length ? <StateBlock>{loading ? <Spinner /> : 'No advertisers match these filters.'}</StateBlock>
+      {loading && !data ? <StateBlock variant="loading" title="Loading advertisers…" rows={6} />
+        : error ? <StateBlock variant="error" title="Couldn’t load advertisers" hint={error} onRetry={refetch} />
+        : !rows.length ? (loading
+          ? <StateBlock variant="loading" title="Loading advertisers…" rows={6} />
+          : <StateBlock variant="empty" title="No advertisers match these filters." />)
         : (
           <>
-            <div className="mb-2 flex items-center gap-2 text-tiny text-fg-secondary">
+            <label className="mb-2 inline-flex cursor-pointer items-center gap-2 text-tiny text-fg-secondary">
               <input type="checkbox" className="chk" checked={allOnPageSelected} onChange={toggleAllOnPage} />
               {visibleSelected.length > 0 ? `${visibleSelected.length} selected on this page` : 'Select all on page'}
-            </div>
-            <div className={loading ? 'opacity-60 transition-opacity' : undefined}>
+            </label>
+            <div aria-busy={loading || undefined} className={`rounded-card shadow-card transition-opacity duration-base ${loading ? 'opacity-60' : ''}`}>
               <Table columns={displayedColumns} rows={rows} rowKey={(a) => a.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
             </div>
-            <PagerFooter total={total} page={page} pageSize={PAGE_SIZE} onPage={goPage} loading={loading} />
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              {loading && <span role="status" className="text-tiny text-fg-muted">Loading…</span>}
+              <Pagination total={total} page={page} pageSize={PAGE_SIZE} onPageChange={goPage} />
+            </div>
+            <p className="mt-2 text-tiny text-fg-muted sm:hidden">Swipe the table sideways for more columns.</p>
           </>
         )}
     </>

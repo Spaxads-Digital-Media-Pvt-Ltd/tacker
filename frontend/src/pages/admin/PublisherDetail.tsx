@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Link2, Pencil } from 'lucide-react';
+import { ChevronLeft, Link2, Pencil } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { recordView } from '../../lib/recentlyViewed';
-import { PageHeader, Tabs, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { Badge, PageHeader, Tabs, StateBlock } from '../../shared-components/primitives/ui';
 import { GeneralTab } from './publisherDetail/GeneralTab';
 import { VisibilityTab } from './publisherDetail/VisibilityTab';
 import { PostbacksTab } from './publisherDetail/PostbacksTab';
@@ -23,7 +23,7 @@ const TABS = [
 export default function PublisherDetail() {
   const { id = '' } = useParams();
   const base = `/api/publishers/${id}`;
-  const { data: pub, loading, error } = useQuery<Publisher>(base);
+  const { data: pub, loading, error, refetch } = useQuery<Publisher>(base);
   const { data: domains } = useQuery<TrackingDomain[]>('/api/tracking-domains');
   const [tab, setTab] = useState<string>('General');
   const [linksOpen, setLinksOpen] = useState(false);
@@ -32,24 +32,39 @@ export default function PublisherDetail() {
     if (pub) recordView('partner', pub.id, pub.name, pub.ref);
   }, [pub]);
 
-  if (loading) return <StateBlock><Spinner /></StateBlock>;
-  if (error || !pub) return <StateBlock>{error ?? 'Publisher not found'}</StateBlock>;
+  if (loading) return <StateBlock variant="loading" title="Loading partner…" rows={6} />;
+  if (error || !pub) return error ? <StateBlock variant="error" title="Couldn’t load this partner" hint={error} onRetry={refetch} />
+    : <StateBlock variant="empty" title="Publisher not found" />;
 
   return (
     <>
       <PageHeader
         title={`Partner Details: ${pub.name}`}
         subtitle={`Publisher · ${pub.status}`}
-        action={
-          <div className="flex items-center gap-2">
-            <Link to="/app/publishers" className="btn-ghost">← All partners</Link>
-            <Link to={`/app/publishers/${id}/edit`} className="btn-ghost"><Pencil size={14} /> Edit</Link>
-            <button className="btn-primary" onClick={() => setLinksOpen(true)}><Link2 size={15} /> Partner Tracking Links</button>
-          </div>
-        }
       />
 
-      <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
+      <Link to="/app/publishers" className="mb-3 inline-flex items-center gap-1 text-small font-medium text-fg-secondary hover:text-fg">
+        <ChevronLeft size={16} aria-hidden /> All partners
+      </Link>
+      <section className="card mb-5 !p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <h2 className="min-w-0 break-words text-h2 font-bold text-fg">{pub.name}</h2>
+              <Badge value={pub.status} />
+            </div>
+            {pub.ref != null && <p className="mt-1 font-mono text-tiny text-fg-muted">#{pub.ref}</p>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to={`/app/publishers/${id}/edit`} className="btn-ghost"><Pencil size={16} aria-hidden /> Edit</Link>
+            <button type="button" className="btn-primary" onClick={() => setLinksOpen(true)}><Link2 size={16} aria-hidden /> Partner Tracking Links</button>
+          </div>
+        </div>
+      </section>
+
+      <div className="mb-6 border-b border-border pb-2 [&>[role=tablist]]:mb-0">
+        <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
+      </div>
 
       {tab === 'General' && <GeneralTab pub={pub} />}
       {tab === 'Visibility' && <VisibilityTab />}

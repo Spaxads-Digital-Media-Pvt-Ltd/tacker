@@ -90,8 +90,8 @@ function AddFromTemplateModal({ onClose }: { onClose: () => void }) {
                 <input className="input" value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} placeholder="https://…" />
               </Field>
             )}
-            <div className="rounded-card border border-border">
-              <div className="grid grid-cols-2 gap-2 border-b border-border bg-page px-3 py-2 text-tiny font-semibold uppercase text-fg-secondary">
+            <div className="overflow-hidden rounded-card border border-border">
+              <div className="grid grid-cols-2 gap-2 border-b border-border bg-table-head px-3 py-2 text-tiny font-semibold uppercase tracking-wide text-table-head-fg">
                 <span>Field</span><span>Value</span>
               </div>
               {Object.keys(fv).length === 0
@@ -132,7 +132,7 @@ function ShareDetailsSubmenu({ offerIds, onDone }: { offerIds: string[]; onDone:
   };
 
   return (
-    <div className="absolute right-full top-0 mr-1 w-64 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+    <div className="absolute right-full top-0 z-10 mr-1 w-64 rounded-card border border-border bg-elevated py-1 shadow-elevated max-sm:right-0 max-sm:top-full max-sm:mr-0 max-sm:mt-1">
       <div className="border-b border-border px-3 py-2">
         <p className="text-small font-semibold text-fg">Record Offer Details Shared</p>
         <p className="text-tiny text-fg-secondary">Logs a real record that these offers were shared with a partner (no outbound email in this app).</p>
@@ -208,30 +208,30 @@ export function TableActionsMenu({
 
   return (
     <>
-      <button ref={btnRef} title="Table Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
+      <button ref={btnRef} title="Table Actions" aria-label="Table actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
+        className="btn-ghost h-10 w-10 shrink-0 !px-0 !py-0 text-fg-secondary hover:text-fg">
+        <MoreVertical size={16} aria-hidden />
       </button>
       {open && createPortal(
         <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-64 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
+          className="z-popover w-64 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
           {item(`Bulk Edit${selectedIds.length ? ` (${selectedIds.length})` : ''}`, () => {
             setOpen(false);
             nav('/app/offers/bulk-edit', { state: { selectedIds } });
           })}
           {item('Add Offer from Template', () => { setOpen(false); setFromTemplate(true); })}
           <div className="my-1 border-t border-border" />
-          <div className="relative" onMouseEnter={() => selectedIds.length > 0 && setShareOpen(true)} onMouseLeave={() => setShareOpen(false)}>
+          <div className="relative" onPointerEnter={(e) => e.pointerType !== 'touch' && selectedIds.length > 0 && setShareOpen(true)} onMouseLeave={() => setShareOpen(false)}>
             {item('Share Offer(s) Details', () => selectedIds.length > 0 && setShareOpen((s) => !s),
               { hasSubmenu: selectedIds.length > 0, inert: selectedIds.length === 0 ? 'Select at least one offer first' : false })}
             {shareOpen && selectedIds.length > 0 && (
               <ShareDetailsSubmenu offerIds={selectedIds} onDone={(msg) => { setShareOpen(false); setOpen(false); setShareMessage(msg); }} />
             )}
           </div>
-          <div className="relative" onMouseEnter={() => setExportOpen(true)} onMouseLeave={() => setExportOpen(false)}>
+          <div className="relative" onPointerEnter={(e) => e.pointerType !== 'touch' && setExportOpen(true)} onMouseLeave={() => setExportOpen(false)}>
             {item('Export', () => setExportOpen((s) => !s), { hasSubmenu: true })}
             {exportOpen && (
-              <div className="absolute right-full top-0 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+              <div className="absolute right-full top-0 z-10 mr-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated max-sm:right-0 max-sm:top-full max-sm:mr-0 max-sm:mt-1">
                 {item('CSV', () => { setOpen(false); setExportOpen(false); onExport('csv'); })}
                 {item('JSON', () => { setOpen(false); setExportOpen(false); onExport('json'); })}
               </div>

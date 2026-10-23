@@ -2,10 +2,12 @@ import { useState, type ReactNode } from 'react';
 import { Badge, Spinner } from '../../../shared-components/primitives/ui';
 import { PostbackTester } from '../../../features/postback/PostbackTester';
 import { useQuery } from '../../../lib/useApi';
+import { moneyIn } from '../../../lib/moneyFormat';
 import type { Advertiser, DashboardUser } from '../../../types';
 
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
-const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
+// Shared formatter in USD: the stats carry no currency (backend follow-up). A missing figure stays $0.00.
+const money = (v: string | number | undefined) => moneyIn(v ?? 0, 'USD').text;
 const num = (v: string | number | undefined) => new Intl.NumberFormat('en-US').format(Number(v ?? 0));
 
 function Card({ title, children }: { title: string; children: ReactNode }) {

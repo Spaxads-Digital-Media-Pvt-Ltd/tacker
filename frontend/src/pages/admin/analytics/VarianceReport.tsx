@@ -551,8 +551,8 @@ export default function VarianceReport() {
       <ReportCard>
         <ResultsBar position="top" title="Detailed Report" loading={loading} actions={<>
           <div className="flex h-10 overflow-hidden rounded-[var(--radius)] border border-border" role="group" aria-label="Variance as">
-            <button type="button" onClick={() => setMode('pct')} title="Variance as %" className={`px-3 text-tiny font-medium ${mode === 'pct' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>%</button>
-            <button type="button" onClick={() => setMode('num')} title="Variance as a number" className={`px-3 text-tiny font-medium ${mode === 'num' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>#</button>
+            <button type="button" onClick={() => setMode('pct')} title="Variance as %" className={`px-3 text-tiny font-medium ${mode === 'pct' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>%</button>
+            <button type="button" onClick={() => setMode('num')} title="Variance as a number" className={`px-3 text-tiny font-medium ${mode === 'num' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>#</button>
           </div>
           <div className="relative min-w-0 flex-1 sm:flex-none">
             <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />

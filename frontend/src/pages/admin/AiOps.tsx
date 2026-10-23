@@ -69,7 +69,7 @@ export default function AiOps() {
               {messages.length === 0 && (
                 <div className="grid h-full place-items-center">
                   <div className="max-w-md text-center">
-                    <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 text-white"><Icon.spark /></div>
+                    <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent text-on-accent"><Icon.spark /></div>
                     <p className="mt-3 text-small text-fg-secondary">Ask anything about your network. Try one of these:</p>
                     <div className="mt-4 grid gap-2">
                       {SUGGESTIONS.map((s) => (
@@ -81,7 +81,7 @@ export default function AiOps() {
               )}
               {messages.map((m, i) => (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-small ${m.role === 'user' ? 'bg-accent text-white' : 'border border-border bg-surface'}`}>
+                  <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-small ${m.role === 'user' ? 'bg-accent text-on-accent' : 'border border-border bg-surface'}`}>
                     <div className="whitespace-pre-wrap">{m.content}</div>
                     {m.tools && m.tools.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">

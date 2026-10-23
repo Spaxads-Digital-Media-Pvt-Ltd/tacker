@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, Pencil, Copy, Settings, Link as LinkIcon, Eye, FileText } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { OfferThumbnail } from '../../shared-components/primitives/OfferThumbnail';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { TableActionsMenu, ALL_COLUMNS } from './OffersTableActions';
@@ -15,7 +16,8 @@ import { groupTrackingDomains } from '../../lib/trackingLinks';
 import { countryLabel, countryName } from '../../data/geo';
 import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
 import { pagedPath, fetchAllPages, useDebounced, sortParams, useTodaySoFarRange, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
-import { SortSelect, PagerFooter, ExportNotice, type SortOption } from './PagedListControls';
+import { SortSelect, ExportNotice, type SortOption } from './PagedListControls';
+import { OFFER_STATUS_LABEL as STATUS_LABEL, OFFER_STATUS_TONE, OFFER_TONE_DOT } from '../../lib/offerStatus';
 import type { Offer, Advertiser, Publisher, TrackingDomain, PagedList } from '../../types';
 
 /** Row action menu (Everflow-style), verified item-by-item against the live reference: Edit, Copy
@@ -71,12 +73,10 @@ function RowActionMenu({
   );
 }
 
-// Real backend enum (draft/active/paused/archived) shown under Everflow's own status labels —
-// draft ≈ Pending (awaiting setup), archived ≈ Deleted. Colors follow this app's own semantic
-// rule (green=positive, amber=pending, red=negative, neutral=inert), not Everflow's literal hues.
+// Real backend enum (draft/active/paused/archived); display labels and dot tones come from
+// lib/offerStatus (shared with Offer Detail's badge).
 const STATUS_OPTS = ['active', 'paused', 'draft', 'archived'] as const;
-const STATUS_LABEL: Record<string, string> = { active: 'Active', paused: 'Paused', draft: 'Pending', archived: 'Deleted' };
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-fg-muted', draft: 'bg-warning', archived: 'bg-danger' };
+const STATUS_DOT: Record<string, string> = Object.fromEntries(STATUS_OPTS.map((s) => [s, OFFER_TONE_DOT[OFFER_STATUS_TONE[s] ?? 'neutral']]));
 // Everflow-style model prefixes: R- on the revenue side, C- on the payout side, same suffix.
 const REV_PREFIX: Record<string, string> = { CPA: 'RPA', CPL: 'RPL', CPC: 'RPC', CPI: 'RPI', CPM: 'RPM', RevShare: 'RevShare' };
 const PAYOUT_TYPES = ['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'] as const;
@@ -125,11 +125,11 @@ function SearchFieldSelect({ value, onChange }: { value: SearchField; onChange: 
   const current = SEARCH_FIELDS.find((f) => f.value === value)!;
   return (
     <div ref={ref} className="relative">
-      <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
-        {current.label} <ChevronDown size={13} className="text-fg-muted" />
+      <button type="button" aria-label={`Search field: ${current.label}`} aria-expanded={open} className="input !w-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap" onClick={() => setOpen((o) => !o)}>
+        {current.label} <ChevronDown size={13} className="text-fg-muted" aria-hidden />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+        <div className="absolute left-0 top-full z-popover mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
           {SEARCH_FIELDS.map((f) => (
             <button key={f.value} type="button" onClick={() => { onChange(f.value); setOpen(false); }}
               className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
@@ -153,11 +153,11 @@ function StatusFilterSelect({ statuses, onChange }: { statuses: string[]; onChan
     : options.find((o) => o.value === value) ?? options[0]!;
   return (
     <div ref={ref} className="relative">
-      <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
-        <span className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" />
+      <button type="button" aria-label={`Status: ${current.label}`} aria-expanded={open} className="input !w-auto flex items-center gap-1.5 whitespace-nowrap" onClick={() => setOpen((o) => !o)}>
+        <span aria-hidden className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" aria-hidden />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+        <div className="absolute left-0 top-full z-popover mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
           {options.map((o) => (
             <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
@@ -427,19 +427,19 @@ export default function Offers() {
   });
 
   const columns: Column<Offer>[] = [
-    { header: '', cell: (o) => <input type="checkbox" className="chk" checked={selected.has(o.id)} onChange={() => toggleRow(o.id)} /> },
+    { header: '', cell: (o) => <input type="checkbox" className="chk" aria-label={`Select offer ${o.name}`} checked={selected.has(o.id)} onChange={() => toggleRow(o.id)} /> },
     { header: 'ID', cell: (o) => <span className="tabular-nums text-fg-secondary">{o.ref ?? '—'}</span> },
     { header: 'Thumbnail', cell: (o) => <OfferThumbnail url={o.thumbnailUrl} name={o.name} /> },
     {
       header: 'Name', cell: (o) => (
         <span className="inline-flex items-center gap-2">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[o.status] ?? 'bg-fg-muted'}`} />
+          <span role="img" aria-label={STATUS_LABEL[o.status] ?? o.status} title={STATUS_LABEL[o.status] ?? o.status} className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[o.status] ?? 'bg-fg-muted'}`} />
           <Link to={`/app/offers/${o.id}`} className="font-medium text-accent-text hover:underline">{o.name}</Link>
         </span>
       ),
     },
     { header: 'Visibility', cell: (o) => <span className="capitalize text-fg-secondary">{o.visibility ?? 'public'}</span> },
-    { header: 'Advertiser', cell: (o) => <span className="text-accent-text">{offerAdvName(o)}</span> },
+    { header: 'Advertiser', cell: (o) => <span className="text-fg-secondary">{offerAdvName(o)}</span> },
     { header: 'Sales Manager', cell: (o) => {
       const n = userName(o.advertiserSalesManagerId ?? advById.get(o.advertiserId)?.salesManagerId ?? null);
       return n ? <span className="text-fg-secondary">{n}</span> : <span className="text-fg-muted">—</span>;
@@ -458,8 +458,8 @@ export default function Offers() {
     } },
     { header: 'Revenue', className: 'text-right', cell: (o) => <><span className="text-tiny text-fg-muted">{REV_PREFIX[o.payoutModel] ?? o.payoutModel}</span> {o.currency} <span className="tabular-nums">{amt(o.defaultRevenue)}</span></> },
     { header: 'Payout', className: 'text-right', cell: (o) => <><span className="text-tiny text-fg-muted">{o.payoutModel}</span> {o.currency} <span className="tabular-nums">{amt(o.defaultPayout)}</span></> },
-    { header: "Today's Clicks", className: 'text-right', cell: (o) => nfmt.format(todayByOffer.get(o.id)?.clicks ?? 0) },
-    { header: "Today's Revenue", className: 'text-right', cell: (o) => money(todayByOffer.get(o.id)?.revenue) },
+    { header: "Today's Clicks", className: 'text-right tabular-nums', cell: (o) => nfmt.format(todayByOffer.get(o.id)?.clicks ?? 0) },
+    { header: "Today's Revenue", className: 'text-right tabular-nums', cell: (o) => money(todayByOffer.get(o.id)?.revenue) },
     { header: 'Created', cell: (o) => new Date(o.createdAt).toLocaleDateString() },
     { header: 'Modified', cell: (o) => (o.updatedAt ? new Date(o.updatedAt).toLocaleDateString() : '—') },
     { header: '', className: 'text-right', cell: (o) => <RowActionMenu offer={o} onDuplicated={refetch} publishers={publishers ?? []} domains={domains ?? []} /> },
@@ -528,61 +528,72 @@ export default function Offers() {
         title="Manage Offers"
         subtitle="Create, manage and optimize your affiliate Offer."
         action={
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center max-sm:w-full">
-            <SearchFieldSelect value={searchField} onChange={(v) => { setSearchField(v); resetView(); }} />
-            <div className="relative max-sm:w-full">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input className="input !w-full sm:!w-56 !pl-8" placeholder={`Search by ${searchField}…`} value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[18rem] sm:flex-1 lg:max-w-md">
+              <SearchFieldSelect value={searchField} onChange={(v) => { setSearchField(v); resetView(); }} />
+              <div className="relative min-w-0 flex-1">
+                <Search size={16} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" />
+                <input className="input !pl-9" aria-label={`Search offers by ${searchField}`} placeholder={`Search by ${searchField}…`} value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
+              </div>
             </div>
             <StatusFilterSelect statuses={statuses} onChange={(v) => { setStatuses(v ? [v] : []); resetView(); }} />
             <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
-            <button type="button" className="btn-ghost relative" onClick={openDrawer}>
-              <SlidersHorizontal size={15} /> Filters
+            <button type="button" className="btn-ghost whitespace-nowrap" onClick={openDrawer}>
+              <SlidersHorizontal size={16} aria-hidden /> Filters
               {appliedCount > 0 && (
-                <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-white">
-                  {appliedCount}
-                </span>
+                <>
+                  <span aria-hidden className="tabular-nums">· {appliedCount}</span>
+                  <span className="sr-only">({appliedCount} applied)</span>
+                </>
               )}
             </button>
-            <Link to="/app/offers/new" className="btn-primary max-sm:w-full">+ Offer</Link>
-            <TableActionsMenu
-              selectedIds={visibleSelected.map((o) => o.id)}
-              columnOrder={columnOrder}
-              hiddenColumns={hiddenColumns}
-              onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
-              onExport={(f) => { void exportRows(f); }}
-              appliedFilters={{
-                status: statuses.length ? statuses.join(',') : undefined, search: searchQ || undefined, searchField,
-                offerName: offerNameQ || undefined,
-                country: country || undefined, platform: platform || undefined,
-                advertiser: advertiserId ? advName(advertiserId) : undefined, category: category || undefined,
-                label: tagId ? tags?.find((t) => t.id === tagId)?.name : undefined, payoutType: payoutType || undefined,
-                revenueType: revenueType || undefined,
-                accountManager: accountManagerId ? userName(accountManagerId) ?? undefined : undefined,
-                salesManager: salesManagerId ? userName(salesManagerId) ?? undefined : undefined,
-                trackingDomain: trackingDomainId ? domains?.find((d) => d.id === trackingDomainId)?.host : undefined,
-                deviceType: deviceType || undefined,
-                offerGroup: offerGroupId ? offerGroups?.find((g) => g.id === offerGroupId)?.name : undefined,
-              }}
-            />
+            <div className="ml-auto flex items-center gap-2">
+              <Link to="/app/offers/new" className="btn-primary whitespace-nowrap">+ Offer</Link>
+              <TableActionsMenu
+                selectedIds={visibleSelected.map((o) => o.id)}
+                columnOrder={columnOrder}
+                hiddenColumns={hiddenColumns}
+                onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
+                onExport={(f) => { void exportRows(f); }}
+                appliedFilters={{
+                  status: statuses.length ? statuses.join(',') : undefined, search: searchQ || undefined, searchField,
+                  offerName: offerNameQ || undefined,
+                  country: country || undefined, platform: platform || undefined,
+                  advertiser: advertiserId ? advName(advertiserId) : undefined, category: category || undefined,
+                  label: tagId ? tags?.find((t) => t.id === tagId)?.name : undefined, payoutType: payoutType || undefined,
+                  revenueType: revenueType || undefined,
+                  accountManager: accountManagerId ? userName(accountManagerId) ?? undefined : undefined,
+                  salesManager: salesManagerId ? userName(salesManagerId) ?? undefined : undefined,
+                  trackingDomain: trackingDomainId ? domains?.find((d) => d.id === trackingDomainId)?.host : undefined,
+                  deviceType: deviceType || undefined,
+                  offerGroup: offerGroupId ? offerGroups?.find((g) => g.id === offerGroupId)?.name : undefined,
+                }}
+              />
+            </div>
           </div>
         }
       />
-      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-3" />
+      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-4" />
       <ExportNotice message={exportNote} onDismiss={() => setExportNote(null)} />
-      {loading && !data ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !rows.length ? <StateBlock>{loading ? <Spinner /> : 'No offers match these filters.'}</StateBlock>
+      {loading && !data ? <StateBlock variant="loading" title="Loading offers…" rows={6} />
+        : error ? <StateBlock variant="error" title="Couldn’t load offers" hint={error} onRetry={refetch} />
+        : !rows.length ? (loading
+          ? <StateBlock variant="loading" title="Loading offers…" rows={6} />
+          : <StateBlock variant="empty" title="No offers match these filters." />)
         : (
           <>
-            <div className="mb-2 flex items-center gap-2 text-tiny text-fg-secondary">
+            <label className="mb-2 inline-flex cursor-pointer items-center gap-2 text-tiny text-fg-secondary">
               <input type="checkbox" className="chk" checked={allOnPageSelected} onChange={toggleAllOnPage} />
               {visibleSelected.length > 0 ? `${visibleSelected.length} selected on this page` : 'Select all on page'}
-            </div>
-            <div className={loading ? 'opacity-60 transition-opacity' : undefined}>
+            </label>
+            <div aria-busy={loading || undefined} className={`rounded-card shadow-card transition-opacity duration-base ${loading ? 'opacity-60' : ''}`}>
               <Table columns={displayedColumns} rows={rows} rowKey={(o) => o.id} stickyCol={displayedColumns.findIndex((c) => c.header === 'Name')} />
             </div>
-            <PagerFooter total={total} page={page} pageSize={PAGE_SIZE} onPage={goPage} loading={loading} />
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              {loading && <span role="status" className="text-tiny text-fg-muted">Loading…</span>}
+              <Pagination total={total} page={page} pageSize={PAGE_SIZE} onPageChange={goPage} />
+            </div>
+            <p className="mt-2 text-tiny text-fg-muted sm:hidden">Swipe the table sideways for more columns.</p>
           </>
         )}
 

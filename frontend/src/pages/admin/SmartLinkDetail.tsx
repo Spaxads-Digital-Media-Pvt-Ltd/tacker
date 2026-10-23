@@ -10,7 +10,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Link2, Pencil, Copy } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../shared-components/primitives/ui';
+import { PageHeader, Tabs, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { HistoryList } from '../../shared-components/panels/HistoryModal';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 import { METRICS_PARAM, deriveRow, pct, type AggResult } from '../../shared-components/primitives/ReportPageKit';
 import { useReportZone } from '../../lib/useReportZone';
@@ -26,22 +27,8 @@ function DateTimeValue({ iso }: { iso: string }) {
   return <>{date}<span className="mt-0.5 block text-tiny text-fg-secondary">{time}</span></>;
 }
 
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-
 function HistoryTab({ id }: { id: string }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/smart-links/${id}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return loading ? <StateBlock><Spinner /></StateBlock>
-    : error ? <StateBlock>{error}</StateBlock>
-    : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-    : <div className="card"><Table columns={columns} rows={data} rowKey={(r) => r.id} /></div>;
+  return <div className="card"><HistoryList endpoint={`/api/smart-links/${id}/history`} caption="Smart link history" zoneNote /></div>;
 }
 
 function RunRecordTab() {

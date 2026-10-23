@@ -357,7 +357,9 @@ function EmailsTab() {
             <tbody>
               {paged.map((e) => (
                 <tr key={e.id} className="border-t border-border">
-                  <td className="cursor-pointer px-3 py-2 text-fg hover:underline" onClick={() => setViewing(e)}>{e.subject}</td>
+                  <td className="px-3 py-2 text-fg">
+                    <button type="button" onClick={() => setViewing(e)} className="text-left hover:underline">{e.subject}</button>
+                  </td>
                   <td className="px-3 py-2 capitalize text-fg-secondary">{e.messageType.replace('_', ' ')}</td>
                   <td className="px-3 py-2 text-fg-secondary">{e.recipientCount} Total Recipient{e.recipientCount === 1 ? '' : 's'}</td>
                   {sub === 'Sent' && <td className="px-3 py-2 text-fg-secondary">{fmt(e.sentAt)}</td>}
@@ -775,8 +777,8 @@ function SystemEmailRow({ e, onToggled }: { e: SystemEmail; onToggled: () => voi
       <div className="flex flex-col items-center gap-1">
         <span className="text-tiny font-medium text-fg-secondary">{e.enabled ? 'Enabled' : 'Disabled'}</span>
         <button disabled={busy} onClick={async () => { if (await run(!e.enabled)) onToggled(); }}
-          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${e.enabled ? 'bg-success' : 'bg-border'}`}>
-          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${e.enabled ? 'right-0.5' : 'left-0.5'}`} />
+          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${e.enabled ? 'bg-success' : 'bg-border-strong'}`}>
+          <span className={`absolute top-0.5 h-5 w-5 rounded-full ${e.enabled ? 'bg-surface' : 'bg-on-accent'} shadow transition-all ${e.enabled ? 'right-0.5' : 'left-0.5'}`} />
         </button>
       </div>
     </div>

@@ -14,6 +14,7 @@ import { Search, SlidersHorizontal, Link2, Pencil, Trash2, Clock, MoreVertical }
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown } from '../../shared-components/primitives/TableActionsKit';
@@ -90,29 +91,8 @@ function RowMenu({ coupon, onDeleted }: { coupon: CouponCode; onDeleted: () => v
           </>
         )}
       </TableRowMenu>
-      {historyOpen && <HistoryModal couponId={coupon.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Coupon Code History" endpoint={`/api/coupon-codes/${coupon.id}/history`} onClose={() => setHistoryOpen(false)} />}
     </>
-  );
-}
-
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-function HistoryModal({ couponId, onClose }: { couponId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/coupon-codes/${couponId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Coupon Code History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-    </Modal>
   );
 }
 
@@ -246,7 +226,7 @@ export default function CouponCodesManage() {
   return (
     <>
       <PageHeader title="Manage Coupon Codes" subtitle="Partners › Coupon Codes › Manage" />
-      <NotEnforcedNote>Coupon codes are a catalog shared with partners. Conversions are attributed by click id, not by coupon code, so a coupon on its own doesn't credit a conversion.</NotEnforcedNote>
+      <NotEnforcedNote>Coupon codes credit sales nobody clicked a link for: when an advertiser’s server postback carries a coupon code (as coupon_code, coupon or promo_code) instead of a click id, the conversion is credited to that code’s partner on its offer. The code must be active and within its start and end dates. Include a transaction id (txn_id) so retried postbacks aren’t counted twice.</NotEnforcedNote>
       {bulkError && <p className="mb-3 rounded-[var(--radius)] bg-danger-bg px-3 py-2 text-small text-danger-text">{bulkError}</p>}
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -265,7 +245,7 @@ export default function CouponCodesManage() {
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                   {activeFilterCount}
                 </span>
               )}

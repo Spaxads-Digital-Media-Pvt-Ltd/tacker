@@ -11,7 +11,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical, ChevronDown, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
@@ -74,27 +75,6 @@ function downloadExport(format: 'csv' | 'json', rows: PostbackControl[]) {
   URL.revokeObjectURL(url);
 }
 
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-function HistoryModal({ controlId, onClose }: { controlId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/postback-controls/${controlId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Postback Control History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-    </Modal>
-  );
-}
-
 function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
@@ -148,7 +128,7 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
   return (
     <>
       {delErr && createPortal(
-        <div role="alert" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">
+        <div role="alert" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-card border border-danger/40 bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">
           {delErr}{del.error ? ` ${del.error}` : ''}
           <button type="button" className="ml-3 font-medium underline" onClick={() => setDelErr(null)}>Dismiss</button>
         </div>,
@@ -167,7 +147,7 @@ function RowMenu({ control, onChanged }: { control: PostbackControl; onChanged: 
         </div>,
         document.body,
       )}
-      {historyOpen && <HistoryModal controlId={control.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Postback Control History" endpoint={`/api/postback-controls/${control.id}/history`} onClose={() => setHistoryOpen(false)} />}
     </>
   );
 }
@@ -283,7 +263,7 @@ export default function PostbackControlsManage() {
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                   {activeFilterCount}
                 </span>
               )}

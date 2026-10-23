@@ -12,7 +12,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, MoreVertical, ChevronDown, SlidersHorizontal, Pencil, Trash2, Clock } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Tabs, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, ApiRequestModal, useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
@@ -50,27 +51,6 @@ function StatusSelect({ value, onChange }: { value: string; onChange: (v: string
   );
 }
 
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-function HistoryModal({ commissionId, onClose }: { commissionId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/tiered-commissions/${commissionId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Tiered Commission History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-    </Modal>
-  );
-}
-
 function RowMenu({ commission, onChanged }: { commission: TieredCommission; onChanged: () => void }) {
   const nav = useNavigate();
   const del = useMutation(() => api.del(`/api/tiered-commissions/${commission.id}`));
@@ -97,7 +77,7 @@ function RowMenu({ commission, onChanged }: { commission: TieredCommission; onCh
           </>
         )}
       </TableRowMenu>
-      {historyOpen && <HistoryModal commissionId={commission.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Tiered Commission History" endpoint={`/api/tiered-commissions/${commission.id}/history`} onClose={() => setHistoryOpen(false)} />}
     </>
   );
 }
@@ -186,7 +166,7 @@ function SummaryTab() {
             className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
             <SlidersHorizontal size={15} />
             {activeFilterCount > 0 && (
-              <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+              <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                 {activeFilterCount}
               </span>
             )}
@@ -333,7 +313,7 @@ export default function TieredCommissionsManage() {
                   className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
                   <SlidersHorizontal size={15} />
                   {activeFilterCount > 0 && (
-                    <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                    <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                       {activeFilterCount}
                     </span>
                   )}

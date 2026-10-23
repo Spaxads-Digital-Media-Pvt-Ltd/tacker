@@ -20,7 +20,7 @@ export function KpiTile({ label, children, hint, to, icon: Icon, tone = 'accent'
   label: string; children: ReactNode; hint?: ReactNode; to?: string; icon?: ElementType; tone?: Tone; footer?: ReactNode;
 }) {
   const body = (
-    <div className="card h-full transition-colors hover:border-slate-400/50">
+    <div className="card h-full transition-colors hover:border-border-hover">
       <div className="flex items-start justify-between gap-3">
         <p className="text-small font-medium text-fg-secondary">{label}</p>
         {Icon && <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${TONES[tone]}`}><Icon size={16} aria-hidden /></span>}

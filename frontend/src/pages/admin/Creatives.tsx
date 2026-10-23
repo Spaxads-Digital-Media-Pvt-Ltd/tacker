@@ -16,7 +16,7 @@
  * file from before storage, still inline, is fetched from the creative's own detail).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search, MoreVertical, Eye, SlidersHorizontal, X } from 'lucide-react';
+import { Plus, Search, MoreVertical, Eye, SlidersHorizontal } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
@@ -202,17 +202,16 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
   const [fileError, setFileError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Escape closes the modal — but only when a nested popover (the Add Macro menu) isn't the thing
-  // being dismissed, so hitting Esc to close that menu doesn't also blow away the whole form.
+  // Escape closes the modal (the shared Modal does that) — but not while a nested popover (the Add
+  // Macro menu) is open: then Escape only closes that menu, so the form isn't lost. Marking the
+  // event handled in the capture phase makes the modal's Escape skip it; the menu still closes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (document.querySelector('[role="menu"]')) return;
-      onClose();
+      if (e.key === 'Escape' && document.querySelector('[role="menu"]')) e.preventDefault();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
 
   const offerOptions = offers.map((o) => ({ value: o.id, label: o.ref != null ? `${o.name} (${o.ref})` : o.name, active: o.status === 'active' }));
   const menu = ADD_MENU.find((m) => m.key === menuKey)!;
@@ -249,12 +248,16 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
     (menuKey === 'link' ? linkValue.trim() : menuKey === 'emailOrHtml' ? (subKind === 'html' ? htmlValue.trim() : true) : !!(fileUrl || existing?.urlInline));
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-2xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-h3 font-semibold tracking-tight text-fg">{isEdit ? `Edit ${TYPE_LABEL[type]} Creative` : `Add ${menu.label} Creative`}</h2>
-          <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
-        </div>
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? `Edit ${TYPE_LABEL[type]} Creative` : `Add ${menu.label} Creative`}
+      size="lg"
+      footer={<>
+        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn-primary" disabled={busy || !valid} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+      </>}
+    >
         <div className="space-y-4">
           {error && <p className="text-small text-danger-text">{error}</p>}
           <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
@@ -297,12 +300,7 @@ function CreativeModal({ menuKey, existing, offers, onClose, onSaved }: ModalPro
             </Field>
           )}
         </div>
-        <div className="mt-6 flex justify-end gap-2 border-t border-border pt-4">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary" disabled={busy || !valid} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -394,10 +392,12 @@ function PreviewModal({ creative, onClose }: { creative: Creative; onClose: () =
           <img src={url} alt={name} className="max-h-[45vh] w-auto rounded-card border border-border bg-page" />
         )}
         {type === 'video' && url && (
+          // intentional content canvas — video letterbox is black by convention; not a theme surface
           <video src={url} controls className="max-h-[45vh] w-full rounded-card border border-border bg-black" />
         )}
         {type === 'html' && html && (
           <>
+            {/* intentional content canvas — creatives are authored for white; not a theme surface */}
             <iframe title="HTML preview" srcDoc={html} sandbox="" className="h-56 w-full rounded-card border border-border bg-white" />
             <pre className="max-h-40 overflow-auto rounded-card border border-border bg-page p-3 text-tiny text-fg">{html}</pre>
           </>
@@ -526,7 +526,7 @@ export default function Creatives() {
           <button type="button" className="btn-ghost relative" onClick={openDrawer}>
             <SlidersHorizontal size={15} /> Filters
             {appliedFilterCount > 0 && (
-              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-white">{appliedFilterCount}</span>
+              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-on-accent">{appliedFilterCount}</span>
             )}
           </button>
           <TableActionsMenu order={columnOrder} hidden={hiddenColumns} appliedFilters={appliedFilters}

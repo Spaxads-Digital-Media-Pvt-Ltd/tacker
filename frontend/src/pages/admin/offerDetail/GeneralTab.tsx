@@ -6,11 +6,13 @@ import { OfferThumbnail } from '../../../shared-components/primitives/OfferThumb
 import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import { advertiserPostbackUrl, resolveTrackingHost } from '../../../lib/trackingLinks';
 import type { Offer, TrackingDomain } from '../../../types';
+import { moneyIn } from '../../../lib/moneyFormat';
 
 type Row = { id: string; [k: string]: unknown };
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
 
-const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
+// Stats money in the offer's own currency (shared formatter); a missing figure stays 0.00 as before.
+const money = (v: string | number | undefined, currency: string) => moneyIn(v ?? 0, currency).text;
 const num = (v: string | number | undefined) => new Intl.NumberFormat('en-US').format(Number(v ?? 0));
 // Bare amount (no currency symbol — these tables carry a separate Currency column). Trims the raw
 // 4-dp numeric-column value (e.g. "10.0000") to the 2-dp money convention used elsewhere on the page.
@@ -163,9 +165,9 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
                   <th className="py-2 pr-4">Clicks</th><th className="py-2 pr-4">CV</th><th className="py-2">CVR</th>
                 </tr></thead>
                 <tbody><tr className="font-semibold text-fg">
-                  <td className="py-2 pr-4">{money(statsRow?.revenue)}</td>
-                  <td className="py-2 pr-4">{money(statsRow?.payout)}</td>
-                  <td className="py-2 pr-4">{money(statsRow?.margin)}</td>
+                  <td className="py-2 pr-4">{money(statsRow?.revenue, offer.currency)}</td>
+                  <td className="py-2 pr-4">{money(statsRow?.payout, offer.currency)}</td>
+                  <td className="py-2 pr-4">{money(statsRow?.margin, offer.currency)}</td>
                   <td className="py-2 pr-4 tabular-nums">{num(statsRow?.clicks)}</td>
                   <td className="py-2 pr-4 tabular-nums">{num(statsRow?.conversions)}</td>
                   <td className="py-2 tabular-nums">{(Number(statsRow?.cr ?? 0) * 100).toFixed(2)}%</td>

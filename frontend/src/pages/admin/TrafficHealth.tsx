@@ -366,7 +366,7 @@ function ReputationFlagsTab() {
         <div><p className="text-small font-semibold text-fg">Removed Flags</p><p className="text-tiny text-fg-muted">0 in the last 90 days</p></div>
       </StatusStrip>
       <div className="grid place-items-center rounded-card border border-border bg-surface px-6 py-16 text-center">
-        <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-accent text-white">
+        <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-accent text-on-accent">
           <ShieldAlert size={28} />
         </div>
         <p className="text-h3 font-semibold text-fg">Gain access to reputation monitoring</p>

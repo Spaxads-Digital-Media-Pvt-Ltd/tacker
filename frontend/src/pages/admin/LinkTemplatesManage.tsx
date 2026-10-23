@@ -10,7 +10,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, Pencil, Trash2, Clock, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
@@ -18,27 +19,6 @@ import type { LinkTemplate, Advertiser } from '../../types';
 import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedNote';
 
 const ALL_COLUMNS = ['ID', 'Name', 'Advertiser', 'Destination URL', 'Created', 'Modified'] as const;
-
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-function HistoryModal({ templateId, onClose }: { templateId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/link-templates/${templateId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Link Template History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-    </Modal>
-  );
-}
 
 function RowMenu({ template, onChanged }: { template: LinkTemplate; onChanged: () => void }) {
   const nav = useNavigate();
@@ -66,7 +46,7 @@ function RowMenu({ template, onChanged }: { template: LinkTemplate; onChanged: (
           </>
         )}
       </TableRowMenu>
-      {historyOpen && <HistoryModal templateId={template.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Link Template History" endpoint={`/api/link-templates/${template.id}/history`} onClose={() => setHistoryOpen(false)} />}
     </>
   );
 }
@@ -139,7 +119,7 @@ export default function LinkTemplatesManage() {
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                   {activeFilterCount}
                 </span>
               )}

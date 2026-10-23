@@ -13,6 +13,7 @@ import { Search, SlidersHorizontal, ChevronDown, Pencil, CreditCard, Clock, More
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { AdvertiserInvoice, Advertiser, DashboardUser } from '../../types';
@@ -110,27 +111,6 @@ function downloadInvoiceExport(format: 'csv' | 'json', rows: AdvertiserInvoice[]
   URL.revokeObjectURL(url);
 }
 
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-function HistoryModal({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/advertiser-invoices/${invoiceId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Invoice History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-    </Modal>
-  );
-}
-
 function PayModal({ invoice, onClose, onDone }: { invoice: AdvertiserInvoice; onClose: () => void; onDone: () => void }) {
   const pay = useMutation(() => api.post(`/api/advertiser-invoices/${invoice.id}/pay`, {}));
   const confirmPay = async () => {
@@ -172,7 +152,7 @@ function RowMenu({ invoice, onChanged }: { invoice: AdvertiserInvoice; onChanged
           </>
         )}
       </TableRowMenu>
-      {historyOpen && <HistoryModal invoiceId={invoice.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Invoice History" endpoint={`/api/advertiser-invoices/${invoice.id}/history`} onClose={() => setHistoryOpen(false)} />}
       {payOpen && <PayModal invoice={invoice} onClose={() => setPayOpen(false)} onDone={onChanged} />}
       {voiding && <VoidInvoiceModal invoiceRef={invoice.ref} endpoint={`/api/advertiser-invoices/${invoice.id}/void`} onClose={() => setVoiding(false)} onVoided={onChanged} />}
     </>
@@ -294,7 +274,7 @@ export default function AdvertiserInvoicesManage() {
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                   {activeFilterCount}
                 </span>
               )}

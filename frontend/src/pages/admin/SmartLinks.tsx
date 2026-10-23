@@ -197,7 +197,7 @@ export default function SmartLinks() {
           <button type="button" className="btn-ghost relative" onClick={openDrawer}>
             <SlidersHorizontal size={15} /> Filters
             {appliedFilterCount > 0 && (
-              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-white">{appliedFilterCount}</span>
+              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-on-accent">{appliedFilterCount}</span>
             )}
           </button>
           <TableActionsMenu rows={rows} offerName={offerName} />

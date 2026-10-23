@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '../lib/useApi';
+import { moneyIn } from '../lib/moneyFormat';
 import { PageHeader, Table, Spinner, StateBlock, type Column } from '../shared-components/primitives/ui';
 import { Pagination } from '../shared-components/primitives/ReportPageKit';
 import { TimeZoneSelect } from '../shared-components/primitives/ReportTimeZone';
@@ -70,7 +71,11 @@ export default function ReportView({
       className: 'text-right tabular-nums',
       cell: (r) => {
         const v = r.metrics[m];
-        return MONEY.has(m) && typeof v === 'string' ? `$${v}` : String(v ?? '—');
+        // CR comes as a 0–1 ratio (reporting providers: conversions / clicks, 4 dp) — shown as a %.
+        if (m === 'cr' && typeof v === 'number') return `${(v * 100).toFixed(2)}%`;
+        // Money (decimal text) through the shared formatter; the stats carry no currency → USD
+        // (backend follow-up). Numeric money (EPC) keeps its precise raw display as before.
+        return MONEY.has(m) && typeof v === 'string' ? moneyIn(v, 'USD').text : String(v ?? '—');
       },
     }));
     return [dimCol, ...metricCols];

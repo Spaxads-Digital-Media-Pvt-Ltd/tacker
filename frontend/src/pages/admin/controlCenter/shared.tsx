@@ -74,7 +74,7 @@ export function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v:
     <button type="button" onClick={() => onChange(!value)}
       className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-tiny font-medium text-fg-secondary hover:bg-page">
       {value ? 'Yes' : 'No'}
-      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${value ? 'bg-success' : 'bg-border'}`} />
+      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${value ? 'bg-success' : 'bg-border-strong'}`} />
     </button>
   );
 }

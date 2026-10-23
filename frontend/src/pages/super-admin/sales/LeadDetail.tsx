@@ -111,15 +111,15 @@ export default function LeadDetail() {
             return (
               <button key={s} type="button" disabled={!canEdit || !!l.network_id || current}
                 onClick={() => void patch({ stage: s })}
-                className={`flex-1 rounded-[var(--radius)] px-3 py-2 text-small font-medium transition-colors disabled:cursor-default ${current ? 'bg-accent text-white' : done ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page enabled:hover:text-fg'}`}>
+                className={`flex-1 rounded-[var(--radius)] px-3 py-2 text-small font-medium transition-colors disabled:cursor-default ${current ? 'bg-accent text-on-accent' : done ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page enabled:hover:text-fg'}`}>
                 {stageOf(s).label}
               </button>
             );
           })}
           <button type="button" disabled={!canEdit || l.stage === 'won'} onClick={() => setWinning(true)}
-            className={`rounded-[var(--radius)] px-3 py-2 text-small font-medium ${l.stage === 'won' ? 'bg-success text-white' : 'text-success-text hover:bg-success-bg'} disabled:cursor-default`}>Won</button>
+            className={`rounded-[var(--radius)] px-3 py-2 text-small font-medium ${l.stage === 'won' ? 'bg-success-bg text-success-text ring-1 ring-success' : 'text-success-text hover:bg-success-bg'} disabled:cursor-default`}>Won</button>
           <button type="button" disabled={!canEdit || l.stage === 'lost' || !!l.network_id} onClick={() => setLosing(true)}
-            className={`rounded-[var(--radius)] px-3 py-2 text-small font-medium ${l.stage === 'lost' ? 'bg-danger text-white' : 'text-danger-text hover:bg-danger-bg'} disabled:cursor-default`}>Lost</button>
+            className={`rounded-[var(--radius)] px-3 py-2 text-small font-medium ${l.stage === 'lost' ? 'bg-[rgb(var(--danger-fill))] text-[rgb(var(--btn-danger-fg))]' : 'text-danger-text hover:bg-danger-bg'} disabled:cursor-default`}>Lost</button>
         </div>
       </div>
 

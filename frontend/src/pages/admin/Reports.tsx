@@ -6,6 +6,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { moneyIn } from '../../lib/moneyFormat';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
@@ -89,7 +90,8 @@ function Section({ name }: { name: string }) {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 const short = (v: unknown) => (v == null ? '—' : String(v).slice(0, 8) + '…');
-const money = (v: unknown) => (v == null ? '—' : `$${v}`);
+// Shared formatter in the row's own currency (the API sends it; USD when absent); null stays "—".
+const money = (v: string | null | undefined, currency: string | null | undefined) => moneyIn(v, currency || 'USD').text;
 const dt = (v: unknown) => (v == null ? '—' : new Date(String(v)).toLocaleString());
 
 type FilterState = Record<string, string>;
@@ -109,7 +111,7 @@ function FiltersBtn({ count, onClick }: { count: number; onClick: () => void }) 
     <button type="button" className="btn-ghost relative" onClick={onClick}>
       <span aria-hidden>⛃</span> Filters
       {count > 0 && (
-        <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-bold text-white">
+        <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[10px] font-bold text-on-accent">
           {count}
         </span>
       )}
@@ -117,7 +119,7 @@ function FiltersBtn({ count, onClick }: { count: number; onClick: () => void }) 
   );
 }
 
-interface OffRow { conversion_id: string; created_at: string; offer_id: string; publisher_id: string | null; event_name: string | null; status: string; payout: string | null; revenue: string | null }
+interface OffRow { conversion_id: string; created_at: string; offer_id: string; publisher_id: string | null; event_name: string | null; status: string; payout: string | null; revenue: string | null; currency?: string | null }
 function OfflineReport() {
   const opts = useContext(OptsCtx);
   const cols: Column<OffRow>[] = [
@@ -126,8 +128,8 @@ function OfflineReport() {
     { header: 'Offer', cell: (r) => { const m = opts.offerMap.get(r.offer_id); return <span className="text-brand-600">{m ? `(${m.ref ?? '—'}) ${m.name}` : short(r.offer_id)}</span>; } },
     { header: 'Event', cell: (r) => r.event_name ?? '—' },
     { header: 'Status', cell: (r) => <Badge value={r.status} /> },
-    { header: 'Payout', className: 'text-right', cell: (r) => money(r.payout) },
-    { header: 'Revenue', className: 'text-right', cell: (r) => money(r.revenue) },
+    { header: 'Payout', className: 'text-right', cell: (r) => money(r.payout, r.currency) },
+    { header: 'Revenue', className: 'text-right', cell: (r) => money(r.revenue, r.currency) },
   ];
   const { data, loading, error } = useQuery<OffRow[]>('/api/offline/conversions');
   return (

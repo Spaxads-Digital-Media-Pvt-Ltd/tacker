@@ -74,7 +74,7 @@ function AllActivityTab({ domainId }: { domainId: string }) {
       {loading ? <StateBlock><Spinner /></StateBlock>
         : !data?.length ? (
           <div className="grid place-items-center rounded-card border border-border bg-surface px-6 py-16 text-center">
-            <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-success text-white"><CheckCircle2 size={28} /></div>
+            <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-success-bg text-success-text"><CheckCircle2 size={28} /></div>
             <p className="text-h3 font-semibold text-fg">No domain activity in this period</p>
             <p className="mt-2 text-small text-fg-secondary">Create, update, or delete events for this domain will appear here.</p>
           </div>
@@ -125,7 +125,7 @@ function ReputationFlagsTab() {
     <div>
       <DateRangePicker from={from} to={to} onFrom={setFrom} onTo={setTo} />
       <div className="grid place-items-center rounded-card border border-border bg-surface px-6 py-16 text-center">
-        <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-accent text-white"><ShieldAlert size={28} /></div>
+        <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-accent text-on-accent"><ShieldAlert size={28} /></div>
         <p className="text-h3 font-semibold text-fg">Gain access to reputation monitoring</p>
         <p className="mt-2 max-w-md text-small text-fg-secondary">
           Monitor this domain across leading blacklist sources.{' '}
@@ -223,7 +223,7 @@ function GatedPanel({ title, description, rows }: { title: string; description: 
         </div>
       </div>
       <div className="grid place-items-center rounded-card border border-border bg-surface px-6 py-16 text-center">
-        <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-accent text-white"><Lock size={26} /></div>
+        <div className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-accent text-on-accent"><Lock size={26} /></div>
         <p className="text-h3 font-semibold text-fg">{title}</p>
         <p className="mt-2 max-w-md text-small text-fg-secondary">
           {description}{' '}

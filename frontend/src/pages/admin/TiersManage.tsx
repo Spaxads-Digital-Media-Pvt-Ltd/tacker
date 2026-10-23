@@ -167,7 +167,7 @@ export default function TiersManage() {
   }, [data, q, searchField, filters, pubNameById]);
 
   const columnsByHeader: Record<string, Column<PartnerTier>> = {
-    Default: { header: 'Default', cell: (t) => (t.isDefault ? <span className="grid h-5 w-5 place-items-center rounded-full bg-success text-white">✓</span> : null) },
+    Default: { header: 'Default', cell: (t) => (t.isDefault ? <span className="grid h-5 w-5 place-items-center rounded-full bg-success-bg text-success-text">✓</span> : null) },
     ID: { header: 'ID', cell: (t) => <span className="text-fg-secondary">{t.id.slice(0, 8)}</span> },
     Name: {
       header: 'Name', cell: (t) => (
@@ -227,7 +227,7 @@ export default function TiersManage() {
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                   {activeFilterCount}
                 </span>
               )}

@@ -192,6 +192,7 @@ function LabelsSub() {
         <SegTable columns={['Name', 'Advertisers', 'Partners', 'Smart Links', 'Offers', 'Offer Groups', 'Partner Tiers', '']}>
           {tags.map((t) => (
             <tr key={t.id} className="bg-surface text-fg">
+              {/* data colour — the tag's own stored colour; #94a3b8 is the same no-colour fallback TagsManage shows */}
               <td className="px-4 py-3 font-medium text-accent-text"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full" style={{ background: t.color ?? '#94a3b8' }} />{t.name}</td>
               <td className="px-4 py-3">{t.advertisers}</td>
               <td className="px-4 py-3">{t.partners}</td>

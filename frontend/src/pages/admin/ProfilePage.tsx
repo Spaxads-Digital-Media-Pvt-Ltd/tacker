@@ -490,7 +490,7 @@ function AnonymizeModal({ onClose, onDone }: { onClose: () => void; onDone: () =
           <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
           <button
             type="button"
-            className="rounded-[var(--radius)] bg-danger px-4 py-2 text-small font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            className="rounded-[var(--radius)] bg-[rgb(var(--danger-fill))] px-4 py-2 text-small font-semibold text-[rgb(var(--btn-danger-fg))] hover:opacity-90 disabled:opacity-50"
             disabled={busy}
             onClick={confirm}
           >

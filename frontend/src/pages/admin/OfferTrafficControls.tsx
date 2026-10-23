@@ -13,9 +13,10 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, MoreVertical, ChevronRight, SlidersHorizontal, X } from 'lucide-react';
+import { Plus, Search, MoreVertical, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem, type Column, Table } from '../../shared-components/primitives/ui';
+import { PageHeader, Spinner, StateBlock, TableScroll, MenuPopover, MenuItem } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { ColumnsModal, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
@@ -94,34 +95,6 @@ function TableActionsMenu({
       {columnsOpen && <ColumnsModal allColumns={ALL_COLUMNS} order={order} hidden={hidden} onClose={() => setColumnsOpen(false)} onApply={onApply} />}
       {apiOpen && <ApiRequestModal onClose={() => setApiOpen(false)} path="/api/traffic-controls" appliedFilters={appliedFilters} />}
     </>
-  );
-}
-
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-
-function HistoryModal({ id, onClose }: { id: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/traffic-controls/${id}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-4xl animate-fade-in overflow-y-auto rounded-card border border-border bg-elevated p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-h3 font-semibold tracking-tight text-fg">History</h2>
-          <button onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
-        </div>
-        {loading ? <StateBlock><Spinner /></StateBlock>
-          : error ? <StateBlock>{error}</StateBlock>
-          : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-          : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-      </div>
-    </div>
   );
 }
 
@@ -250,7 +223,7 @@ export default function OfferTrafficControls() {
           <button type="button" className="btn-ghost relative" onClick={openDrawer}>
             <SlidersHorizontal size={15} /> Filters
             {appliedFilterCount > 0 && (
-              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-white">{appliedFilterCount}</span>
+              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-on-accent">{appliedFilterCount}</span>
             )}
           </button>
           <TableActionsMenu rows={rows} order={columnOrder} hidden={hiddenColumns} appliedFilters={appliedFilters}
@@ -303,7 +276,7 @@ export default function OfferTrafficControls() {
           </>
         )}
 
-      {historyId && <HistoryModal id={historyId} onClose={() => setHistoryId(null)} />}
+      {historyId && <HistoryModal title="History" endpoint={`/api/traffic-controls/${historyId}/history`} onClose={() => setHistoryId(null)} />}
 
       {drawerOpen && (
         <SearchFilterDrawer appliedCount={draftFilterCount} onClose={() => setDrawerOpen(false)} onApply={applyDrawer}>

@@ -119,7 +119,7 @@ function DeleteInvestigationModal({
         <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
         <button
           type="button"
-          className="rounded-[var(--radius)] bg-danger px-4 py-2 text-small font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="rounded-[var(--radius)] bg-[rgb(var(--danger-fill))] px-4 py-2 text-small font-medium text-[rgb(var(--btn-danger-fg))] hover:opacity-90 disabled:opacity-50"
           onClick={onConfirm}
           disabled={busy}
         >

@@ -89,13 +89,13 @@ export function TableActionsMenu({
 
   return (
     <>
-      <button ref={btnRef} title="Table Actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
-        className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-        <MoreVertical size={15} />
+      <button ref={btnRef} title="Table Actions" aria-label="Table actions" aria-haspopup="menu" aria-expanded={open} onClick={toggle}
+        className="btn-ghost h-10 w-10 shrink-0 !px-0 !py-0 text-fg-secondary hover:text-fg">
+        <MoreVertical size={16} aria-hidden />
       </button>
       {open && createPortal(
         <div ref={menuRef} role="menu" style={{ position: 'fixed', top: pos.top, right: pos.right }}
-          className="z-50 w-64 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
+          className="z-popover w-64 origin-top-right animate-fade-in rounded-card border border-border bg-elevated py-1 shadow-elevated">
           {item(`Bulk Edit${selectedIds.length ? ` (${selectedIds.length})` : ''}`, () => {
             setOpen(false);
             nav('/app/publishers/bulk-edit', { state: { selectedIds } });

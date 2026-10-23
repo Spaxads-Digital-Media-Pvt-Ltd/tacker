@@ -61,10 +61,11 @@ function AdvertiserLogo({ name }: { name: string }) {
   const initials = name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
   let hue = 0;
   for (let i = 0; i < name.length; i++) hue = (hue * 31 + name.charCodeAt(i)) % 360;
+  // data colour — one solid hue derived from the name (30% lightness: white initials ≥ 4.5:1 for every hue)
   return (
     <span
-      className="grid h-8 w-8 place-items-center rounded-full text-tiny font-semibold text-white shadow-sm"
-      style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 42%), hsl(${(hue + 24) % 360} 60% 34%))` }}
+      className="grid h-8 w-8 place-items-center rounded-full text-tiny font-semibold text-on-accent shadow-sm ring-1 ring-border"
+      style={{ background: `hsl(${hue} 55% 30%)` }}
     >
       {initials}
     </span>
@@ -196,7 +197,7 @@ export default function MarketplaceConnections() {
             title="Table Filters">
             <SlidersHorizontal size={15} />
             {activeFilterCount > 0 && (
-              <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+              <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                 {activeFilterCount}
               </span>
             )}

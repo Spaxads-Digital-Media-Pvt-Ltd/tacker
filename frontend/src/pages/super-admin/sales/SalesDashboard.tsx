@@ -78,11 +78,11 @@ export default function SalesDashboard() {
             {funnel.map((f) => (
               <div key={f.key} className="flex items-center gap-3 text-small">
                 <span className="w-24 shrink-0 text-fg-secondary">{f.label}</span>
-                <div className="h-6 flex-1 rounded bg-page">
-                  <div className={`flex h-6 items-center rounded px-2 text-tiny font-semibold text-white ${f.dot}`} style={{ width: `${Math.max(8, ((f.row?.count ?? 0) / maxCount) * 100)}%` }}>
-                    {f.row?.count ?? 0}
-                  </div>
+                {/* Solid stage colour; the count sits beside the bar (never on the coloured fill). */}
+                <div className="h-6 min-w-0 flex-1 rounded bg-page" aria-hidden>
+                  <div className={`h-6 rounded ${f.dot}`} style={{ width: `${Math.max(8, ((f.row?.count ?? 0) / maxCount) * 100)}%` }} />
                 </div>
+                <span className="w-10 shrink-0 text-right text-tiny font-semibold tabular-nums text-fg">{f.row?.count ?? 0}</span>
               </div>
             ))}
             <p className="pt-1 text-tiny text-fg-muted">Won counts the last 30 days.</p>

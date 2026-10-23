@@ -110,7 +110,7 @@ export default function Pipeline() {
                       <div key={l.id} draggable={movable}
                         onDragStart={(e) => { e.dataTransfer.setData('text/plain', l.id); e.dataTransfer.effectAllowed = 'move'; setDragging(l.id); }}
                         onDragEnd={() => { setDragging(null); setOver(null); }}
-                        className={`rounded-[var(--radius)] border border-border bg-elevated p-3 text-small shadow-sm transition ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === l.id ? 'opacity-40' : 'hover:border-slate-400/60'}`}>
+                        className={`rounded-[var(--radius)] border border-border bg-elevated p-3 text-small shadow-sm transition ${movable ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging === l.id ? 'opacity-40' : 'hover:border-border-hover'}`}>
                         <div className="flex items-start justify-between gap-2">
                           <Link to={`/admin/sales/leads/${l.id}`} className="min-w-0 font-medium text-fg hover:text-accent-text hover:underline">{l.company}</Link>
                           {l.owner_name && <Avatar name={l.owner_name} size="sm" />}

@@ -13,6 +13,7 @@ import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeO
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { PartnerInvoice, Publisher } from '../../types';
@@ -257,29 +258,8 @@ function RowMenu({ invoice, onChanged }: { invoice: PartnerInvoice; onChanged: (
       </TableRowMenu>
       {rowErr && <p role="alert" className="mt-1 text-tiny text-danger-text">{rowErr}</p>}
       {voiding && <VoidInvoiceModal invoiceRef={invoice.ref} endpoint={`/api/partner-invoices/${invoice.id}/void`} onClose={() => setVoiding(false)} onVoided={onChanged} />}
-      {historyOpen && <HistoryModal invoiceId={invoice.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Invoice History" endpoint={`/api/partner-invoices/${invoice.id}/history`} onClose={() => setHistoryOpen(false)} />}
     </>
-  );
-}
-
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-function HistoryModal({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/partner-invoices/${invoiceId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Invoice History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
-    </Modal>
   );
 }
 
@@ -428,7 +408,7 @@ export default function PartnerInvoicesManage() {
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                   {activeFilterCount}
                 </span>
               )}

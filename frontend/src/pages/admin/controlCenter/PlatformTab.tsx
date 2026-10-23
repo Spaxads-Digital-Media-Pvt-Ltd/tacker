@@ -70,7 +70,7 @@ function YesNoPill({ label, value, onChange }: { label: string; value: boolean; 
       <span className="text-small text-fg">{label}</span>
       <button type="button" onClick={() => onChange(!value)}
         className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-tiny font-medium text-fg-secondary hover:bg-page">
-        <span className={`h-2 w-2 rounded-full ${value ? 'bg-success' : 'bg-border'}`} />
+        <span className={`h-2 w-2 rounded-full ${value ? 'bg-success' : 'bg-border-strong'}`} />
         {value ? 'Yes' : 'No'}
       </button>
     </div>
@@ -259,10 +259,12 @@ function EditGeneralForm({ onCancel, onSaved }: { onCancel: () => void; onSaved:
       <Checkbox label="Show Everflow Support Link in Partner and Advertiser UIs" />
       <div className="grid grid-cols-1 gap-3 rounded-card border border-border p-3 sm:grid-cols-2">
         <div className="flex items-center justify-between">
+          {/* data colour — the network's default primary brand swatch (shown as data, not a theme colour) */}
           <span className="flex items-center gap-2 text-small text-fg"><span className="h-4 w-4 rounded-full bg-[#1E3557]" />Default Primary Color (#1E3557)</span>
           <button title="Not available yet" className="text-tiny font-medium text-accent-text">Edit</button>
         </div>
         <div className="flex items-center justify-between">
+          {/* data colour — the network's default secondary brand swatch (shown as data, not a theme colour) */}
           <span className="flex items-center gap-2 text-small text-fg"><span className="h-4 w-4 rounded-full bg-[#60A8EF]" />Default Secondary Color (#60A8EF)</span>
           <button title="Not available yet" className="text-tiny font-medium text-accent-text">Edit</button>
         </div>

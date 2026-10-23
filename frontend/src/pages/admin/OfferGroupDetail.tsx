@@ -9,7 +9,8 @@ import { useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Tabs, Spinner, StateBlock, type Column, Table } from '../../shared-components/primitives/ui';
+import { PageHeader, Tabs, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { HistoryList } from '../../shared-components/panels/HistoryModal';
 import { InfoCard, InfoGrid, InfoRow } from './controlCenter/shared';
 import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedBadge';
 import { fmtDateTime, fmtMoney, CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL, type OfferGroup } from '../../data/offerGroups';
@@ -95,22 +96,8 @@ function CapsCard({ data, id, nav }: { data: OfferGroup; id: string; nav: (p: st
   );
 }
 
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
-
 function HistoryTab({ id }: { id: string }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/offer-groups/${id}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return loading ? <StateBlock><Spinner /></StateBlock>
-    : error ? <StateBlock>{error}</StateBlock>
-    : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-    : <div className="card"><Table columns={columns} rows={data} rowKey={(r) => r.id} /></div>;
+  return <div className="card"><HistoryList endpoint={`/api/offer-groups/${id}/history`} caption="Offer group history" zoneNote /></div>;
 }
 
 function OffersTab({ data, offers, advertisers }: { data: OfferGroup; offers: Offer[]; advertisers: Advertiser[] }) {

@@ -78,10 +78,11 @@ function fmtEpc(v: number | undefined): string {
 function AdvertiserLogo({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
   const dim = size === 'lg' ? 'h-20 w-20 text-xl' : size === 'sm' ? 'h-9 w-9 text-tiny' : 'h-16 w-16 text-base';
   const hue = logoHue(name);
+  // data colour — one solid hue derived from the name (30% lightness: white initials ≥ 4.5:1 for every hue)
   return (
     <div
-      className={`grid shrink-0 place-items-center rounded-full font-semibold text-white shadow-sm ${dim}`}
-      style={{ background: `linear-gradient(135deg, hsl(${hue} 55% 42%), hsl(${(hue + 24) % 360} 60% 34%))` }}
+      className={`grid shrink-0 place-items-center rounded-full font-semibold text-on-accent shadow-sm ring-1 ring-border ${dim}`}
+      style={{ background: `hsl(${hue} 55% 30%)` }}
     >
       {initials(name)}
     </div>
@@ -347,8 +348,8 @@ export default function Marketplace() {
             />
           </div>
           <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-            <button type="button" title="Grid view" onClick={() => setView('grid')} className={`grid h-9 w-9 place-items-center transition-colors ${view === 'grid' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-page'}`}><LayoutGrid size={15} /></button>
-            <button type="button" title="List view" onClick={() => setView('list')} className={`grid h-9 w-9 place-items-center border-l border-border transition-colors ${view === 'list' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-page'}`}><List size={15} /></button>
+            <button type="button" title="Grid view" onClick={() => setView('grid')} className={`grid h-9 w-9 place-items-center transition-colors ${view === 'grid' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary hover:bg-page'}`}><LayoutGrid size={15} /></button>
+            <button type="button" title="List view" onClick={() => setView('list')} className={`grid h-9 w-9 place-items-center border-l border-border transition-colors ${view === 'list' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary hover:bg-page'}`}><List size={15} /></button>
           </div>
         </div>
       </div>

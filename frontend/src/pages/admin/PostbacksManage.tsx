@@ -12,6 +12,7 @@ import { Search, SlidersHorizontal, ChevronDown, Pencil, Play, Trash2, Clock, Mo
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Table, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { useDropdown, ColumnsModal, ApiRequestModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
@@ -74,31 +75,73 @@ function StatusFilterSelect({ value, onChange }: { value: string; onChange: (v: 
   );
 }
 
+const EXPORT_FORMATS = [['csv', 'CSV'], ['json', 'JSON']] as const;
+
+/**
+ * Table Actions › Export: opens on hover (as before), on click, or with Enter / Space / ArrowRight —
+ * focus then moves to the first format; ArrowUp / ArrowDown move between formats; Escape or
+ * ArrowLeft close it and return focus to "Export".
+ */
+function ExportSubmenu({ onPick }: { onPick: (format: 'csv' | 'json') => void }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const openAndFocus = () => {
+    setOpen(true);
+    window.requestAnimationFrame(() => itemRefs.current[0]?.focus());
+  };
+  const closeAndReturn = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+  const onMenuKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const i = itemRefs.current.findIndex((el) => el === document.activeElement);
+    if (e.key === 'Escape' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeAndReturn();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const n = EXPORT_FORMATS.length;
+      itemRefs.current[(i + (e.key === 'ArrowDown' ? 1 : n - 1)) % n]?.focus();
+    }
+  };
+  return (
+    <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={openAndFocus}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); openAndFocus(); }
+          else if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+        }}
+        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle"
+      >
+        Export
+      </button>
+      {open && (
+        <div role="menu" aria-label="Export format" onKeyDown={onMenuKey}
+          className="absolute right-full top-0 mr-1 w-28 rounded-card border border-border bg-elevated py-1 shadow-elevated">
+          {EXPORT_FORMATS.map(([format, label], i) => (
+            <button key={format} ref={(el) => { itemRefs.current[i] = el; }} type="button" role="menuitem"
+              onClick={() => onPick(format)}
+              className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle focus-visible:bg-accent-subtle">
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HtmlCodeModal({ code, onClose }: { code: string; onClose: () => void }) {
   return (
     <Modal open onClose={onClose} title="HTML Code">
       <pre className="max-h-96 overflow-auto rounded-card border border-border bg-page p-3 text-tiny text-fg"><code>{code}</code></pre>
-    </Modal>
-  );
-}
-
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null; userAgent: string | null }
-function HistoryModal({ postbackId, onClose }: { postbackId: string; onClose: () => void }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/postbacks/${postbackId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return (
-    <Modal open onClose={onClose} title="Postback History" size="xl">
-      {loading ? <StateBlock><Spinner /></StateBlock>
-        : error ? <StateBlock>{error}</StateBlock>
-        : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-        : <Table columns={columns} rows={data} rowKey={(r) => r.id} />}
     </Modal>
   );
 }
@@ -161,11 +204,11 @@ function RowActionMenu({ postback, onDeleted }: { postback: Postback; onDeleted:
           </>
         )}
       </TableRowMenu>
-      {historyOpen && <HistoryModal postbackId={postback.id} onClose={() => setHistoryOpen(false)} />}
+      {historyOpen && <HistoryModal title="Postback History" endpoint={`/api/postbacks/${postback.id}/history`} onClose={() => setHistoryOpen(false)} />}
       {(toast || err) && createPortal(
         <div className="fixed bottom-6 right-6 z-50 max-w-sm space-y-2">
           {toast && <div className="rounded-card border border-border bg-elevated px-4 py-3 text-small text-fg shadow-elevated">{toast}</div>}
-          {err && <div className="rounded-card border border-danger-border bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">{err}</div>}
+          {err && <div className="rounded-card border border-danger/40 bg-danger-bg px-4 py-3 text-small text-danger-text shadow-elevated">{err}</div>}
         </div>,
         document.body,
       )}
@@ -305,7 +348,7 @@ export default function PostbacksManage() {
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg relative">
               <SlidersHorizontal size={15} />
               {activeFilterCount > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">
                   {activeFilterCount}
                 </span>
               )}
@@ -322,13 +365,7 @@ export default function PostbacksManage() {
             </button>
             {tableActionsOpen && (
               <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-                <div className="relative group">
-                  <button className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Export</button>
-                  <div className="absolute right-full top-0 mr-1 hidden w-28 rounded-card border border-border bg-elevated py-1 shadow-elevated group-hover:block">
-                    <button onClick={() => { setTableActionsOpen(false); exportRows('csv'); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">CSV</button>
-                    <button onClick={() => { setTableActionsOpen(false); exportRows('json'); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">JSON</button>
-                  </div>
-                </div>
+                <ExportSubmenu onPick={(format) => { setTableActionsOpen(false); exportRows(format); }} />
                 <div className="my-1 border-t border-border" />
                 <button onClick={() => { setTableActionsOpen(false); setShowColumns(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Columns Customization</button>
                 <button onClick={() => { setTableActionsOpen(false); setShowApiRequest(true); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Show API Request</button>

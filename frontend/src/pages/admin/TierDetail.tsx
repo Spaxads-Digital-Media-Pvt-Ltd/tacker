@@ -10,12 +10,11 @@ import { Edit2, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Tabs, Table, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { HistoryList } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import type { PartnerTier, PartnerTierMember, PartnerTierOffer, Offer } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' };
-
-interface HistoryRow { id: string; operationTime: string; service: string; changes: string; employee: string | null; method: string; portal: string; userIp: string | null }
 
 function OfferLinkModal({ tierId, existing, onClose, onSaved }: { tierId: string; existing: PartnerTierOffer | null; onClose: () => void; onSaved: () => void }) {
   const { data: offers } = useQuery<Offer[]>('/api/offers');
@@ -178,19 +177,7 @@ function GeneralTab({ tier }: { tier: PartnerTier }) {
 }
 
 function HistoryTab({ tierId }: { tierId: string }) {
-  const { data, loading, error } = useQuery<HistoryRow[]>(`/api/partner-tiers/${tierId}/history`);
-  const columns: Column<HistoryRow>[] = [
-    { header: 'Operation Time', cell: (r) => new Date(r.operationTime).toLocaleString() },
-    { header: 'Changes', cell: (r) => r.changes },
-    { header: 'Employee', cell: (r) => r.employee ?? 'System' },
-    { header: 'Method', cell: (r) => r.method },
-    { header: 'Portal', cell: (r) => r.portal },
-    { header: 'User IP', cell: (r) => r.userIp ?? '—' },
-  ];
-  return loading ? <StateBlock><Spinner /></StateBlock>
-    : error ? <StateBlock>{error}</StateBlock>
-    : !data || data.length === 0 ? <StateBlock>No changes recorded yet.</StateBlock>
-    : <div className="card"><Table columns={columns} rows={data} rowKey={(r) => r.id} /></div>;
+  return <div className="card"><HistoryList endpoint={`/api/partner-tiers/${tierId}/history`} caption="Tier history" zoneNote /></div>;
 }
 
 export default function TierDetail() {
