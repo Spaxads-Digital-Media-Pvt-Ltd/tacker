@@ -13,8 +13,9 @@
  * Report controls change what is fetched; the results bar holds view-only controls (timezone,
  * search-this-page, table menu) that never refetch.
  */
-import type { ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { ArrowRight, SlidersHorizontal } from 'lucide-react';
+import { ActiveFilterChips } from './ActiveFilterChips';
 import { REPORT_CONTROL } from './reportControl';
 import { TimeZoneSelect } from './ReportTimeZone';
 import type { ReportZone } from '../../lib/useReportZone';
@@ -117,21 +118,38 @@ export function UpdatingIndicator() {
 }
 
 /**
- * Tinted bar above the results: title, loading state and chips (`children`) on the left, view-only
- * controls (`actions`) on the right. `position="top"` when it is the first section of its card.
+ * Tinted bar above the results: title, loading state, notes and the active filter chips (`children`)
+ * on the left, view-only controls (`actions`) on the right. `position="top"` when it is the first
+ * section of its card.
+ *
+ * From sm the actions are their own column pinned to the first row, so chips never push them down:
+ * the chips run inline after the title and wrap onto the next line from the bar's left edge. Below
+ * sm the actions keep their full-width row under the title and the chips follow it (the chip element
+ * is rendered in the one place that is displayed, so tab order matches what you see). With no active
+ * filters nothing extra renders.
  */
 export function ResultsBar({ title, loading, actions, children, position = 'middle' }: {
   title: ReactNode; loading?: boolean; actions?: ReactNode; children?: ReactNode; position?: 'top' | 'middle';
 }) {
   const edge = position === 'top' ? 'rounded-t-[var(--radius-card)] border-b' : 'border-y';
+  const parts = Children.toArray(children);
+  const chipEls = parts.filter((c): c is ReactElement<{ chips: unknown[] }> => isValidElement(c) && c.type === ActiveFilterChips);
+  const rest = parts.filter((c) => !chipEls.includes(c as ReactElement<{ chips: unknown[] }>));
+  const hasChips = chipEls.some((c) => c.props.chips.length > 0);
+  const inlineChips = chipEls.map((c) => cloneElement(c, { inline: true } as Partial<{ chips: unknown[] }>));
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-3 ${edge} border-border bg-page/60 px-5 py-3 sm:px-6`}>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h3 className="mr-1 text-small font-semibold text-fg">{title}</h3>
+    <div className={`flex flex-col gap-y-3 sm:flex-row sm:items-start sm:gap-x-4 ${edge} border-border bg-page/60 px-5 py-3 sm:px-6`}>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {/* sm+: a zero-width 40 px strut makes the first line as tall as the actions, so the title and
+            first chips centre on them; -mr-2 cancels the gap it would add. */}
+        <span aria-hidden className="-mr-2 hidden h-10 sm:block" />
+        <h3 className="text-small font-semibold text-fg">{title}</h3>
         {loading && <UpdatingIndicator />}
-        {children}
+        {rest}
+        {hasChips && <div className="hidden sm:contents">{inlineChips}</div>}
       </div>
-      {actions && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">{actions}</div>}
+      {actions && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">{actions}</div>}
+      {hasChips && <div className="flex flex-wrap items-center gap-2 sm:hidden">{inlineChips}</div>}
     </div>
   );
 }

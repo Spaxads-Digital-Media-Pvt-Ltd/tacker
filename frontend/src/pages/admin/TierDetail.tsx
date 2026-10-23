@@ -6,10 +6,11 @@
  */
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Edit2, MoreVertical } from 'lucide-react';
+import { Edit2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, Table, Modal, Field, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Tabs, Table, Modal, Field, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import { HistoryList } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import type { PartnerTier, PartnerTierMember, PartnerTierOffer, Offer } from '../../types';
@@ -60,12 +61,10 @@ function OffersPanel({ tierId }: { tierId: string }) {
   const [editing, setEditing] = useState<PartnerTierOffer | null | undefined>(undefined);
   const del = useMutation((offerId: string) => api.del(`/api/partner-tiers/${tierId}/offers/${offerId}`));
   const confirm = useConfirm();
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const rows = (data ?? []).filter((o) => !q.trim() || o.offerName.toLowerCase().includes(q.trim().toLowerCase()));
 
   const doRemove = async (o: PartnerTierOffer) => {
-    setOpenMenuId(null);
     void confirm({
       title: 'Remove offer from tier?', message: `Are you sure you want to remove "${o.offerName}" from this tier?`,
       confirmLabel: 'Remove', destructive: true,
@@ -80,18 +79,12 @@ function OffersPanel({ tierId }: { tierId: string }) {
     { header: 'Automatically Approve Partners', cell: (o) => <span className={o.autoApprovePartners ? 'text-success' : 'text-danger-text'}>{o.autoApprovePartners ? 'YES' : 'NO'}</span> },
     {
       header: '', className: 'text-right', cell: (o) => (
-        <div className="relative inline-block">
-          <button title="Actions" onClick={() => setOpenMenuId(openMenuId === o.offerId ? null : o.offerId)}
-            className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-            <MoreVertical size={15} />
-          </button>
-          {openMenuId === o.offerId && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-              <button onClick={() => { setOpenMenuId(null); setEditing(o); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Edit</button>
-              <button onClick={() => doRemove(o)} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Remove</button>
-            </div>
-          )}
-        </div>
+        <TableRowMenu ariaLabel="Actions">
+          {({ close }) => (<>
+            <MenuItem onSelect={() => { close(); setEditing(o); }}>Edit</MenuItem>
+            <MenuItem tone="danger" onSelect={() => { close(); doRemove(o); }}>Remove</MenuItem>
+          </>)}
+        </TableRowMenu>
       ),
     },
   ];

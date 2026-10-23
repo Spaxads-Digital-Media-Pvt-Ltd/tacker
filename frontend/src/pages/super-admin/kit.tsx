@@ -6,6 +6,8 @@
  */
 import { useState, type ElementType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { estimateLabelWidth, pickXLabels } from '../../shared-components/charts/chartMath';
+import { useElementWidth } from '../../shared-components/charts/useElementWidth';
 
 const TONES = {
   accent: 'bg-accent-subtle text-accent-text',
@@ -85,7 +87,13 @@ export function TrendChart({ points, series, height = 160, format = (n) => n.toL
   points: { label: string; values: number[] }[]; series: { name: string; className: string }[]; height?: number; format?: (n: number) => string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [axis, axisW] = useElementWidth();
   const max = Math.max(1, ...points.flatMap((p) => p.values));
+  // Axis labels under the column centres (flex-1 columns, 4 px gaps), chosen so none collide or clip.
+  const colW = points.length ? (axisW - 4 * (points.length - 1)) / points.length : 0;
+  const xLabels = axisW > 0
+    ? pickXLabels(points.map((_, i) => i * (colW + 4) + colW / 2), points.map((p) => estimateLabelWidth(p.label, 10)), { left: 0, right: axisW })
+    : [];
   const n = series.length;
   const hovered = hover === null ? null : points[hover];
   return (
@@ -106,9 +114,9 @@ export function TrendChart({ points, series, height = 160, format = (n) => n.toL
           </div>
         ))}
       </div>
-      <div className="mt-1 flex gap-1">
-        {points.map((p, i) => (
-          <span key={p.label} className="flex-1 truncate text-center text-[10px] text-fg-muted">{i % Math.ceil(points.length / 6) === 0 ? p.label : ''}</span>
+      <div ref={axis} className="relative mt-1 h-4">
+        {xLabels.map(({ index, x }) => (
+          <span key={index} className="absolute top-0 -translate-x-1/2 whitespace-nowrap text-[10px] text-fg-muted" style={{ left: x }}>{points[index]!.label}</span>
         ))}
       </div>
     </div>

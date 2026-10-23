@@ -1,9 +1,8 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, Badge, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
-import { useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { PageHeader, Table, Badge, Spinner, StateBlock, type Column, MenuSelect } from '../../shared-components/primitives/ui';
 import type { AdvertiserOffer } from '../../types';
 
 const PAGE_SIZE = 50;
@@ -16,29 +15,8 @@ const STATUS_OPTS = [
  { value: 'archived', label: 'Archived', dot: 'bg-fg-muted' },
 ];
 
-function DropdownSelect({ options, value, onChange, width = 'w-36' }: { options: { value: string; label: string; dot?: string }[]; value: string; onChange: (v: string) => void; width?: string }) {
- const { open, setOpen, ref } = useDropdown();
- const current = options.find((o) => o.value === value) ?? options[0]!;
- return (
- <div ref={ref} className="relative">
- <button type="button" className={`input !w-auto flex items-center gap-1.5 ${width}`} onClick={() => setOpen((o) => !o)}>
- {current.dot && <span className={`h-2 w-2 rounded-full ${current.dot}`} />}
- {current.label} <ChevronDown size={13} className="text-fg-muted" />
- </button>
- {open && (
- <div className={`absolute left-0 top-full z-30 mt-1 ${width} rounded-card border border-border bg-elevated py-1 shadow-elevated`}>
- {options.map((o) => (
- <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
- className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
- {o.dot && <span className={`h-2 w-2 rounded-full ${o.dot}`} />}
- {o.label}
- {o.value === value && <span className="ml-auto text-accent-text">✓</span>}
- </button>
- ))}
- </div>
- )}
- </div>
- );
+function DropdownSelect({ options, value, onChange, label, width = 'w-36' }: { options: { value: string; label: string; dot?: string }[]; value: string; onChange: (v: string) => void; label: string; width?: string }) {
+ return <MenuSelect label={label} value={value} options={options} onChange={onChange} active={value !== options[0]?.value} width={width} />;
 }
 
 export default function AdvertiserOffers() {
@@ -76,7 +54,7 @@ export default function AdvertiserOffers() {
  <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
  <input className="input !pl-8" placeholder="Search offers…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
  </div>
- <DropdownSelect options={STATUS_OPTS} value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
+ <DropdownSelect label="Status" options={STATUS_OPTS} value={status} onChange={(v) => { setStatus(v); setPage(1); }} />
  </div>
  {loading ? <StateBlock><Spinner /></StateBlock>
  : error ? <StateBlock>{error}</StateBlock>

@@ -1,6 +1,6 @@
 import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertCircle, Inbox, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Inbox, RefreshCw, X } from 'lucide-react';
 import { useIntersectionObserver } from '../../lib/useIntersectionObserver';
 import { usePageTitle } from './PageTitle';
 import { HelpHint } from '../panels/HelpHint';
@@ -13,7 +13,8 @@ import { HelpHint } from '../panels/HelpHint';
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   usePageTitle(title, subtitle);
   if (!action) return null;
-  return <div className="mb-5 flex flex-wrap items-center justify-end gap-2 sm:gap-3">{action}</div>;
+  // form-width: on a form page the actions row shares the form container (index.css); elsewhere full width.
+  return <div className="form-width mb-5 flex flex-wrap items-center justify-end gap-2 sm:gap-3">{action}</div>;
 }
 
 /** Metric hue for a StatCard's icon chip (charts / chips only — never text in light mode). */
@@ -478,6 +479,11 @@ export function EntitySearchSelect({
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
+  // The list stays inside its dialog (so the dialog's Tab trap still reaches its checkboxes) and is
+  // scrolled into view when it opens — near the bottom of a scrolling modal body it would otherwise
+  // run past the visible edge.
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => { if (open) listRef.current?.scrollIntoView?.({ block: 'nearest' }); }, [open]);
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     return options.filter((o) => !s || o.label.toLowerCase().includes(s) || o.value.toLowerCase().includes(s)).slice(0, 40);
@@ -503,7 +509,7 @@ export function EntitySearchSelect({
           <>
             {/* z-popover: this list opens inside modals (CollectionTab) — above the dialog content. */}
             <button type="button" className="fixed inset-0 z-popover" aria-label="close" onClick={() => setOpen(false)} />
-            <ul className="absolute z-popover mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-elevated py-1 shadow-elevated">
+            <ul ref={listRef} className="absolute z-popover mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-elevated py-1 shadow-elevated">
               {filtered.length === 0 ? (
                 <li className="px-3 py-2 text-tiny text-fg-muted">No matches</li>
               ) : filtered.map((o) => (
@@ -566,20 +572,28 @@ export function DurationField({ value, onChange }: { value: string; onChange: (v
 }
 
 /**
- * Anchored dropdown menu — the standard row-kebab / "Table Actions" popover.
+ * Anchored dropdown menu — the standard row-kebab / "Table Actions" / toolbar-select popover.
  *
- * Portaled to <body> and positioned from the trigger's rect, so an `overflow`-clipped or
- * `transform`ed ancestor (the table scroll wrapper, an animation utility further up) can't trap or
- * clip it; flips upward when it would overflow the viewport bottom. Dismisses on outside
- * pointer-down, Escape, scroll, or resize.
+ * Portaled to <body> with `position: fixed` from the trigger's rect, so an `overflow`-clipped or
+ * `transform`ed ancestor (the table scroll wrapper, a drawer or modal body, an animation utility
+ * further up) can't trap or clip it. Opens below the trigger, flips above when there isn't room,
+ * and is clamped 8 px inside the viewport (a panel taller than the viewport scrolls). It follows the
+ * trigger on scroll / resize and closes once the trigger has scrolled out of view.
+ *
+ * Keyboard: opening focuses the checked (or first) item; ↑ / ↓ / Home / End move between items;
+ * Escape — and choosing an item through `close()` — returns focus to the trigger. Outside
+ * pointer-down closes it without moving focus.
  *
  * Deliberately has NO full-screen `fixed inset-0` click-catcher overlay. That overlay was the
  * "row kebab opens the wrong menu" bug: with a menu open, its viewport-covering overlay ate the
  * FIRST click on any *other* trigger (a different row's kebab, or the toolbar's Table Actions ⋮),
  * so switching menus silently required two clicks and left the previously-open menu showing.
  */
+const MENU_ITEMS = '[role="menuitem"]:not(:disabled),[role="menuitemradio"]:not(:disabled),[role="menuitemcheckbox"]:not(:disabled)';
+const VIEWPORT_MARGIN = 8;
+
 export function MenuPopover({
-  button, ariaLabel, triggerClassName, align = 'end', width = 'w-max min-w-[11rem]', onOpenChange, children,
+  button, ariaLabel, triggerClassName, align = 'end', width = 'w-max min-w-[11rem]', onOpenChange, triggerProps, children,
 }: {
   button: ReactNode;
   ariaLabel: string;
@@ -587,6 +601,8 @@ export function MenuPopover({
   align?: 'start' | 'end';
   width?: string;
   onOpenChange?: (open: boolean) => void;
+  /** Extra attributes for the trigger button (e.g. `data-active` for the toolbar's filtered state). */
+  triggerProps?: Record<string, string | undefined>;
   children: (api: { close: () => void }) => ReactNode;
 }) {
   const [open, setOpenState] = useState(false);
@@ -597,44 +613,84 @@ export function MenuPopover({
       return next;
     });
   }, [onOpenChange]);
-  const [style, setStyle] = useState<{ top?: number; bottom?: number; left?: number; right?: number }>({});
+  const [style, setStyle] = useState<{ top: number; left: number; maxHeight?: number; visibility?: 'hidden' }>({ top: 0, left: 0, visibility: 'hidden' });
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
 
   const place = useCallback(() => {
-    const b = btnRef.current?.getBoundingClientRect();
-    if (!b) return;
+    const btn = btnRef.current;
+    const menu = menuRef.current;
+    if (!btn || !menu) return;
+    const b = btn.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Trigger scrolled out of view: nothing left to anchor to.
+    if (b.bottom < 0 || b.top > vh || b.right < 0 || b.left > vw) { setOpen(false); return; }
     const gap = 4;
-    const menuH = menuRef.current?.offsetHeight ?? 0;
-    const flipUp = menuH > 0 && b.bottom + gap + menuH > window.innerHeight && b.top - gap - menuH > 0;
-    setStyle({
-      ...(flipUp ? { bottom: Math.round(window.innerHeight - b.top + gap) } : { top: Math.round(b.bottom + gap) }),
-      ...(align === 'end' ? { right: Math.round(window.innerWidth - b.right) } : { left: Math.round(b.left) }),
-    });
-  }, [align]);
+    const m = VIEWPORT_MARGIN;
+    const w = menu.offsetWidth;
+    const h = menu.scrollHeight;
+    const below = vh - b.bottom - gap - m;
+    const above = b.top - gap - m;
+    const up = h > below && above > below;
+    const room = Math.max(0, up ? above : below);
+    const height = Math.min(h, room > 120 ? room : vh - 2 * m);
+    let top = up ? b.top - gap - height : b.bottom + gap;
+    top = Math.min(Math.max(top, m), vh - m - height);
+    let left = align === 'end' ? b.right - w : b.left;
+    left = Math.min(Math.max(left, m), Math.max(m, vw - m - w));
+    setStyle({ top: Math.round(top), left: Math.round(left), maxHeight: height < h ? Math.floor(height) : undefined });
+  }, [align, setOpen]);
 
-  useLayoutEffect(() => { if (open) place(); }, [open, place]);
+  const close = useCallback(() => {
+    setOpen(false);
+    btnRef.current?.focus();
+  }, [setOpen]);
+
+  useLayoutEffect(() => {
+    if (!open) { setStyle({ top: 0, left: 0, visibility: 'hidden' }); return; }
+    place();
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
+    (items.find((el) => el.getAttribute('aria-checked') === 'true') ?? items[0])?.focus({ preventScroll: true });
+  }, [open, place]);
+
   useEffect(() => {
     if (!open) return;
-    place(); // second pass now the panel has a real height (drives flip-up)
+    let frame = 0;
+    const follow = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
     const onDown = (e: Event) => {
       const t = e.target as Node;
       if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const dismiss = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(follow);
+    if (menuRef.current) ro?.observe(menuRef.current);
     document.addEventListener('pointerdown', onDown, true);
     document.addEventListener('keydown', onKey);
-    window.addEventListener('resize', dismiss);
-    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', follow);
+    window.addEventListener('scroll', follow, true);
     return () => {
+      cancelAnimationFrame(frame);
+      ro?.disconnect();
       document.removeEventListener('pointerdown', onDown, true);
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', dismiss);
-      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', follow);
+      window.removeEventListener('scroll', follow, true);
     };
-  }, [open, place, setOpen]);
+  }, [open, place, setOpen, close]);
+
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>(MENU_ITEMS) ?? [])];
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    const next = e.key === 'ArrowDown' ? (i + 1) % items.length : e.key === 'ArrowUp' ? (i - 1 + items.length) % items.length
+      : e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    items[next]!.focus();
+  };
 
   return (
     <>
@@ -643,16 +699,19 @@ export function MenuPopover({
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true); } }}
         className={triggerClassName}
+        {...triggerProps}
       >
         {button}
       </button>
       {open && createPortal(
-        <div ref={menuRef} role="menu" style={style}
-          className={`fixed z-popover ${width} animate-fade-in rounded-card border border-border bg-elevated p-1.5 shadow-elevated motion-reduce:animate-none`}>
-          {children({ close: () => setOpen(false) })}
+        <div ref={menuRef} id={menuId} role="menu" aria-label={ariaLabel} style={style} onKeyDown={onMenuKey}
+          className={`fixed z-popover ${width} overflow-y-auto animate-fade-in rounded-card border border-border bg-elevated p-1.5 shadow-elevated motion-reduce:animate-none`}>
+          {children({ close })}
         </div>,
         document.body,
       )}
@@ -660,10 +719,66 @@ export function MenuPopover({
   );
 }
 
-/** A row inside <MenuPopover>. `tone="danger"` for destructive actions. */
-export function MenuItem({ children, onSelect, tone = 'default', disabled = false, icon: Icon }: { children: ReactNode; onSelect: () => void; tone?: 'default' | 'danger' | 'success'; disabled?: boolean; icon?: React.ElementType }) {
+export interface MenuSelectOption<T extends string = string> { value: T; label: string; dot?: string }
+
+/**
+ * Toolbar select (search field, status, type, sort …) on MenuPopover: a `.btn-toolbar` trigger
+ * showing the current choice and a portaled list of radio items, the current one checked.
+ * `active` gives the trigger the subtle accent "filtered" state; `display` overrides what the
+ * trigger shows (e.g. "3 statuses" when the drawer picked several). Values pass through untouched.
+ */
+export function MenuSelect<T extends string>({
+  value, options, onChange, label, prefix, display, active = false, align = 'start', width = 'w-44', showCheck = true,
+}: {
+  value: T;
+  options: readonly MenuSelectOption<T>[];
+  onChange: (value: T) => void;
+  /** What the select chooses ("Status", "Search field", "Sort") — the trigger reads "Status: Active". */
+  label: string;
+  /** Visible lead-in inside the trigger (e.g. "Sort:"). */
+  prefix?: ReactNode;
+  display?: { label: string; dot?: string };
+  active?: boolean;
+  align?: 'start' | 'end';
+  width?: string;
+  /** Hide the check mark (when the trigger shows a summary that no single item matches). */
+  showCheck?: boolean;
+}) {
+  const current = display ?? options.find((o) => o.value === value) ?? options[0];
   return (
-    <button type="button" role="menuitem" onClick={onSelect} disabled={disabled}
+    <MenuPopover
+      ariaLabel={`${label}: ${current?.label ?? ''}`}
+      align={align}
+      width={width}
+      triggerClassName="btn-toolbar"
+      triggerProps={{ 'data-active': active ? 'true' : undefined }}
+      button={<>
+        {prefix && <span className="text-fg-secondary">{prefix}</span>}
+        {current?.dot && <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${current.dot}`} />}
+        <span className="truncate">{current?.label}</span>
+        <ChevronDown size={14} aria-hidden className="shrink-0" />
+      </>}
+    >
+      {({ close }) => options.map((o) => {
+        const checked = showCheck && o.value === value;
+        return (
+          <button key={o.value} type="button" role="menuitemradio" aria-checked={checked}
+            onClick={() => { onChange(o.value); close(); }}
+            className="flex w-full items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-left text-small text-fg transition-colors duration-fast hover:bg-subtle focus-visible:bg-subtle">
+            {o.dot && <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${o.dot}`} />}
+            <span className="flex-1">{o.label}</span>
+            {checked && <Check size={14} aria-hidden className="shrink-0 text-accent-text" />}
+          </button>
+        );
+      })}
+    </MenuPopover>
+  );
+}
+
+/** A row inside <MenuPopover>. `tone="danger"` for destructive actions. */
+export function MenuItem({ children, onSelect, tone = 'default', disabled = false, icon: Icon, title }: { children: ReactNode; onSelect: () => void; tone?: 'default' | 'danger' | 'success'; disabled?: boolean; icon?: React.ElementType; title?: string }) {
+  return (
+    <button type="button" role="menuitem" onClick={onSelect} disabled={disabled} title={title}
       className={`group flex w-full items-center gap-2.5 whitespace-nowrap rounded-[var(--radius)] px-3 py-2 text-left text-small font-medium transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-50 ${
         tone === 'danger' ? 'text-danger-text hover:bg-danger-bg' : tone === 'success' ? 'text-success-text hover:bg-success-bg' : 'text-fg hover:bg-subtle'
       }`}>

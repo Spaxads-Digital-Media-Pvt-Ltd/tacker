@@ -8,14 +8,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, Check, X, MoreVertical } from 'lucide-react';
+import { Search, SlidersHorizontal, Check, X, MoreVertical } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { downloadCsv } from '../../lib/export';
-import { PageHeader, Tabs, Table, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Tabs, Table, Spinner, StateBlock, MenuItem, type Column, MenuSelect } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, ApiRequestModal, useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, ApiRequestModal, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import type { OfferApplication, QuestionnaireListItem, Publisher, Offer, Advertiser, DashboardUser } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { approved: 'bg-success', pending: 'bg-warning', rejected: 'bg-danger' };
@@ -31,26 +31,7 @@ const APP_COLUMNS = ['Partner', 'Offer', 'Partner Manager', 'Status', 'Questionn
 const Q_COLUMNS = ['ID', 'Name', 'Questions', 'Offers', 'Created', 'Modified'] as const;
 
 function StatusSelect<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: readonly { value: T; label: string; dot: string }[] }) {
-  const { open, setOpen, ref } = useDropdown();
-  const current = options.find((o) => o.value === value) ?? options[0]!;
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
-        <span className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-36 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {options.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              <span className={`h-2 w-2 rounded-full ${o.dot}`} /> {o.label}
-              {o.value === value && <span className="ml-auto text-accent-text">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <MenuSelect label="Status" value={value} options={options} onChange={onChange} active={value !== options[0]?.value} />;
 }
 
 function AppRowMenu({ app, onChanged }: { app: OfferApplication; onChanged: () => void }) {
@@ -220,7 +201,6 @@ function QuestionnairesTab() {
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [filterOpen, setFilterOpen] = useState(false);
   const activeFilterCount = Object.values(filters).reduce((n, arr) => n + (arr?.length ?? 0), 0);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [showColumns, setShowColumns] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
   const [columnOrder, setColumnOrder] = useState<string[]>([...Q_COLUMNS]);
@@ -254,7 +234,6 @@ function QuestionnairesTab() {
   })));
 
   const doDelete = async (item: QuestionnaireListItem) => {
-    setOpenMenuId(null);
     void confirm({
       title: 'Delete questionnaire?', message: `Are you sure you want to delete questionnaire "${item.name}"?`,
       confirmLabel: 'Delete', destructive: true,
@@ -279,19 +258,13 @@ function QuestionnairesTab() {
   };
   const actionsCol: Column<QuestionnaireListItem> = {
     header: '', className: 'text-right', cell: (r) => (
-      <div className="relative inline-block">
-        <button title="Actions" onClick={() => setOpenMenuId(openMenuId === r.id ? null : r.id)}
-          className="inline-grid h-7 w-7 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-          <MoreVertical size={15} />
-        </button>
-        {openMenuId === r.id && (
-          <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-            <button onClick={() => { setOpenMenuId(null); nav(`/app/aff-applications/questionnaires/${r.id}/edit?preview=1`); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Preview Questionnaire</button>
-            <button onClick={() => { setOpenMenuId(null); nav(`/app/aff-applications/questionnaires/${r.id}/edit`); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Edit</button>
-            <button onClick={() => doDelete(r)} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Delete</button>
-          </div>
-        )}
-      </div>
+      <TableRowMenu ariaLabel="Actions">
+        {({ close }) => (<>
+          <MenuItem onSelect={() => { close(); nav(`/app/aff-applications/questionnaires/${r.id}/edit?preview=1`); }}>Preview Questionnaire</MenuItem>
+          <MenuItem onSelect={() => { close(); nav(`/app/aff-applications/questionnaires/${r.id}/edit`); }}>Edit</MenuItem>
+          <MenuItem tone="danger" onSelect={() => { close(); doDelete(r); }}>Delete</MenuItem>
+        </>)}
+      </TableRowMenu>
     ),
   };
   const shownColumns = useMemo<Set<string>>(() => new Set(Q_COLUMNS.filter((c) => !hiddenColumns.has(c))), [hiddenColumns]);
@@ -299,7 +272,7 @@ function QuestionnairesTab() {
     const ordered = columnOrder.map((h) => columnsByHeader[h]).filter((c): c is Column<QuestionnaireListItem> => Boolean(c && shownColumns.has(c.header)));
     return [...ordered, actionsCol];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnOrder, shownColumns, openMenuId]);
+  }, [columnOrder, shownColumns]);
 
   return (
     <>

@@ -7,13 +7,13 @@
  */
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, MoreVertical, ChevronDown, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { Search, MoreVertical, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Spinner, StateBlock, MenuPopover, MenuItem, type Column, MenuSelect } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
 import { downloadCsv, downloadXlsx } from '../../lib/export';
 import type { TrafficBlocking, Publisher, Offer } from '../../types';
 
@@ -26,26 +26,8 @@ const STATUS_OPTIONS = [
 const ALL_COLUMNS = ['ID', 'Offer', 'Partner', 'Sub1', 'Sub2', 'Sub3', 'Sub4', 'Sub5', 'Source ID', 'Status', 'Created', 'Modified'] as const;
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { open, setOpen, ref } = useDropdown();
   const current = STATUS_OPTIONS.find((o) => o.value === value) ?? STATUS_OPTIONS[1];
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
-        <span className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-36 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {STATUS_OPTIONS.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              <span className={`h-2 w-2 rounded-full ${o.dot}`} /> {o.label}
-              {o.value === value && <span className="ml-auto text-accent-text">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <MenuSelect label="Status" value={value} options={STATUS_OPTIONS} display={current} onChange={onChange} active={value !== 'all'} />;
 }
 
 function RowMenu({ rule, onDeleted }: { rule: TrafficBlocking; onDeleted: () => void }) {

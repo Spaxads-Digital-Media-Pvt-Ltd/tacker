@@ -2,7 +2,8 @@
  * Form page layout (Concept 05): the form card with its header (step caption, title, required note)
  * and, optionally, the 336 px aside — FieldHelpPanel + UpNextCard — at ≥ lg. Below lg the field help
  * becomes a collapsed "Field help" disclosure under the card header and Up next moves below the card.
- * No aside → the card is centred and wider (max 880 px) so it never leaves half the page empty.
+ * No aside → the card is centred at the shared form width (960 px, index.css `.form-width`), which the
+ * Stepper, the page actions row and FormFooter also use — one container, equal margins.
  * Wizards pass `layout` explicitly so the card width never changes between steps: "aside" keeps the
  * 336 px column reserved even on a step with nothing to show; "centered" puts Up next below the card.
  * Presentational only: the page keeps its own <form>, fields, validation and submit.
@@ -30,7 +31,7 @@ export function FormLayout({ caption, title, requiredNote, help, upNext, layout,
 }) {
   const hasAside = (layout ?? (help || upNext ? 'aside' : 'centered')) === 'aside';
   return (
-    <div data-form-layout className={hasAside ? 'grid gap-6 lg:grid-cols-[minmax(0,1fr)_336px] lg:items-start' : 'mx-auto w-full max-w-[880px]'}>
+    <div data-form-layout={hasAside ? 'aside' : 'centered'} className={hasAside ? 'grid gap-6 lg:grid-cols-[minmax(0,1fr)_336px] lg:items-start' : 'form-width'}>
       <div className="min-w-0 space-y-6">
         <section className="card !p-5 sm:!p-7">
           {(caption || title || requiredNote) && (

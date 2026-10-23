@@ -24,8 +24,9 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MoreVertical, Search } from 'lucide-react';
-import { PageHeader, Tabs, StateBlock, Spinner } from '../../shared-components/primitives/ui';
+import { Search } from 'lucide-react';
+import { PageHeader, Tabs, StateBlock, Spinner, MenuItem } from '../../shared-components/primitives/ui';
+import { TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import { EmptyShellTable } from '../../shared-components/primitives/EmptyShellTable';
 import { loadSavedReports, persistSavedReports, syncSavedReports } from '../../lib/savedReports';
 import type { SavedReportConfig } from '../../shared-components/primitives/ReportPageKit';
@@ -77,7 +78,6 @@ function SavedReportsTab() {
   const nav = useNavigate();
   const { rows, remove, tick } = useSavedRows();
   const [q, setQ] = useState('');
-  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState<SavedReportDto | null>(null);
   // The caller's saved reports on the server (ids + schedules); re-read once the sync above lands.
   const server = useQuery<SavedReportDto[]>('/api/saved-reports');
@@ -117,20 +117,15 @@ function SavedReportsTab() {
                   </td>
                   <td className="px-4 py-3">{r.label}</td>
                   <td className="px-4 py-3 text-fg-secondary">{formatDate(r.from)} – {formatDate(r.to)}</td>
-                  <td className="relative text-right">
-                    <button type="button" title="Actions" onClick={() => setMenuFor(menuFor === `${r.source}-${r.name}` ? null : `${r.source}-${r.name}`)}
-                      className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-                      <MoreVertical size={15} />
-                    </button>
-                    {menuFor === `${r.source}-${r.name}` && (
-                      <div className="absolute right-2 top-full z-30 w-36 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setMenuFor(null)}>
-                        <button onClick={() => { setMenuFor(null); nav(r.href); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Open</button>
-                        <button onClick={() => { const s = onServer(r); setMenuFor(null); if (s) setScheduling(s); }} disabled={!onServer(r)}
-                          title={onServer(r) ? undefined : 'Still saving to the server — try again in a moment'}
-                          className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle disabled:opacity-50">{onServer(r)?.schedule ? 'Edit schedule…' : 'Schedule…'}</button>
-                        <button onClick={() => { setMenuFor(null); remove(r.source, r.name); }} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Delete</button>
-                      </div>
-                    )}
+                  <td className="text-right">
+                    <TableRowMenu ariaLabel="Actions">
+                      {({ close }) => (<>
+                        <MenuItem onSelect={() => { close(); nav(r.href); }}>Open</MenuItem>
+                        <MenuItem onSelect={() => { const s = onServer(r); close(); if (s) setScheduling(s); }} disabled={!onServer(r)}
+                          title={onServer(r) ? undefined : 'Still saving to the server — try again in a moment'}>{onServer(r)?.schedule ? 'Edit schedule…' : 'Schedule…'}</MenuItem>
+                        <MenuItem tone="danger" onSelect={() => { close(); remove(r.source, r.name); }}>Delete</MenuItem>
+                      </>)}
+                    </TableRowMenu>
                   </td>
                 </tr>
               ))}
@@ -159,14 +154,12 @@ function ScheduledReportsTab() {
   const loading = me.loading || list.loading;
   const columns = everyone ? [...SCHEDULED_COLUMNS.slice(0, 2), 'Owner', ...SCHEDULED_COLUMNS.slice(2)] : SCHEDULED_COLUMNS;
   const [editing, setEditing] = useState<SavedReportDto | null>(null);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const send = useMutation((id: string) => api.post<SendResult>(`/api/saved-reports/${id}/send`, {}));
   const unschedule = useMutation((id: string) => api.patch(`/api/saved-reports/${id}`, { schedule: null }));
   const rows = (data ?? []).filter((r) => r.schedule);
 
   const act = async (what: 'send' | 'remove', r: SavedReportDto) => {
-    setMenuFor(null);
     setNotice(null);
     if (what === 'send') {
       const res = await send.run(r.id);
@@ -213,19 +206,15 @@ function ScheduledReportsTab() {
                     <td className="px-4 py-3" title={r.lastRunDetail ?? undefined}>
                       <span className={r.lastRunStatus && r.lastRunStatus !== 'sent' ? 'text-danger-text' : undefined}>{r.lastRunStatus ?? 'Not yet'}</span>
                     </td>
-                    <td className="relative text-right">
-                      <button type="button" title="Actions" onClick={() => setMenuFor(menuFor === r.id ? null : r.id)}
-                        className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-fg-secondary hover:bg-accent-subtle hover:text-fg">
-                        <MoreVertical size={15} />
-                      </button>
-                      {menuFor === r.id && (
-                        <div className="absolute right-2 top-full z-30 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated" onMouseLeave={() => setMenuFor(null)}>
-                          <button onClick={() => { setMenuFor(null); setEditing(r); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Edit schedule…</button>
-                          <button onClick={() => void act('send', r)} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Send now</button>
-                          {src && <button onClick={() => { setMenuFor(null); nav(savedReportHref(src, r.config as SavedReportLinkConfig)); }} className="block w-full px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">Open report</button>}
-                          <button onClick={() => void act('remove', r)} className="block w-full px-3 py-1.5 text-left text-small text-danger-text hover:bg-accent-subtle">Remove schedule</button>
-                        </div>
-                      )}
+                    <td className="text-right">
+                      <TableRowMenu ariaLabel="Actions">
+                        {({ close }) => (<>
+                          <MenuItem onSelect={() => { close(); setEditing(r); }}>Edit schedule…</MenuItem>
+                          <MenuItem onSelect={() => { close(); void act('send', r); }}>Send now</MenuItem>
+                          {src && <MenuItem onSelect={() => { close(); nav(savedReportHref(src, r.config as SavedReportLinkConfig)); }}>Open report</MenuItem>}
+                          <MenuItem tone="danger" onSelect={() => { close(); void act('remove', r); }}>Remove schedule</MenuItem>
+                        </>)}
+                      </TableRowMenu>
                     </td>
                   </tr>
                 );

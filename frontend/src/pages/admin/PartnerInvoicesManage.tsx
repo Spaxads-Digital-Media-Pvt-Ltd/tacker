@@ -12,10 +12,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, SlidersHorizontal, ChevronDown, ChevronRight, Pencil, Eye, EyeOff, CheckCircle2, Download, Clock, MoreVertical, Ban } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, Tabs, Modal, Spinner, StateBlock, MenuItem, type Column, MenuSelect } from '../../shared-components/primitives/ui';
 import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { CategoryFilterDrawer, type FilterCategory } from '../../shared-components/primitives/CategoryFilterDrawer';
-import { ColumnsModal, TableRowMenu, useDropdown, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal, TableRowMenu, ApiRequestModal } from '../../shared-components/primitives/TableActionsKit';
 import type { PartnerInvoice, Publisher } from '../../types';
 import { VoidInvoiceModal } from './VoidInvoiceModal';
 
@@ -89,32 +89,8 @@ const ALL_COLUMNS = ['Invoice ID', 'Partner', 'Status', 'Visibility', 'Payment T
 const money = (v: string | number, c = 'USD') => `${c} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}`;
 
 function StatusSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { open, setOpen, ref } = useDropdown();
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open, ref, setOpen]);
   const current = STATUS_OPTIONS.find((o) => o.value === value) ?? STATUS_OPTIONS[1];
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
-        <span className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-30 mt-1 w-36 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {STATUS_OPTIONS.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              <span className={`h-2 w-2 rounded-full ${o.dot}`} /> {o.label}
-              {o.value === value && <span className="ml-auto text-accent-text">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <MenuSelect label="Status" value={value} options={STATUS_OPTIONS} display={current} onChange={onChange} active={value !== 'all'} />;
 }
 
 function NotesModal({ title, text, onClose }: { title: string; text: string; onClose: () => void }) {

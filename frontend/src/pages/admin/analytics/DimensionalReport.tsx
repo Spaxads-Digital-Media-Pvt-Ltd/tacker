@@ -49,6 +49,8 @@ import { REPORT_CONTROL as CONTROL } from '../../../shared-components/primitives
 import { useReportZone } from '../../../lib/useReportZone';
 import { bucketLabel } from '../../../lib/reportTime';
 import { zoneRangeParams } from '../../../lib/reportZone';
+import { estimateLabelWidth, pickXLabels } from '../../../shared-components/charts/chartMath';
+import { useElementWidth } from '../../../shared-components/charts/useElementWidth';
 
 interface AggRow { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }
 interface AggResult { rows: AggRow[]; sortedWithinCurrency?: boolean }
@@ -205,10 +207,12 @@ function DimensionCard({
   );
 }
 
-/** `unavailable`: why the series isn't drawn (e.g. its points mix currencies) — shown in its place. */
+/** `unavailable`: why the series isn't drawn (e.g. its points mix currencies) — shown in its place.
+ * Drawn in real pixels (measured width) so the axis text is never stretched or squeezed. */
 function LabeledChart({ label, labels, values, unavailable }: { label: string; labels: string[]; values: number[]; unavailable?: { text: string; title: string } }) {
+  const [box, measured] = useElementWidth();
   const hasData = values.length > 0 && values.some((v) => v > 0);
-  const w = 560, h = 180, padL = 44, padR = 12, padT = 10, padB = 20;
+  const w = measured || 560, h = 140, padL = 44, padR = 12, padT = 10, padB = 20;
   const plotW = w - padL - padR, plotH = h - padT - padB;
   const n = Math.max(1, values.length);
   const max = Math.max(1, ...values);
@@ -216,10 +220,10 @@ function LabeledChart({ label, labels, values, unavailable }: { label: string; l
   const y = (v: number) => padT + plotH - (v / max) * plotH;
   const line = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   const area = values.length ? `${line} L${x(n - 1).toFixed(1)},${padT + plotH} L${x(0).toFixed(1)},${padT + plotH} Z` : '';
-  const step = Math.max(1, Math.ceil(n / 6));
+  const xLabels = pickXLabels(labels.map((_, i) => x(i)), labels.map((l) => estimateLabelWidth(l, 11)), { left: padL, right: w - padR });
 
   return (
-    <div>
+    <div ref={box}>
       <p className="mb-1 text-small font-medium text-fg">{label}</p>
       {unavailable ? (
         <div className="grid h-[100px] place-items-center rounded-[var(--radius)] border border-dashed border-border">
@@ -230,17 +234,17 @@ function LabeledChart({ label, labels, values, unavailable }: { label: string; l
           <p className="text-tiny text-fg-muted">No data for this period</p>
         </div>
       ) : (
-        <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height: 140 }}>
+        measured > 0 && <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} className="block w-full">
           {[0, 0.5, 1].map((f) => (
-            <text key={f} x={padL - 6} y={padT + plotH * (1 - f) + 3} fontSize={9} textAnchor="end" fill="rgb(var(--text-secondary))">
+            <text key={f} x={padL - 6} y={padT + plotH * (1 - f) + 3} fontSize={11} textAnchor="end" fill="rgb(var(--text-secondary))">
               {Math.round(max * f).toLocaleString()}
             </text>
           ))}
           <path d={area} fill="rgb(var(--accent-text))" opacity={0.15} />
           <path d={line} fill="none" stroke="rgb(var(--accent-text))" strokeWidth={1.5} />
-          {labels.map((l, i) => (i % step === 0 ? (
-            <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="rgb(var(--text-secondary))">{l}</text>
-          ) : null))}
+          {xLabels.map(({ index, x: lx }) => (
+            <text key={index} x={lx} y={h - 4} fontSize={11} textAnchor="middle" fill="rgb(var(--text-secondary))">{labels[index]}</text>
+          ))}
         </svg>
       )}
     </div>

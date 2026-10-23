@@ -10,21 +10,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, Pencil, User, FileText, Clock, Trash2 } from 'lucide-react';
+import { Search, SlidersHorizontal, Pencil, User, FileText, Clock, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { useImpersonate } from '../../lib/impersonation';
-import { PageHeader, Table, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, StateBlock, MenuItem, type Column, MenuSelect } from '../../shared-components/primitives/ui';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { HistoryModal } from '../../shared-components/panels/HistoryModal';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CategoryFilterDrawer } from '../../shared-components/primitives/CategoryFilterDrawer';
 import { TableActionsMenu, } from './AdvertisersTableActions';
-import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
-import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
+import { TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
+import type { FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
 import { chipsFromValues, withoutValue } from '../../lib/filterChips';
 import { pagedPath, fetchAllPages, useDebounced, sortParams, useTodaySoFarRange, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
-import { SortSelect, ExportNotice, type SortOption } from './PagedListControls';
+import { SortSelect, ExportNotice, type SortOption, FilterToolbar } from './PagedListControls';
 import type { Advertiser, DashboardUser, PagedList } from '../../types';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
@@ -40,27 +40,8 @@ const PAGE_SIZE = 12;
 
 const money = (v: string | number | undefined) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v ?? 0))}`;
 function StatusFilterSelect({ value, onChange, statusOpts }: { value: string; onChange: (v: string) => void; statusOpts: readonly string[] }) {
-  const { open, setOpen, ref } = useDropdown();
   const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...statusOpts.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s, dot: STATUS_DOT[s] ?? 'bg-fg-muted' }))];
-  const current = options.find((o) => o.value === value) ?? options[0]!;
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-label={`Status: ${current.label}`} aria-expanded={open} className="input !w-auto flex items-center gap-1.5 whitespace-nowrap" onClick={() => setOpen((o) => !o)}>
-        <span aria-hidden className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" aria-hidden />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-popover mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {options.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              <span className={`h-2 w-2 rounded-full ${o.dot}`} /> {o.label}
-              {o.value === value && <span className="ml-auto text-accent-text">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <MenuSelect label="Status" value={value} options={options} onChange={onChange} active={value !== ''} />;
 }
 
 function RowActionMenu({ advertiser, onChanged }: { advertiser: Advertiser; onChanged: () => void }) {
@@ -316,15 +297,32 @@ export default function Advertisers() {
         ))}
       </div>
 
-      <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2">
+      <FilterToolbar className="mb-4" chips={chips} onRemoveChip={removeChip} onClearAll={clearAll} actions={<>
+        <Link to="/app/advertisers/new" className="btn-primary whitespace-nowrap">+ Advertiser</Link>
+        <TableActionsMenu
+          selectedIds={visibleSelected.map((a) => a.id)}
+          allColumns={ALL_COLUMNS}
+          columnOrder={columnOrder}
+          hiddenColumns={hiddenColumns}
+          onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
+          onExport={(f) => { void exportRows(f); }}
+          appliedFilters={{
+            status: status || undefined, search: searchQ || undefined,
+            // Drawer filters too, with user / label UUIDs shown by name.
+            ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v.length).map(([k, v]) => [k, v.map((x) =>
+              FILTER_CATEGORIES.find((c) => c.key === k)?.options.find((o) => o.value === x)?.label ?? x).join(', ')])),
+          }}
+        />
+      </>} lead={
         <div className="relative w-full min-w-0 sm:w-auto sm:min-w-[16rem] sm:flex-1 lg:max-w-sm">
           <Search size={16} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-muted" />
           <input className="input !pl-9" aria-label="Search advertisers" placeholder="Search…" value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
         </div>
+      }>
         <StatusFilterSelect statusOpts={tabStatusOpts} value={status} onChange={(v) => { setStatus(v); resetView(); }} />
         <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
         <div className="relative">
-          <button type="button" onClick={() => setFilterOpen((o) => !o)} className="btn-ghost whitespace-nowrap">
+          <button type="button" onClick={() => setFilterOpen((o) => !o)} className="btn-toolbar" data-active={activeFilterCount > 0 ? 'true' : undefined}>
             <SlidersHorizontal size={16} aria-hidden /> Filters
             {activeFilterCount > 0 && (
               <>
@@ -338,26 +336,8 @@ export default function Advertisers() {
               onApply={(v) => { setFilters(v); resetView(); }} onClose={() => setFilterOpen(false)} />
           )}
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Link to="/app/advertisers/new" className="btn-primary whitespace-nowrap">+ Advertiser</Link>
-          <TableActionsMenu
-            selectedIds={visibleSelected.map((a) => a.id)}
-            allColumns={ALL_COLUMNS}
-            columnOrder={columnOrder}
-            hiddenColumns={hiddenColumns}
-            onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
-            onExport={(f) => { void exportRows(f); }}
-            appliedFilters={{
-              status: status || undefined, search: searchQ || undefined,
-              // Drawer filters too, with user / label UUIDs shown by name.
-              ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v.length).map(([k, v]) => [k, v.map((x) =>
-                FILTER_CATEGORIES.find((c) => c.key === k)?.options.find((o) => o.value === x)?.label ?? x).join(', ')])),
-            }}
-          />
-        </div>
-      </div>
+      </FilterToolbar>
 
-      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-4" />
       <ExportNotice message={exportNote} onDismiss={() => setExportNote(null)} />
 
       {loading && !data ? <StateBlock variant="loading" title="Loading advertisers…" rows={6} />

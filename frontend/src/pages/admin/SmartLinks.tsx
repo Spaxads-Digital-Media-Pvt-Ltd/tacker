@@ -194,7 +194,7 @@ export default function SmartLinks() {
             <option value="all">All</option>
             {STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s[0]!.toUpperCase() + s.slice(1)}</option>)}
           </select>
-          <button type="button" className="btn-ghost relative" onClick={openDrawer}>
+          <button type="button" className="btn-toolbar relative" data-active={appliedFilterCount > 0 ? 'true' : undefined} onClick={openDrawer}>
             <SlidersHorizontal size={15} /> Filters
             {appliedFilterCount > 0 && (
               <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-on-accent">{appliedFilterCount}</span>

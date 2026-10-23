@@ -206,7 +206,7 @@ export default function AdvertiserEdit() {
   return (
     <>
       <PageHeader title={`Edit Advertiser: ${advertiser.name}`} subtitle={`Advertisers › ${advertiser.name} › Edit`} />
-      <div className="mx-auto max-w-[880px]"><Tabs tabs={[...TABS]} active={tab} onChange={setTab} /></div>
+      <div className="form-width"><Tabs tabs={[...TABS]} active={tab} onChange={setTab} /></div>
       <form onSubmit={submit}>
       <FormLayout title={tab} requiredNote="Fields with an asterisk (*) are mandatory." layout="centered">
         <div className="space-y-6">

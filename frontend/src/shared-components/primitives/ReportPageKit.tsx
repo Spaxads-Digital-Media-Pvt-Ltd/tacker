@@ -41,12 +41,16 @@ export const DEVICE_OPTIONS: { value: string; label: string }[] = DEVICES.map((d
 // Report math + formatting live in lib/reportMath.ts (pure, unit-tested); re-exported here so pages
 // keep importing them from the kit.
 import { money, pct, num, toIso, daysAgo, todayStr, deriveRow, type DerivedRow } from '../../lib/reportMath';
+import { estimateLabelWidth, pickXLabels } from '../charts/chartMath';
+import { useElementWidth } from '../charts/useElementWidth';
 export { money, pct, num, toIso, daysAgo, todayStr, deriveRow, type DerivedRow };
 
-/** `revenue: null` = not plotted (e.g. the days mix currencies, so their totals aren't comparable). */
+/** `revenue: null` = not plotted (e.g. the days mix currencies, so their totals aren't comparable).
+ * Drawn in real pixels (measured width) so the axis text is never stretched or squeezed. */
 export function MiniChart({ labels, revenue: revenueIn, clicks }: { labels: string[]; revenue: number[] | null; clicks: number[] }) {
+  const [box, measured] = useElementWidth();
   const revenue = revenueIn ?? [];
-  const w = 900, h = 220, padL = 40, padR = 40, padT = 12, padB = 24;
+  const w = measured || 900, h = 240, padL = 40, padR = 40, padT = 12, padB = 24;
   const plotW = w - padL - padR, plotH = h - padT - padB;
   const n = Math.max(1, labels.length);
   const revMax = Math.max(1, ...revenue), clickMax = Math.max(1, ...clicks);
@@ -57,20 +61,23 @@ export function MiniChart({ labels, revenue: revenueIn, clicks }: { labels: stri
     ? `${revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} L${x(n - 1).toFixed(1)},${padT + plotH} L${x(0).toFixed(1)},${padT + plotH} Z`
     : '';
   const clickLine = clicks.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yClick(v).toFixed(1)}`).join(' ');
-  const step = Math.max(1, Math.ceil(n / 10));
+  const shortLabels = labels.map((l) => l.slice(5));
+  const xLabels = pickXLabels(shortLabels.map((_, i) => x(i)), shortLabels.map((l) => estimateLabelWidth(l, 11)), { left: padL, right: w - padR });
 
   // Colors use the real Section-0 tokens so the chart is theme-aware. (This previously referenced a
   // `--color-*` var namespace that doesn't exist in this project, so it silently rendered the indigo
   // hex fallback in both themes — an accent mismatch, not a deliberate color.)
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height: 240 }}>
+    <div ref={box} className="w-full">
+    {measured > 0 && <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} className="block w-full">
       {revenue.length > 0 && <path d={revArea} fill="rgb(var(--accent-text))" opacity={0.15} />}
       {revenue.length > 0 && <path d={revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} fill="none" stroke="rgb(var(--accent-text))" strokeWidth={2} />}
       <path d={clickLine} fill="none" stroke="rgb(var(--text-muted))" strokeWidth={1.5} strokeDasharray="4 3" />
-      {labels.map((l, i) => (i % step === 0 ? (
-        <text key={i} x={x(i)} y={h - 4} fontSize={9} textAnchor="middle" fill="rgb(var(--text-secondary))">{l.slice(5)}</text>
-      ) : null))}
-    </svg>
+      {xLabels.map(({ index, x: lx }) => (
+        <text key={index} x={lx} y={h - 6} fontSize={11} textAnchor="middle" fill="rgb(var(--text-secondary))">{shortLabels[index]}</text>
+      ))}
+    </svg>}
+    </div>
   );
 }
 

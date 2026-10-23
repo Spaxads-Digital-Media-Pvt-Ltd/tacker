@@ -13,11 +13,11 @@
  * and others — rather than guessing at a page that can't be inspected live.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Plus, Pencil, Trash2, Search, MoreVertical, ChevronDown } from 'lucide-react';
-import { PageHeader, Field, Modal, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { Plus, Pencil, Trash2, Search, MoreVertical } from 'lucide-react';
+import { PageHeader, Field, Modal, Spinner, StateBlock, MenuSelect } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
-import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
 import { ChoiceCards } from '../../shared-components/forms/ChoiceCards';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
@@ -33,26 +33,8 @@ const TYPE_OPTIONS = [
 ] as const;
 
 function TypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const { open, setOpen, ref } = useDropdown();
   const current = TYPE_OPTIONS.find((o) => o.value === value) ?? TYPE_OPTIONS[0];
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" className="input !w-auto flex items-center gap-1.5" onClick={() => setOpen((o) => !o)}>
-        {current.label} <ChevronDown size={13} className="text-fg-muted" />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-32 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {TYPE_OPTIONS.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              {o.label}
-              {o.value === value && <span className="ml-auto text-accent-text">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <MenuSelect label="Type" value={value} options={TYPE_OPTIONS} display={current} onChange={onChange} active={value !== 'all'} align="end" />;
 }
 
 function DataPointForm({ initial, onSaved, onCancel }: { initial?: DataPoint; onSaved: () => void; onCancel: () => void }) {

@@ -1,7 +1,7 @@
 // TimeSeriesChart geometry (charts/chartMath.ts) — nice ticks, clamped curves, gap runs.
 import { describe, it } from 'vitest';
 import assert from 'node:assert';
-import { curvePath, curveSegments, niceTicks, runs, type Pt } from '../chartMath.ts';
+import { curvePath, curveSegments, estimateLabelWidth, niceTicks, pickXLabels, runs, type Pt } from '../chartMath.ts';
 
 describe('niceTicks', () => {
   it('round steps covering the domain', () => {
@@ -80,5 +80,72 @@ describe('runs (null gaps)', () => {
 
   it('a zero is a value, not a gap', () => {
     assert.deepStrictEqual(runs([0, 0], at), [[{ x: 0, y: 0 }, { x: 1, y: 0 }]]);
+  });
+});
+
+describe('pickXLabels', () => {
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // The bucket labels the app draws: day, hour, week (start day) and month.
+  const FORMATS: Record<string, (i: number) => string> = {
+    day: (i) => { const d = new Date(Date.UTC(2026, 8, 23 + i)); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`; },
+    hour: (i) => `${String(i % 24).padStart(2, '0')}:00`,
+    week: (i) => { const d = new Date(Date.UTC(2026, 6, 6 + 7 * i)); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`; },
+    month: (i) => `${MONTHS[i % 12]} ${2020 + Math.floor(i / 12)}`,
+  };
+  // The chart's own geometry: a y-axis gutter on the left, 12 px on the right; lines put the first and
+  // last points on the plot edges, bars put every label at its band centre.
+  const layout = (width: number, n: number, kind: 'line' | 'bar') => {
+    const left = 40, right = width - 12, plotW = right - left;
+    const xs = Array.from({ length: n }, (_, i) => (kind === 'bar' || n === 1 ? left + (plotW / n) * (i + 0.5) : left + (i * plotW) / (n - 1)));
+    return { xs, bounds: { left, right } };
+  };
+
+  it('never overlaps (≥ 8 px apart), never clips, always keeps the first and last label', () => {
+    for (const [name, fmt] of Object.entries(FORMATS)) {
+      for (let width = 280; width <= 1100; width += 10) {
+        for (let n = 1; n <= 90; n++) {
+          for (const kind of ['line', 'bar'] as const) {
+            const labels = Array.from({ length: n }, (_, i) => fmt(i));
+            const widths = labels.map((l) => estimateLabelWidth(l));
+            const { xs, bounds } = layout(width, n, kind);
+            const got = pickXLabels(xs, widths, bounds);
+            const where = `${name} w=${width} n=${n} ${kind}`;
+            assert.strictEqual(got[0]!.index, 0, `first kept: ${where}`);
+            assert.strictEqual(got[got.length - 1]!.index, n - 1, `last kept: ${where}`);
+            got.forEach((g, k) => {
+              const half = widths[g.index]! / 2;
+              assert.ok(g.x - half >= bounds.left - 1e-9 && g.x + half <= bounds.right + 1e-9, `inside plot: ${where} #${g.index}`);
+              if (k > 0) {
+                const p = got[k - 1]!;
+                assert.ok(g.index > p.index, `ordered: ${where}`);
+                assert.ok(p.x + widths[p.index]! / 2 + 8 <= g.x - half + 1e-9, `gap: ${where} #${p.index}/#${g.index}`);
+              }
+            });
+          }
+        }
+      }
+    }
+  });
+
+  it('uses the width it has: a 30-day range shows several labels on a wide chart and fewer on a narrow one', () => {
+    const labels = Array.from({ length: 30 }, (_, i) => FORMATS.day!(i));
+    const widths = labels.map((l) => estimateLabelWidth(l));
+    const wide = pickXLabels(layout(1100, 30, 'line').xs, widths, layout(1100, 30, 'line').bounds);
+    const narrow = pickXLabels(layout(320, 30, 'line').xs, widths, layout(320, 30, 'line').bounds);
+    assert.ok(wide.length >= 8, `wide ${wide.length}`);
+    assert.ok(narrow.length >= 3 && narrow.length < wide.length, `narrow ${narrow.length}`);
+  });
+
+  it('keeps edge labels inside the plot: the first starts at the left edge, the last ends at the right', () => {
+    const { xs, bounds } = layout(600, 7, 'line');
+    const got = pickXLabels(xs, xs.map(() => 40), bounds);
+    assert.strictEqual(got[0]!.x, bounds.left + 20);
+    assert.strictEqual(got[got.length - 1]!.x, bounds.right - 20);
+  });
+
+  it('a single point is one label; labels too wide for the plot fall back to the last one', () => {
+    assert.deepStrictEqual(pickXLabels([100], [40], { left: 40, right: 400 }), [{ index: 0, x: 100 }]);
+    assert.deepStrictEqual(pickXLabels([], [], { left: 0, right: 100 }), []);
+    assert.deepStrictEqual(pickXLabels([0, 50], [60, 60], { left: 0, right: 80 }).map((l) => l.index), [1]);
   });
 });

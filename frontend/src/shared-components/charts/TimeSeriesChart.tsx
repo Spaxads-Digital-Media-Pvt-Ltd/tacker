@@ -19,7 +19,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { StateBlock } from '../primitives/ui';
-import { curvePath, niceTicks, runs } from './chartMath';
+import { curvePath, estimateLabelWidth, niceTicks, pickXLabels, runs } from './chartMath';
 
 export type SeriesTone = 'brand' | 'revenue' | 'payout' | 'margin' | 'clicks' | 'conversions';
 export interface ChartSeries {
@@ -114,20 +114,11 @@ export function TimeSeriesChart({
     const x = kind === 'bar' || n === 1
       ? (i: number) => left + band * (i + 0.5)
       : (i: number) => left + (i * plotW) / (n - 1);
-    // X labels: as many as fit (~64px each); always the last one, dropping a crowded neighbour.
-    const fit = Math.max(2, Math.floor(plotW / 64));
-    const step = Math.max(1, Math.ceil(n / fit));
-    const shown = new Set<number>();
-    for (let i = 0; i < n; i += step) shown.add(i);
-    if (n > 1) {
-      const lastShown = Math.max(...shown);
-      if (lastShown !== n - 1) {
-        if (n - 1 - lastShown < step * 0.6) shown.delete(lastShown);
-        shown.add(n - 1);
-      }
-    }
-    return { ticks, tickText, left, plotW, plotH, y, x, band, shown, yMin };
-  }, [series, width, height, n, kind, formatTick]);
+    // X labels (12 px): first and last always, intermediates spaced by their real widths, every box
+    // kept inside the plot (chartMath.pickXLabels).
+    const xLabels = pickXLabels(labels.map((_, i) => x(i)), labels.map((l) => estimateLabelWidth(l)), { left, right: left + plotW });
+    return { ticks, tickText, left, plotW, plotH, y, x, band, xLabels, yMin };
+  }, [series, width, height, n, kind, formatTick, labels]);
 
   const markers = n <= MAX_MARKERS;
   const baseY = geo.y(Math.max(geo.yMin, 0));
@@ -203,10 +194,8 @@ export function TimeSeriesChart({
               </g>
             ))}
             {/* X labels */}
-            {labels.map((l, i) => geo.shown.has(i) && (
-              <text key={i} x={geo.x(i)} y={height - 8}
-                textAnchor={kind !== 'bar' && n > 1 && i === 0 ? 'start' : kind !== 'bar' && n > 1 && i === n - 1 ? 'end' : 'middle'}
-                className="fill-fg-muted text-tiny">{l}</text>
+            {geo.xLabels.map(({ index, x }) => (
+              <text key={index} x={x} y={height - 8} textAnchor="middle" className="fill-fg-muted text-tiny">{labels[index]}</text>
             ))}
             {/* Active band (bars) / crosshair (lines) */}
             {active !== null && (kind === 'bar'

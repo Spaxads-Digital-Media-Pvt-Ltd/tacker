@@ -144,7 +144,7 @@ describe('Field / FormLayout / FormFooter / UpNextCard', () => {
     assert.strictEqual(attr(renderToStaticMarkup(<Field label="X"><input id="mine" /></Field>), '<label', 'for'), 'mine');
   });
   it('FormLayout centres a wider card without an aside, and adds the aside with help', () => {
-    assert.match(renderToStaticMarkup(<FormLayout title="T"><i /></FormLayout>), /max-w-\[880px\]/);
+    assert.match(renderToStaticMarkup(<FormLayout title="T"><i /></FormLayout>), /data-form-layout="centered" class="form-width"/);
     const withHelp = renderToStaticMarkup(<FormLayout title="T" help={{ fallback: { body: 'b' } }}><i /></FormLayout>);
     assert.match(withHelp, /lg:grid-cols-\[minmax\(0,1fr\)_336px\]/);
     assert.match(withHelp, /<aside/);
@@ -153,8 +153,9 @@ describe('Field / FormLayout / FormFooter / UpNextCard', () => {
     const reserved = renderToStaticMarkup(<FormLayout title="Email" layout="aside"><i /></FormLayout>);
     assert.match(reserved, /lg:grid-cols-\[minmax\(0,1fr\)_336px\]/);
     assert.match(reserved, /<aside/);
+    assert.match(reserved, /data-form-layout="aside"/);
     const centred = renderToStaticMarkup(<FormLayout title="General" layout="centered" upNext={<UpNextCard number={2} name="Address" />}><i /></FormLayout>);
-    assert.match(centred, /max-w-\[880px\]/);
+    assert.match(centred, /data-form-layout="centered" class="form-width"/);
     assert.doesNotMatch(centred, /<aside/);
     assert.match(centred, /Step 2: <\/span>Address/);
   });

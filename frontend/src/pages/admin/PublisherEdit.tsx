@@ -210,7 +210,7 @@ export default function PublisherEdit() {
   return (
     <>
       <PageHeader title={`Edit Partner: ${publisher.name}`} subtitle={`Partners › ${publisher.name} › Edit`} />
-      <div className="mx-auto max-w-[880px]"><Tabs tabs={[...TABS]} active={tab} onChange={setTab} /></div>
+      <div className="form-width"><Tabs tabs={[...TABS]} active={tab} onChange={setTab} /></div>
       <form onSubmit={submit}>
       {/* One hinted field only — centred card on every tab; the hint stays as the field's (?) tooltip. */}
       <FormLayout title={tab} requiredNote="Fields with an asterisk (*) are mandatory." layout="centered">

@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useNavigate, Link } from 'react-router-dom';
-import { Search, SlidersHorizontal, ChevronDown, Pencil, Copy, Settings, Link as LinkIcon, Eye, FileText } from 'lucide-react';
+import { Search, SlidersHorizontal, Pencil, Copy, Settings, Link as LinkIcon, Eye, FileText } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
-import { PageHeader, Table, StateBlock, MenuItem, type Column } from '../../shared-components/primitives/ui';
+import { PageHeader, Table, StateBlock, MenuItem, type Column, MenuSelect } from '../../shared-components/primitives/ui';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { OfferThumbnail } from '../../shared-components/primitives/OfferThumbnail';
 import { SearchFilterDrawer, FieldBlock } from '../../shared-components/primitives/SearchFilterDrawer';
 import { TableActionsMenu, ALL_COLUMNS } from './OffersTableActions';
-import { useDropdown, TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
+import { TableRowMenu } from '../../shared-components/primitives/TableActionsKit';
 import { CopyOfferModal } from './CopyOfferModal';
 import { CopyOfferSettingsModal } from './CopyOfferSettingsModal';
 import { TrackingLinksModal } from './offerDetail/TrackingLinksModal';
 import { groupTrackingDomains } from '../../lib/trackingLinks';
 import { countryLabel, countryName } from '../../data/geo';
-import { ActiveFilterChips, type FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
+import type { FilterChip } from '../../shared-components/primitives/ActiveFilterChips';
 import { pagedPath, fetchAllPages, useDebounced, sortParams, useTodaySoFarRange, EXPORT_MAX_ROWS, type PagedParams } from './pagedList';
-import { SortSelect, ExportNotice, type SortOption } from './PagedListControls';
+import { SortSelect, ExportNotice, type SortOption, FilterToolbar } from './PagedListControls';
 import { OFFER_STATUS_LABEL as STATUS_LABEL, OFFER_STATUS_TONE, OFFER_TONE_DOT } from '../../lib/offerStatus';
 import type { Offer, Advertiser, Publisher, TrackingDomain, PagedList } from '../../types';
 
@@ -121,53 +121,17 @@ const SEARCH_FIELDS = [
 type SearchField = (typeof SEARCH_FIELDS)[number]['value'];
 
 function SearchFieldSelect({ value, onChange }: { value: SearchField; onChange: (v: SearchField) => void }) {
-  const { open, setOpen, ref } = useDropdown();
-  const current = SEARCH_FIELDS.find((f) => f.value === value)!;
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-label={`Search field: ${current.label}`} aria-expanded={open} className="input !w-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap" onClick={() => setOpen((o) => !o)}>
-        {current.label} <ChevronDown size={13} className="text-fg-muted" aria-hidden />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-popover mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {SEARCH_FIELDS.map((f) => (
-            <button key={f.value} type="button" onClick={() => { onChange(f.value); setOpen(false); }}
-              className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              {f.label}{f.value === value && <span className="text-accent-text">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <MenuSelect label="Search field" value={value} options={SEARCH_FIELDS} onChange={onChange} width="w-40" />;
 }
 
 /** Toolbar status quick-pick. Picks a single status; when the drawer has several selected it shows
  * "N statuses" instead of pretending only the first one applies. */
 function StatusFilterSelect({ statuses, onChange }: { statuses: string[]; onChange: (v: string) => void }) {
-  const { open, setOpen, ref } = useDropdown();
-  const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...STATUS_OPTS.map((s) => ({ value: s, label: STATUS_LABEL[s], dot: STATUS_DOT[s] }))];
+  const options = [{ value: '', label: 'All', dot: 'bg-fg-muted' }, ...STATUS_OPTS.map((s) => ({ value: s, label: STATUS_LABEL[s] ?? s, dot: STATUS_DOT[s] ?? 'bg-fg-muted' }))];
   const value = statuses.length === 1 ? statuses[0]! : '';
-  const current = statuses.length > 1
-    ? { value: '', label: `${statuses.length} statuses`, dot: 'bg-accent' }
-    : options.find((o) => o.value === value) ?? options[0]!;
   return (
-    <div ref={ref} className="relative">
-      <button type="button" aria-label={`Status: ${current.label}`} aria-expanded={open} className="input !w-auto flex items-center gap-1.5 whitespace-nowrap" onClick={() => setOpen((o) => !o)}>
-        <span aria-hidden className={`h-2 w-2 rounded-full ${current.dot}`} /> {current.label} <ChevronDown size={13} className="text-fg-muted" aria-hidden />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-popover mt-1 w-40 rounded-card border border-border bg-elevated py-1 shadow-elevated">
-          {options.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              <span className={`h-2 w-2 rounded-full ${o.dot}`} /> {o.label}
-              {statuses.length <= 1 && o.value === value && <span className="ml-auto text-accent-text">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <MenuSelect label="Status" value={value} options={options} onChange={onChange} active={statuses.length > 0}
+      display={statuses.length > 1 ? { label: `${statuses.length} statuses`, dot: 'bg-accent' } : undefined} showCheck={statuses.length <= 1} />
   );
 }
 
@@ -528,7 +492,29 @@ export default function Offers() {
         title="Manage Offers"
         subtitle="Create, manage and optimize your affiliate Offer."
         action={
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+          <FilterToolbar chips={chips} onRemoveChip={removeChip} onClearAll={clearAll} actions={<>
+            <Link to="/app/offers/new" className="btn-primary whitespace-nowrap">+ Offer</Link>
+            <TableActionsMenu
+              selectedIds={visibleSelected.map((o) => o.id)}
+              columnOrder={columnOrder}
+              hiddenColumns={hiddenColumns}
+              onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
+              onExport={(f) => { void exportRows(f); }}
+              appliedFilters={{
+                status: statuses.length ? statuses.join(',') : undefined, search: searchQ || undefined, searchField,
+                offerName: offerNameQ || undefined,
+                country: country || undefined, platform: platform || undefined,
+                advertiser: advertiserId ? advName(advertiserId) : undefined, category: category || undefined,
+                label: tagId ? tags?.find((t) => t.id === tagId)?.name : undefined, payoutType: payoutType || undefined,
+                revenueType: revenueType || undefined,
+                accountManager: accountManagerId ? userName(accountManagerId) ?? undefined : undefined,
+                salesManager: salesManagerId ? userName(salesManagerId) ?? undefined : undefined,
+                trackingDomain: trackingDomainId ? domains?.find((d) => d.id === trackingDomainId)?.host : undefined,
+                deviceType: deviceType || undefined,
+                offerGroup: offerGroupId ? offerGroups?.find((g) => g.id === offerGroupId)?.name : undefined,
+              }}
+            />
+          </>} lead={
             <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[18rem] sm:flex-1 lg:max-w-md">
               <SearchFieldSelect value={searchField} onChange={(v) => { setSearchField(v); resetView(); }} />
               <div className="relative min-w-0 flex-1">
@@ -536,9 +522,10 @@ export default function Offers() {
                 <input className="input !pl-9" aria-label={`Search offers by ${searchField}`} placeholder={`Search by ${searchField}…`} value={nameQ} onChange={(e) => { setNameQ(e.target.value); resetView(); }} />
               </div>
             </div>
+          }>
             <StatusFilterSelect statuses={statuses} onChange={(v) => { setStatuses(v ? [v] : []); resetView(); }} />
             <SortSelect value={sort} options={SORT_OPTIONS} onChange={(v) => { setSort(v); resetView(); }} />
-            <button type="button" className="btn-ghost whitespace-nowrap" onClick={openDrawer}>
+            <button type="button" className="btn-toolbar" data-active={appliedCount > 0 ? 'true' : undefined} onClick={openDrawer}>
               <SlidersHorizontal size={16} aria-hidden /> Filters
               {appliedCount > 0 && (
                 <>
@@ -547,33 +534,9 @@ export default function Offers() {
                 </>
               )}
             </button>
-            <div className="ml-auto flex items-center gap-2">
-              <Link to="/app/offers/new" className="btn-primary whitespace-nowrap">+ Offer</Link>
-              <TableActionsMenu
-                selectedIds={visibleSelected.map((o) => o.id)}
-                columnOrder={columnOrder}
-                hiddenColumns={hiddenColumns}
-                onApplyColumns={(order, hidden) => { setColumnOrder(order); setHiddenColumns(hidden); }}
-                onExport={(f) => { void exportRows(f); }}
-                appliedFilters={{
-                  status: statuses.length ? statuses.join(',') : undefined, search: searchQ || undefined, searchField,
-                  offerName: offerNameQ || undefined,
-                  country: country || undefined, platform: platform || undefined,
-                  advertiser: advertiserId ? advName(advertiserId) : undefined, category: category || undefined,
-                  label: tagId ? tags?.find((t) => t.id === tagId)?.name : undefined, payoutType: payoutType || undefined,
-                  revenueType: revenueType || undefined,
-                  accountManager: accountManagerId ? userName(accountManagerId) ?? undefined : undefined,
-                  salesManager: salesManagerId ? userName(salesManagerId) ?? undefined : undefined,
-                  trackingDomain: trackingDomainId ? domains?.find((d) => d.id === trackingDomainId)?.host : undefined,
-                  deviceType: deviceType || undefined,
-                  offerGroup: offerGroupId ? offerGroups?.find((g) => g.id === offerGroupId)?.name : undefined,
-                }}
-              />
-            </div>
-          </div>
+          </FilterToolbar>
         }
       />
-      <ActiveFilterChips chips={chips} onRemove={removeChip} onClearAll={clearAll} className="mb-4" />
       <ExportNotice message={exportNote} onDismiss={() => setExportNote(null)} />
       {loading && !data ? <StateBlock variant="loading" title="Loading offers…" rows={6} />
         : error ? <StateBlock variant="error" title="Couldn’t load offers" hint={error} onRetry={refetch} />

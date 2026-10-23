@@ -70,3 +70,50 @@ export function runs(values: readonly (number | null)[], at: (i: number, v: numb
   if (cur.length) out.push(cur);
   return out;
 }
+
+/**
+ * Conservative rendered width (px) of an axis label: ~0.6 em per character (Inter's tabular digits
+ * are 0.6 em; most letters are narrower) plus 2 px, so a selection made with it never collides.
+ */
+export function estimateLabelWidth(text: string, fontPx = 12): number {
+  return Math.ceil(text.length * fontPx * 0.6) + 2;
+}
+
+export interface AxisLabel { index: number; x: number }
+
+/**
+ * Which x-axis labels to draw, and where. `xs` are the label centres (data positions), `widths` their
+ * rendered widths, `bounds` the plot's horizontal extent. Every box is shifted inside the bounds (an
+ * edge label is never cut off — the first one ends up start-aligned, the last end-aligned) and drawn
+ * centred at the returned `x`. The first and last labels are always kept (when both fit at all);
+ * intermediates are every k-th index for the smallest k at which no two kept boxes are closer than
+ * `minGap`, and any intermediate that would crowd the first or last label is dropped.
+ */
+export function pickXLabels(
+  xs: readonly number[], widths: readonly number[], bounds: { left: number; right: number }, minGap = 8,
+): AxisLabel[] {
+  const n = xs.length;
+  if (n === 0) return [];
+  const span = Math.max(0, bounds.right - bounds.left);
+  const centre = (i: number) => {
+    const half = Math.min(widths[i] ?? 0, span) / 2;
+    return Math.min(Math.max(xs[i]!, bounds.left + half), bounds.right - half);
+  };
+  const c = xs.map((_, i) => centre(i));
+  const clear = (a: number, b: number) => c[a]! + (widths[a] ?? 0) / 2 + minGap <= c[b]! - (widths[b] ?? 0) / 2;
+  const last = n - 1;
+  const at = (i: number): AxisLabel => ({ index: i, x: c[i]! });
+  if (n === 1) return [at(0)];
+  if (!clear(0, last)) return [at(last)];
+  for (let k = 1; k < last; k++) {
+    const kept = [0];
+    let ok = true;
+    for (let i = k; i < last; i += k) {
+      if (!clear(0, i) || !clear(i, last)) continue;
+      if (!clear(kept[kept.length - 1]!, i)) { ok = false; break; }
+      kept.push(i);
+    }
+    if (ok) return [...kept, last].map(at);
+  }
+  return [at(0), at(last)];
+}

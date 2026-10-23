@@ -28,7 +28,9 @@ export function FormFooter({ stepText, unsavedNote, cancel, primary }: {
 }) {
   const p = primary && typeof primary === 'object' && !isValidElement(primary) && 'label' in (primary as object) ? (primary as FooterPrimary) : null;
   return (
-    <div className="sticky -bottom-12 z-20 -mx-4 mt-6 flex flex-col gap-3 border-t border-border bg-surface px-4 py-3 sm:-mx-6 sm:px-6 md:flex-row md:items-center md:justify-between lg:-mx-8 lg:px-8">
+    <div className="sticky -bottom-12 z-20 -mx-4 mt-6 border-t border-border bg-surface px-4 py-3 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      {/* The bar spans the viewport; its content sits on the card's edges (.form-width). */}
+      <div className="form-width flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-small text-fg-secondary">
         {stepText && <span className="font-medium text-fg">{stepText}</span>}
         {stepText && unsavedNote && <span aria-hidden className="h-1 w-1 rounded-full bg-fg-muted" />}
@@ -43,6 +45,7 @@ export function FormFooter({ stepText, unsavedNote, cancel, primary }: {
               : p.label}
           </button>
         ) : (primary as ReactNode)}
+      </div>
       </div>
     </div>
   );

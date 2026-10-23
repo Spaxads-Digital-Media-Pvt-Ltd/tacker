@@ -228,6 +228,9 @@
   }
 }
 
+/* A centred FormLayout on the page sets the shared form width (see .form-width). */
+:root:has([data-form-layout='centered']) { --form-max-w: 960px; }
+
 @layer components {
   /* No `focus:outline-none` here: it compiled to `.btn:focus` (specificity 0,2,0) and beat the
    * global :focus-visible outline, so no button showed keyboard focus. Mouse clicks still don't
@@ -248,6 +251,21 @@
     background-color: rgb(var(--btn-primary-hover)) !important;
   }
   .btn-ghost   { @apply btn border border-border-strong/60 bg-surface text-fg shadow-sm hover:border-accent/50 hover:bg-accent-subtle; }
+  /* Form pages share ONE container: the page actions row, the Stepper card, the FormLayout card and
+   * the FormFooter content all use .form-width. A centred form sets --form-max-w (960 px — the
+   * content width at 1280 px with the sidebar expanded, so the card fills a common laptop exactly and
+   * leaves equal margins on wider screens, sidebar expanded or collapsed); with an aside form, or on
+   * any other page, the variable is unset and .form-width is simply the full content width. */
+  .form-width { width: 100%; max-width: var(--form-max-w, none); margin-inline: auto; }
+  /* Toolbar trigger (search field / status / sort / Filters): the same box as .input, so a toolbar row
+   * lines up at one height. Keyboard focus uses the global :focus-visible outline — no :focus ring
+   * left behind after a click. [data-active=true] = a filter is applied: accent tint and text, a thin
+   * accent border (80 % — 3:1 against the page in both themes). */
+  .btn-toolbar {
+    @apply inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius)] border border-border-strong bg-surface
+           px-3.5 py-2.5 text-body text-fg shadow-sm transition-colors duration-fast ease-out-token hover:border-fg-secondary hover:bg-subtle;
+  }
+  .btn-toolbar[data-active='true'] { @apply border-accent-text/80 bg-accent-subtle text-accent-text hover:border-accent-text hover:bg-accent-subtle; }
   /* Destructive primary action (Delete / Revoke / Remove) — used by ConfirmDialog. */
   .btn-danger  { @apply btn border shadow-sm hover:opacity-90; color: rgb(var(--btn-danger-fg)); background-color: rgb(var(--danger-fill)); border-color: rgb(var(--danger-fill)); }
   /* Card: surface, hairline border, 12px radius, subtle shadow. Border emphasis on hover;
