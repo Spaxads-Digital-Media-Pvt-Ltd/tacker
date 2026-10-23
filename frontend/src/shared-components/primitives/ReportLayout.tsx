@@ -92,7 +92,7 @@ export function FiltersButton({ count = 0, onClick, disabled = false, title, chi
     <div className="relative" title={title}>
       <button type="button" onClick={onClick} disabled={disabled} aria-haspopup="dialog" className={`btn-ghost ${REPORT_CONTROL} !px-3.5`}>
         <SlidersHorizontal size={15} className="text-fg-secondary" /> Filters
-        {count > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-white">{count}</span>}
+        {count > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-tiny font-bold text-on-accent">{count}</span>}
       </button>
       {children}
     </div>

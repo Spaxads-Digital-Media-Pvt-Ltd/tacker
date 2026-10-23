@@ -76,7 +76,8 @@ export function ConfirmDialog({ options, onClose }: { options: ConfirmOptions | 
             </button>
           )}
           <button ref={confirmRef} type="button" className={options.destructive ? 'btn-danger' : 'btn-primary'} disabled={busy} aria-busy={busy} onClick={confirm}>
-            {busy ? <><span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />{confirmLabel}…</> : confirmLabel}
+            {/* Spinner in the button's own foreground (currentColor = --btn-primary-fg / --btn-danger-fg). */}
+            {busy ? <><span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2" style={{ borderColor: 'color-mix(in srgb, currentColor 40%, transparent)', borderTopColor: 'currentColor' }} />{confirmLabel}…</> : confirmLabel}
           </button>
         </div>
       </div>

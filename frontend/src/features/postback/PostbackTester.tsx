@@ -24,7 +24,12 @@ function isExampleUrl(url: string): boolean {
   } catch { return false; }
 }
 
-export function PostbackTester({ testPath, hint }: { testPath: string; hint?: string }) {
+export function PostbackTester({ testPath, hint, testOnlyGeoDeviceNote = false }: {
+  testPath: string;
+  hint?: string;
+  /** Partner postbacks only: live ones never fill {country} / {device}, so say they're test-only values. */
+  testOnlyGeoDeviceNote?: boolean;
+}) {
   const [url, setUrl] = useState(EXAMPLE_URL);
   const [method, setMethod] = useState('GET');
   const [country, setCountry] = useState('US');
@@ -92,6 +97,11 @@ export function PostbackTester({ testPath, hint }: { testPath: string; hint?: st
             </select>
           </Field>
         </div>
+        {testOnlyGeoDeviceNote && (
+          <p className="text-tiny text-fg-muted">
+            GEO and Device fill <code className="font-mono">{'{country}'}</code> and <code className="font-mono">{'{device}'}</code> — filled in tests only; live postbacks don’t fill them.
+          </p>
+        )}
         <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Firing…' : 'Send test'}</button>
       </form>
 

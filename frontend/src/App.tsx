@@ -159,6 +159,7 @@ const OfferTrafficControls = lazy(() => import('./pages/admin/OfferTrafficContro
 const OfferTrafficControlForm = lazy(() => import('./pages/admin/OfferTrafficControlForm'));
 const OfferCustomSettingsGlobal = lazy(() => import('./pages/admin/OfferCustomSettingsGlobal'));
 const OfferSmartSwitch = lazy(() => import('./pages/admin/OfferSmartSwitch'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 
 function Loading() {
   return (
@@ -378,7 +379,7 @@ export default function App() {
         </Route>
 
         <Route path="/" element={<RootRedirect />} />
-        <Route path="*" element={<RootRedirect />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

@@ -6,39 +6,66 @@
 @tailwind utilities;
 
 /* =========================================================================
- * DESIGN TOKENS (Section 0) — the single source of truth for color/type/space.
- * All color tokens are stored as "R G B" triples so Tailwind can apply alpha
- * via rgb(var(--token) / <alpha-value>). Never hardcode a hex/px anywhere else.
+ * DESIGN TOKENS — the single source of truth for colour / type / radius / motion.
+ * Colour tokens are "R G B" triples so Tailwind can apply alpha via
+ * rgb(var(--token) / <alpha-value>) — translucent variants are opacity modifiers on
+ * the base token (e.g. bg-metric-revenue/5), never extra variables.
+ * Mirrors the Figma variables collection "Tracker Tokens" (Light / Dark modes).
+ * Never hard-code a hex/rgb literal anywhere else.
  *
- * Palette: "Slate & Teal (Clean Enterprise)" — slate neutrals, a teal accent
- * (#0D9488), and a permanent dark-slate sidebar. --info stays blue so brand-teal
- * and informational-blue never read as the same colour.
+ * Palette: slate neutrals + teal. --brand is the bright teal for indicators, icons,
+ * charts and the focus ring; --accent is the deeper teal for fills behind white text.
+ * Neither --brand nor the metric hues are used for TEXT in light mode (contrast) —
+ * text uses --accent-text / --text-*.
  * ========================================================================= */
 :root {
-  /* --- Accent (teal). --hover = one step darker (teal-700). --subtle/--text are the
-   *     spec's positive-chip pair (teal-100 / teal-700): light tint bg + dark teal text
-   *     (#0F766E on #CCFBF1 ≈ 4.86:1 AA). --text also rides on white ≈ 5.47:1. --- */
-  --accent: 13 148 136;          /* #0D9488 teal-600 */
-  --accent-hover: 15 118 110;    /* #0F766E teal-700 — white text ≈ 5.47:1 */
-  --accent-subtle: 204 251 241;  /* #CCFBF1 teal-100 */
-  --accent-text: 15 118 110;     /* #0F766E teal-700 */
+  /* --- Brand + accent --- */
+  --brand: 0 159 122;            /* #009F7A — indicators, icons, charts; 3.37:1 on surface (UI) */
+  --accent: 0 127 98;            /* #007F62 — fills; white text 4.99:1 */
+  --accent-hover: 0 106 82;      /* #006A52 — white text 6.60:1 */
+  --accent-subtle: 221 244 238;  /* #DDF4EE — tint fills / chips */
+  --accent-text: 0 122 94;       /* #007A5E — links / emphasis: 5.32:1 surface, 4.63:1 on subtle */
+  --focus-ring: var(--brand);    /* own token (defaults to brand): 3.37:1 surface, 3.13:1 page */
+  --chart: var(--brand);
 
-  /* --- Semantic / status. success stays GREEN (emerald), NOT the teal chip pair —
-   *     keeping "positive" visually distinct from the teal brand accent. danger maps to
-   *     the spec's negative-chip pair (rose-100 / rose-700). --- */
-  --success: 5 150 105;   --success-bg: 209 250 229;  --success-text: 6 95 70;     /* #059669 / #D1FAE5 / #065F46 — green = positive */
-  --danger: 225 29 72;    --danger-bg: 255 228 230;   --danger-text: 190 18 60;    /* #E11D48 / #FFE4E6 / #BE123C — red = negative */
-  --warning: 245 158 11;  --warning-bg: 254 243 199;  --warning-text: 146 64 14;   /* amber = pending (unchanged) */
-  --info: 59 130 246;     --info-bg: 219 234 254;     --info-text: 30 64 175;      /* blue = info (unchanged) */
+  /* --- Buttons + chrome --- */
+  --btn-primary-bg: 0 127 98;    /* #007F62 */
+  --btn-primary-hover: 0 106 82; /* #006A52 */
+  --btn-primary-fg: 255 255 255; /* 4.99:1 / 6.60:1 */
+  --btn-danger-fg: 255 255 255;  /* white on --danger-fill 4.70:1 */
+  --danger-fill: 225 29 72;      /* #E11D48 */
+  --text-on-accent: 255 255 255; /* text/icons on accent fills */
+  --header-bg: 255 255 255;
+  --header-fg: 21 34 56;         /* #152238 — 15.94:1 */
+  --chrome-bg: var(--header-bg); /* legacy name, kept — follows the header */
+  --table-head-bg: 248 250 253;  /* #F8FAFD */
+  --table-head-fg: 82 99 122;    /* #52637A — 5.86:1 */
+  --table-row-hover: 244 247 251;/* #F4F7FB */
 
-  /* --- Neutral / surface — slate ramp (slate-900 / 700 / 500 text on slate-100 page) --- */
-  --bg-page: 241 245 249;        /* #F1F5F9 slate-100 */
+  /* --- Metric hues (charts, sparklines, icon chips, tone borders — NOT text in light mode) --- */
+  --metric-revenue: 0 159 122;      /* #009F7A */
+  --metric-payout: 37 99 235;       /* #2563EB */
+  --metric-margin: 124 58 237;      /* #7C3AED */
+  --metric-clicks: 217 119 6;       /* #D97706 */
+  --metric-conversions: 8 145 178;  /* #0891B2 */
+
+  /* --- Semantic / status (green = positive, red = negative, amber = pending, blue = info) --- */
+  --success: 5 150 105;   --success-bg: 209 250 229;  --success-text: 6 95 70;     /* 6.78:1 */
+  --danger: 225 29 72;    --danger-bg: 255 228 230;   --danger-text: 190 18 60;    /* 5.24:1 */
+  --warning: 245 158 11;  --warning-bg: 254 243 199;  --warning-text: 146 64 14;   /* 6.37:1 */
+  --info: 59 130 246;     --info-bg: 219 234 254;     --info-text: 30 64 175;      /* 7.15:1 */
+
+  /* --- Neutral / surface --- */
+  --bg-page: 244 247 251;        /* #F4F7FB */
   --bg-surface: 255 255 255;     /* #FFFFFF */
   --bg-elevated: 255 255 255;    /* #FFFFFF (uses shadow, not tint) */
-  --border: 226 232 240;         /* #E2E8F0 slate-200 */
-  --text-primary: 15 23 42;      /* #0F172A slate-900 */
-  --text-secondary: 51 65 85;    /* #334155 slate-700 — mid step of the ramp */
-  --text-muted: 100 116 139;     /* #64748B slate-500 */
+  --bg-subtle: 248 250 253;      /* #F8FAFD — recessed tracks, table heads, code wells */
+  --border: 225 232 240;         /* #E1E8F0 — hairlines */
+  --border-strong: 127 143 165;  /* #7F8FA5 — input / control outlines, 3.29:1 on surface (UI) */
+  --border-hover: var(--text-muted); /* used at 60% (Tailwind border-hover) */
+  --text-primary: 21 34 56;      /* #152238 — 15.94:1 surface, 14.83:1 page */
+  --text-secondary: 82 99 122;   /* #52637A — 6.13:1 surface, 5.71:1 page */
+  --text-muted: 98 114 136;      /* #627288 — 4.90:1 surface, 4.56:1 page */
 
   /* --- Typography --- */
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -49,29 +76,40 @@
   /* --- Radius --- */
   --radius: 8px;        /* controls / inputs */
   --radius-card: 12px;  /* cards */
+  --radius-nav: 10px;   /* sidebar rows */
+  --radius-shell: 22px; /* inset main panel */
 
-  /* --- Shadows (themeable — see .dark override) --- */
-  --shadow-elevated: 0 4px 16px rgb(0 0 0 / 0.10), 0 1px 3px rgb(0 0 0 / 0.06);
+  /* --- Shadows (themeable — see .dark) --- */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px -2px rgb(15 23 42 / 0.08);
+  --shadow-card-hover: 0 2px 4px rgb(15 23 42 / 0.06), 0 10px 24px -4px rgb(15 23 42 / 0.10);
+  --shadow-elevated: 0 1px 3px rgb(15 23 42 / 0.06), 0 12px 32px -6px rgb(15 23 42 / 0.14);
 
-  /* --- Sidebar — a permanent dark-slate island (both themes). Its own foreground ramp
-   *     because the global --text-* ramp is dark-on-light and can't ride a dark rail.
-   *     Contrast on --sidebar-bg #0F172A: fg 6.96:1, fg-muted 5.86:1 (both AA);
-   *     fg-strong on --sidebar-active-bg 14:1. --- */
-  --sidebar-bg: 15 23 42;          /* #0F172A slate-900 */
-  --sidebar-fg: 148 163 184;       /* #94A3B8 slate-400 — idle nav text + icons */
-  --sidebar-fg-strong: 248 250 252;/* #F8FAFC slate-50 — active / hover text, wordmark */
-  --sidebar-fg-muted: 134 149 170; /* #8695AA — section labels (spec #64748B nudged up for AA) */
-  --sidebar-active-bg: 30 41 59;   /* #1E293B slate-800 — active row fill */
-  --sidebar-hover-bg: 23 32 51;    /* #172033 — hover row fill (subtler than active) */
-  --sidebar-accent: 45 212 191;    /* #2DD4BF teal-400 — active left bar + active collapsed icon */
-  --sidebar-border: 30 41 59;      /* #1E293B — internal dividers + on-rail search border */
+  /* --- Motion --- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
 
-  /* Nav-flyout backdrop scrim — alpha baked in (same as --shadow-elevated) so it can carry a
-   * theme-specific opacity. Kept low; `backdrop-blur` does the actual separating. */
+  /* --- Sidebar — white in light mode, with a teal-tinted active row.
+   *     AA on --sidebar-bg #FFF: fg 6.13:1, fg-muted (section labels) 4.90:1;
+   *     hover: fg on hover-bg 5.60:1; active: fg-strong on active-bg 13.98:1,
+   *     active icon + bar (--sidebar-accent) on active-bg 4.67:1, on bg 5.32:1.
+   *     --sidebar-accent is the deeper accent-text teal, not --brand: brand on active-bg is only 2.95:1. --- */
+  --sidebar-bg: 255 255 255;       /* #FFFFFF */
+  --sidebar-fg: 82 99 122;         /* #52637A — idle text + icons */
+  --sidebar-fg-strong: 21 34 56;   /* #152238 — hover / active text, wordmark */
+  --sidebar-fg-muted: 98 114 136;  /* #627288 — section labels */
+  --sidebar-active-bg: 226 244 239;/* #E2F4EF — teal-tinted active row */
+  --sidebar-hover-bg: 241 245 249; /* #F1F5F9 */
+  --sidebar-accent: 0 122 94;      /* #007A5E — active icon / left bar */
+  --sidebar-active-ring: var(--brand); /* used at 28% (Tailwind sidebar-ring) */
+  --sidebar-border: 225 232 240;   /* #E1E8F0 */
+
+  /* Nav-flyout / modal backdrop scrim — alpha baked in so it can be theme-specific. */
   --flyout-scrim: 0 0 0 / 0.20;
 
-  /* --- Legacy brand-* aliases → follow the accent so existing components
-   *     stay in sync until they're migrated to the accent-* tokens directly. --- */
+  /* --- Legacy brand-* aliases → follow the accent (unchanged mapping) --- */
   --brand-50: var(--accent-subtle);
   --brand-100: var(--accent-subtle);
   --brand-300: var(--accent);
@@ -94,46 +132,73 @@
 .dark {
   color-scheme: dark;
 
-  /* Pure-black shadows read weak on a dark ground — deepen alpha + spread + offset so
-     modals and popovers still separate from the page. Light shadow is left untouched. */
+  /* Warm near-black + dusty mauve / plum (Batch T, Figma "Tracker Tokens" Dark). Light mode is
+   * untouched — its teal palette stays exactly as approved. */
+
+  /* Pure-black shadows read weak on a dark ground — deeper alpha so cards, modals and
+   * popovers still separate from the page. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.30), 0 4px 12px -2px rgb(0 0 0 / 0.35);
+  --shadow-card-hover: 0 2px 4px rgb(0 0 0 / 0.35), 0 10px 24px -4px rgb(0 0 0 / 0.45);
   --shadow-elevated: 0 10px 34px rgb(0 0 0 / 0.5), 0 3px 10px rgb(0 0 0 / 0.38);
 
-  /* A black wash barely darkens the near-black page — nudge it up; blur still carries the effect. */
+  /* A black wash barely darkens the near-black page — nudge it up (flat scrim, no blur). */
   --flyout-scrim: 0 0 0 / 0.35;
 
-  /* --- Accent (teal, tuned for dark). Kept at teal-700 so white text on a primary fill
-   *     stays ≈ 5.47:1 (AA) as the original navy dark accent did; --text is bright teal-300
-   *     for links (≈ 10:1 on cards). --- */
-  --accent: 15 118 110;        /* #0F766E teal-700 — fills; white text ≈ 5.47:1 */
-  --accent-hover: 17 94 89;    /* #115E59 teal-800 — darker on hover */
-  --accent-subtle: 19 78 74;   /* #134E4A — deep teal tint: hover fills / active nav / chips */
-  --accent-text: 94 234 212;   /* #5EEAD4 teal-300 — links / emphasis on dark surfaces */
+  /* --- Brand + accent: mauve for text / indicators, plum for fills behind white text --- */
+  --brand: 217 169 207;          /* #D9A9CF — 9.70:1 on surface */
+  --accent: 126 78 115;          /* #7E4E73 — fills; white text 6.51:1 */
+  --accent-hover: 108 66 99;     /* #6C4263 — white text 8.09:1 */
+  --accent-subtle: 42 29 40;     /* #2A1D28 — deep plum tint */
+  --accent-text: 217 169 207;    /* #D9A9CF — 9.70:1 surface, 8.07:1 on accent-subtle */
+  --focus-ring: var(--brand);    /* 9.70:1 surface, 9.44:1 page */
 
-  /* --- Semantic / status — same hues, dark-tuned (solid vivid, -bg deep tint, -text light tint).
-   *     success back to green (emerald) so it stays distinct from the teal accent. --- */
+  /* --- Buttons + chrome: the primary button is a mauve fill with dark-ink text and icons --- */
+  --btn-primary-bg: 195 146 185;  /* #C392B9 */
+  --btn-primary-hover: 169 122 159;/* #A97A9F */
+  --btn-primary-fg: 27 16 25;     /* #1B1019 — 7.17:1 / 5.26:1 */
+  --danger-fill: 190 18 60;       /* rose-700 — white text 6.29:1 (the vivid dark --danger is 2.69:1) */
+  --header-bg: 15 13 16;          /* #0F0D10 */
+  --header-fg: 243 238 242;       /* #F3EEF2 — 16.88:1 */
+  --table-head-bg: 22 19 26;      /* #16131A */
+  --table-head-fg: 177 167 175;   /* #B1A7AF — 7.89:1 */
+  --table-row-hover: 26 22 27;    /* #1A161B */
+
+  /* --- Metric hues (dark-tuned, spread around the wheel so none reads as mauve but revenue) --- */
+  --metric-revenue: 217 169 207;    /* #D9A9CF mauve */
+  --metric-payout: 125 179 234;     /* #7DB3EA sky */
+  --metric-margin: 168 201 122;     /* #A8C97A sage */
+  --metric-clicks: 239 165 91;      /* #EFA55B amber */
+  --metric-conversions: 95 201 196; /* #5FC9C4 teal */
+
+  /* --- Semantic / status — same hues, dark-tuned (solid vivid, -bg deep tint, -text light tint) --- */
   --success: 52 211 153;  --success-bg: 6 78 59;    --success-text: 167 243 208;  /* #34D399 / #064E3B / #A7F3D0 */
   --danger: 251 113 133;  --danger-bg: 76 19 40;    --danger-text: 253 164 175;   /* #FB7185 / #4C1328 / #FDA4AF */
   --warning: 251 191 36;  --warning-bg: 56 40 8;    --warning-text: 253 224 71;
   --info: 96 165 250;     --info-bg: 18 38 66;      --info-text: 147 197 253;
 
-  /* --- Neutral / surface — layered slate: page < surface (card) < elevated (popover) --- */
-  --bg-page: 15 23 42;           /* #0F172A slate-900 */
-  --bg-surface: 27 37 55;        /* #1B2537 */
-  --bg-elevated: 38 50 74;       /* #26324A */
-  --border: 43 58 84;            /* #2B3A54 */
-  --text-primary: 241 245 249;   /* #F1F5F9 slate-100 */
-  --text-secondary: 169 180 196; /* #A9B4C4 */
-  --text-muted: 124 138 160;     /* #7C8AA0 */
+  /* --- Neutral / surface — warm near-black --- */
+  --bg-page: 20 16 21;           /* #141015 */
+  --bg-surface: 15 13 16;        /* #0F0D10 */
+  --bg-elevated: 26 22 27;       /* #1A161B */
+  --bg-subtle: 22 19 26;         /* #16131A */
+  --border: 46 40 47;            /* #2E282F */
+  --border-strong: 111 106 111;  /* #6F6A6F — opaque (#CFC6CD at 50% over surface): 3.66 surface / 3.56 page / 3.38 elevated */
+  --text-primary: 243 238 242;   /* #F3EEF2 — 16.88:1 surface */
+  --text-secondary: 177 167 175; /* #B1A7AF — 8.31:1 surface */
+  --text-muted: 138 127 136;     /* #8A7F88 — 5.04:1 surface, 4.66:1 elevated */
 
-  /* --- Sidebar — even darker than the dark page so the rail recedes; fg ramp reused from :root. --- */
-  --sidebar-bg: 10 15 28;          /* #0A0F1C */
-  --sidebar-fg: 148 163 184;       /* #94A3B8 */
-  --sidebar-fg-strong: 248 250 252;/* #F8FAFC */
-  --sidebar-fg-muted: 134 149 170; /* #8695AA */
-  --sidebar-active-bg: 28 39 64;   /* #1C2740 */
-  --sidebar-hover-bg: 20 29 48;    /* #141D30 */
-  --sidebar-accent: 45 212 191;    /* #2DD4BF teal-400 */
-  --sidebar-border: 30 41 59;      /* #1E293B */
+  /* --- Sidebar — #0A090B, the darkest layer so the rail recedes.
+   *     AA on #0A090B: fg 8.53:1, fg-muted (section labels) 5.18:1; hover: fg on hover-bg 7.89:1;
+   *     active (#4D3448): fg-strong 9.64:1, flyout label (accent) 5.54:1, flyout description (fg) 4.74:1,
+   *     active icon 5.54:1 (UI). --- */
+  --sidebar-bg: 10 9 11;           /* #0A090B */
+  --sidebar-fg: 177 167 175;       /* #B1A7AF */
+  --sidebar-fg-strong: 243 238 242;/* #F3EEF2 */
+  --sidebar-fg-muted: 138 127 136; /* #8A7F88 */
+  --sidebar-active-bg: 77 52 72;   /* #4D3448 — every active-row text pair ≥ 4.5:1 */
+  --sidebar-hover-bg: 22 19 26;    /* #16131A */
+  --sidebar-accent: 217 169 207;   /* #D9A9CF */
+  --sidebar-border: 28 24 29;      /* #1C181D */
 }
 
 @layer base {
@@ -146,59 +211,78 @@
   }
   /* Visible keyboard focus on every interactive element (quality floor). */
   :focus-visible {
-    outline: 2px solid rgb(var(--accent));
+    outline: 2px solid rgb(var(--focus-ring));
     outline-offset: 2px;
   }
+  /* Reduced motion: no animation, no stagger delays, no looping, no smooth scroll. */
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-delay: 0s !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      transition-delay: 0s !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
+  /* No `focus:outline-none` here: it compiled to `.btn:focus` (specificity 0,2,0) and beat the
+   * global :focus-visible outline, so no button showed keyboard focus. Mouse clicks still don't
+   * draw the ring (that's what :focus-visible is for). */
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-[var(--radius)] px-4 py-2 text-body font-medium
-           transition-all duration-150 focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
+           transition-all duration-fast ease-out-token disabled:opacity-50 disabled:pointer-events-none;
   }
-  .btn-primary { 
-    @apply btn border border-black/80 shadow-[0_2px_10px_rgba(45,212,191,0.25),inset_0_1px_0_rgba(45,212,191,0.3)] text-white transition-all hover:shadow-[0_4px_16px_rgba(45,212,191,0.4)]; 
-    background-color: rgb(27, 35, 53) !important;
+  /* Primary: token fill + foreground only (light: deep teal + white; dark: mauve + dark ink). Icons
+   * inside inherit the foreground (currentColor) — never a fixed white.
+   * The !important beats the ad-hoc bg-* utilities some call sites still stack on .btn-primary. */
+  .btn-primary {
+    @apply btn border border-transparent shadow-sm;
+    color: rgb(var(--btn-primary-fg));
+    background-color: rgb(var(--btn-primary-bg)) !important;
   }
   .btn-primary:hover {
-    background-color: rgb(35, 45, 65) !important;
+    background-color: rgb(var(--btn-primary-hover)) !important;
   }
-  .btn-ghost   { @apply btn border border-fg-muted/30 bg-surface text-fg shadow-sm hover:border-accent/50 hover:bg-accent-subtle hover:shadow; }
+  .btn-ghost   { @apply btn border border-border-strong/60 bg-surface text-fg shadow-sm hover:border-accent/50 hover:bg-accent-subtle; }
   /* Destructive primary action (Delete / Revoke / Remove) — used by ConfirmDialog. */
-  .btn-danger  { @apply btn border border-danger bg-danger text-white shadow-sm hover:opacity-90; }
-  /* Card: white surface, hairline border, 12px radius, ultra-subtle shadow.
-   * Hover-lift + border emphasis kept from the Slate & Teal branch; colours token-driven
-   * (shadow-card + border-fg-muted) so they track the theme instead of being pinned to hex. */
+  .btn-danger  { @apply btn border shadow-sm hover:opacity-90; color: rgb(var(--btn-danger-fg)); background-color: rgb(var(--danger-fill)); border-color: rgb(var(--danger-fill)); }
+  /* Card: surface, hairline border, 12px radius, subtle shadow. Border emphasis on hover;
+   * colours token-driven so they track the theme. No lift: every card (static ones included)
+   * moving under the pointer read as noise. */
   .card {
     @apply rounded-[var(--radius-card)] border border-border bg-surface p-6 shadow-card
-           transition-[border-color,box-shadow,transform] duration-200 ease-in-out
-           hover:-translate-y-0.5 hover:border-fg-muted;
+           transition-[border-color,box-shadow] duration-base ease-out-token
+           hover:border-border-hover;
   }
+  /* Input outline uses --border-strong (≥ 3:1, WCAG 1.4.11); focus ring follows --focus-ring. */
   .input {
-    @apply w-full rounded-[var(--radius)] border border-fg-muted/30 bg-surface px-3.5 py-2.5 text-body text-fg
-           shadow-sm transition-all duration-150 placeholder:text-fg-muted
-           hover:border-accent/50 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
+    @apply w-full rounded-[var(--radius)] border border-border-strong bg-surface px-3.5 py-2.5 text-body text-fg
+           shadow-sm transition-[border-color,box-shadow] duration-fast ease-out-token placeholder:text-fg-muted
+           hover:border-fg-secondary focus:outline-none;
+  }
+  .input:focus {
+    border-color: rgb(var(--focus-ring));
+    box-shadow: 0 0 0 3px rgb(var(--focus-ring) / 0.25);
   }
   .label { @apply mb-1.5 block text-small font-medium text-fg-secondary; }
   /* Thin, token-coloured scrollbar for the nav rail — a raw OS scrollbar (with arrow
    * buttons, on Windows) in the middle of the nav icons reads as broken. Sidebar-scoped
-   * colours since the rail is a dark island in both themes. */
+   * colours so the thumb tracks the rail in both themes. */
   .scrollbar-slim { scrollbar-width: thin; scrollbar-color: rgb(var(--sidebar-border)) transparent; }
   .scrollbar-slim::-webkit-scrollbar { width: 6px; height: 6px; }
   .scrollbar-slim::-webkit-scrollbar-track { background: transparent; }
   .scrollbar-slim::-webkit-scrollbar-thumb { background: rgb(var(--sidebar-border)); border-radius: 3px; }
   .scrollbar-slim::-webkit-scrollbar-thumb:hover { background: rgb(var(--sidebar-fg-muted)); }
   .scrollbar-slim::-webkit-scrollbar-button { display: none; }
-  /* Active nav row — "Clean Enterprise" treatment: flat --sidebar-active-bg fill, bright
-   * text, and a teal left bar (3px inset shadow; the bar's ends follow the row radius).
-   * Reads --sidebar-* so it's identical in light and dark. */
+  /* Active nav row background (rail rows, flyout items, rail utility links): one flat
+   * --sidebar-active-bg fill (no gradients). Background only — text colour, the ring and the left
+   * bar stay with each component's own utilities. */
   .sidebar-active {
-    color: rgb(var(--sidebar-fg-strong));
     background-color: rgb(var(--sidebar-active-bg));
-    box-shadow: inset 3px 0 0 rgb(var(--sidebar-accent));
   }
   .chk {
     @apply h-3.5 w-3.5 shrink-0 rounded border border-border bg-surface
@@ -210,22 +294,23 @@
     @apply w-full text-left text-small text-fg-secondary;
   }
   .premium-table thead {
-    @apply sticky top-0 z-20 border-b border-slate-700 text-tiny uppercase tracking-wide text-slate-100 font-medium;
-    background-color: rgb(27, 35, 53) !important;
+    @apply sticky top-0 z-20 border-b border-border text-tiny uppercase tracking-wide text-table-head-fg font-semibold;
+    background-color: rgb(var(--table-head-bg)) !important;
   }
   .premium-table thead th {
-    background-color: rgb(27, 35, 53) !important;
+    background-color: rgb(var(--table-head-bg)) !important;
   }
   .premium-table thead tr {
     @apply h-14;
   }
+  /* Rows fade in (opacity only, fill-mode backwards). The old translateY animation with fill
+   * `both` left a transform on every row for good — a containing block that trapped popovers. */
   .premium-table tbody tr {
-    @apply h-14 bg-surface text-fg transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50 animate-fade-in-up;
+    @apply h-14 bg-surface text-fg transition-colors duration-fast hover:bg-table-row-hover;
+    animation: table-row-in var(--dur-slow) var(--ease-out) backwards;
   }
   .premium-table tbody td {
-    @apply border-b border-solid border-accent/30 dark:border-accent/20;
-    /* subtle translucent glow at the bottom edge for the glass effect */
-    box-shadow: inset 0 -1px 0 rgba(13, 148, 136, 0.1);
+    @apply border-b border-solid border-border;
   }
   .premium-table tbody tr:last-child td {
     @apply border-b-0 shadow-none;
@@ -253,4 +338,9 @@
   .premium-table td:first-child {
     @apply font-medium text-fg;
   }
+}
+
+@keyframes table-row-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

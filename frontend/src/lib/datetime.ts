@@ -92,3 +92,20 @@ export function useNow(intervalMs = 1000): Date {
   }, [intervalMs]);
   return now;
 }
+
+/**
+ * Compact age of a past instant — "Just now", "5m ago", "3h ago", "2d ago", else the local date.
+ * Invalid input is returned unchanged. `now` is injectable for tests.
+ */
+export function timeAgo(iso: string, now: number = Date.now()): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const min = Math.floor((now - t) / 60000);
+  if (min < 1) return 'Just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
+}

@@ -1,22 +1,24 @@
 /**
  * MacroTokenPicker — clickable chip list of postback URL macros (Everflow-style).
- * Clicking a macro appends its token to the current URL value.
+ * Clicking a macro appends its token to the current URL value. `macros` picks the list (default
+ * MACROS); the partner-postback form passes POSTBACK_MACROS — the tokens its postbacks actually fill.
  */
 import { MACROS } from '../../data/creatives';
 import { Field } from '../../shared-components/primitives/ui';
 
 export function MacroTokenPicker({
- value, onChange,
+ value, onChange, macros = MACROS,
 }: {
  value: string;
  onChange: (v: string) => void;
+ macros?: readonly { token: string; label: string }[];
 }) {
  const insert = (token: string) => onChange(value + token);
 
  return (
  <Field label="Available Macros">
  <div className="flex flex-wrap gap-1.5">
- {MACROS.map((m) => (
+ {macros.map((m) => (
  <button
  key={m.token}
  type="button"

@@ -73,20 +73,19 @@ export function NavFlyout({ entry, expanded = false, topOffset, onClose }: {
     : 12;
 
   // Two states that can coexist on *different* items at once:
-  //  • hover  — transient accent-subtle wash (unchanged), no bar, default label colour.
-  //  • active — the current route: same wash made persistent, PLUS an inset left accent bar and
-  //    an accent-coloured label (the same left-bar marker the dark rail's own active item uses).
-  // The bar + label colour are what tell the two apart — a hovered non-active item never has
-  // them — and when the active item is itself hovered the wash simply doesn't compound, so it
-  // still reads as "active, and under the cursor" rather than breaking.
-  const itemBase = 'group block w-[calc(100%-16px)] mx-2 my-1 px-3 py-2.5 rounded-lg text-left transition-all duration-200 hover:bg-[rgb(var(--sidebar-accent))]/10 hover:shadow-[0_2px_10px_rgba(45,212,191,0.05)]';
-  const activeClass = 'bg-[rgb(var(--sidebar-accent))]/15 shadow-[inset_3px_0_0_rgb(var(--sidebar-accent))]';
+  //  • hover  — transient sidebar hover wash, no bar, default label colour.
+  //  • active — the current route: the rail's own active treatment (teal-tinted fill, hairline
+  //    ring, inset left accent bar) and an accent label/icon.
+  // The bar + accent label are what tell the two apart — a hovered non-active item never has them.
+  const itemBase = 'group block w-[calc(100%-16px)] mx-2 my-1 px-3 py-2.5 rounded-nav text-left transition-colors duration-fast';
+  const idleClass = 'hover:bg-sidebar-hover-bg';
+  const activeClass = 'sidebar-active ring-1 ring-inset ring-sidebar-ring shadow-[inset_3px_0_0_rgb(var(--sidebar-accent))]';
   const body = (it: { label: string; description: string; icon?: React.ElementType }, isActive: boolean) => (
     <div className="flex items-start gap-3 w-full">
-      {it.icon && <it.icon size={18} className={`mt-0.5 shrink-0 transition-colors duration-200 ${isActive ? 'text-[rgb(var(--sidebar-accent))]' : 'text-[rgb(var(--sidebar-fg-muted))] group-hover:text-[rgb(var(--sidebar-accent))]'}`} />}
+      {it.icon && <it.icon size={18} aria-hidden className={`mt-0.5 shrink-0 transition-colors duration-fast ${isActive ? 'text-sidebar-accent' : 'text-sidebar-fg-muted group-hover:text-sidebar-fg-strong'}`} />}
       <div className="flex-1">
-        <p className={`text-body font-semibold transition-colors duration-200 ${isActive ? 'text-[rgb(var(--sidebar-accent))]' : 'text-[rgb(var(--sidebar-fg-strong))] group-hover:text-white'}`}>{it.label}</p>
-        <p className={`mt-0.5 text-tiny transition-colors duration-200 ${isActive ? 'text-[rgb(var(--sidebar-fg))]' : 'text-[rgb(var(--sidebar-fg-muted))] group-hover:text-[rgb(var(--sidebar-fg))]'}`}>{it.description}</p>
+        <p className={`text-body font-semibold transition-colors duration-fast ${isActive ? 'text-sidebar-accent' : 'text-sidebar-fg-strong'}`}>{it.label}</p>
+        <p className={`mt-0.5 text-tiny transition-colors duration-fast ${isActive ? 'text-sidebar-fg' : 'text-sidebar-fg-muted group-hover:text-sidebar-fg'}`}>{it.description}</p>
       </div>
     </div>
   );
@@ -106,19 +105,19 @@ export function NavFlyout({ entry, expanded = false, topOffset, onClose }: {
         ref={ref}
         role="menu"
         style={{ top: adjustedTop, maxHeight: `calc(100vh - ${adjustedTop + 24}px)` }}
-        className={`fixed z-50 left-4 right-4 animate-slide-in-right overflow-y-auto scrollbar-slim rounded-card border border-black/80 bg-[rgb(var(--sidebar-bg))]/90 backdrop-blur-xl shadow-[0_8px_20px_rgba(0,0,0,0.4),inset_0_0_0_1px_rgba(45,212,191,0.2)] md:right-auto md:w-64 ${
+        className={`fixed z-50 left-4 right-4 animate-slide-in-right motion-reduce:animate-none overflow-y-auto scrollbar-slim rounded-card border border-sidebar-border bg-sidebar shadow-elevated md:right-auto md:w-64 ${
           expanded ? 'md:left-[260px]' : 'md:left-[68px]'
         }`}
       >
-        <div className="sticky top-0 flex items-center gap-2.5 border-b border-[rgb(var(--sidebar-accent))]/20 bg-[rgb(var(--sidebar-bg))] px-5 py-4 z-10">
-          <span className="text-[rgb(var(--sidebar-accent))]"><Ic /></span>
-          <h2 className="flex-1 text-h3 font-semibold tracking-tight text-[rgb(var(--sidebar-fg-strong))]">{entry.label}</h2>
-          <button onClick={onClose} className="text-[rgb(var(--sidebar-fg))] hover:text-[rgb(var(--sidebar-fg-strong))]" aria-label="Close"><X size={17} /></button>
+        <div className="sticky top-0 z-10 flex items-center gap-2.5 border-b border-sidebar-border bg-sidebar px-5 py-4">
+          <span className="text-sidebar-accent" aria-hidden><Ic /></span>
+          <h2 className="flex-1 text-h3 font-semibold tracking-tight text-sidebar-fg-strong">{entry.label}</h2>
+          <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full text-sidebar-fg transition-colors duration-fast hover:bg-sidebar-hover-bg hover:text-sidebar-fg-strong" aria-label="Close"><X size={17} /></button>
         </div>
         <div className="py-2">
           {items.map((it, i) => {
             const isActive = i === activeIndex;
-            const cls = `${itemBase} ${isActive ? activeClass : ''}`;
+            const cls = `${itemBase} ${isActive ? activeClass : idleClass}`;
             return it.to ? (
               <Link key={it.label} to={it.to} onClick={onClose} className={cls} aria-current={isActive ? 'page' : undefined}>{body(it, isActive)}</Link>
             ) : (

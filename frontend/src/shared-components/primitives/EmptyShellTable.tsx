@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Search, MoreVertical, ChevronDown, ChevronRight, Check, GripVertical, Info } from 'lucide-react';
-import { Field, MenuPopover, Modal, ScrollReveal, TableScroll } from './ui';
+import { Field, MenuPopover, Modal, ScrollReveal, StateBlock, TableScroll } from './ui';
 import { Pagination } from './ReportPageKit';
 
 /**
- * Static table shell for detail-page sub-tabs that have no backend yet. Matches the reference UI's
- * own empty state — most of its screenshots show "No Record Found" for these exact tabs, so a shell
- * is a faithful match, not a placeholder standing in for something richer. Every toolbar control is
+ * Static table shell for detail-page sub-tabs that have no backend yet. With no `rows` it shows only
+ * an honest "Not available yet" state (no toolbar, no table); callers that pass real `rows` get the
+ * table (search, paging, delete) unchanged. Every toolbar control is
  * real and workable, matching the reference's own down to the small details: the search box holds
  * what you type, the status filter and "Table Actions" kebab open real popovers, Columns
  * Customization actually shows/hides columns in the table (derived from the real `columns` prop, so
@@ -85,8 +85,8 @@ function ColumnsCustomizationPanel({ columns, visible, onApply, onClose }: { col
               <GripVertical size={14} className="shrink-0 cursor-grab text-fg-muted" />
               <span className="flex-1">{c}</span>
               <button type="button" onClick={() => toggle(c)}
-                className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${pending.includes(c) ? 'bg-success' : 'bg-border'}`}>
-                <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${pending.includes(c) ? 'translate-x-[18px]' : 'translate-x-0'}`} />
+                className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${pending.includes(c) ? 'bg-success' : 'bg-border-strong'}`}>
+                <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full ${pending.includes(c) ? 'bg-surface' : 'bg-on-accent'} shadow transition-transform ${pending.includes(c) ? 'translate-x-[18px]' : 'translate-x-0'}`} />
               </button>
             </div>
           ))}
@@ -276,6 +276,18 @@ export function EmptyShellTable({
   const lastPage = Math.max(1, Math.ceil(filtered.length / SHELL_PAGE_SIZE));
   useEffect(() => { if (page > lastPage) setPage(lastPage); }, [page, lastPage]);
   const pageRows = filtered.slice((page - 1) * SHELL_PAGE_SIZE, page * SHELL_PAGE_SIZE);
+
+  // No `rows` = no data source behind this list yet: show only an honest state — no search, status
+  // filter, table actions or add/edit control for a list that can't hold anything. Callers that pass
+  // rows get the render below, unchanged.
+  if (rows === undefined) {
+    return (
+      <ScrollReveal>
+        <StateBlock variant="empty" icon={<Info size={18} />} title="Not available yet"
+          hint="This list isn’t connected to data in this app yet, so there are no records to show." />
+      </ScrollReveal>
+    );
+  }
 
   return (
     <ScrollReveal>

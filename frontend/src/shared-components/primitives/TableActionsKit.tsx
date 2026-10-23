@@ -66,8 +66,8 @@ export function ColumnsModal({
                 {reorderable && <GripVertical size={14} className="shrink-0 cursor-grab text-fg-muted" />}
                 <span className="flex-1">{c}</span>
                 <button type="button" role="switch" aria-checked={!draftHidden.has(c)} onClick={() => toggle(c)}
-                  className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${!draftHidden.has(c) ? 'bg-success' : 'bg-border'}`}>
-                  <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${!draftHidden.has(c) ? 'translate-x-[18px]' : 'translate-x-0'}`} />
+                  className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${!draftHidden.has(c) ? 'bg-success' : 'bg-border-strong'}`}>
+                  <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full ${!draftHidden.has(c) ? 'bg-surface' : 'bg-on-accent'} shadow transition-transform ${!draftHidden.has(c) ? 'translate-x-[18px]' : 'translate-x-0'}`} />
                 </button>
               </div>
             );
@@ -138,7 +138,7 @@ export function TableRowMenu({ children, ariaLabel = 'Row actions' }: { children
     <MenuPopover
       button={<MoreVertical size={16} />}
       ariaLabel={ariaLabel}
-      triggerClassName="p-1 rounded-[var(--radius)] text-fg-muted hover:bg-slate-100 hover:text-fg transition-colors dark:hover:bg-slate-700"
+      triggerClassName="p-1 rounded-[var(--radius)] text-fg-muted hover:bg-subtle hover:text-fg transition-colors"
     >
       {typeof children === 'function' ? children : () => children}
     </MenuPopover>

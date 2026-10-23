@@ -8,15 +8,17 @@
  *                                id yet; the caller POSTs each name once the id is known.
  */
 import { useState } from 'react';
+import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { Field } from '../primitives/ui';
 
 interface Tag { id: string; name: string; color: string | null; createdAt: string }
 
+// Concept 05 chip input: the control box matches .input (42 px, --border-strong, focus ring).
 function ChipBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border bg-surface p-2">
+    <div className="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-[var(--radius)] border border-border-strong bg-surface px-2 py-1.5 transition-[border-color,box-shadow] duration-fast hover:border-fg-secondary focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/25">
       {children}
     </div>
   );
@@ -24,9 +26,11 @@ function ChipBox({ children }: { children: React.ReactNode }) {
 
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-accent-subtle px-2.5 py-1 text-tiny font-medium text-accent-text">
+    <span className="inline-flex items-center gap-1 rounded-full bg-accent-subtle py-0.5 pl-2.5 pr-1 text-tiny font-medium text-accent-text">
       {label}
-      <button type="button" onClick={onRemove} className="text-accent-text/70 hover:text-accent-text" aria-label={`Remove ${label}`}>×</button>
+      <button type="button" onClick={onRemove} className="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/15" aria-label={`Remove ${label}`}>
+        <X size={12} aria-hidden />
+      </button>
     </span>
   );
 }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, Search, ChevronRight, X } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
@@ -63,72 +64,101 @@ function routeTitle(pathname: string, role: Role): string {
   return label || 'Dashboard';
 }
 
-/** Slim top header (Section 1) — page title on the left (Section 2), global search + profile menu
+/** Who gets global search: network staff (SearchModal) and the Super Admin console
+ * (PlatformSearchModal). The publisher / advertiser portals have no search — no button, no ⌘K. */
+function hasSearch(role: Role): boolean {
+  return role === 'admin' || role === 'super_admin';
+}
+
+/** Rail labels fade in after the width animation (--dur-slow); none under reduced motion. */
+const LABEL_FADE = 'animate-fade-in [animation-delay:var(--dur-slow)] motion-reduce:animate-none';
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
+
+/** Slim top header — page title on the left, search (staff / Super Admin only) + theme + profile
  * on the right. Below `md` the persistent rail is a hidden drawer, so the header also carries the
- * menu trigger + brand mark. Search (or ⌘K / Ctrl+K) opens the global SearchModal — the Super Admin
- * console's PlatformSearchModal. */
+ * menu trigger + brand mark. */
 function TopHeader({ role, initials, displayName, email, logoUrl, onSignOut, onMenu, onSearch }: {
   role: Role; initials: string; displayName: string; email: string; logoUrl: string | null; onSignOut: () => void; onMenu: () => void; onSearch: () => void;
 }) {
   const loc = useLocation();
   const { title, subtitle } = usePageTitleValue();
   const heading = title ?? routeTitle(loc.pathname, role);
+  const search = hasSearch(role);
   return (
-    <header className="relative z-40 flex items-center gap-3 border-b border-black/80 bg-[rgb(27,35,53)] backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.4),inset_0_-1px_0_rgba(45,212,191,0.2)] px-4 py-2.5">
-      {/* Left zone — nav trigger + brand (both < md only) + page title. flex-1 so it balances
-          the right zone and keeps the centre search bar actually centred. */}
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+    <header className="relative z-40 flex items-center gap-2 border-b border-border bg-header px-4 py-2.5 text-header-fg sm:gap-3 sm:px-6 lg:px-8">
+      {/* Left zone — nav trigger + brand (both < md only) + page title. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
         <button
           type="button"
           onClick={onMenu}
           aria-label="Open navigation"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-white/70 transition-colors hover:bg-black/30 hover:text-white md:hidden"
+          className="-ml-1.5 grid h-11 w-11 shrink-0 place-items-center rounded-full text-fg-secondary transition-colors duration-fast hover:bg-subtle hover:text-header-fg md:hidden"
         >
-          <Menu size={18} />
+          <Menu size={20} />
         </button>
-        {/* Brand chip: skip on the smallest screens so the page title + header search fit; the
-            hamburger already carries the nav affordance there. */}
+        {/* Brand chip: skip on the smallest screens so the page title fits; the hamburger already
+            carries the nav affordance there. */}
         <div className="hidden shrink-0 sm:block md:hidden"><Brandmark compact logoUrl={logoUrl} /></div>
         <div className="min-w-0">
-          <h1 className="truncate text-h2 font-semibold leading-tight text-white">{heading}</h1>
-          {subtitle && <p className="truncate text-tiny text-white/60">{subtitle}</p>}
+          <h1 className="truncate text-h3 font-semibold leading-tight text-header-fg sm:text-h2">{heading}</h1>
+          {subtitle && <p className="truncate text-tiny text-fg-muted">{subtitle}</p>}
         </div>
       </div>
 
-      {/* Right zone — holds search, theme toggle, and profile. */}
-      <div className="flex flex-[2] items-center justify-end gap-3">
-        {/* Desktop Search */}
-        <button
-          type="button" onClick={onSearch}
-          className="group hidden w-full max-w-[240px] items-center gap-2 rounded-[var(--radius)] border border-white/20 bg-white/10 px-3 py-1.5 text-small text-white/80 shadow-sm transition-all hover:bg-white/20 hover:border-white/30 md:flex md:mr-12"
-        >
-          <Search size={15} className="shrink-0 text-white/60 transition-colors group-hover:text-white/90" />
-          <span className="flex-1 text-left font-medium">Search…</span>
-          <kbd className="shrink-0 rounded border border-white/20 bg-white/5 px-1.5 py-0.5 text-[10px] font-bold text-white/70 shadow-sm transition-colors group-hover:border-white/30 group-hover:bg-white/20 group-hover:text-white">⌘K</kbd>
-        </button>
+      {/* Right zone — search, theme toggle, profile. */}
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        {search && (
+          <>
+            {/* Desktop search */}
+            <button
+              type="button" onClick={onSearch}
+              className="group hidden w-60 items-center gap-2 rounded-full border border-border bg-subtle px-3.5 py-2 text-small text-fg-muted transition-colors duration-fast hover:border-border-hover hover:bg-surface md:flex"
+            >
+              <Search size={15} className="shrink-0" aria-hidden />
+              <span className="flex-1 text-left font-medium">Search…</span>
+              <kbd className="shrink-0 rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-tiny font-semibold text-fg-muted">{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
+            </button>
 
-        {/* Mobile Search */}
-        <button
-          type="button" onClick={onSearch} aria-label="Search"
-          className="mr-8 grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-white shadow-[0_2px_4px_rgba(0,0,0,0.5)] ring-1 ring-white/20 transition-colors hover:bg-black/30 hover:text-white md:hidden"
-        >
-          <Search size={18} />
-        </button>
+            {/* Mobile search */}
+            <button
+              type="button" onClick={onSearch} aria-label="Search"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border bg-subtle text-header-fg transition-colors duration-fast hover:border-border-hover hover:bg-surface md:hidden"
+            >
+              <Search size={18} aria-hidden />
+            </button>
+          </>
+        )}
 
         <ThemeToggle />
-        <ProfileMenu initials={initials} displayName={displayName} email={email} onSignOut={onSignOut} />
+        <ProfileMenu role={role} initials={initials} displayName={displayName} email={email} onSignOut={onSignOut} />
       </div>
     </header>
   );
 }
 
-/** Tooltip label that appears to the right of an icon on hover/focus (collapsed rail only). */
-function RailTip({ children }: { children: string }) {
-  return (
-    <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-fg px-2 py-1 text-tiny font-medium text-page opacity-0 shadow-elevated transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-      {children}
-    </span>
-  );
+/** Hover / focus tooltip for the collapsed rail. Portaled + fixed-positioned, so the nav's own
+ * scroll container can't clip it. Hidden while a flyout is open (the flyout names the section). */
+function useRailTip(label: string, enabled: boolean) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const show = (e: SyntheticEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setPos({ top: r.top + r.height / 2, left: r.right + 8 });
+  };
+  const hide = () => setPos(null);
+  const tip = enabled && pos
+    ? createPortal(
+        <span
+          role="tooltip"
+          style={{ top: pos.top, left: pos.left }}
+          className="pointer-events-none fixed z-[60] -translate-y-1/2 whitespace-nowrap rounded-[var(--radius)] bg-fg px-2 py-1 text-tiny font-medium text-page shadow-elevated"
+        >
+          {label}
+        </span>,
+        document.body,
+      )
+    : null;
+  return { tip, handlers: { onMouseEnter: show, onMouseLeave: hide, onFocus: show, onBlur: hide } };
 }
 
 /** True if `to` (a leaf's own route) should be considered the current page. */
@@ -144,11 +174,10 @@ function isGroupActive(entry: NavEntry, pathname: string): boolean {
 }
 
 /** A rail item that opens an Everflow-style flyout instead of navigating directly, when the entry
- * has one. Renders as an icon-only button (collapsed rail) or icon+label row (expanded rail). Icon
- * color is dark/near-black by default (not muted gray) so the collapsed rail reads clearly, same
- * as the reference — the accent tint only shows for the active/open item. */
-function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
-  entry: NavEntry; pathname: string; expanded: boolean; openLabel: string | null;
+ * has one. Renders as an icon-only button with a tooltip (collapsed rail) or an icon+label row
+ * (expanded rail). The accent tint only shows for the active/open item. */
+function RailItem({ entry, pathname, expanded, fadeLabels, openLabel, onToggle, onSwap }: {
+  entry: NavEntry; pathname: string; expanded: boolean; fadeLabels: boolean; openLabel: string | null;
   onToggle: (label: string, top: number) => void;
   /** Hover-swap: mouse-enter a different flyout icon while one is already open → switch to it. */
   onSwap: (label: string | null, top: number) => void;
@@ -163,34 +192,28 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
   // glow at the same time and read as a double-highlight bug.
   const on = openLabel === null ? active : isOpen;
 
-  // Expanded rail gets the premium treatment (accent-gradient active row, dimmer idle text,
-  // gradient icon chip on the active item, trailing chevron for flyout groups). The collapsed
-  // icon rail is left exactly as-is for responsive parity.
-  const railIdle = 'text-[rgb(var(--sidebar-fg))] hover:bg-[rgb(var(--sidebar-active-bg))] hover:text-[rgb(var(--sidebar-accent))]';
+  // Idle: secondary text, hover wash. On: teal-tinted fill, strong text, accent icon, a hairline
+  // ring and (expanded) a left indicator bar. Same tokens in both themes.
+  const railIdle = 'text-sidebar-fg hover:bg-sidebar-hover-bg hover:text-sidebar-fg-strong';
+  const railOn = 'sidebar-active text-sidebar-fg-strong ring-1 ring-inset ring-sidebar-ring';
   const rowClass = expanded
-    ? `relative flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2.5 text-small font-medium transition-colors ${
-        on ? 'sidebar-active' : railIdle
-      }`
-    : `grid h-11 w-11 place-items-center rounded-[var(--radius)] transition-colors ${
-        on ? 'bg-[rgb(var(--sidebar-active-bg))] text-[rgb(var(--sidebar-accent))]' : railIdle
-      }`;
+    ? `relative flex w-full items-center gap-3 rounded-nav px-3 py-2.5 text-small font-medium transition-colors duration-fast ${on ? railOn : railIdle}`
+    : `grid h-11 w-11 place-items-center rounded-nav transition-colors duration-fast ${on ? railOn : railIdle}`;
 
-  const iconEl = expanded && on
-    ? <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius)] bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-sm"><Ic /></span>
-    : <Ic />;
+  const { tip, handlers: tipHandlers } = useRailTip(entry.label, !expanded && openLabel === null);
+  // Labels fade in once the rail has finished widening (only when the user toggled it).
+  const labelCls = fadeLabels ? LABEL_FADE : '';
 
   const content = expanded ? (
     <>
-      {iconEl}
+      {on && <span aria-hidden className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-sidebar-accent" />}
+      <Ic className={`shrink-0 ${on ? 'text-sidebar-accent' : ''}`} />
       {/* text-left: flyout rows are <button>s (default text-align:center) — keep labels flush */}
-      <span className="flex-1 truncate text-left">{entry.label}</span>
-      {entry.flyout && <ChevronRight size={14} className={`shrink-0 ${on ? 'text-[rgb(var(--sidebar-accent))]' : 'text-[rgb(var(--sidebar-fg-muted))]'}`} />}
+      <span className={`flex-1 truncate text-left ${labelCls}`}>{entry.label}</span>
+      {entry.flyout && <ChevronRight size={14} aria-hidden className={`shrink-0 ${on ? 'text-sidebar-accent' : 'text-sidebar-fg-muted'}`} />}
     </>
   ) : (
-    <>
-      <Ic />
-      <RailTip>{entry.label}</RailTip>
-    </>
+    <Ic className={on ? 'text-sidebar-accent' : ''} />
   );
 
   if (entry.flyout) {
@@ -206,10 +229,13 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
             // Hover opens the flyout instantly
             if (e.pointerType === 'mouse') onSwap(entry.label, btnRef.current?.getBoundingClientRect().top ?? 12);
           }}
+          aria-label={expanded ? undefined : entry.label}
+          {...tipHandlers}
           className={`group relative ${rowClass}`}
         >
           {content}
         </button>
+        {tip}
       </div>
     );
   }
@@ -221,35 +247,72 @@ function RailItem({ entry, pathname, expanded, openLabel, onToggle, onSwap }: {
         onPointerEnter={(e) => {
           if (e.pointerType === 'mouse') onSwap(null, 12);
         }}
+        aria-label={expanded ? undefined : entry.label}
+        aria-current={active ? 'page' : undefined}
+        {...tipHandlers}
         className={`group relative ${rowClass}`}
       >
         {content}
       </Link>
+      {tip}
     </div>
   );
 }
 
-/** Icon-only by default (Section 3); toggles to a labeled, grouped rail — Everflow-style — via the
- * hamburger button at the top. */
+const NAV_EXPANDED_KEY = 'tracker-nav-expanded';
+
+/** The rail's saved expanded/collapsed choice; with none saved, expanded on wide screens (≥ 1280px). */
+function readNavExpanded(): boolean {
+  try {
+    const v = localStorage.getItem(NAV_EXPANDED_KEY);
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+  } catch {
+    /* storage unavailable — fall through to the width default */
+  }
+  try {
+    return window.matchMedia('(min-width: 1280px)').matches;
+  } catch {
+    return false;
+  }
+}
+
+/** Collapsible rail: icons only, or a labeled, grouped rail — Everflow-style — toggled from the
+ * brand mark at the top. The choice is remembered (tracker-nav-expanded). */
 export function AppShell() {
   const { session, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [openFlyout, setOpenFlyout] = useState<string | null>(null);
   const [flyoutTop, setFlyoutTop] = useState(12);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(readNavExpanded);
+  // Set once the user toggles the rail, so labels fade in after the width animation — not on first paint.
+  const [fadeLabels, setFadeLabels] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   // O12: the network's logo / favicon (staff and portals; the Super Admin console has no network).
   const { logoUrl, overdueInvoice, features, announcements } = useNetworkBranding(Boolean(session) && session?.role !== 'super_admin');
   const platform = usePlatformMe();
+  const searchEnabled = session ? hasSearch(session.role) : false;
 
-  // ⌘K / Ctrl+K opens the search.
+  const toggleExpanded = () => {
+    const next = !expanded;
+    setFadeLabels(true);
+    setExpanded(next);
+    try {
+      localStorage.setItem(NAV_EXPANDED_KEY, String(next));
+    } catch {
+      /* private mode / storage disabled — the choice still holds for this session */
+    }
+  };
+
+  // ⌘K / Ctrl+K opens the search — only for roles that have one (not the publisher / advertiser portals).
   useEffect(() => {
+    if (!searchEnabled) return;
     const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [searchEnabled]);
 
   // Off-canvas drawer (< md): close on navigation and on Escape.
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
@@ -290,34 +353,36 @@ export function AppShell() {
   const openEntry = items.find((i) => i.label === openFlyout) ?? null;
   // The drawer (< lg, when open) is always full-width + labelled; the desktop rail follows `expanded`.
   const labeled = expanded || mobileOpen;
+  const headerFade = fadeLabels && !mobileOpen ? LABEL_FADE : '';
 
   let lastGroup: string | undefined;
 
   return (
     <PageTitleProvider>
     <div className="flex h-full">
-      {/* Off-canvas backdrop (< md only) — same scrim token + blur as NavFlyout. */}
+      {/* Off-canvas backdrop (< md only) — the same flat scrim token as NavFlyout (no frosted glass). */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-[rgb(var(--flyout-scrim))] backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-40 bg-[rgb(var(--flyout-scrim))] md:hidden"
           onClick={() => setMobileOpen(false)}
           aria-hidden
         />
       )}
       <aside
         onMouseLeave={() => setOpenFlyout(null)}
-        className={`flex flex-col border-r border-black/80 shadow-[2px_0_12px_rgba(0,0,0,0.4),inset_-1px_0_0_rgba(45,212,191,0.2)] bg-[rgb(var(--sidebar-bg))]/95 backdrop-blur-xl text-[rgb(var(--sidebar-fg))] pt-4 pb-6 fixed inset-y-0 left-0 z-50 w-72 transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-none ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col overflow-x-hidden border-r border-sidebar-border bg-sidebar pb-6 pt-4 text-sidebar-fg shadow-elevated transition-transform duration-base ease-out-token motion-reduce:transition-none md:static md:z-auto md:translate-x-0 md:shadow-none md:transition-[width] md:duration-slow ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${expanded ? 'md:w-64' : 'md:w-16 md:items-center'}`}
       >
         {/* Brand area — logo always sits at the very top of the rail. Expanded/drawer: logo +
-         * wordmark in a row with the toggle. Collapsed: just the mark, stacked above the toggle. */}
+         * wordmark in a row with the close button. Collapsed: just the mark. The mark toggles the rail. */}
         <div className={labeled ? 'mb-3 flex items-center gap-2 px-3.5' : 'mb-3 flex flex-col items-center gap-1'}>
           <button
             type="button"
-            onClick={() => setExpanded((e) => !e)}
+            onClick={toggleExpanded}
             aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
-            className={`text-[rgb(var(--sidebar-fg-strong))] text-left outline-none ${labeled ? 'min-w-0 flex-1' : 'grid h-11 w-11 place-items-center'}`}
+            aria-expanded={expanded}
+            className={`rounded-nav text-left text-sidebar-fg-strong ${labeled ? 'min-w-0 flex-1' : 'grid h-11 w-11 place-items-center'}`}
           >
             <Brandmark compact={!labeled} logoUrl={logoUrl} />
           </button>
@@ -326,25 +391,25 @@ export function AppShell() {
             type="button"
             onClick={() => setMobileOpen(false)}
             aria-label="Close navigation"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] text-[rgb(var(--sidebar-fg))] transition-colors hover:bg-[rgb(var(--sidebar-hover-bg))] hover:text-[rgb(var(--sidebar-fg-strong))] md:hidden"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-sidebar-fg transition-colors duration-fast hover:bg-sidebar-hover-bg hover:text-sidebar-fg-strong md:hidden"
           >
             <X size={18} />
           </button>
         </div>
         {labeled && (
-          <p className="mb-1.5 mt-1 px-5 text-tiny font-semibold uppercase tracking-wider text-[rgb(var(--sidebar-fg-muted))]">Core Platform</p>
+          <p className={`mb-1.5 mt-1 px-5 text-tiny font-semibold uppercase tracking-wider text-sidebar-fg-muted ${headerFade}`}>Core Platform</p>
         )}
 
-        <nav className="scrollbar-slim flex w-full flex-1 flex-col overflow-y-auto gap-1">
+        <nav aria-label="Main" className="scrollbar-slim flex w-full flex-1 flex-col gap-1 overflow-y-auto">
           {items.map((item) => {
             const showHeader = labeled && item.group && item.group !== lastGroup;
             lastGroup = item.group;
             return (
               <div key={item.label} className={labeled ? 'w-full' : 'contents'}>
                 {showHeader && (
-                  <p className="mb-1.5 mt-4 px-5 text-tiny font-semibold uppercase tracking-wider text-[rgb(var(--sidebar-fg-muted))] first:mt-0">{item.group}</p>
+                  <p className={`mb-1.5 mt-4 px-5 text-tiny font-semibold uppercase tracking-wider text-sidebar-fg-muted first:mt-0 ${headerFade}`}>{item.group}</p>
                 )}
-                <RailItem entry={item} pathname={location.pathname} expanded={labeled} {...toggleProps} />
+                <RailItem entry={item} pathname={location.pathname} expanded={labeled} fadeLabels={fadeLabels && !mobileOpen} {...toggleProps} />
               </div>
             );
           })}
@@ -352,12 +417,14 @@ export function AppShell() {
 
         {openEntry && <NavFlyout entry={openEntry} expanded={labeled} topOffset={flyoutTop} onClose={() => setOpenFlyout(null)} />}
 
-        <div className={labeled ? 'w-full space-y-1 border-t border-[rgb(var(--sidebar-accent))]/20 px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-[rgb(var(--sidebar-accent))]/20 pt-2'}>
+        <div className={labeled ? 'w-full space-y-1 border-t border-sidebar-border px-2 pt-3' : 'flex flex-col items-center gap-0.5 border-t border-sidebar-border pt-2'}>
           {/* N1: the bell is network staff's (their audit feed + notification preferences); partner /
               advertiser portals and the Super Admin console have neither, so they don't show it. */}
           {session.role === 'admin' && <NotificationsBell expanded={labeled} />}
           <HelpMenu expanded={labeled} />
-          <AccountLink expanded={labeled} />
+          {/* Account → /app/profile exists only on the network-staff surface; the portals and the
+              Super Admin console have no profile page, so they don't show it. */}
+          {session.role === 'admin' && <AccountLink expanded={labeled} />}
         </div>
       </aside>
 
@@ -374,7 +441,7 @@ export function AppShell() {
             navigate(impersonating ? '/impersonate?ended=1' : '/login');
           }}
           onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
-        <main className="flex-1 overflow-auto px-12 pt-4 pb-12">
+        <main className="flex-1 overflow-auto px-4 pb-12 pt-5 sm:px-6 lg:px-8">
           <div className="w-full animate-fade-in">
             <SectionTabs role={session.role} />
             <Outlet />
@@ -382,7 +449,7 @@ export function AppShell() {
         </main>
       </div>
     </div>
-    {searchOpen && (session.role === 'super_admin'
+    {searchOpen && searchEnabled && (session.role === 'super_admin'
       ? <PlatformSearchModal onClose={() => setSearchOpen(false)} />
       : <SearchModal onClose={() => setSearchOpen(false)} />)}
     </PageTitleProvider>

@@ -79,7 +79,7 @@ function toBody(fields: FieldDef[], form: Record<string, string | boolean>, orig
 }
 
 export function CollectionTab({
-  basePath, listPath, fields, columns, addLabel, emptyText, editable = false, searchKeys, searchPlaceholder = 'Search…', prepareBody, rowActions,
+  basePath, listPath, fields, columns, addLabel, emptyText, editable = false, searchKeys, searchPlaceholder = 'Search…', prepareBody, rowActions, onChanged,
 }: {
   basePath: string;
   /** GET target, if it needs query params (e.g. a category filter) that mustn't leak into the
@@ -97,6 +97,9 @@ export function CollectionTab({
   prepareBody?: (body: Record<string, unknown>, form: Record<string, string | boolean>) => Record<string, unknown>;
   /** Extra per-row buttons, shown before Edit / Delete. */
   rowActions?: (row: Row) => ReactNode;
+  /** Called after an add / edit / delete succeeds (after this tab's own refetch) — lets a parent
+   * refresh a query of its own that depends on these rows (e.g. a section count). */
+  onChanged?: () => void;
 }) {
   const { data, loading, error, refetch } = useQuery<Row[]>(listPath ?? basePath);
   const [open, setOpen] = useState(false);
@@ -125,12 +128,12 @@ export function CollectionTab({
               message: 'Are you sure you want to delete this item? This cannot be undone.',
               confirmLabel: 'Delete',
               destructive: true,
-              onConfirm: async () => { if (await del.run(row.id) !== null) refetch(); },
+              onConfirm: async () => { if (await del.run(row.id) !== null) { refetch(); onChanged?.(); } },
             })}>Delete</button>
         </span>
       ),
     },
-  ], [columns, del, refetch, editable, confirm, rowActions]);
+  ], [columns, del, refetch, editable, confirm, rowActions, onChanged]);
 
   return (
     <div className="space-y-4">
@@ -152,11 +155,11 @@ export function CollectionTab({
 
       {open && <FormModal title={addLabel} fields={fields} prepareBody={prepareBody}
         onSubmit={(body) => api.post(basePath, body)}
-        onClose={() => setOpen(false)} onDone={() => { setOpen(false); refetch(); }} />}
+        onClose={() => setOpen(false)} onDone={() => { setOpen(false); refetch(); onChanged?.(); }} />}
 
       {editRow && <FormModal title="Edit" fields={fields} initial={editRow} prepareBody={prepareBody}
         onSubmit={(body) => api.patch(`${basePath}/${editRow.id}`, body)}
-        onClose={() => setEditRow(null)} onDone={() => { setEditRow(null); refetch(); }} />}
+        onClose={() => setEditRow(null)} onDone={() => { setEditRow(null); refetch(); onChanged?.(); }} />}
     </div>
   );
 }

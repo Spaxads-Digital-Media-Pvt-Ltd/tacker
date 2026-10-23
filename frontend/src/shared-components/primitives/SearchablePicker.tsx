@@ -161,11 +161,11 @@ export function SearchablePicker({
       {required && (
         <input className="sr-only" tabIndex={-1} aria-hidden required value={value.filter(Boolean).join(',')} onChange={() => {}} />
       )}
-      {/* z-[110]: above the modal Overlay (z-[100]) — inside a modal a z-50 panel opened behind the dialog. */}
+      {/* z-popover: above the modal Overlay (z-overlay) — inside a modal a z-50 panel opened behind the dialog. */}
       {open && createPortal(
         <div ref={panelRef} onKeyDown={onKeyDown}
           style={{ top: style.top, bottom: style.bottom, left: style.left, width: style.width, maxHeight: style.maxHeight }}
-          className="fixed z-[110] flex animate-fade-in flex-col overflow-hidden rounded-[10px] border border-border bg-elevated shadow-elevated">
+          className="fixed z-popover flex animate-fade-in flex-col overflow-hidden rounded-[10px] border border-border bg-elevated shadow-elevated">
           <div className="relative border-b border-border p-2">
             <Search size={14} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-fg-muted" />
             <input ref={searchRef} className="input !pl-8" placeholder={searchPlaceholder} value={q}
@@ -185,7 +185,7 @@ export function SearchablePicker({
                   <div id={`spk-row-${row}`} data-row={row} role="option" aria-selected={isSel}
                     onMouseEnter={() => setActive(row)} onClick={() => activate(row)}
                     className={`flex cursor-pointer items-center gap-2 px-3 py-1.5 text-small ${active === row ? 'bg-accent-subtle' : ''} ${isSel ? 'font-medium text-accent-text' : 'text-fg'}`}>
-                    <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${isSel ? 'border-accent bg-accent text-white' : 'border-border'}`}>
+                    <span className={`grid h-4 w-4 shrink-0 place-items-center rounded border ${isSel ? 'border-accent bg-accent text-on-accent' : 'border-border'}`}>
                       {isSel && <Check size={11} />}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{o.label}</span>

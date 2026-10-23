@@ -17,14 +17,15 @@ export function ActiveFilterChips({ chips, onRemove, onClearAll, className = '' 
 }) {
   if (!chips.length) return null;
   return (
-    <div className={`flex flex-wrap items-center gap-1.5 ${className}`} aria-label="Active filters">
+    <div className={`flex flex-wrap items-center gap-2 ${className}`} aria-label="Active filters">
       {chips.map((c) => (
         <span key={`${c.exclude ? 'x' : 'f'}:${c.key}:${c.value}`}
-          className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-0.5 text-tiny ${c.exclude ? 'border-danger bg-danger-bg text-danger-text' : 'border-border bg-surface text-fg'}`}>
-          <span className="text-fg-muted">{c.exclude ? `Not ${c.label}` : c.label}:</span>
-          <span className="truncate font-medium" title={c.valueLabel}>{c.valueLabel}</span>
+          className={`inline-flex max-w-full items-center gap-1 rounded-full py-1 pl-2.5 pr-1.5 text-tiny ${c.exclude ? 'bg-danger-bg text-danger-text' : 'bg-accent-subtle text-accent-text'}`}>
+          <span className="whitespace-nowrap">{c.exclude ? `Not ${c.label}` : c.label}:</span>
+          <span className="truncate font-semibold" title={c.valueLabel}>{c.valueLabel}</span>
+          {/* Focus outline in the chip's own text colour: --focus-ring is 2.92:1 on accent-subtle in light. */}
           <button type="button" aria-label={`Remove ${c.label} ${c.valueLabel}`} onClick={() => onRemove(c)}
-            className="ml-0.5 text-fg-muted hover:text-fg"><X size={11} /></button>
+            className="ml-0.5 grid place-items-center rounded-full p-0.5 hover:text-fg focus-visible:outline-current"><X size={12} aria-hidden /></button>
         </span>
       ))}
       <button type="button" onClick={onClearAll} className="ml-1 text-tiny font-medium text-accent-text hover:underline">Clear all</button>

@@ -11,22 +11,12 @@ import { Link, useLocation } from 'react-router-dom';
 import { Bell, User, HelpCircle, BookOpen, Keyboard, Mail } from 'lucide-react';
 import { useQuery } from '../../lib/useApi';
 import { useAuth } from '../../auth/AuthContext';
+import { usePlatformMe } from '../../lib/platformMe';
+import { timeAgo } from '../../lib/datetime';
 
 interface HistoryRow {
   id: string; ref: number; operationTime: string; service: string; changes: string; isNew: boolean;
   employee: string; method: string; portal: string; userIp: string | null; userAgent: string | null;
-}
-
-function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const min = Math.floor(diffMs / 60000);
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return new Date(iso).toLocaleDateString();
 }
 
 function usePopover() {
@@ -48,20 +38,20 @@ function usePopover() {
   return { open, setOpen, ref, panelRef };
 }
 
-const RAIL_IDLE = 'text-[rgb(var(--sidebar-fg))] hover:bg-[rgb(var(--sidebar-hover-bg))] hover:text-[rgb(var(--sidebar-fg-strong))]';
-const RAIL_ON = 'bg-[rgb(var(--sidebar-active-bg))] text-[rgb(var(--sidebar-fg-strong))]';
+const RAIL_IDLE = 'text-sidebar-fg hover:bg-sidebar-hover-bg hover:text-sidebar-fg-strong';
+const RAIL_ON = 'sidebar-active text-sidebar-fg-strong ring-1 ring-inset ring-sidebar-ring';
 
 function RailIconButton({ expanded, label, children, onClick, badge }: { expanded: boolean; label: string; children: ReactNode; onClick: () => void; badge?: boolean }) {
-  const cls = `transition-colors ${RAIL_IDLE}`;
+  const cls = `transition-colors duration-fast ${RAIL_IDLE}`;
   return expanded ? (
     <button type="button" onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-small font-medium ${cls}`}>
+      className={`flex w-full items-center gap-3 rounded-nav px-3 py-2.5 text-small font-medium ${cls}`}>
       <span className="relative shrink-0">{children}{badge && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-danger" />}</span>
       {label}
     </button>
   ) : (
     <button type="button" onClick={onClick} aria-label={label}
-      className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] ${cls}`}>
+      className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-nav ${cls}`}>
       {children}
       {badge && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger" />}
     </button>
@@ -78,12 +68,12 @@ export function AccountLink({ expanded }: { expanded: boolean }) {
   const on = useLocation().pathname.startsWith('/app/profile');
   return expanded ? (
     <Link to="/app/profile"
-      className={`flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-small font-medium transition-colors ${on ? RAIL_ON : RAIL_IDLE}`}>
+      className={`flex w-full items-center gap-3 rounded-nav px-3 py-2.5 text-small font-medium transition-colors duration-fast ${on ? RAIL_ON : RAIL_IDLE}`}>
       <User size={18} className="shrink-0" /> Account
     </Link>
   ) : (
     <Link to="/app/profile" aria-label="Account"
-      className={`group relative grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] transition-colors ${on ? RAIL_ON : RAIL_IDLE}`}>
+      className={`group relative grid h-11 w-11 shrink-0 place-items-center rounded-nav transition-colors duration-fast ${on ? RAIL_ON : RAIL_IDLE}`}>
       <User size={18} />
     </Link>
   );
@@ -169,7 +159,7 @@ export function NotificationsBell({ expanded }: { expanded: boolean }) {
         <Popover anchorRef={ref} panelRef={panelRef}>
           <div className="flex items-center justify-between border-b border-border px-3.5 py-3">
             <h3 className="text-small font-semibold text-fg">Recent Notifications</h3>
-            <Link to="/app/control-center/accounts" onClick={() => setOpen(false)} className="text-tiny font-medium text-accent-text">Browse all</Link>
+            <Link to="/app/control-center/accounts?view=history" onClick={() => setOpen(false)} className="text-tiny font-medium text-accent-text">Browse all</Link>
           </div>
           <div className="max-h-80 overflow-y-auto">
             {rows.length === 0 ? (
@@ -207,6 +197,7 @@ export function HelpMenu({ expanded }: { expanded: boolean }) {
   // Network staff ask the platform's support team in the app (tickets); the Super Admin console has the desk.
   const { session } = useAuth();
   const role = session?.role;
+  const platform = usePlatformMe();
   // Re-read on navigation (cheap), so the badge clears once they answer or resolve.
   const { pathname } = useLocation();
   const tickets = useQuery<{ open: number; waiting_on_you: number }>(role === 'admin' ? '/api/support/summary' : null, { at: pathname.startsWith('/app/support') ? pathname : undefined });
@@ -233,9 +224,12 @@ export function HelpMenu({ expanded }: { expanded: boolean }) {
                 {waiting > 0 && <span className="ml-auto rounded-full bg-warning-bg px-1.5 text-tiny font-semibold text-warning-text">{waiting} awaiting you</span>}
               </Link>
             ) : role === 'super_admin' ? (
-              <Link to="/admin/support" onClick={() => setOpen(false)} className={itemCls}>
-                <Mail size={16} className="shrink-0 text-fg-secondary" /> Support desk
-              </Link>
+              // Only for platform roles that may open the desk (PlatformGate section "support").
+              platform.can('support') && (
+                <Link to="/admin/support" onClick={() => setOpen(false)} className={itemCls}>
+                  <Mail size={16} className="shrink-0 text-fg-secondary" /> Support desk
+                </Link>
+              )
             ) : (
               <a href={`mailto:${supportEmail}`} onClick={() => setOpen(false)} className={itemCls}>
                 <Mail size={16} className="shrink-0 text-fg-secondary" /> Contact Support

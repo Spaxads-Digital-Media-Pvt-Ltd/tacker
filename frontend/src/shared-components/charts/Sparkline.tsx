@@ -2,8 +2,8 @@
 
 /**
  * Catmull-Rom → cubic Bézier: turns a polyline into a gently flowing curve with no control
- * handles to tune per-call. `tension` 0 = straight segments, ~0.2 = smooth. Kept in sync with the
- * identical helper in PerformanceChart (small enough to duplicate rather than add a shared file).
+ * handles to tune per-call. `tension` 0 = straight segments, ~0.2 = smooth. The same approach as
+ * TimeSeriesChart's clamped Catmull-Rom `curvePath` (charts/chartMath.ts), kept separate here.
  *
  * `yBounds` clamps the two control-point Y values into the plot's vertical range. A cubic Bézier
  * segment always stays inside the convex hull of its 4 points; the endpoints are real data (already
@@ -53,18 +53,10 @@ export function Sparkline({ data, color = 'rgb(var(--accent))', height = 40, cla
   // spike-into-zeros transition can't bow the smoothed line past the drawing area.
   const line = smoothPath(pts, 0.16, [2, height - 2]);
   const area = n <= 1 ? '' : `${line} L${w},${height} L0,${height} Z`;
-  // Sanitize to a valid SVG id — `color` may be a hex string or a CSS value like
-  // "rgb(var(--accent))", and `url(#id)` breaks if the id contains parens/spaces.
-  const id = `sg-${color.replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <svg viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" className={className} style={{ height }} aria-hidden>
-      <defs>
-        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {area && <path d={area} fill={`url(#${id})`} className="animate-fade-in [animation-delay:800ms] [animation-fill-mode:both]" />}
+      {/* Area: one flat tint of the line colour (no gradients). */}
+      {area && <path d={area} fill={color} fillOpacity={0.12} className="animate-fade-in [animation-delay:800ms] [animation-fill-mode:both]" />}
       <path 
         d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" 
         className="animate-fade-in [animation-delay:800ms] [animation-fill-mode:both]" 

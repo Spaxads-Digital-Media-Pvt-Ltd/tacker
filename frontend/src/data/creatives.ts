@@ -56,6 +56,27 @@ export const MACROS = [
   { token: '{sub5}', label: 'Sub 5' },
 ];
 
+/**
+ * Macros the partner (outbound) postback actually fills — exactly the set the postback worker sends
+ * (api-backend workers/processors/outbound-postback.ts). No {country} / {device}: those are filled on
+ * offer destination URLs, never on a partner postback. `MACROS` above stays the creatives' list.
+ */
+export const POSTBACK_MACROS = [
+  { token: '{click_id}', label: 'Click ID' },
+  { token: '{conversion_id}', label: 'Conversion ID' },
+  { token: '{offer_id}', label: 'Offer ID' },
+  { token: '{publisher_id}', label: 'Partner ID' },
+  { token: '{event}', label: 'Event' },
+  { token: '{payout}', label: 'Payout' },
+  { token: '{currency}', label: 'Currency' },
+  { token: '{txn_id}', label: 'Transaction ID' },
+  { token: '{sub1}', label: 'Sub 1' },
+  { token: '{sub2}', label: 'Sub 2' },
+  { token: '{sub3}', label: 'Sub 3' },
+  { token: '{sub4}', label: 'Sub 4' },
+  { token: '{sub5}', label: 'Sub 5' },
+];
+
 /** Upload size cap (the backend's too). */
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 

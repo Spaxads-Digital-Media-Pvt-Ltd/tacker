@@ -89,7 +89,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
             <input
               ref={inputRef}
               className="input !pl-10 !pr-16"
-              placeholder="Search the app and the help center"
+              placeholder="Search offers, partners and advertisers"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && q.trim() && recordQuery(q)}

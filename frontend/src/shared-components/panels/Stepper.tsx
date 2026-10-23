@@ -1,42 +1,93 @@
+import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 
-/** Numbered step indicator for multi-step create wizards (Everflow-style): a full-width, sticky
- *  strip — each label on a single line above its circle, a horizontal rule running through the
- *  circles whose completed portion fills with the accent. Sticks to the top of the scroll area so
- *  it stays visible while the form below it scrolls. Render it as a direct child of the page's
- *  scroll container (outside any `max-w-*` wrapper) so it spans the full width. */
-export function Stepper({ steps, current }: { steps: string[]; current: number }) {
-  const progress = steps.length > 1 ? (current / (steps.length - 1)) * 100 : 0;
+export interface StepGroup { label: string; steps: number[] }
+
+/**
+ * Step indicator for the create wizards (Concept 05): a sticky card of pill chips — done = check,
+ * current = accent chip (number in an inverted circle), upcoming = subtle chip. Optional `groups`
+ * show the steps by phase, each with a caps caption ("1 of 3" in the current phase, "n steps"
+ * otherwise) and thin dividers; optional `labels` are shorter display names (`steps` values are
+ * unchanged). Progress only — unless the page already let users jump between steps: then it passes
+ * `onStepClick` (same handler as its old step buttons) and each chip is a button. Below md the row scrolls sideways (the next
+ * chip peeks past the edge), the current chip is kept in view, and the row is a keyboard stop
+ * (arrow keys scroll it) only while it actually scrolls.
+ */
+export function Stepper({ steps, current, groups, labels, onStepClick }: {
+  steps: readonly string[]; current: number; groups?: StepGroup[]; labels?: string[];
+  /** Only for pages whose step headers were already clickable; no new navigation. */
+  onStepClick?: (index: number) => void;
+}) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const currentRef = useRef<HTMLLIElement>(null);
+  const [scrollable, setScrollable] = useState(false);
+
+  useEffect(() => {
+    const box = scroller.current;
+    if (!box) return undefined;
+    const measure = () => setScrollable(box.scrollWidth > box.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const box = scroller.current;
+    const el = currentRef.current;
+    if (!box || !el || box.scrollWidth <= box.clientWidth) return;
+    const b = box.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (r.left < b.left + 12 || r.right > b.right - 12) box.scrollLeft += r.left - b.left - 12;
+  }, [current]);
+
+  const chip = (i: number) => {
+    const isCurrent = i === current;
+    const done = i < current;
+    const body = (
+      <>
+        <span aria-hidden className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-tiny font-semibold tabular-nums ${
+          isCurrent ? 'bg-on-accent text-accent' : done ? 'bg-accent-subtle text-accent-text' : 'bg-surface text-fg-secondary ring-1 ring-inset ring-border'}`}>
+          {done ? <Check size={13} strokeWidth={3} /> : i + 1}
+        </span>
+        <span className="whitespace-nowrap">{labels?.[i] ?? steps[i]}</span>
+        {done && <span className="sr-only"> (done)</span>}
+      </>
+    );
+    const chipClass = `flex shrink-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 text-small font-medium ${isCurrent ? 'bg-accent text-on-accent' : 'bg-subtle text-fg-secondary'}`;
+    return onStepClick ? (
+      <li key={i} ref={isCurrent ? currentRef : undefined} className="flex shrink-0">
+        <button type="button" aria-current={isCurrent ? 'step' : undefined} onClick={() => onStepClick(i)}
+          className={`${chipClass} transition-colors duration-fast ${isCurrent ? '' : 'hover:bg-border hover:text-fg'}`}>{body}</button>
+      </li>
+    ) : (
+      <li key={i} ref={isCurrent ? currentRef : undefined} aria-current={isCurrent ? 'step' : undefined} className={chipClass}>{body}</li>
+    );
+  };
+
   return (
-    <div className="sticky -top-4 z-20 -mx-4 mb-6 border-b border-border bg-page px-4 pb-4 pt-4">
-      <div className="relative">
-        {/* connector rule, sitting at the circles' vertical centre, behind them */}
-        <div className="absolute inset-x-[6%] bottom-[15px] h-0.5 bg-border">
-          <div className="h-full bg-accent transition-all duration-300" style={{ width: `${progress}%` }} />
-        </div>
-        <ol className="relative flex items-end justify-between gap-2">
-          {steps.map((s, i) => {
-            const done = i < current;
-            const active = i === current;
+    <nav aria-label="Progress" className="sticky -top-5 z-20 -mx-4 mb-6 bg-page px-4 pb-3 pt-5 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div ref={scroller} role="group" aria-label="Steps" tabIndex={scrollable ? 0 : undefined}
+        className="card overflow-x-auto !p-0 [scrollbar-width:none] md:overflow-visible [&::-webkit-scrollbar]:hidden">
+        <div className="flex w-max min-w-full px-3 py-3 md:w-auto md:flex-wrap md:gap-y-3 md:px-5 md:py-4">
+          {groups ? groups.map((g, gi) => {
+            const pos = g.steps.indexOf(current);
             return (
-              <li key={s} className="flex flex-1 flex-col items-center gap-2">
-                <span className={`whitespace-nowrap text-center text-[11px] font-medium leading-none ${active ? 'text-fg' : 'text-fg-muted'}`}>{s}</span>
-                <span
-                  className={`z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 text-tiny font-semibold transition-colors ${
-                    done
-                      ? 'border-accent bg-accent text-white'
-                      : active
-                      ? 'border-accent bg-accent text-white shadow-[0_0_0_4px_rgb(var(--accent-subtle))]'
-                      : 'border-border bg-page text-fg-muted'
-                  }`}
-                >
-                  {done ? <Check size={15} strokeWidth={3} /> : i + 1}
-                </span>
-              </li>
+              <div key={g.label} role="group" aria-label={g.label}
+                className={`flex shrink-0 flex-col gap-2 ${gi > 0 ? 'border-l border-border pl-2 md:pl-5' : ''} ${gi < groups.length - 1 ? 'pr-2 md:pr-5' : ''}`}>
+                <p className={`flex items-baseline gap-2 whitespace-nowrap text-[11px] font-semibold uppercase tracking-wider ${pos >= 0 ? 'text-accent-text' : 'text-fg-secondary'}`}>
+                  {g.label}
+                  <span className="text-tiny font-normal normal-case tracking-normal text-fg-muted">
+                    {pos >= 0 ? `${pos + 1} of ${g.steps.length}` : `${g.steps.length} ${g.steps.length === 1 ? 'step' : 'steps'}`}
+                  </span>
+                </p>
+                <ol start={(g.steps[0] ?? 0) + 1} className="flex gap-1 md:gap-1.5">{g.steps.map(chip)}</ol>
+              </div>
             );
-          })}
-        </ol>
+          }) : <ol className="flex gap-1 md:gap-1.5">{steps.map((_, i) => chip(i))}</ol>}
+        </div>
       </div>
-    </div>
+    </nav>
   );
 }

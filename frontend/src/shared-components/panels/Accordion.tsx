@@ -1,15 +1,19 @@
-import { useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useId, type ReactNode } from 'react';
+import { FormSection } from '../forms/FormSection';
 
+/**
+ * A titled, collapsible card — built on FormSection (button header with aria-expanded/controls,
+ * region labelled by it, chevron + height motion). Content mounts on first open and then stays
+ * mounted while collapsed (`lazyMount`): two callers (offer Custom Settings, offer Postbacks) render
+ * CollectionTabs that fetch on mount, so a section that starts closed still sends no request until
+ * it's opened — as before.
+ */
 export function Accordion({ title, count, defaultOpen, children }: { title: string; count?: number; defaultOpen?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(!!defaultOpen);
+  const id = useId();
   return (
-    <div className="card !p-0">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
-        {open ? <ChevronDown size={16} className="text-fg-secondary" /> : <ChevronRight size={16} className="text-fg-secondary" />}
-        <h3 className="flex-1 text-h3 font-medium text-fg">{title}{count != null ? ` (${count})` : ''}</h3>
-      </button>
-      {open && <div className="border-t border-border p-4">{children}</div>}
-    </div>
+    <FormSection id={`accordion${id}`} collapsible defaultOpen={defaultOpen} lazyMount variant="card" heading="h3"
+      title={`${title}${count != null ? ` (${count})` : ''}`}>
+      {children}
+    </FormSection>
   );
 }

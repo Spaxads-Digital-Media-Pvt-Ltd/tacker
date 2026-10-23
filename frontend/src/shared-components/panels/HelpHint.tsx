@@ -12,7 +12,7 @@ export function HelpHint({ text }: { text: string }) {
         type="button"
         tabIndex={0}
         aria-label={text}
-        className="grid h-3.5 w-3.5 cursor-help place-items-center rounded-full text-fg-muted transition-colors hover:text-fg-secondary focus-visible:text-fg-secondary focus-visible:outline-none"
+        className="grid h-3.5 w-3.5 cursor-help place-items-center rounded-full text-fg-muted transition-colors hover:text-fg-secondary focus-visible:text-fg-secondary"
       >
         <HelpCircle size={13} aria-hidden />
       </button>

@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, MoreVertical, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MoreVertical, Search } from 'lucide-react';
 import type { FilterCategory, FilterValues } from './CategorizedFilters';
 import { chipsFromValues, withoutValue, type ChipCategory, type FilterChip } from '../../lib/filterChips';
 import { api } from '../../lib/api';
@@ -393,7 +393,7 @@ export function ReportingFiltersFlyout({
           ] as const).filter(([seg]) => sections.includes(seg)).map(([seg, label, n]) => (
             <button key={seg} type="button" onClick={() => push(seg)}
               className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-              <span className="flex items-center gap-2">{label}{n > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">{n}</span>}</span>
+              <span className="flex items-center gap-2">{label}{n > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">{n}</span>}</span>
               <ChevronRight size={13} className="text-fg-muted" />
             </button>
           ))}
@@ -424,7 +424,7 @@ export function ReportingFiltersFlyout({
               return (
                 <button key={c.key} type="button" onClick={() => push(c.key)}
                   className="flex w-full items-center justify-between px-3 py-1.5 text-left text-small text-fg hover:bg-accent-subtle">
-                  <span className="flex items-center gap-2">{c.label}{n > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">{n}</span>}</span>
+                  <span className="flex items-center gap-2">{c.label}{n > 0 && <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">{n}</span>}</span>
                   <ChevronRight size={13} className="text-fg-muted" />
                 </button>
               );
@@ -507,7 +507,7 @@ export function ReportingFiltersFlyout({
                   {(['>', '>=', '<', '<='] as MetricOp[]).map((op) => (
                     <button key={op} type="button" disabled={off}
                       onClick={() => setDraftMetric((m) => ({ ...m, [f.key]: { op, value: m[f.key]?.value ?? '' } }))}
-                      className={`px-2 py-1 text-tiny disabled:cursor-not-allowed ${entry?.op === op ? 'bg-accent text-white' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>
+                      className={`px-2 py-1 text-tiny disabled:cursor-not-allowed ${entry?.op === op ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary hover:bg-accent-subtle'}`}>
                       {OP_LABEL[op]}
                     </button>
                   ))}
@@ -615,22 +615,46 @@ export function RowKebabMenu({ items }: { items: { label: string; onClick: () =>
   );
 }
 
-/** "{N} Total | first | prev | page | next | last" — matches the live reference's own pagination
- * footer exactly, backed by a real COUNT from the reporting query (see `total` on ReportResult). */
+/** Page numbers to show: always the first and last, the current page and its neighbours, with
+ * `null` marking a gap ("…"). */
+function pageItems(page: number, last: number): (number | null)[] {
+  const want = new Set([1, last, page - 1, page, page + 1].filter((p) => p >= 1 && p <= last));
+  const sorted = [...want].sort((a, b) => a - b);
+  const out: (number | null)[] = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1]! > 1) out.push(null);
+    out.push(p);
+  });
+  return out;
+}
+
+/** "Showing 26–50 of 1,284 · ‹ 1 … 2 3 4 … 52 ›" — backed by a real COUNT from the reporting query
+ * (see `total` on ReportResult). Same props as before; the first/last jumps are the "1" and last-page
+ * buttons. Below `sm` the numbers give way to "page / last" so the control fits a phone. */
 export function Pagination({ total, page, pageSize, onPageChange }: { total: number; page: number; pageSize: number; onPageChange: (p: number) => void }) {
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
-  const btn = 'grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent';
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(total, page * pageSize);
+  const btn = 'grid h-9 min-w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface px-2 text-small font-medium tabular-nums text-fg-secondary transition-colors duration-fast hover:border-border-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border';
   return (
-    <div className="flex items-center gap-3 text-tiny text-fg-secondary">
-      <span>{total.toLocaleString()} Total</span>
+    <nav aria-label="Pagination" className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 text-small text-fg-secondary">
+      <span className="tabular-nums" aria-live="polite">
+        {total === 0 ? 'No results' : `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()}`}
+      </span>
       <div className="flex items-center gap-1">
-        <button type="button" title="First page" disabled={page <= 1} onClick={() => onPageChange(1)} className={btn}><ChevronsLeft size={14} /></button>
-        <button type="button" title="Previous page" disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))} className={btn}><ChevronLeft size={14} /></button>
-        <span className="px-1 text-fg">{page}</span>
-        <button type="button" title="Next page" disabled={page >= lastPage} onClick={() => onPageChange(Math.min(lastPage, page + 1))} className={btn}><ChevronRight size={14} /></button>
-        <button type="button" title="Last page" disabled={page >= lastPage} onClick={() => onPageChange(lastPage)} className={btn}><ChevronsRight size={14} /></button>
+        <button type="button" aria-label="Previous page" title="Previous page" disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))} className={btn}><ChevronLeft size={16} aria-hidden /></button>
+        {pageItems(page, lastPage).map((p, i) => p === null ? (
+          <span key={`gap-${i}`} aria-hidden className="hidden px-1 text-fg-muted sm:inline">…</span>
+        ) : p === page ? (
+          <span key={p} aria-current="page" className="hidden h-9 min-w-9 place-items-center rounded-[var(--radius)] bg-accent px-2 text-small font-semibold tabular-nums text-on-accent sm:grid">{p.toLocaleString()}</span>
+        ) : (
+          <button key={p} type="button" aria-label={`Page ${p}`} onClick={() => onPageChange(p)}
+            className={`${btn} !hidden sm:!grid`}>{p.toLocaleString()}</button>
+        ))}
+        <span className="px-2 tabular-nums text-fg sm:hidden">{page.toLocaleString()} / {lastPage.toLocaleString()}</span>
+        <button type="button" aria-label="Next page" title="Next page" disabled={page >= lastPage} onClick={() => onPageChange(Math.min(lastPage, page + 1))} className={btn}><ChevronRight size={16} aria-hidden /></button>
       </div>
-    </div>
+    </nav>
   );
 }
 

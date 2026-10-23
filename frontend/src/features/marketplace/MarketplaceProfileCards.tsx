@@ -13,6 +13,7 @@ function fmtDate(iso: string) {
 function ProfileLogo({ url, variant }: { url: string | null; variant: 'discovery' | 'banner' }) {
   if (variant === 'discovery') {
     return url ? (
+      // intentional content canvas — logos are authored for white; not a theme surface
       <img src={url} alt="" className="h-14 w-14 rounded-full border border-border bg-white object-contain p-1 shadow-sm" />
     ) : (
       <div className="grid h-14 w-14 place-items-center rounded-full border border-border bg-accent-subtle text-accent-text shadow-sm">
@@ -22,6 +23,7 @@ function ProfileLogo({ url, variant }: { url: string | null; variant: 'discovery
   }
 
   return url ? (
+    // intentional content canvas — logos are authored for white; not a theme surface
     <div className="mb-4 flex h-28 w-full items-center justify-center rounded-[var(--radius)] border border-border bg-white p-4 shadow-sm">
       <img src={url} alt="" className="max-h-20 max-w-full object-contain" />
     </div>

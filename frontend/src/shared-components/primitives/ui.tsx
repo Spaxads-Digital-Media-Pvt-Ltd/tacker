@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { AlertCircle, Inbox, RefreshCw, X } from 'lucide-react';
 import { useIntersectionObserver } from '../../lib/useIntersectionObserver';
 import { usePageTitle } from './PageTitle';
 import { HelpHint } from '../panels/HelpHint';
@@ -13,14 +13,38 @@ import { HelpHint } from '../panels/HelpHint';
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   usePageTitle(title, subtitle);
   if (!action) return null;
-  return <div className="mb-6 flex flex-wrap items-center justify-end gap-3">{action}</div>;
+  return <div className="mb-5 flex flex-wrap items-center justify-end gap-2 sm:gap-3">{action}</div>;
 }
 
-export function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+/** Metric hue for a StatCard's icon chip (charts / chips only — never text in light mode). */
+export type MetricTone = 'revenue' | 'payout' | 'margin' | 'clicks' | 'conversions';
+const METRIC_CHIP: Record<MetricTone, string> = {
+  revenue: 'bg-metric-revenue/10 text-metric-revenue',
+  payout: 'bg-metric-payout/10 text-metric-payout',
+  margin: 'bg-metric-margin/10 text-metric-margin',
+  clicks: 'bg-metric-clicks/10 text-metric-clicks',
+  conversions: 'bg-metric-conversions/10 text-metric-conversions',
+};
+
+/**
+ * KPI tile: label, a large tabular value, an optional hint. Additive: `icon` (+ `tone` for its
+ * metric-hue chip) and `muted` (the value is a placeholder such as "Mixed" / "—", not a figure).
+ */
+export function StatCard({ label, value, hint, icon, tone, muted = false, valueTitle }: {
+  label: string; value: string; hint?: string;
+  icon?: ReactNode; tone?: MetricTone; muted?: boolean; valueTitle?: string;
+}) {
   return (
-    <ScrollReveal className="card transition-all duration-300 hover:scale-[1.02] hover:border-slate-400/50 hover:shadow-[0_0_15px_rgba(20,184,166,0.15)]">
-      <p className="text-small font-medium text-fg-secondary">{label}</p>
-      <p className="mt-2 text-3xl font-semibold tracking-tight text-fg">{value}</p>
+    <ScrollReveal className="card !p-5 hover:shadow-card-hover">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-small font-medium text-fg-secondary">{label}</p>
+        {icon && (
+          <span aria-hidden className={`grid h-8 w-8 shrink-0 place-items-center rounded-[var(--radius)] ${tone ? METRIC_CHIP[tone] : 'bg-accent-subtle text-accent-text'}`}>
+            {icon}
+          </span>
+        )}
+      </div>
+      <p title={valueTitle} className={`mt-2 text-h1 font-bold tabular-nums tracking-tight ${muted ? 'text-fg-muted' : 'text-fg'}`}>{value}</p>
       {hint && <p className="mt-1 text-tiny text-fg-muted">{hint}</p>}
     </ScrollReveal>
   );
@@ -45,7 +69,7 @@ const SUCCESS = 'bg-success-bg text-success-text';
 const WARNING = 'bg-warning-bg text-warning-text';
 const DANGER = 'bg-danger-bg text-danger-text';
 // bg-elevated so the chip reads as *raised* in dark (bg-page there is darker than the card).
-// --bg-elevated is pure #FFF in light == the card, so add a hairline inset ring to keep the chip
+// --bg-elevated is pure white in light == the card, so add a hairline inset ring to keep the chip
 // visible there too; ring is box-shadow, so no size drift vs the coloured badge tones.
 const NEUTRAL = 'bg-elevated text-fg-secondary ring-1 ring-inset ring-border';
 const BADGE_TONES: Record<string, string> = {
@@ -57,24 +81,84 @@ const BADGE_TONES: Record<string, string> = {
   draft: NEUTRAL, paused: NEUTRAL, inactive: NEUTRAL, disabled: NEUTRAL, archived: NEUTRAL, duplicate: NEUTRAL,
 };
 
-/** `value` picks the tone (and is the text unless `label` is given). */
-export function Badge({ value, label }: { value: string; label?: string }) {
-  const tone = BADGE_TONES[value] ?? 'bg-accent-subtle text-accent-text';
+const TONE_CLASSES = { success: SUCCESS, warning: WARNING, danger: DANGER, neutral: NEUTRAL } as const;
+
+/** `value` picks the tone (and is the text unless `label` is given). Additive: `tone` overrides the
+ * value-derived tone, for status sets with their own shared tone map (e.g. lib/offerStatus). */
+export function Badge({ value, label, tone: toneKey }: { value: string; label?: string; tone?: keyof typeof TONE_CLASSES }) {
+  const tone = (toneKey ? TONE_CLASSES[toneKey] : BADGE_TONES[value]) ?? 'bg-accent-subtle text-accent-text';
   return <span className={`inline-flex rounded-full px-2.5 py-0.5 text-tiny font-semibold capitalize ${tone}`}>{label ?? value}</span>;
 }
 
 export function Spinner() {
-  return <div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-accent" />;
+  return <div role="status" aria-label="Loading" className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-accent motion-reduce:animate-none" />;
 }
 
-export function StateBlock({ children }: { children: ReactNode }) {
-  return <div className="grid place-items-center rounded-card border border-dashed border-border py-16 text-center text-small text-fg-secondary">{children}</div>;
+/**
+ * Loading / empty / error placeholder for a panel or table.
+ *  - No `variant` (every existing call site): a dashed box around `children`, exactly as before.
+ *  - `variant="loading"`: skeleton bars (`rows`, default 4) announced as busy to screen readers.
+ *  - `variant="empty"`: icon + `title` + `hint` (or `children`) + optional `action`.
+ *  - `variant="error"`: alert icon + `title` + the message (`hint` or `children`) + a Retry button
+ *    when `onRetry` is given.
+ */
+export function StateBlock({
+  children, variant, title, hint, icon, action, onRetry, retryLabel = 'Retry', rows = 4,
+}: {
+  children?: ReactNode;
+  variant?: 'loading' | 'empty' | 'error';
+  title?: ReactNode;
+  hint?: ReactNode;
+  icon?: ReactNode;
+  action?: ReactNode;
+  onRetry?: () => void;
+  retryLabel?: string;
+  rows?: number;
+}) {
+  if (!variant) {
+    return <div className="grid place-items-center rounded-card border border-dashed border-border px-6 py-14 text-center text-small text-fg-secondary">{children}</div>;
+  }
+  if (variant === 'loading') {
+    return (
+      <div role="status" aria-busy="true" className="rounded-card border border-border bg-surface p-5">
+        <span className="sr-only">{title ?? 'Loading…'}</span>
+        <div aria-hidden className="space-y-3">
+          {Array.from({ length: Math.max(1, rows) }, (_, i) => (
+            <div key={i} className={`h-3 animate-pulse rounded-full bg-subtle motion-reduce:animate-none ${i === 0 ? 'w-1/3' : i % 3 === 2 ? 'w-2/3' : 'w-full'}`} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  const error = variant === 'error';
+  const body = hint ?? children;
+  return (
+    <div role={error ? 'alert' : undefined}
+      className="flex flex-col items-center rounded-card border border-dashed border-border bg-surface px-6 py-10 text-center">
+      <span aria-hidden className={`grid h-10 w-10 place-items-center rounded-full ${error ? 'bg-danger-bg text-danger-text' : 'bg-accent-subtle text-accent-text'}`}>
+        {icon ?? (error ? <AlertCircle size={18} /> : <Inbox size={18} />)}
+      </span>
+      {(title ?? (error ? 'Something went wrong' : null)) && (
+        <p className="mt-3 text-body font-semibold text-fg">{title ?? 'Something went wrong'}</p>
+      )}
+      {body && <div className="mt-1 max-w-md text-small text-fg-secondary">{body}</div>}
+      {(action || (error && onRetry)) && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          {error && onRetry && (
+            <button type="button" className="btn-ghost" onClick={onRetry}><RefreshCw size={15} aria-hidden /> {retryLabel}</button>
+          )}
+          {action}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
  * Reusable scroll shell for wide data tables — the deliberate "scroll, don't reflow" pattern
- * (see tailwind.config.js responsive strategy). Bounds height so `sticky` works, and shows a soft
- * edge-fade only on the side that has more content, so the horizontal scroll is discoverable.
+ * (see tailwind.config.js responsive strategy). Bounds height so `sticky` works, and shows a flat
+ * edge bar (--border-strong, no gradient) only on the side that has more content, so the
+ * horizontal scroll is discoverable.
  * Wrap a bare `<table>` in this on pages that don't use <Table> below.
  */
 export function TableScroll({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -102,8 +186,8 @@ export function TableScroll({ children, className = '' }: { children: ReactNode;
       <div ref={ref} className={`max-h-[70vh] overflow-auto rounded-card border border-border bg-surface ${className}`}>
         {children}
       </div>
-      {edge.left && <div aria-hidden className="pointer-events-none absolute inset-y-px left-px w-12 rounded-l-card bg-gradient-to-r from-black/[0.04] dark:from-black/[0.15] to-transparent" />}
-      {edge.right && <div aria-hidden className="pointer-events-none absolute inset-y-px right-px w-12 rounded-r-card bg-gradient-to-l from-black/[0.04] dark:from-black/[0.15] to-transparent" />}
+      {edge.left && <div aria-hidden className="pointer-events-none absolute inset-y-3 left-1 w-0.5 rounded-full bg-border-strong" />}
+      {edge.right && <div aria-hidden className="pointer-events-none absolute inset-y-3 right-1 w-0.5 rounded-full bg-border-strong" />}
     </div>
   );
 }
@@ -118,14 +202,19 @@ export interface Column<T> {
   className?: string;
 }
 
-export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Column<T>[]; rows: T[]; rowKey: (row: T) => string; stickyCol?: number }) {
+export function Table<T>({ columns, rows, rowKey, stickyCol = 0, caption }: {
+  columns: Column<T>[]; rows: T[]; rowKey: (row: T) => string; stickyCol?: number;
+  /** Additive: an accessible name for the table (visually hidden). */
+  caption?: string;
+}) {
   return (
     <TableScroll>
       <table className="premium-table">
+        {caption && <caption className="sr-only">{caption}</caption>}
         <thead>
           <tr>
             {columns.map((c, i) => (
-              <th key={i} className={i === stickyCol ? 'sticky left-0 z-30 bg-slate-900' : ''}>{c.header}</th>
+              <th key={i} scope="col" className={`${i === stickyCol ? 'sticky left-0 z-30' : ''} ${c.className ?? ''}`}>{c.header}</th>
             ))}
           </tr>
         </thead>
@@ -133,7 +222,7 @@ export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Co
           {rows.map((row) => (
             <tr key={rowKey(row)}>
               {columns.map((c, i) => (
-                <td key={i} className={i === stickyCol ? 'sticky left-0 z-10 bg-inherit' : ''}>{c.cell(row)}</td>
+                <td key={i} className={`${i === stickyCol ? 'sticky left-0 z-10 bg-inherit' : ''} ${c.className ?? ''}`}>{c.cell(row)}</td>
               ))}
             </tr>
           ))}
@@ -143,12 +232,23 @@ export function Table<T>({ columns, rows, rowKey, stickyCol = 0 }: { columns: Co
   );
 }
 
-const MODAL_SIZE: Record<string, string> = { md: 'max-w-lg', xl: 'max-w-4xl' };
+const MODAL_SIZE: Record<string, string> = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
+type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
+
+// Open overlays, innermost last — Escape belongs to the topmost one only, so closing a confirm or
+// picker never also closes the modal underneath it (and loses its form).
+const overlayStack: number[] = [];
+let overlaySeq = 0;
+let bodyOverflowBefore = '';
 
 /**
  * Full-viewport dimmed layer portaled to document.body. Nested `fixed` overlays inside AppShell's
  * scrollable `<main>` (or any overflow/transform ancestor) get clipped — use Overlay (or Modal)
  * for every dimmed popup.
+ *
+ * Escape closes only the topmost overlay, and not while an open combobox / menu inside it owns the
+ * key. The backdrop closes only on a click that both starts and ends on it, so a text selection
+ * dragged out of a form doesn't dismiss the dialog.
  */
 export function Overlay({
   children,
@@ -159,25 +259,81 @@ export function Overlay({
   onClose?: () => void;
   className?: string;
 }) {
+  // Callers pass inline handlers — read the latest through a ref so the listener isn't re-bound
+  // (and the body lock re-applied) on every parent render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const downOnBackdrop = useRef(false);
+
   useEffect(() => {
+    const id = ++overlaySeq;
+    if (overlayStack.length === 0) {
+      bodyOverflowBefore = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+    overlayStack.push(id);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose?.();
+      if (e.key !== 'Escape' || e.defaultPrevented || overlayStack[overlayStack.length - 1] !== id) return;
+      const t = e.target as Element | null;
+      if (t?.closest?.('[aria-haspopup][aria-expanded="true"], [role="combobox"][aria-expanded="true"]')) return;
+      onCloseRef.current?.();
     };
-    if (onClose) window.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
     return () => {
-      if (onClose) window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+      const i = overlayStack.lastIndexOf(id);
+      if (i >= 0) overlayStack.splice(i, 1);
+      if (overlayStack.length === 0) document.body.style.overflow = bodyOverflowBefore;
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
-    <div className={`fixed inset-0 z-[100] ${className}`} onClick={onClose} role="presentation">
+    <div
+      className={`fixed inset-0 z-overlay ${className}`}
+      role="presentation"
+      onPointerDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && downOnBackdrop.current) onCloseRef.current?.();
+        downOnBackdrop.current = false;
+      }}
+    >
       {children}
     </div>,
     document.body,
   );
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Dialog focus model (same as ConfirmDialog): on open, focus the first field in the dialog body
+ * (or the dialog itself) unless something inside already took focus (autoFocus); keep Tab inside;
+ * on close, return focus to whatever opened it.
+ */
+function useDialogFocus(boxRef: RefObject<HTMLElement>) {
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const t = window.setTimeout(() => {
+      if (box.contains(document.activeElement)) return;
+      const field = box.querySelector<HTMLElement>('[data-dialog-body] :is(input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]))');
+      (field ?? box).focus({ preventScroll: true });
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+    };
+  }, [boxRef]);
+
+  return (e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab' || !boxRef.current) return;
+    const items = Array.from(boxRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+    if (items.length === 0) { e.preventDefault(); return; }
+    const first = items[0]!, last = items[items.length - 1]!;
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === boxRef.current)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
 }
 
 /**
@@ -188,27 +344,50 @@ export function Overlay({
  * Uses Overlay (portaled to document.body) so it is not clipped by AppShell / animate-fade-in.
  */
 export function Modal({
-  open, onClose, title, children, footer, size = 'md',
+  open, onClose, title, children, footer, size = 'md', description,
 }: {
-  open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; size?: 'md' | 'xl';
+  open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode;
+  /** `sm` / `lg` are additive; `md` (default) and `xl` keep their widths. */
+  size?: ModalSize;
+  /** Additive: a line under the title, announced as the dialog's description. */
+  description?: ReactNode;
 }) {
   if (!open) return null;
+  return <ModalBox onClose={onClose} title={title} footer={footer} size={size} description={description}>{children}</ModalBox>;
+}
+
+function ModalBox({
+  onClose, title, children, footer, size, description,
+}: {
+  onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; size: ModalSize; description?: ReactNode;
+}) {
+  const titleId = useId();
+  const descId = useId();
+  const boxRef = useRef<HTMLDivElement>(null);
+  const trapTab = useDialogFocus(boxRef);
   return (
     <Overlay onClose={onClose}>
       <div
+        ref={boxRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
-        className={`flex max-h-[calc(100vh-2rem)] w-full ${MODAL_SIZE[size]} animate-fade-in flex-col rounded-card border border-border bg-elevated shadow-elevated`}
+        aria-labelledby={titleId}
+        aria-describedby={description ? descId : undefined}
+        tabIndex={-1}
+        className={`flex max-h-[calc(100dvh-2rem)] w-full ${MODAL_SIZE[size]} animate-fade-in flex-col rounded-card border border-border bg-elevated shadow-elevated focus:outline-none motion-reduce:animate-none`}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={trapTab}
       >
-        <div className="flex shrink-0 items-center justify-between p-6 pb-0">
-          <h2 id="modal-title" className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
-          <button type="button" onClick={onClose} className="text-fg-muted hover:text-fg" aria-label="Close"><X size={18} /></button>
+        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pt-5">
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
+            {description && <p id={descId} className="mt-1 text-small text-fg-secondary">{description}</p>}
+          </div>
+          <button type="button" onClick={onClose} className="-mr-2 -mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full text-fg-muted transition-colors duration-fast hover:bg-subtle hover:text-fg" aria-label="Close"><X size={18} /></button>
         </div>
-        <div className="mt-4 flex-1 overflow-y-auto overflow-x-auto px-6 pb-6">{children}</div>
+        <div data-dialog-body className="mt-4 flex-1 overflow-y-auto overflow-x-auto px-6 pb-6">{children}</div>
         {footer != null && (
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-4">{footer}</div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-6 py-4">{footer}</div>
         )}
       </div>
     </Overlay>
@@ -225,10 +404,10 @@ export function PromptModal({
   open: boolean; onClose: () => void; title: string; message: string; placeholder?: string; onConfirm: (value: string) => void;
 }) {
   const [value, setValue] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
-    if (open) { setValue(''); setTimeout(() => inputRef.current?.focus(), 50); }
+    if (open) setValue('');
   }, [open]);
 
   const submit = () => {
@@ -238,25 +417,20 @@ export function PromptModal({
     onClose();
   };
 
+  // Escape is handled once, by the Overlay (it used to fire onClose twice).
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') { e.preventDefault(); submit(); }
-    if (e.key === 'Escape') onClose();
   };
 
   if (!open) return null;
   return (
     <Overlay onClose={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="prompt-title"
-        className="animate-fade-in w-full max-w-sm rounded-card border border-border bg-elevated p-6 shadow-elevated"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="prompt-title" className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
+      <PromptBox titleId={titleId}>
+        <h2 id={titleId} className="text-h3 font-semibold tracking-tight text-fg">{title}</h2>
         <p className="mt-2 text-small text-fg-secondary">{message}</p>
         <input
-          ref={inputRef}
+          autoFocus
+          aria-labelledby={titleId}
           className="input mt-4"
           placeholder={placeholder}
           value={value}
@@ -267,8 +441,27 @@ export function PromptModal({
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
           <button type="button" className="btn-primary" onClick={submit}>Save</button>
         </div>
-      </div>
+    </PromptBox>
     </Overlay>
+  );
+}
+
+function PromptBox({ titleId, children }: { titleId: string; children: ReactNode }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const trapTab = useDialogFocus(boxRef);
+  return (
+    <div
+      ref={boxRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      className="animate-fade-in w-full max-w-sm rounded-card border border-border bg-elevated p-6 shadow-elevated focus:outline-none"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={trapTab}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -302,14 +495,15 @@ export function EntitySearchSelect({
           onFocus={() => setOpen(true)}
         />
         {value.length > 0 && (
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-accent px-1.5 text-[10px] font-semibold text-white">
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-accent px-1.5 text-[10px] font-semibold text-on-accent">
             {value.length}
           </span>
         )}
         {open && (
           <>
-            <button type="button" className="fixed inset-0 z-10" aria-label="close" onClick={() => setOpen(false)} />
-            <ul className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-elevated py-1 shadow-elevated">
+            {/* z-popover: this list opens inside modals (CollectionTab) — above the dialog content. */}
+            <button type="button" className="fixed inset-0 z-popover" aria-label="close" onClick={() => setOpen(false)} />
+            <ul className="absolute z-popover mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-elevated py-1 shadow-elevated">
               {filtered.length === 0 ? (
                 <li className="px-3 py-2 text-tiny text-fg-muted">No matches</li>
               ) : filtered.map((o) => (
@@ -329,9 +523,9 @@ export function EntitySearchSelect({
           {value.slice(0, 6).map((id) => {
             const o = options.find((x) => x.value === id);
             return (
-              <button key={id} type="button" onClick={() => toggle(id)}
-                className="rounded-md bg-accent-subtle px-2 py-0.5 text-[11px] text-accent-text hover:bg-accent-subtle/70">
-                {o?.label ?? id.slice(0, 8)} ×
+              <button key={id} type="button" onClick={() => toggle(id)} aria-label={`Remove ${o?.label ?? id.slice(0, 8)}`}
+                className="inline-flex items-center gap-1 rounded-full bg-accent-subtle py-0.5 pl-2.5 pr-1.5 text-tiny font-medium text-accent-text hover:bg-accent/15">
+                {o?.label ?? id.slice(0, 8)} <span aria-hidden>×</span>
               </button>
             );
           })}
@@ -457,7 +651,7 @@ export function MenuPopover({
       </button>
       {open && createPortal(
         <div ref={menuRef} role="menu" style={style}
-          className={`fixed z-50 ${width} animate-fade-in rounded-[10px] border border-border bg-surface p-1 shadow-elevated`}>
+          className={`fixed z-popover ${width} animate-fade-in rounded-card border border-border bg-elevated p-1.5 shadow-elevated motion-reduce:animate-none`}>
           {children({ close: () => setOpen(false) })}
         </div>,
         document.body,
@@ -470,20 +664,57 @@ export function MenuPopover({
 export function MenuItem({ children, onSelect, tone = 'default', disabled = false, icon: Icon }: { children: ReactNode; onSelect: () => void; tone?: 'default' | 'danger' | 'success'; disabled?: boolean; icon?: React.ElementType }) {
   return (
     <button type="button" role="menuitem" onClick={onSelect} disabled={disabled}
-      className={`group flex w-full items-center gap-2.5 whitespace-nowrap rounded-[var(--radius)] px-3 py-2 text-left text-small transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        tone === 'danger' ? 'text-danger-text hover:bg-danger-bg' : tone === 'success' ? 'text-success-text hover:bg-success-bg' : 'text-fg hover:bg-slate-50 dark:hover:bg-slate-700/50'
+      className={`group flex w-full items-center gap-2.5 whitespace-nowrap rounded-[var(--radius)] px-3 py-2 text-left text-small font-medium transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-50 ${
+        tone === 'danger' ? 'text-danger-text hover:bg-danger-bg' : tone === 'success' ? 'text-success-text hover:bg-success-bg' : 'text-fg hover:bg-subtle'
       }`}>
-      {Icon && <Icon size={14} className={`shrink-0 transition-colors ${tone === 'danger' ? 'text-danger/80 group-hover:text-danger-text' : tone === 'success' ? 'text-success/80 group-hover:text-success-text' : 'text-fg-secondary group-hover:text-fg'}`} />}
+      {Icon && <Icon size={16} aria-hidden className={`shrink-0 transition-colors ${tone === 'danger' ? 'text-danger-text' : tone === 'success' ? 'text-success-text' : 'text-fg-secondary group-hover:text-fg'}`} />}
       {children}
     </button>
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+const LABELABLE = new Set(['input', 'select', 'textarea']);
+
+/**
+ * Label + control. When the child is a single native input/select/textarea the label is tied to it
+ * (htmlFor/id, generated if the control has none), so screen readers announce the field name and
+ * clicking the label focuses the control. The help hint sits beside the label, not inside it, so it
+ * isn't read as part of the field's name.
+ *
+ * Concept 05: the label turns accent while the field has focus; `data-help-label` / `data-help` feed
+ * the FieldHelpPanel. `error` (display only — validation stays where it is) shows a danger outline
+ * and the message under the control, tied to it with aria-invalid / aria-describedby.
+ */
+export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string; children: ReactNode }) {
+  const autoId = useId();
+  const errorId = `${autoId}-error`;
+  let control = children;
+  let htmlFor: string | undefined;
+  if (isValidElement(children) && typeof children.type === 'string' && LABELABLE.has(children.type)) {
+    const props = children.props as { id?: string; 'aria-describedby'?: string };
+    const existing = props.id;
+    htmlFor = existing ?? autoId;
+    const extra: Record<string, unknown> = {};
+    if (!existing) extra.id = autoId;
+    if (error) {
+      extra['aria-invalid'] = true;
+      extra['aria-describedby'] = [props['aria-describedby'], errorId].filter(Boolean).join(' ');
+    }
+    if (Object.keys(extra).length) control = cloneElement(children as ReactElement<Record<string, unknown>>, extra);
+  }
   return (
-    <div>
-      <label className="label">{label}{hint && <HelpHint text={hint} />}</label>
-      {children}
+    <div data-help-label={label} data-help={hint}
+      className={`group/field ${error ? '[&_.input]:!border-danger [&_.input]:ring-1 [&_.input]:ring-inset [&_.input]:ring-danger' : ''}`}>
+      <div className="mb-1.5 flex items-center">
+        <label className={`label !mb-0 transition-colors duration-fast ${error ? '!text-danger-text' : 'group-focus-within/field:text-accent-text'}`} htmlFor={htmlFor}>{label}</label>
+        {hint && <HelpHint text={hint} />}
+      </div>
+      {control}
+      {error && (
+        <p id={errorId} data-field-error className="mt-1.5 flex items-start gap-1.5 text-tiny text-danger-text">
+          <AlertCircle size={14} aria-hidden className="mt-px shrink-0" />{error}
+        </p>
+      )}
     </div>
   );
 }
@@ -516,7 +747,7 @@ export function UnavailableField({ label, children }: { label: string; children:
  */
 type SegmentedOption = string | { value: string; label: string };
 export function Segmented({
-  options, value, onChange, dots, labels, className,
+  options, value, onChange, dots, labels, className, ariaLabel, size = 'md',
 }: {
   options: readonly SegmentedOption[];
   value: string;
@@ -524,10 +755,15 @@ export function Segmented({
   dots?: Record<string, string>;
   labels?: Record<string, string>;
   className?: string;
+  /** Additive: names the group for screen readers. */
+  ariaLabel?: string;
+  /** Additive: `sm` for toolbars (date presets, chart type). */
+  size?: 'sm' | 'md';
 }) {
   const items = options.map((o) => (typeof o === 'string' ? { value: o, label: labels?.[o] ?? o } : o));
   return (
-    <div className={`flex w-full gap-1 rounded-[var(--radius)] border border-border bg-page p-1 shadow-[inset_0_1px_2px_rgb(2_6_23_/_0.06)] ${className ?? ''}`}>
+    <div role="group" aria-label={ariaLabel}
+      className={`flex w-full gap-1 rounded-full border border-border bg-subtle p-1 ${className ?? ''}`}>
       {items.map((o) => {
         const on = value === o.value;
         return (
@@ -536,8 +772,10 @@ export function Segmented({
             type="button"
             aria-pressed={on}
             onClick={() => onChange(o.value)}
-            className={`flex flex-1 basis-0 min-w-0 items-center justify-center gap-1.5 rounded-[calc(var(--radius)-3px)] px-3 py-2 text-small font-medium capitalize transition-colors ${
-              on ? 'bg-elevated text-fg shadow-sm ring-1 ring-inset ring-border' : 'text-fg-secondary hover:text-fg'
+            className={`flex flex-1 basis-0 min-w-0 items-center justify-center gap-1.5 rounded-full font-medium capitalize transition-colors duration-fast ${
+              size === 'sm' ? 'px-2.5 py-1 text-tiny' : 'px-3 py-2 text-small'
+            } ${
+              on ? 'bg-surface text-fg shadow-sm ring-1 ring-inset ring-border' : 'text-fg-secondary hover:text-fg'
             }`}
           >
             {dots && <span className={`h-2 w-2 shrink-0 rounded-full ${dots[o.value] ?? 'bg-fg-muted'}`} />}
@@ -549,23 +787,64 @@ export function Segmented({
   );
 }
 
-/** Horizontal tab strip (controlled). Used by the multi-section entity screens (offers, etc.). */
-export function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onChange: (t: string) => void }) {
+/** Horizontal tab strip (controlled). Used by the multi-section entity screens (offers, etc.).
+ * WAI-ARIA tabs: one tab stop, Left/Right/Home/End move between tabs (and select them).
+ * Below `sm` the strip scrolls sideways instead of wrapping, and the selected tab is scrolled into
+ * view horizontally (the page itself is never scrolled). */
+export function Tabs({ tabs, active, onChange, ariaLabel, counts }: {
+  tabs: string[]; active: string; onChange: (t: string) => void;
+  /** Additive: names the tab list for screen readers. */
+  ariaLabel?: string;
+  /** Additive: a small count badge per tab (only tabs present in the map show one). */
+  counts?: Record<string, number>;
+}) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const activeIdx = Math.max(0, tabs.indexOf(active));
+  useEffect(() => {
+    const box = listRef.current;
+    const el = refs.current[activeIdx];
+    if (!box || !el || box.scrollWidth <= box.clientWidth) return;
+    const b = box.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (r.left < b.left) box.scrollLeft += r.left - b.left - 8;
+    else if (r.right > b.right) box.scrollLeft += r.right - b.right + 8;
+  }, [activeIdx]);
+  const onKeyDown = (e: React.KeyboardEvent, i: number) => {
+    const n = tabs.length;
+    const next = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i - 1 + n) % n
+      : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    onChange(tabs[next]!);
+    refs.current[next]?.focus();
+  };
   return (
-    <div className="mb-6 flex flex-wrap gap-1 border-b border-border">
-      {tabs.map((t) => {
+    <div ref={listRef} role="tablist" aria-label={ariaLabel}
+      className="mb-6 flex flex-wrap gap-1 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:p-1 max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden">
+      {tabs.map((t, i) => {
         const on = t === active;
+        const count = counts?.[t];
         return (
           <button
             key={t}
+            ref={(el) => { refs.current[i] = el; }}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            tabIndex={i === activeIdx ? 0 : -1}
             onClick={() => onChange(t)}
-            className={`-mb-px whitespace-nowrap rounded-t-[var(--radius)] px-3.5 py-2 text-small font-medium transition-colors ${
+            onKeyDown={(e) => onKeyDown(e, i)}
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-small font-medium transition-colors duration-fast ${
               on
-                ? 'border-b-2 border-accent text-accent-text'
-                : 'text-fg-secondary hover:text-fg'
+                ? 'bg-accent-subtle text-accent-text'
+                : 'text-fg-secondary hover:bg-subtle hover:text-fg'
             }`}
           >
             {t}
+            {count !== undefined && (
+              <span className={`rounded-full px-1.5 text-tiny font-semibold tabular-nums ${on ? 'bg-surface text-accent-text' : 'bg-subtle text-fg-secondary'}`}>{count}</span>
+            )}
           </button>
         );
       })}
@@ -583,7 +862,14 @@ export function AnimatedNumber({ value, formatFn = String, animate = true, durat
       prevValue.current = 0;
       return;
     }
-    
+    // Reduced motion: show the figure straight away (the CSS reduced-motion rule can't reach a
+    // JS count-up).
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setDisplayValue(value);
+      prevValue.current = value;
+      return;
+    }
+
     const startValue = prevValue.current;
     const endValue = value;
     if (startValue === endValue) return;

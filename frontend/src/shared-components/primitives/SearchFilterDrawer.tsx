@@ -31,7 +31,7 @@ export function SearchFilterDrawer({ appliedCount, onClose, onApply, children }:
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
-      <button type="button" aria-label="Close filters" className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <button type="button" aria-label="Close filters" className="absolute inset-0 bg-[rgb(var(--flyout-scrim))]" onClick={onClose} />
       <aside className="relative flex h-full w-full max-w-[440px] flex-col border-l border-border bg-surface shadow-2xl animate-fade-in">
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div>
