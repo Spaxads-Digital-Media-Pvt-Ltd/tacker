@@ -36,7 +36,7 @@ import { useMemo, useState } from 'react';
 import { ChevronDown, Filter, Plus, Search, X } from 'lucide-react';
 import { useQuery } from '../../../lib/useApi';
 import { uaDimensionLabel } from '../../../lib/userAgentDisplay';
-import { Spinner, StateBlock } from '../../../shared-components/primitives/ui';
+import { Spinner, StateBlock, TableScroll } from '../../../shared-components/primitives/ui';
 import { DASH, num, useGraphRows, GraphCappedNote } from '../../../shared-components/primitives/ReportPageKit';
 import { combineCurrencies, currenciesOf, mixedTitle, resolveCurrency, showSortedWithinNote, withCurrenciesMetric, type RowCurrency } from '../../../lib/reportCurrency';
 import { CurrencyNotes, Money } from '../../../shared-components/primitives/ReportMoney';
@@ -173,6 +173,8 @@ function DimensionCard({
         {loading ? <Spinner /> : error ? <p className="text-small text-danger-text">{error}</p>
           : rows.length === 0 ? <p className="text-small text-fg-muted">No Data Available</p>
           : (
+            // Kept inside the card: a breakdown wider than its card scrolls sideways (shared TableScroll).
+            <TableScroll>
             <table className="premium-table">
               <thead className="text-tiny uppercase text-fg-muted">
                 <tr>
@@ -201,6 +203,7 @@ function DimensionCard({
                 })}
               </tbody>
             </table>
+            </TableScroll>
           )}
       </ReportBody>
     </ReportCard>

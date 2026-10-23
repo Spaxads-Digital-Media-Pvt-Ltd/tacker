@@ -15,6 +15,9 @@ export function money(v: number, currency = 'USD'): string {
   }
 }
 export const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
+/** The reporting `cr` metric — a 0–1 ratio (conversions ÷ clicks, see ReportView) — as a percentage
+ * with 2 places, "2.87%"; no value reads "0.00%". The detail pages' General-tab stats share it. */
+export const crPercent = (v: string | number | null | undefined): string => pct(Number(v ?? 0));
 
 const EXPORT_RATIO = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
 /**

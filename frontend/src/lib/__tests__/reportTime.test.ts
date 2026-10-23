@@ -2,7 +2,7 @@
 // TZ too (e.g. TZ=America/New_York) to see the ClickHouse case fail without the fix.
 import { describe, it } from 'vitest';
 import assert from 'node:assert';
-import { bucketLabel, formatReportDay, formatReportHour, parseReportTimestamp, reportBucketDay } from '../reportTime.ts';
+import { bucketLabel, formatReportDay, formatReportHour, formatReportHourShort, parseReportTimestamp, reportBucketDay } from '../reportTime.ts';
 
 describe('parseReportTimestamp', () => {
   it('reads a Postgres ISO string unchanged', () => {
@@ -48,5 +48,16 @@ describe('zoned buckets are labelled by their own wall time (D7)', () => {
     assert.strictEqual(bucketLabel('hour', '2026-10-13T05:00:00.000Z'), '2026-10-13 05:00');
     assert.strictEqual(bucketLabel('hour', '2026-10-13 05:00:00'), '2026-10-13 05:00');
     assert.strictEqual(bucketLabel('country', 'IN'), 'IN');
+  });
+});
+
+describe('formatReportHourShort (hourly chart labels)', () => {
+  it('reads the bucket’s own date and hour: "Oct 16 · 00:00"', () => {
+    assert.strictEqual(formatReportHourShort('2026-10-16T00:00:00.000Z'), 'Oct 16 · 00:00');
+    assert.strictEqual(formatReportHourShort('2026-10-03 17:00:00'), 'Oct 3 · 17:00');
+  });
+  it('a zoned bucket keeps its wall time (not shifted to UTC)', () => {
+    assert.strictEqual(formatReportHourShort('2026-10-13T00:00:00+05:30'), 'Oct 13 · 00:00');
+    assert.strictEqual(formatReportHourShort('2026-01-01T23:00:00-05:00'), 'Jan 1 · 23:00');
   });
 });

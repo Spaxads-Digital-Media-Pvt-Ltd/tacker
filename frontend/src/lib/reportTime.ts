@@ -51,6 +51,14 @@ export function formatReportHour(s: string): string {
   return `${w.m}/${w.d}/${w.y} ${w.h}:00`;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "Oct 16 · 00:00" — an hour bucket's own wall time in the report's zone, short (chart axis labels). */
+export function formatReportHourShort(s: string): string {
+  const w = wall(s);
+  return `${MONTHS[Number(w.m) - 1] ?? w.m} ${Number(w.d)} · ${w.h}:00`;
+}
+
 /** A Day / Hour dimension cell: "2026-10-13" / "2026-10-13 05:00"; any other dimension's value unchanged. */
 export function bucketLabel(dim: string, raw: string): string {
   if (dim !== 'day' && dim !== 'hour') return raw;

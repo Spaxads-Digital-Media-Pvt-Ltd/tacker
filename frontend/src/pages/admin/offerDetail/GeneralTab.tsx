@@ -7,6 +7,7 @@ import { CopyBox } from '../../../shared-components/panels/CopyBox';
 import { advertiserPostbackUrl, resolveTrackingHost } from '../../../lib/trackingLinks';
 import type { Offer, TrackingDomain } from '../../../types';
 import { moneyIn } from '../../../lib/moneyFormat';
+import { crPercent } from '../../../lib/reportMath';
 
 type Row = { id: string; [k: string]: unknown };
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
@@ -170,7 +171,7 @@ export function GeneralTab({ offer, advName, domains, base, onSaved }: {
                   <td className="py-2 pr-4">{money(statsRow?.margin, offer.currency)}</td>
                   <td className="py-2 pr-4 tabular-nums">{num(statsRow?.clicks)}</td>
                   <td className="py-2 pr-4 tabular-nums">{num(statsRow?.conversions)}</td>
-                  <td className="py-2 tabular-nums">{(Number(statsRow?.cr ?? 0) * 100).toFixed(2)}%</td>
+                  <td className="py-2 tabular-nums">{crPercent(statsRow?.cr)}</td>
                 </tr></tbody>
               </table>
             </div>

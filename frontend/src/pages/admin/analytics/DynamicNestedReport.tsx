@@ -53,7 +53,7 @@ import {
 } from '../../../lib/reportCurrency';
 import { moneyExportCells } from '../../../lib/reportExportCells';
 import { CurrencyNotes, Money, MoneyPct } from '../../../shared-components/primitives/ReportMoney';
-import { bucketLabel } from '../../../lib/reportTime';
+import { bucketLabel, formatReportHourShort } from '../../../lib/reportTime';
 import { useReportZone, type ZoneDays } from '../../../lib/useReportZone';
 import { zoneRangeParams } from '../../../lib/reportZone';
 
@@ -369,7 +369,9 @@ export default function DynamicNestedReport() {
     const dimKey = chronological ? 'day' : 'hour';
     const rows = [...graph.rows].sort((a, b) => (a.dimensions[dimKey] ?? '').localeCompare(b.dimensions[dimKey] ?? ''));
     return {
-      labels: rows.map((r) => (r.dimensions[dimKey] ?? '').slice(0, 10)),
+      // A single day is charted per hour: keep the raw bucket so the chart can show its hour (lib/reportTime).
+      labels: rows.map((r) => (dimKey === 'hour' ? r.dimensions[dimKey] ?? '' : (r.dimensions[dimKey] ?? '').slice(0, 10))),
+      hourly: dimKey === 'hour',
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
       // Revenue across points in different currencies isn't one comparable series — not plotted then.
@@ -559,7 +561,7 @@ export default function DynamicNestedReport() {
                   : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>}
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
               </div>
-              <MiniChart labels={graphSeries.labels} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
+              <MiniChart labels={graphSeries.labels} formatLabel={graphSeries.hourly ? formatReportHourShort : undefined} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
             </div>
           )
         )}

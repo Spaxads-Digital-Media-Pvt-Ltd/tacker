@@ -3,6 +3,7 @@ import { Badge, Spinner } from '../../../shared-components/primitives/ui';
 import { Icon } from '../../../shared-components/primitives/icons';
 import { useQuery } from '../../../lib/useApi';
 import { moneyIn } from '../../../lib/moneyFormat';
+import { crPercent } from '../../../lib/reportMath';
 import type { Publisher } from '../../../types';
 
 interface AggResult { rows: { dimensions: Record<string, string | null>; metrics: Record<string, string | number> }[] }
@@ -88,7 +89,7 @@ export function GeneralTab({ pub }: { pub: Publisher }) {
                   <td className="py-2 pr-4">{money(statsRow?.margin)}</td>
                   <td className="py-2 pr-4">{num(statsRow?.clicks)}</td>
                   <td className="py-2 pr-4">{num(statsRow?.conversions)}</td>
-                  <td className="py-2">{statsRow?.cr ?? 0}%</td>
+                  <td className="py-2 tabular-nums">{crPercent(statsRow?.cr)}</td>
                 </tr></tbody>
               </table>
             </div>

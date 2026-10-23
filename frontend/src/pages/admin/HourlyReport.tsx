@@ -52,7 +52,7 @@ import { ReportCard, ReportControls, DateRangeField, FiltersButton, ClearButton,
 import { REPORT_CONTROL as CONTROL } from '../../shared-components/primitives/reportControl';
 import { countryLabel } from '../../data/geo';
 import { flexReportPath } from '../../lib/flexReportLink';
-import { formatReportHour, reportBucketDay } from '../../lib/reportTime';
+import { formatReportHour, formatReportHourShort, reportBucketDay } from '../../lib/reportTime';
 import { useReportZone } from '../../lib/useReportZone';
 
 /** Max hours the Performance Graph pages in (200 per request, ~93 days); past this it shows a "narrow the range" note. */
@@ -274,7 +274,8 @@ export default function HourlyReport() {
   const graphSeries = useMemo(() => {
     const rows = [...graph.rows].sort((a, b) => (a.dimensions['hour'] ?? '').localeCompare(b.dimensions['hour'] ?? ''));
     return {
-      labels: rows.map((r) => (r.dimensions['hour'] ?? '').slice(0, 13)),
+      // Raw hour buckets; the chart formats them as "Oct 16 · 00:00" (the bucket's own wall time, lib/reportTime).
+      labels: rows.map((r) => r.dimensions['hour'] ?? ''),
       revenue: rows.map((r) => num(r.metrics['revenue'] ?? 0)),
       clicks: rows.map((r) => num(r.metrics['clicks'] ?? 0)),
       // Revenue across days in different currencies isn't one comparable series — not plotted then.
@@ -445,7 +446,7 @@ export default function HourlyReport() {
                   : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-3 rounded bg-accent-text" /> Revenue</span>}
                 <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 bg-fg-muted" /> Clicks</span>
               </div>
-              <MiniChart labels={graphSeries.labels} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
+              <MiniChart labels={graphSeries.labels} formatLabel={formatReportHourShort} revenue={isMixed(graphSeries.rc) ? null : graphSeries.revenue} clicks={graphSeries.clicks} />
             </div>
           )
         )}

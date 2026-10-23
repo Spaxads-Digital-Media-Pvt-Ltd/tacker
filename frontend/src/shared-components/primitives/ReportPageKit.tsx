@@ -47,7 +47,11 @@ export { money, pct, num, toIso, daysAgo, todayStr, deriveRow, type DerivedRow }
 
 /** `revenue: null` = not plotted (e.g. the days mix currencies, so their totals aren't comparable).
  * Drawn in real pixels (measured width) so the axis text is never stretched or squeezed. */
-export function MiniChart({ labels, revenue: revenueIn, clicks }: { labels: string[]; revenue: number[] | null; clicks: number[] }) {
+export function MiniChart({ labels, revenue: revenueIn, clicks, formatLabel = (l) => l.slice(5) }: {
+  labels: string[]; revenue: number[] | null; clicks: number[];
+  /** Axis text per label. Default: "YYYY-MM-DD" → "MM-DD"; hour buckets pass formatReportHourShort. */
+  formatLabel?: (label: string) => string;
+}) {
   const [box, measured] = useElementWidth();
   const revenue = revenueIn ?? [];
   const w = measured || 900, h = 240, padL = 40, padR = 40, padT = 12, padB = 24;
@@ -61,7 +65,7 @@ export function MiniChart({ labels, revenue: revenueIn, clicks }: { labels: stri
     ? `${revenue.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yRev(v).toFixed(1)}`).join(' ')} L${x(n - 1).toFixed(1)},${padT + plotH} L${x(0).toFixed(1)},${padT + plotH} Z`
     : '';
   const clickLine = clicks.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${yClick(v).toFixed(1)}`).join(' ');
-  const shortLabels = labels.map((l) => l.slice(5));
+  const shortLabels = labels.map(formatLabel);
   const xLabels = pickXLabels(shortLabels.map((_, i) => x(i)), shortLabels.map((l) => estimateLabelWidth(l, 11)), { left: padL, right: w - padR });
 
   // Colors use the real Section-0 tokens so the chart is theme-aware. (This previously referenced a

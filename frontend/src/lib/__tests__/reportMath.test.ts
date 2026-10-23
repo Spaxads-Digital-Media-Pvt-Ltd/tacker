@@ -1,7 +1,7 @@
 // Regression tests for the shared report math (lib/reportMath.ts) — imports the real module.
 import { describe, it } from 'vitest';
 import assert from 'node:assert';
-import { deriveRow, daysAgo, money, todayStr } from '../reportMath.ts';
+import { crPercent, deriveRow, daysAgo, money, todayStr } from '../reportMath.ts';
 
 describe('deriveRow', () => {
   // 100 gross clicks, 10 invalid → 90 valid; 20 conversions of every status, 6 approved.
@@ -55,5 +55,22 @@ describe('money', () => {
   });
   it('falls back to the code for a currency Intl does not know', () => {
     assert.strictEqual(money(2, 'ZZZZ'), 'ZZZZ 2.00');
+  });
+});
+
+describe('crPercent (General-tab CR)', () => {
+  it('reads the API cr as a 0–1 ratio and shows it as a percentage, like the offer page', () => {
+    assert.strictEqual(crPercent(0.0287), '2.87%');
+    assert.strictEqual(crPercent(0.0309), '3.09%');
+    assert.strictEqual(crPercent(1), '100.00%');
+    assert.strictEqual(crPercent(0), '0.00%');
+  });
+  it('accepts decimal text and treats a missing value as 0', () => {
+    assert.strictEqual(crPercent('0.0412'), '4.12%');
+    assert.strictEqual(crPercent(undefined), '0.00%');
+    assert.strictEqual(crPercent(null), '0.00%');
+  });
+  it('matches the offer page’s own formula for any ratio', () => {
+    for (const v of [0.00004, 0.01234, 0.5, 0.99995]) assert.strictEqual(crPercent(v), `${(Number(v) * 100).toFixed(2)}%`);
   });
 });
