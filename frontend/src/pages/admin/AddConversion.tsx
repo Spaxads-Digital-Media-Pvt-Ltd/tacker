@@ -21,6 +21,8 @@ import { api, ApiError } from '../../lib/api';
 import { checkMoneyInput } from '../../lib/moneyInput';
 import { useQuery } from '../../lib/useApi';
 import { PageHeader, Field } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 import type { Offer, Publisher } from '../../types';
 
 function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
@@ -110,12 +112,12 @@ export default function AddConversion() {
       <PageHeader title="Add Conversion" subtitle="Reporting › Conversion Imports › Add" action={
         <Link to="/app/reports/offline" className="btn-ghost">Back</Link>
       } />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Offer *">
               <select className="input" required value={form.offerId} onChange={(e) => set('offerId', e.target.value)}>
                 <option value="" disabled>Select Offer…</option>
@@ -182,12 +184,11 @@ export default function AddConversion() {
             </p>
           </Field>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/reports/offline" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy || !form.offerId || amountsInvalid}>{busy ? 'Adding…' : 'Add'}</button>
           </div>
-        </form>
-      </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/reports/offline" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Adding…' : 'Add', disabled: busy || !form.offerId || amountsInvalid }} />
+      </form>
     </>
   );
 }

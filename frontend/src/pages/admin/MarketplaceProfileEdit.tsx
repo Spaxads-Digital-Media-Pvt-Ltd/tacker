@@ -18,6 +18,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 import { useMutation, useQuery } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
@@ -110,6 +113,7 @@ function LogoUrlField({ value, onChange }: { value: string; onChange: (v: string
         <p className="mt-2 rounded-[var(--radius)] border border-warning-bg bg-warning-bg px-3 py-2 text-tiny text-warning-text">{normalized.warning}</p>
       )}
       {previewUrl && !previewError && (
+        // intentional content canvas — logos are authored for white; not a theme surface
         <img
           src={previewUrl}
           alt=""
@@ -209,20 +213,14 @@ export default function MarketplaceProfileEdit() {
     if (result) navigate('/app/marketplace/profile');
   };
 
-  const Footer = () => (
-    <div className="sticky bottom-0 mt-6 flex justify-end gap-2 border-t border-border bg-page py-4">
-      <button type="button" className="btn-ghost" onClick={() => navigate('/app/marketplace/profile')}>Cancel</button>
-      <button type="button" className="btn-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSubmit || busy} onClick={submit}>
-        {busy ? <Spinner /> : 'Request Changes'}
-      </button>
-    </div>
-  );
+  const socialFilled = (['socialTwitter', 'socialInstagram', 'socialMeta', 'socialTiktok', 'socialYoutube', 'socialLinkedin'] as const).filter((k) => d[k].trim()).length;
+  const customFilled = [d.customLinkLabel, d.customLinkUrl].filter((v) => v.trim()).length;
 
   return (
     <>
       <PageHeader title="Edit Marketplace Profile" subtitle="Marketplace › Profile › Edit" />
 
-      <div className="mb-6 flex gap-6 border-b border-border">
+      <div className="mb-6 flex gap-6 overflow-x-auto border-b border-border">
         {(['general', 'review'] as const).map((t) => (
           <button key={t} type="button" onClick={() => setTab(t)}
             className={`border-b-2 pb-2.5 text-small font-medium capitalize ${tab === t ? 'border-accent text-accent-text' : 'border-transparent text-fg-secondary hover:text-fg'}`}>
@@ -234,16 +232,16 @@ export default function MarketplaceProfileEdit() {
       {error && <p className="mb-4 text-small text-danger-text">{error}</p>}
 
       {tab === 'general' ? (
-        <div className="card">
-          <p className="mb-6 text-small text-fg-muted">Fields with an asterisk (*) are mandatory.</p>
-          <h3 className="mb-4 text-h3 font-medium text-fg">General Information</h3>
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
+          <FormSection id="marketplace-general" title="General Information">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
               <label className="label">Name to use in the Marketplace <span className="text-danger-text">*</span></label>
               <input className="input" value={d.name} onChange={(e) => set('name', e.target.value)} />
             </div>
             <LogoUrlField value={d.logoUrl} onChange={(v) => set('logoUrl', v)} />
-            <div className="lg:col-span-2">
+            <div className="md:col-span-2">
               <label className="label">Description <span className="text-danger-text">*</span></label>
               <textarea className="input min-h-24" value={d.description} onChange={(e) => set('description', e.target.value)} />
             </div>
@@ -251,8 +249,8 @@ export default function MarketplaceProfileEdit() {
             <div>
               <label className="label">Categories <span className="text-danger-text">*</span></label>
               <div className="mb-2 inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-                <button type="button" onClick={() => set('categoriesMode', 'targeted')} className={`px-3 py-1.5 text-tiny font-medium ${d.categoriesMode === 'targeted' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>Targeted (Up to 5)</button>
-                <button type="button" onClick={() => set('categoriesMode', 'all')} className={`px-3 py-1.5 text-tiny font-medium ${d.categoriesMode === 'all' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>All</button>
+                <button type="button" onClick={() => set('categoriesMode', 'targeted')} className={`px-3 py-1.5 text-tiny font-medium ${d.categoriesMode === 'targeted' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary'}`}>Targeted (Up to 5)</button>
+                <button type="button" onClick={() => set('categoriesMode', 'all')} className={`px-3 py-1.5 text-tiny font-medium ${d.categoriesMode === 'all' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary'}`}>All</button>
               </div>
               {d.categoriesMode === 'targeted' && (
                 <MultiSelect label="" options={MARKETPLACE_CATEGORIES} selected={d.categories} onChange={(v) => set('categories', v)} max={5} />
@@ -266,8 +264,8 @@ export default function MarketplaceProfileEdit() {
             <div>
               <label className="label">Geolocations Covered <span className="text-danger-text">*</span></label>
               <div className="mb-2 inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-                <button type="button" onClick={() => set('geolocationsMode', 'global')} className={`px-3 py-1.5 text-tiny font-medium ${d.geolocationsMode === 'global' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>Global</button>
-                <button type="button" onClick={() => set('geolocationsMode', 'specific')} className={`px-3 py-1.5 text-tiny font-medium ${d.geolocationsMode === 'specific' ? 'bg-accent text-white' : 'bg-surface text-fg-secondary'}`}>Specific</button>
+                <button type="button" onClick={() => set('geolocationsMode', 'global')} className={`px-3 py-1.5 text-tiny font-medium ${d.geolocationsMode === 'global' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary'}`}>Global</button>
+                <button type="button" onClick={() => set('geolocationsMode', 'specific')} className={`px-3 py-1.5 text-tiny font-medium ${d.geolocationsMode === 'specific' ? 'bg-accent text-on-accent' : 'bg-surface text-fg-secondary'}`}>Specific</button>
               </div>
               {d.geolocationsMode === 'specific' && (
                 countryOptions.length === 0
@@ -280,8 +278,9 @@ export default function MarketplaceProfileEdit() {
               <input className="input" placeholder="https://example.com" value={d.websiteUrl} onChange={(e) => set('websiteUrl', e.target.value)} />
             </div>
           </div>
+          </FormSection>
 
-          <h3 className="mb-1 mt-8 text-h3 font-medium text-fg">Contact</h3>
+          <FormSection id="marketplace-contact" title="Contact" className="border-t border-border pt-6">
           <div className="mb-4">
             <p className="mb-1 text-small font-medium text-fg">Visibility</p>
             <p className="mb-2 text-tiny text-fg-muted">Please choose how you would like your contact information to be shared. By checking Share Publicly, your contact information will be visible in your Marketplace card.</p>
@@ -289,7 +288,7 @@ export default function MarketplaceProfileEdit() {
               <input type="checkbox" className="chk" checked={d.contactSharePublicly} onChange={(e) => set('contactSharePublicly', e.target.checked)} /> Share Publicly
             </label>
           </div>
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>
               <label className="label">First Name <span className="text-danger-text">*</span></label>
               <input className="input" value={d.contactFirstName} onChange={(e) => set('contactFirstName', e.target.value)} />
@@ -308,8 +307,12 @@ export default function MarketplaceProfileEdit() {
             </div>
           </div>
 
-          <p className="mb-2 mt-6 text-small font-medium text-fg">Social Media <span className="text-fg-muted">(Optional)</span></p>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          </FormSection>
+
+          {/* Optional — open on load when any link is already filled. */}
+          <FormSection id="marketplace-social" title="Social Media (Optional)" collapsible defaultOpen={socialFilled > 0} filledCount={socialFilled}
+            summary="Twitter · Instagram · Meta · TikTok · YouTube · LinkedIn">
+          <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2">
             {([
               ['socialTwitter', 'Twitter URL'], ['socialInstagram', 'Instagram URL'], ['socialMeta', 'Meta URL'],
               ['socialTiktok', 'TikTok URL'], ['socialYoutube', 'YouTube URL'], ['socialLinkedin', 'LinkedIn URL'],
@@ -321,8 +324,11 @@ export default function MarketplaceProfileEdit() {
             ))}
           </div>
 
-          <p className="mb-2 mt-6 text-small font-medium text-fg">Custom Link</p>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          </FormSection>
+
+          <FormSection id="marketplace-custom-link" title="Custom Link" collapsible defaultOpen={customFilled > 0} filledCount={customFilled}
+            summary="Label · Link">
+          <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2">
             <div>
               <label className="label">Label</label>
               <input className="input" value={d.customLinkLabel} onChange={(e) => set('customLinkLabel', e.target.value)} />
@@ -332,8 +338,9 @@ export default function MarketplaceProfileEdit() {
               <input className="input" value={d.customLinkUrl} onChange={(e) => set('customLinkUrl', e.target.value)} />
             </div>
           </div>
+          </FormSection>
 
-          <div className="mt-6 rounded-card border border-border bg-accent-subtle p-4">
+          <div className="rounded-card border border-border bg-accent-subtle p-4">
             <p className="mb-1 text-small font-semibold text-fg">Important!</p>
             <p className="text-small text-fg-secondary">We don't suggest requiring a Default Marketplace Offer as it can add friction while connecting with new Advertisers.</p>
           </div>
@@ -343,9 +350,8 @@ export default function MarketplaceProfileEdit() {
             </label>
             <p className="mt-1 text-tiny text-fg-muted">Note: This setting will not apply to Advertisers you are currently working with.</p>
           </div>
-
-          <Footer />
-        </div>
+          </div>
+        </FormLayout>
       ) : (
         <div className="card">
           <p className="mb-6 text-small text-fg-muted">Fields with an asterisk (*) are mandatory.</p>
@@ -354,9 +360,10 @@ export default function MarketplaceProfileEdit() {
             <p className="text-small text-fg-secondary">If something doesn't look right, you can use the tabs above to return to the original form.</p>
           </div>
           <MarketplaceProfileCards profile={toPreviewProfile(d)} />
-          <Footer />
         </div>
       )}
+      <FormFooter cancel={<button type="button" className="btn-ghost" onClick={() => navigate('/app/marketplace/profile')}>Cancel</button>}
+        primary={{ label: busy ? <Spinner /> : 'Request Changes', type: 'button', disabled: Boolean(!canSubmit || busy), onClick: submit }} />
     </>
   );
 }

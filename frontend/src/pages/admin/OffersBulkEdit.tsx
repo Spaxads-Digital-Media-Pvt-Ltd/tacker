@@ -9,6 +9,9 @@ import { Plus, Trash2, Search } from 'lucide-react';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { patchEach } from '../../lib/bulk';
 import { PageHeader, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 import type { Offer, Advertiser } from '../../types';
 
 const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-fg-muted', draft: 'bg-warning', archived: 'bg-danger' };
@@ -149,15 +152,16 @@ export default function OffersBulkEdit() {
     <>
       <PageHeader title="Bulk Edit" subtitle="Offers › Bulk Edit" />
       {!reviewing ? (
-        <div className="space-y-4">
-          <div className="card">
-            <h3 className="mb-3 text-h3 font-medium text-fg">Offer Selection</h3>
+        <>
+        <FormLayout>
+          <div className="space-y-6">
+          <FormSection id="bulk-selection" title="Offer Selection">
             <div className="relative mb-3">
               <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
               <input className="input !pl-8" placeholder="Search in both, available and selected" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
-            <div className="grid grid-cols-1 gap-3 rounded-card border border-border sm:grid-cols-2">
-              <div className="border-b border-border sm:border-b-0 sm:border-r">
+            <div className="grid grid-cols-1 rounded-card border border-border md:grid-cols-2">
+              <div className="border-b border-border md:border-b-0 md:border-r">
                 <div className="flex items-center justify-between border-b border-border bg-page px-3 py-2">
                   <span className="text-small font-semibold text-fg">Available</span>
                   <button type="button" className="text-tiny font-medium text-accent-text hover:underline" onClick={selectAllAvailable}>Select All</button>
@@ -190,11 +194,11 @@ export default function OffersBulkEdit() {
                 </div>
               </div>
             </div>
-          </div>
+          </FormSection>
 
-          <div className="card">
+          <FormSection id="bulk-changes" className="border-t border-border pt-6">
             <div className="mb-3 flex items-center gap-2">
-              <h3 className="text-h3 font-medium text-fg">Changes</h3>
+              <h3 className="text-small font-semibold text-fg">Changes</h3>
               <button type="button" title="Add change" onClick={addChange}
                 className="grid h-7 w-7 place-items-center rounded-full border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg">
                 <Plus size={15} />
@@ -207,16 +211,16 @@ export default function OffersBulkEdit() {
               ))}
               {changes.length === 0 && <p className="text-small text-fg-muted">No changes yet. Click + to add one.</p>}
             </div>
+          </FormSection>
           </div>
-
-          <div className="flex justify-end gap-2">
-            <Link to="/app/offers" className="btn-ghost">Cancel</Link>
-            <button type="button" className="btn-primary" disabled={!canReview} onClick={() => setReviewing(true)}>Review</button>
-          </div>
-        </div>
+        </FormLayout>
+        <FormFooter key="pick" cancel={<Link to="/app/offers" className="btn-ghost">Cancel</Link>}
+          primary={{ label: 'Review', type: 'button', disabled: !canReview, onClick: () => setReviewing(true) }} />
+        </>
       ) : (
-        <div className="card space-y-4">
-          <h3 className="text-h3 font-medium text-fg">Review Changes</h3>
+        <>
+        <FormLayout title="Review Changes">
+        <div className="space-y-4">
           {error && <p className="text-small text-danger-text">{error}</p>}
           <p className="text-small text-fg-secondary">
             Applying <strong>{validChanges.length}</strong> change{validChanges.length === 1 ? '' : 's'} to <strong>{selectedIds.size}</strong> offer{selectedIds.size === 1 ? '' : 's'}.
@@ -226,11 +230,11 @@ export default function OffersBulkEdit() {
               <li key={c.id}>{FIELD_OPTIONS.find((f) => f.value === c.field)?.label}: <strong>{c.field === 'advertiserId' ? advName(c.value) : c.value}</strong></li>
             ))}
           </ul>
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <button type="button" className="btn-ghost" onClick={() => setReviewing(false)}>Back</button>
-            <button type="button" className="btn-primary" disabled={busy} onClick={apply}>{busy ? 'Applying…' : 'Confirm & Apply'}</button>
-          </div>
         </div>
+        </FormLayout>
+        <FormFooter key="review" cancel={<button type="button" className="btn-ghost" onClick={() => setReviewing(false)}>Back</button>}
+          primary={{ label: busy ? 'Applying…' : 'Confirm & Apply', type: 'button', disabled: busy, onClick: apply }} />
+        </>
       )}
     </>
   );

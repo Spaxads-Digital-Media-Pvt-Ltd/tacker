@@ -9,11 +9,21 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { Stepper } from '../../shared-components/panels/Stepper';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import { DualListPicker } from '../../shared-components/panels/DualListPicker';
 import { VARIABLES, COMPARISON_METHODS, type TrafficControl } from '../../data/trafficControls';
 import type { Advertiser, Offer, Publisher } from '../../types';
+
+const STEPS = ['General', 'Control'];
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'inactive', label: 'Inactive', tone: 'warning' }] as const;
 
 export default function OfferTrafficControlForm() {
   const { id } = useParams();
@@ -98,35 +108,22 @@ export default function OfferTrafficControlForm() {
     <>
       <PageHeader title={isEdit ? `Edit Traffic Control${existing ? `: ${existing.name}` : ''}` : 'Add Traffic Control'} subtitle={`Offers › Traffic Controls › ${isEdit ? 'Edit' : 'Add'}`} />
 
-      <div className="mx-auto max-w-2xl">
-      <div className="mb-6 flex items-center gap-6 border-b border-border pb-4">
-        {(['General', 'Control'] as const).map((label, i) => {
-          const n = (i + 1) as 1 | 2;
-          const on = step === n;
-          return (
-            <button key={label} type="button" onClick={() => setStep(n)} className="flex items-center gap-2">
-              <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-semibold ${on ? 'bg-accent text-accent-fg' : 'border border-border text-fg-secondary'}`}>{n}</span>
-              <span className={`text-small font-medium ${on ? 'text-accent-text' : 'text-fg-secondary'}`}>{label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="card space-y-6">
+      <Stepper steps={STEPS} current={step - 1} onStepClick={(i) => setStep((i + 1) as 1 | 2)} />
+      {/* No field hints anywhere → centred card on both steps; Up next sits below the card. */}
+      <FormLayout caption={`Step ${step}`} title={STEPS[step - 1]} requiredNote="Fields with an asterisk (*) are mandatory." layout="centered"
+        upNext={step === 1 ? <UpNextCard number={2} name={STEPS[1]!} required /> : undefined}>
+      <div className="space-y-6">
         {error && <p className="text-small text-danger-text">{error}</p>}
-        <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
         {step === 1 ? (
           <>
-            <div>
-              <h3 className="mb-4 text-h3 font-medium text-fg">General</h3>
-              <div className="max-w-md space-y-4">
+            <FormSection id="traffic-control-general" title="General">
+              <div className="space-y-4">
                 <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
-                <Field label="Status *">
-                  <Segmented options={['active', 'inactive']} value={status}
-                    onChange={(v) => setStatus(v as typeof status)}
-                    dots={{ active: 'bg-success', inactive: 'bg-warning' }} />
-                </Field>
+                <div>
+                  <span id="traffic-control-status-label" className="label">Status *</span>
+                  <StatusChoice options={STATUS_OPTIONS} value={status} onChange={setStatus} ariaLabelledby="traffic-control-status-label" />
+                </div>
                 <Field label="Effective Between *">
                   <Segmented
                     options={[{ value: 'always', label: 'Always On' }, { value: 'period', label: 'Set Specific Period' }]}
@@ -134,24 +131,18 @@ export default function OfferTrafficControlForm() {
                     onChange={(v) => setHasPeriod(v === 'period')} />
                 </Field>
                 {hasPeriod && (
-                  <div className="ml-3 flex gap-3 border-l-2 border-border pl-4">
+                  <div className="ml-3 grid grid-cols-1 gap-3 border-l-2 border-border pl-4 sm:grid-cols-2">
                     <Field label="From"><input type="date" className="input" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} /></Field>
                     <Field label="To"><input type="date" className="input" value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} /></Field>
                   </div>
                 )}
               </div>
-            </div>
+            </FormSection>
 
-            <div className="border-t border-border pt-6">
-              <h3 className="mb-4 text-h3 font-medium text-fg">Offer Selection</h3>
-              <Field label="Apply to specific offers or advertisers">
-                <button type="button" onClick={() => setOfferSelect((v) => !v)}
-                  className={`flex w-24 items-center rounded-full border border-border p-0.5 text-tiny font-medium ${offerSelect ? 'justify-end bg-accent-subtle text-accent-text' : 'justify-start text-fg-secondary'}`}>
-                  <span className="rounded-full bg-surface px-2 py-1 shadow-sm">{offerSelect ? 'Yes' : 'No'}</span>
-                </button>
-              </Field>
+            <FormSection id="traffic-control-offers" title="Offer Selection" className="border-t border-border pt-6">
+              <ToggleRow label="Apply to specific offers or advertisers" checked={offerSelect} onChange={() => setOfferSelect((v) => !v)} />
               {offerSelect && (
-                <div className="mt-4 max-w-2xl">
+                <div className="mt-4">
                   <div className="mb-3">
                     <Segmented options={['offers', 'advertisers']} value={offerScope} onChange={(v) => setOfferScope(v as typeof offerScope)} />
                   </div>
@@ -160,21 +151,15 @@ export default function OfferTrafficControlForm() {
                     : <DualListPicker options={advertiserOptions} selected={advertiserIds} onChange={setAdvertiserIds} />}
                 </div>
               )}
-            </div>
+            </FormSection>
 
-            <div className="border-t border-border pt-6">
-              <h3 className="mb-4 text-h3 font-medium text-fg">Partner Selection</h3>
-              <Field label="Apply to specific partner(s)">
-                <button type="button" onClick={() => setPartnerSelect((v) => !v)}
-                  className={`flex w-24 items-center rounded-full border border-border p-0.5 text-tiny font-medium ${partnerSelect ? 'justify-end bg-accent-subtle text-accent-text' : 'justify-start text-fg-secondary'}`}>
-                  <span className="rounded-full bg-surface px-2 py-1 shadow-sm">{partnerSelect ? 'Yes' : 'No'}</span>
-                </button>
-              </Field>
-              {partnerSelect && <div className="mt-4 max-w-2xl"><DualListPicker options={partnerOptions} selected={partnerIds} onChange={setPartnerIds} /></div>}
-            </div>
+            <FormSection id="traffic-control-partners" title="Partner Selection" className="border-t border-border pt-6">
+              <ToggleRow label="Apply to specific partner(s)" checked={partnerSelect} onChange={() => setPartnerSelect((v) => !v)} />
+              {partnerSelect && <div className="mt-4"><DualListPicker options={partnerOptions} selected={partnerIds} onChange={setPartnerIds} /></div>}
+            </FormSection>
           </>
         ) : (
-          <div className="max-w-md space-y-4">
+          <div className="space-y-4">
             <Field label="Control Type *">
               <Segmented options={['whitelist', 'blacklist']} value={controlType} onChange={(v) => setControlType(v as typeof controlType)} />
             </Field>
@@ -203,21 +188,17 @@ export default function OfferTrafficControlForm() {
           </div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          {step === 1 ? (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-traffic-controls')}>Cancel</button>
-              <button type="button" className="btn-primary" disabled={!step1Valid} onClick={() => setStep(2)}>Next</button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
-              <button type="button" className="btn-primary" disabled={busy || !step2Valid} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-            </>
-          )}
-        </div>
       </div>
-      </div>
+      </FormLayout>
+      {step === 1 ? (
+        <FormFooter key="general" stepText={`Step 1 of ${STEPS.length}`}
+          cancel={<button type="button" className="btn-ghost" onClick={() => nav('/app/offers-traffic-controls')}>Cancel</button>}
+          primary={{ label: `Next: ${STEPS[1]}`, shortLabel: 'Next', type: 'button', disabled: !step1Valid, onClick: () => setStep(2) }} />
+      ) : (
+        <FormFooter key="control" stepText={`Step 2 of ${STEPS.length}`}
+          cancel={<button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', type: 'button', disabled: Boolean(busy || !step2Valid), onClick: submit }} />
+      )}
     </>
   );
 }

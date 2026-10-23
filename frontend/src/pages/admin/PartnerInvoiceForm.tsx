@@ -12,19 +12,12 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { PartnerInvoice, Publisher } from '../../types';
 import { InvoiceCurrencyPicker } from './InvoiceCurrencyPicker';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
-
-function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
-      className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${value ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
-      <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-medium shadow ${value ? 'bg-success text-white' : 'bg-white text-fg-secondary'}`}>
-        {value ? 'Yes' : 'No'}
-      </span>
-    </button>
-  );
-}
 
 interface FormState {
   publisherId: string; periodStart: string; periodEnd: string; currency: string; hidden: boolean; paymentTerms: string; publicNotes: string; internalNotes: string;
@@ -80,10 +73,10 @@ export default function PartnerInvoiceForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Invoice' : 'Add Invoice'} subtitle={`Partners › Invoices › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+        <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
           <Field label="Partner *">
             {isEdit ? (
@@ -96,7 +89,7 @@ export default function PartnerInvoiceForm() {
             )}
           </Field>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <Field label="Start Date *">
               {isEdit ? <input className="input" disabled value={existing?.periodStart ?? ''} />
                 : <input type="date" className="input" required value={form.periodStart} onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))} />}
@@ -116,11 +109,8 @@ export default function PartnerInvoiceForm() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div>
-              <label className="label">Invoice Hidden From Partner</label>
-              <YesNoToggle value={form.hidden} onChange={(v) => setForm((f) => ({ ...f, hidden: v }))} />
-            </div>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-end">
+            <ToggleRow label="Invoice Hidden From Partner" checked={form.hidden} onChange={(v) => setForm((f) => ({ ...f, hidden: v }))} />
             <Field label="Payment Terms">
               <select className="input" value={form.paymentTerms} onChange={(e) => setForm((f) => ({ ...f, paymentTerms: e.target.value }))}>
                 <option value="">Select Payment Terms…</option>
@@ -129,19 +119,26 @@ export default function PartnerInvoiceForm() {
             </Field>
           </div>
 
-          <Field label="Public Notes">
-            <textarea className="input min-h-[70px]" value={form.publicNotes} onChange={(e) => setForm((f) => ({ ...f, publicNotes: e.target.value }))} />
-          </Field>
-          <Field label="Internal Notes">
-            <textarea className="input min-h-[70px]" value={form.internalNotes} onChange={(e) => setForm((f) => ({ ...f, internalNotes: e.target.value }))} />
-          </Field>
+          {/* Optional — create: collapsed; edit: open when the saved invoice has either (keyed so it
+              re-mounts once the record arrives — the form state is copied in by an effect). */}
+          <FormSection key={existing?.id ?? 'new'} id="partner-invoice-notes" title="Notes" collapsible summary="Public Notes · Internal Notes"
+            defaultOpen={Boolean(existing?.publicNotes?.trim() || existing?.internalNotes?.trim())}
+            filledCount={[form.publicNotes, form.internalNotes].filter((v) => v.trim()).length}>
+            <div className="space-y-4 pt-2">
+              <Field label="Public Notes">
+                <textarea className="input min-h-[70px]" value={form.publicNotes} onChange={(e) => setForm((f) => ({ ...f, publicNotes: e.target.value }))} />
+              </Field>
+              <Field label="Internal Notes">
+                <textarea className="input min-h-[70px]" value={form.internalNotes} onChange={(e) => setForm((f) => ({ ...f, internalNotes: e.target.value }))} />
+              </Field>
+            </div>
+          </FormSection>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/aff-invoices" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy || (!isEdit && previewPath !== null && !form.currency)}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/aff-invoices" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy || (!isEdit && previewPath !== null && !form.currency) }} />
         </form>
-      </div>
     </>
   );
 }

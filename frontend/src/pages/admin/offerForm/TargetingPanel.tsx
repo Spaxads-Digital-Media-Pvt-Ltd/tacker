@@ -7,6 +7,7 @@
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import { Segmented } from '../../../shared-components/primitives/ui';
+import { FormSection } from '../../../shared-components/forms/FormSection';
 import { useConfirm } from '../../../shared-components/primitives/confirm';
 import { normalizePostal } from '../../../lib/postal';
 import { countryName, loadCityNames, regionName, useRegions } from '../../../data/geo';
@@ -239,8 +240,7 @@ export function TargetingPanel({ targeting, onChange, deviceTypes, onDeviceTypes
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="mb-2 text-h3 font-medium text-fg">Inclusion/Exclusion Summary</h3>
+      <FormSection id="targeting-summary" title="Inclusion/Exclusion Summary">
         {active.length === 0 && deviceTypes.length === 0 ? (
           <p className="text-small italic text-fg-muted">No targeting rules configured — all traffic is allowed.</p>
         ) : (
@@ -263,10 +263,9 @@ export function TargetingPanel({ targeting, onChange, deviceTypes, onDeviceTypes
             ))}
           </div>
         )}
-      </div>
+      </FormSection>
 
-      <div>
-        <h3 className="mb-2 text-h3 font-medium text-fg">Device Characteristics</h3>
+      <FormSection id="targeting-device" title="Device Characteristics" className="border-t border-border pt-6">
         <CategoryPicker
           categories={Object.keys(DEVICE_KEYS)}
           badge={(c) => { const k = DEVICE_KEYS[c]; return k === 'deviceType' ? deviceTypes.length : (targeting[k as TargetingKey]?.values.length ?? 0); }}
@@ -278,7 +277,7 @@ export function TargetingPanel({ targeting, onChange, deviceTypes, onDeviceTypes
                   <div className="flex flex-wrap gap-2">
                     {DEVICES.map((d) => (
                       <button key={d} type="button" onClick={() => toggleDevice(d)}
-                        className={`rounded-full border px-4 py-1.5 text-small font-medium capitalize transition-colors ${deviceTypes.includes(d) ? 'border-accent bg-accent-subtle text-accent-text' : 'border-border bg-surface text-fg-secondary hover:bg-page'}`}>
+                        className={`rounded-full border px-4 py-1.5 text-small font-medium capitalize transition-colors ${deviceTypes.includes(d) ? 'border-accent-text bg-accent-subtle text-accent-text' : 'border-border bg-surface text-fg-secondary hover:bg-page'}`}>
                         {d}
                       </button>
                     ))}
@@ -290,18 +289,17 @@ export function TargetingPanel({ targeting, onChange, deviceTypes, onDeviceTypes
             return devicePanel(k);
           }}
         />
-      </div>
+      </FormSection>
 
-      <div>
-        <h3 className="mb-2 text-h3 font-medium text-fg">Geolocation</h3>
+      <FormSection id="targeting-geo" title="Geolocation" className="border-t border-border pt-6">
         <CategoryPicker
           categories={Object.keys(GEO_KEYS)}
           badge={(c) => targeting[GEO_KEYS[c]!]?.values.length ?? 0}
           panel={(c) => geoPanel(GEO_KEYS[c]!)}
         />
-      </div>
+      </FormSection>
 
-      <div className="space-y-2">
+      <div className="space-y-2" data-help-label="ZIP/Postal Code">
         <label className="label block">ZIP/Postal Code</label>
         <Segmented className="!w-auto inline-flex" options={[{ value: 'include', label: 'Include' }, { value: 'exclude', label: 'Exclude' }]}
           value={zipMode} onChange={(v) => updateZip(zipText, v as TargetingRule['mode'])} />
@@ -319,14 +317,13 @@ export function TargetingPanel({ targeting, onChange, deviceTypes, onDeviceTypes
         )}
       </div>
 
-      <div>
-        <h3 className="mb-2 text-h3 font-medium text-fg">IP Ranges</h3>
+      <FormSection id="targeting-ip" title="IP Ranges" className="border-t border-border pt-6">
         <CategoryPicker
           categories={Object.keys(IP_KEYS)}
           badge={(c) => targeting[IP_KEYS[c]!]?.values.length ?? 0}
           panel={(c) => { const k = IP_KEYS[c]!; return <RuleEditor key={k} dim={k} rule={targeting[k]} onChange={(r) => setRule(k, r)} />; }}
         />
-      </div>
+      </FormSection>
     </div>
   );
 }

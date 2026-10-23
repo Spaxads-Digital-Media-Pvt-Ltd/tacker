@@ -10,12 +10,20 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
 import { Stepper } from '../../shared-components/panels/Stepper';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 import type { Offer, Publisher, Advertiser } from '../../types';
 import { toDateInput, ruleAmountField, conditionError, SEPARATELY_BY_LABEL, SEPARATELY_BY_HINT } from '../../lib/customerValueRules';
 
 const STEPS = ['General', 'Timeframe', 'Behavior'];
+/** Steps with a required field — the Up next card's Required badge (Behavior: a payout or revenue). */
+const REQUIRED_STEPS = new Set([2]);
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'inactive', label: 'Inactive', tone: 'warning' }] as const;
 
 interface DataPoint { id: string; name: string; dataType: 'text' | 'number'; parameterKey: string }
 interface Condition { dataPointId: string; conditionLogic: 'any_value' | 'sum_of_values'; operator: string; value: string }
@@ -164,22 +172,24 @@ export default function CustomerValueRuleForm() {
     <>
       <PageHeader title={isEdit ? 'Edit Rule' : 'Add Rule'} subtitle="Customer Value › Payout & Revenue Rules" />
       <Stepper steps={STEPS} current={step} />
-      <div className="max-w-2xl mx-auto">
-        <div className="card">
-          <p className="mb-4 text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
+      <FormLayout caption={`Step ${step + 1}`} title={STEPS[step]} requiredNote="Fields with an asterisk (*) are mandatory." layout="centered"
+        upNext={step < STEPS.length - 1 ? <UpNextCard number={step + 2} name={STEPS[step + 1]!} required={REQUIRED_STEPS.has(step + 1)} /> : undefined}>
           {error && <p className="mb-4 text-small text-danger-text">{error}</p>}
 
           {step === 0 && (
-            <div className="space-y-5">
-              <h3 className="text-h3 font-medium text-fg">Basic Details</h3>
+            <div className="space-y-6">
+              <FormSection id="cv-basic" title="Basic Details">
+              <div className="space-y-5">
               <Field label="Name *"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
               <div>
-                <label className="label">Status *</label>
-                <Segmented options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} value={status} onChange={setStatus} />
+                <span id="cv-status-label" className="label">Status *</span>
+                <StatusChoice options={STATUS_OPTIONS} value={status as (typeof STATUS_OPTIONS)[number]['value']} onChange={setStatus} ariaLabelledby="cv-status-label" />
               </div>
+              </div>
+              </FormSection>
 
-              <h3 className="text-h3 font-medium text-fg">Scope</h3>
-              <p className="text-small text-fg-secondary">Choose how the rule applies to your Customer's Conversion Events.</p>
+              <FormSection id="cv-scope" title="Scope" description="Choose how the rule applies to your Customer's Conversion Events." className="border-t border-border pt-6">
+              <div className="space-y-5">
               <div>
                 <label className="label">Conversion Events Grouping *</label>
                 <Segmented options={[{ value: 'all_together', label: 'All Together' }, { value: 'separately_by', label: SEPARATELY_BY_LABEL }]} value={grouping} onChange={setGrouping} />
@@ -202,17 +212,21 @@ export default function CustomerValueRuleForm() {
                 <Segmented options={[{ value: 'all', label: 'All' }, { value: 'specific', label: 'Specific' }]} value={applyPartnersMode} onChange={setApplyPartnersMode} />
                 {applyPartnersMode === 'specific' && <div className="mt-2"><CheckboxList items={publishers ?? []} selected={applyPartnerIds} onChange={setApplyPartnerIds} /></div>}
               </div>
+              </div>
+              </FormSection>
             </div>
           )}
 
           {step === 1 && (
-            <div className="space-y-5">
-              <h3 className="text-h3 font-medium text-fg">Rule Duration</h3>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-6">
+              <FormSection id="cv-duration" title="Rule Duration">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Field label="Start Date"><input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field>
                 <Field label="End Date"><input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field>
               </div>
-              <h3 className="text-h3 font-medium text-fg">Goal Cycle</h3>
+              </FormSection>
+              <FormSection id="cv-goal-cycle" title="Goal Cycle" className="border-t border-border pt-6">
+              <div className="space-y-5">
               <Segmented options={[{ value: 'continuous', label: 'Continuous' }, { value: 'recurring', label: 'Recurring' }]} value={goalCycle} onChange={setGoalCycle} />
               {goalCycle === 'recurring' ? (
                 <Field label="Recurring Duration">
@@ -228,12 +242,15 @@ export default function CustomerValueRuleForm() {
                   )}
                 </>
               )}
+              </div>
+              </FormSection>
             </div>
           )}
 
           {step === 2 && (
-            <div className="space-y-5">
-              <h3 className="text-h3 font-medium text-fg">Set Goal Conditions</h3>
+            <div className="space-y-6">
+              <FormSection id="cv-conditions" title="Set Goal Conditions">
+              <div className="space-y-5">
               <Segmented options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} value={setGoalConditions ? 'yes' : 'no'} onChange={(v) => setSetGoalConditions(v === 'yes')} />
 
               {setGoalConditions && (
@@ -269,13 +286,16 @@ export default function CustomerValueRuleForm() {
                   {(!dataPoints || dataPoints.length === 0) && <p className="text-tiny text-fg-muted">Create a Custom Data Point first.</p>}
                 </div>
               )}
+              </div>
+              </FormSection>
 
-              <h3 className="text-h3 font-medium text-fg">Goal Achievement Outcome</h3>
+              <FormSection id="cv-outcome" title="Goal Achievement Outcome" className="border-t border-border pt-6">
+              <div className="space-y-5">
               <Field label="Outcome Frequency">
                 <Segmented options={[{ value: 'once_per_customer', label: 'Once per Customer' }, { value: 'every_cycle', label: 'Every Cycle' }]} value={outcomeFrequency} onChange={setOutcomeFrequency} />
               </Field>
               <p className="text-small text-fg-secondary">Set a Custom Payout and/or a Custom Revenue — at least one is required. Either overrides the conversion's normal value when this rule fires, in that conversion's own currency (no conversion between currencies).</p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Field label="Custom Payout (conversion's currency)">
                   <input className="input" inputMode="decimal" value={payoutValue} onChange={(e) => setPayoutValue(e.target.value)} placeholder="200.00"
                     aria-invalid={payoutField.error != null || undefined} />
@@ -287,20 +307,24 @@ export default function CustomerValueRuleForm() {
                   {revenueField.error && <p className="mt-1 text-tiny text-danger-text">{revenueField.error}</p>}
                 </Field>
               </div>
+              </div>
+              </FormSection>
             </div>
           )}
 
-          <div className="mt-8 flex justify-between gap-2 border-t border-border pt-4">
-            <button className="btn-ghost" onClick={() => nav('/app/customer-value')}>Cancel</button>
-            <div className="flex gap-2">
-              {step > 0 && <button className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button>}
-              <button className="btn-primary" disabled={busy || !name || (step === STEPS.length - 1 && (amountsMissing || amountsInvalid || conditionsInvalid))} onClick={next}>
-                {busy ? 'Saving…' : step === STEPS.length - 1 ? 'Save' : 'Next'}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      </FormLayout>
+      <FormFooter
+        stepText={`Step ${step + 1} of ${STEPS.length}`}
+        cancel={<>
+          <button className="btn-ghost" onClick={() => nav('/app/customer-value')}>Cancel</button>
+          {step > 0 && <button className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button>}
+        </>}
+        primary={{
+          label: busy ? 'Saving…' : step === STEPS.length - 1 ? 'Save' : `Next: ${STEPS[step + 1]}`,
+          shortLabel: busy || step === STEPS.length - 1 ? undefined : 'Next',
+          type: 'button', onClick: next,
+          disabled: Boolean(busy || !name || (step === STEPS.length - 1 && (amountsMissing || amountsInvalid || conditionsInvalid))),
+        }} />
     </>
   );
 }

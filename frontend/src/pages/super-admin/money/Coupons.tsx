@@ -9,6 +9,7 @@ import { useMutation, useQuery } from '../../../lib/useApi';
 import { usePlatformMe } from '../../../lib/platformMe';
 import { day } from '../../../lib/platformBilling';
 import { PageHeader, Table, Modal, Field, Segmented, Spinner, StateBlock, type Column } from '../../../shared-components/primitives/ui';
+import { ChoiceCards } from '../../../shared-components/forms/ChoiceCards';
 import { Chip } from '../kit';
 import { couponFor, couponOff, type Coupon } from '../../../lib/platformRevenue';
 
@@ -82,7 +83,7 @@ function CouponForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
           <Field label="Code" hint="Letters, digits, - and _"><input className="input font-mono uppercase" required maxLength={40} value={f.code} onChange={set('code')} placeholder="LAUNCH20" /></Field>
           <Field label="Name"><input className="input" required maxLength={120} value={f.name} onChange={set('name')} placeholder="Launch offer" /></Field>
         </div>
-        <Segmented options={[{ value: 'percent', label: 'Percent off' }, { value: 'amount', label: 'Amount off' }]} value={f.kind} onChange={(v) => setF((s) => ({ ...s, kind: v }))} />
+        <ChoiceCards options={[{ value: 'percent', label: 'Percent off' }, { value: 'amount', label: 'Amount off' }]} value={f.kind} onChange={(v) => setF((s) => ({ ...s, kind: v }))} />
         {f.kind === 'percent'
           ? <Field label="Percent off"><input className="input max-w-[10rem]" required inputMode="decimal" value={f.percentOff} onChange={set('percentOff')} placeholder="20" /></Field>
           : (

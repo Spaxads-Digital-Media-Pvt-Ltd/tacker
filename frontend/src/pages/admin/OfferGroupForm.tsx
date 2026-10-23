@@ -15,7 +15,13 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { PageHeader, Field } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { Stepper } from '../../shared-components/panels/Stepper';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import { DualListPicker } from '../../shared-components/panels/DualListPicker';
 import { CAP_TYPES, TIME_INTERVALS, TIME_INTERVAL_LABEL, CURRENCIES, type OfferGroup } from '../../data/offerGroups';
 import { NotEnforcedNote } from '../../shared-components/primitives/NotEnforcedBadge';
@@ -24,6 +30,10 @@ import type { Advertiser, Offer } from '../../types';
 type CapType = (typeof CAP_TYPES)[number]['key'];
 type Interval = (typeof TIME_INTERVALS)[number];
 interface CapRow { id: number; interval: Interval; value: string }
+const STEPS = ['General', 'Tracking & Controls'];
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active', tone: 'success' }, { value: 'paused', label: 'Paused', tone: 'warning' }, { value: 'deleted', label: 'Deleted', tone: 'danger' },
+] as const;
 
 export default function OfferGroupForm() {
   const { id } = useParams();
@@ -116,44 +126,29 @@ export default function OfferGroupForm() {
     <>
       <PageHeader title={isEdit ? `Edit Offer Group${existing ? `: ${existing.name}` : ''}` : 'Add Offer Group'} subtitle={`Offers › Groups › ${isEdit ? 'Edit' : 'Add'}`} />
 
-      <div className="mx-auto max-w-2xl">
-      <div className="mb-6 flex items-center gap-6 border-b border-border pb-4">
-        {(['General', 'Tracking & Controls'] as const).map((label, i) => {
-          const n = (i + 1) as 1 | 2;
-          const on = step === n;
-          return (
-            <button key={label} type="button" onClick={() => setStep(n)} className="flex items-center gap-2">
-              <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-semibold ${on ? 'bg-accent text-accent-fg' : 'border border-border text-fg-secondary'}`}>{n}</span>
-              <span className={`text-small font-medium ${on ? 'text-accent-text' : 'text-fg-secondary'}`}>{label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="card space-y-5">
+      <Stepper steps={STEPS} current={step - 1} onStepClick={(i) => setStep((i + 1) as 1 | 2)} />
+      {/* No field hints anywhere → centred card on both steps; Up next sits below the card. */}
+      <FormLayout caption={`Step ${step}`} title={STEPS[step - 1]} requiredNote="Fields with an asterisk (*) are mandatory." layout="centered"
+        upNext={step === 1 ? <UpNextCard number={2} name={STEPS[1]!} /> : undefined}>
+      <div className="space-y-5">
         {error && <p className="text-small text-danger-text">{error}</p>}
-        <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
         {step === 1 ? (
           <div className="space-y-4">
-            <div className="max-w-md"><Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
-            <div className="max-w-md"><Field label="Status *">
-              <Segmented
-                options={['active', 'paused', 'deleted']}
-                value={status}
-                onChange={(v) => setStatus(v as typeof status)}
-                dots={{ active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' }}
-              />
-            </Field></div>
+            <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
+            <div>
+              <span id="offer-group-status-label" className="label">Status *</span>
+              <StatusChoice options={STATUS_OPTIONS} value={status} onChange={setStatus} ariaLabelledby="offer-group-status-label" />
+            </div>
 
-            <div className="flex max-w-2xl items-end gap-2">
-              <div className="flex-1"><Field label="Advertiser *">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
+              <div><Field label="Advertiser *">
                 <select className="input" required value={advertiserId} onChange={(e) => { setAdvertiserId(e.target.value); setOfferIds([]); }}>
                   <option value="">Select Advertiser…</option>
                   {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.ref != null ? `(${a.ref}) ${a.name}` : a.name}</option>)}
                 </select>
               </Field></div>
-              <div className="w-56"><Field label="Currency *">
+              <div><Field label="Currency *">
                 <select className="input" value={currency} onChange={(e) => { currencyTouched.current = true; setCurrency(e.target.value); }}>
                   {currencyOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
@@ -161,22 +156,19 @@ export default function OfferGroupForm() {
             </div>
 
             {advertiserId && (
-              <div className="ml-3 max-w-2xl border-l-2 border-border pl-4">
+              <div className="ml-3 border-l-2 border-border pl-4">
                 <Field label="Offers *"><DualListPicker options={offerOptions} selected={offerIds} onChange={setOfferIds} /></Field>
               </div>
             )}
 
-            <div className="max-w-md"><Field label="Labels"><textarea className="input min-h-[70px]" value={labels} onChange={(e) => setLabels(e.target.value)} /></Field></div>
-            <div className="max-w-md"><Field label="Notes (internal)"><textarea className="input min-h-[70px]" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field></div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Labels"><textarea className="input min-h-[70px]" value={labels} onChange={(e) => setLabels(e.target.value)} /></Field>
+              <Field label="Notes (internal)"><textarea className="input min-h-[70px]" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+            </div>
           </div>
         ) : (
-          <div className="max-w-2xl space-y-5">
-            <Field label="Enable Caps">
-              <button type="button" onClick={() => setCapsEnabled((v) => !v)}
-                className={`flex w-24 items-center rounded-full border border-border p-0.5 text-tiny font-medium ${capsEnabled ? 'justify-end bg-accent-subtle text-accent-text' : 'justify-start text-fg-secondary'}`}>
-                <span className="rounded-full bg-surface px-2 py-1 shadow-sm">{capsEnabled ? 'Yes' : 'No'}</span>
-              </button>
-            </Field>
+          <div className="space-y-5">
+            <ToggleRow label="Enable Caps" checked={capsEnabled} onChange={() => setCapsEnabled((v) => !v)} />
             {/* Nothing reads offer-group caps on the click or conversion path; the offers' own caps
                 (Offer → Tracking & Controls) are the ones that block traffic. */}
             <NotEnforcedNote />
@@ -214,21 +206,17 @@ export default function OfferGroupForm() {
           </div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          {step === 1 ? (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-groups')}>Cancel</button>
-              <button type="button" className="btn-primary" disabled={!name || !advertiserId || offerIds.length === 0} onClick={() => setStep(2)}>Next</button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
-              <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-            </>
-          )}
-        </div>
       </div>
-      </div>
+      </FormLayout>
+      {step === 1 ? (
+        <FormFooter key="general" stepText={`Step 1 of ${STEPS.length}`}
+          cancel={<button type="button" className="btn-ghost" onClick={() => nav('/app/offers-groups')}>Cancel</button>}
+          primary={{ label: `Next: ${STEPS[1]}`, shortLabel: 'Next', type: 'button', disabled: !name || !advertiserId || offerIds.length === 0, onClick: () => setStep(2) }} />
+      ) : (
+        <FormFooter key="caps" stepText={`Step 2 of ${STEPS.length}`}
+          cancel={<button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', type: 'button', disabled: busy, onClick: submit }} />
+      )}
     </>
   );
 }

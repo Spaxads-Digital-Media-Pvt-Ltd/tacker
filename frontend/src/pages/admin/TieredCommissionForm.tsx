@@ -13,6 +13,13 @@ import { Plus, Trash2, Search, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { Stepper } from '../../shared-components/panels/Stepper';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import type { TieredCommission, TieredGoal, TieredVariable, TieredAction, TimePeriod, Offer, Publisher, Advertiser } from '../../types';
 
 const STEPS = ['General', 'Settings'] as const;
@@ -30,16 +37,7 @@ const ACTION_OPTIONS: { value: TieredAction; label: string; unit: string }[] = [
   { value: 'increase_pct', label: 'Increase (Percentage)', unit: '%' },
 ];
 
-function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
-      className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${value ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
-      <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-medium shadow ${value ? 'bg-success text-white' : 'bg-white text-fg-secondary'}`}>
-        {value ? 'Yes' : 'No'}
-      </span>
-    </button>
-  );
-}
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'inactive', label: 'Inactive', tone: 'warning' }] as const;
 
 function MultiSelectPicker({
   label, options, selected, onChange,
@@ -166,47 +164,30 @@ export default function TieredCommissionForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Tiered Commission' : 'Add Tiered Commission'} subtitle={`Advertisers › Tiered Commissions › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-3xl mx-auto">
-        <div className="mb-6 flex items-center gap-3">
-          {STEPS.map((s, i) => (
-            <div key={s} className="flex items-center gap-3">
-              <button type="button" onClick={() => (i === 0 || generalValid) && setStep(i)}
-                className={`flex items-center gap-2 text-small font-medium ${step === i ? 'text-accent-text' : 'text-fg-secondary'}`}>
-                <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny ${step === i ? 'bg-accent-text text-white' : 'border border-border'}`}>{i + 1}</span>
-                {s}
-              </button>
-              {i < STEPS.length - 1 && <div className="h-px w-12 bg-border" />}
-            </div>
-          ))}
-        </div>
-
-        <form onSubmit={submit} className="card space-y-6">
+      <Stepper steps={STEPS} current={step} onStepClick={(i) => (i === 0 || generalValid) && setStep(i)} />
+        <form onSubmit={submit}>
+        <FormLayout caption={`Step ${step + 1}`} title={STEPS[step]} requiredNote="Fields with an asterisk (*) are mandatory."
+          layout="centered" upNext={step === 0 ? <UpNextCard number={2} name={STEPS[1]} required /> : undefined}>
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
           {step === 0 && (
             <div className="space-y-5">
               <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
               <div>
-                <label className="label">Status *</label>
-                <Segmented options={['active', 'inactive']} value={form.status} onChange={(v) => set('status', v as FormState['status'])} dots={{ active: 'bg-success', inactive: 'bg-warning' }} />
+                <span id="tiered-status-label" className="label">Status *</span>
+                <StatusChoice options={STATUS_OPTIONS} value={form.status} onChange={(v) => set('status', v)} ariaLabelledby="tiered-status-label" />
               </div>
               <Field label="Notes"><textarea className="input min-h-[60px]" value={form.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
 
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                <div>
-                  <label className="label">Enable Start Date</label>
-                  <div className="flex items-center gap-2">
-                    <YesNoToggle value={form.hasStart} onChange={(v) => set('hasStart', v)} />
-                    {form.hasStart && <input type="date" className="input" value={form.effectiveStart} onChange={(e) => set('effectiveStart', e.target.value)} />}
-                  </div>
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
+                <div className="space-y-2">
+                  <ToggleRow label="Enable Start Date" checked={form.hasStart} onChange={(v) => set('hasStart', v)} />
+                  {form.hasStart && <input type="date" className="input" aria-label="Start date" value={form.effectiveStart} onChange={(e) => set('effectiveStart', e.target.value)} />}
                 </div>
-                <div>
-                  <label className="label">Enable End Date</label>
-                  <div className="flex items-center gap-2">
-                    <YesNoToggle value={form.hasEnd} onChange={(v) => set('hasEnd', v)} />
-                    {form.hasEnd && <input type="date" className="input" min={form.effectiveStart || undefined} value={form.effectiveEnd} onChange={(e) => set('effectiveEnd', e.target.value)} />}
-                  </div>
+                <div className="space-y-2">
+                  <ToggleRow label="Enable End Date" checked={form.hasEnd} onChange={(v) => set('hasEnd', v)} />
+                  {form.hasEnd && <input type="date" className="input" aria-label="End date" min={form.effectiveStart || undefined} value={form.effectiveEnd} onChange={(e) => set('effectiveEnd', e.target.value)} />}
                 </div>
               </div>
 
@@ -220,33 +201,26 @@ export default function TieredCommissionForm() {
               </div>
 
               <div>
-                <label className="label">Apply to specific Affiliates</label>
-                <YesNoToggle value={form.hasPartners} onChange={(v) => set('hasPartners', v)} />
+                <ToggleRow label="Apply to specific Affiliates" checked={form.hasPartners} onChange={(v) => set('hasPartners', v)} />
                 {form.hasPartners && (
                   <div className="mt-3">
                     <MultiSelectPicker label="Partners" options={partnerOptions} selected={form.partnerIds} onChange={(ids) => set('partnerIds', ids)} />
                   </div>
                 )}
               </div>
-
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <Link to="/app/adv-tiered-commissions" className="btn-ghost">Cancel</Link>
-                <button type="button" className="btn-primary" disabled={!generalValid} onClick={() => setStep(1)}>Next</button>
-              </div>
             </div>
           )}
 
           {step === 1 && (
             <div className="space-y-6">
-              <div>
-                <h3 className="mb-3 text-h3 font-medium text-fg">Frequency</h3>
+              <FormSection id="tiered-frequency" title="Frequency">
                 <Field label="Time Period *">
                   <select className="input" required value={form.timePeriod} onChange={(e) => set('timePeriod', e.target.value as TimePeriod)}>
                     <option value="">Select Time Period…</option>
                     {TIME_PERIOD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </Field>
-              </div>
+              </FormSection>
 
               <div>
                 <div className="mb-3 flex items-center gap-2">
@@ -271,14 +245,11 @@ export default function TieredCommissionForm() {
                               <input type="number" min={0} className="input" required value={goal.minValue} onChange={(e) => updateGoal(i, { ...goal, minValue: Number(e.target.value) })} />
                             </Field>
                           </div>
-                          <div>
-                            <label className="label">Add Upper Bound</label>
-                            <div className="flex items-center gap-2">
-                              <YesNoToggle value={goal.maxValue != null} onChange={(v) => updateGoal(i, { ...goal, maxValue: v ? goal.minValue + 1 : null })} />
-                              {goal.maxValue != null && (
-                                <input type="number" min={goal.minValue} className="input !w-32" value={goal.maxValue} onChange={(e) => updateGoal(i, { ...goal, maxValue: Number(e.target.value) })} />
-                              )}
-                            </div>
+                          <div className="space-y-2">
+                            <ToggleRow label="Add Upper Bound" checked={goal.maxValue != null} onChange={(v) => updateGoal(i, { ...goal, maxValue: v ? goal.minValue + 1 : null })} />
+                            {goal.maxValue != null && (
+                              <input type="number" min={goal.minValue} className="input !w-32" aria-label="Upper bound" value={goal.maxValue} onChange={(e) => updateGoal(i, { ...goal, maxValue: Number(e.target.value) })} />
+                            )}
                           </div>
                         </div>
                         <button type="button" onClick={() => removeGoal(i)} title="Remove goal"
@@ -292,12 +263,10 @@ export default function TieredCommissionForm() {
                 </div>
               </div>
 
-              <div className="border-t border-border pt-5">
-                <h3 className="mb-3 text-h3 font-medium text-fg">Revenue &amp; Payout</h3>
+              <FormSection id="tiered-revenue-payout" title="Revenue & Payout" className="border-t border-border pt-6">
                 <div className="space-y-4">
                   <div>
-                    <label className="label">Enable Payout Setting</label>
-                    <YesNoToggle value={form.payoutEnabled} onChange={(v) => set('payoutEnabled', v)} />
+                    <ToggleRow label="Enable Payout Setting" checked={form.payoutEnabled} onChange={(v) => set('payoutEnabled', v)} />
                     {form.payoutEnabled && (
                       <div className="mt-3 grid grid-cols-2 gap-3">
                         <Field label="Action *">
@@ -313,8 +282,7 @@ export default function TieredCommissionForm() {
                     )}
                   </div>
                   <div>
-                    <label className="label">Enable Revenue Setting</label>
-                    <YesNoToggle value={form.revenueEnabled} onChange={(v) => set('revenueEnabled', v)} />
+                    <ToggleRow label="Enable Revenue Setting" checked={form.revenueEnabled} onChange={(v) => set('revenueEnabled', v)} />
                     {form.revenueEnabled && (
                       <div className="mt-3 grid grid-cols-2 gap-3">
                         <Field label="Action *">
@@ -337,16 +305,22 @@ export default function TieredCommissionForm() {
                     )}
                   </div>
                 </div>
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <button type="button" className="btn-ghost" onClick={() => setStep(0)}>Back</button>
-                <button type="submit" className="btn-primary" disabled={busy || !settingsValid}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-              </div>
+              </FormSection>
             </div>
           )}
+          </div>
+        </FormLayout>
+        {/* Keyed per step: Next (type=button) and Save (type=submit) are separate elements, as before. */}
+        {step === 0 ? (
+          <FormFooter key="general" stepText={`Step 1 of ${STEPS.length}`}
+            cancel={<Link to="/app/adv-tiered-commissions" className="btn-ghost">Cancel</Link>}
+            primary={{ label: `Next: ${STEPS[1]}`, shortLabel: 'Next', type: 'button', disabled: !generalValid, onClick: () => setStep(1) }} />
+        ) : (
+          <FormFooter key="settings" stepText={`Step 2 of ${STEPS.length}`}
+            cancel={<button type="button" className="btn-ghost" onClick={() => setStep(0)}>Back</button>}
+            primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', type: 'submit', disabled: Boolean(busy || !settingsValid) }} />
+        )}
         </form>
-      </div>
     </>
   );
 }

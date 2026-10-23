@@ -7,23 +7,16 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import type { CouponCode, Offer, Publisher } from '../../types';
 
-function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
-      className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${value ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
-      <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-medium shadow ${value ? 'bg-success text-white' : 'bg-white text-fg-secondary'}`}>
-        {value ? 'Yes' : 'No'}
-      </span>
-    </button>
-  );
-}
-
-const STATUSES = ['active', 'disabled'] as const;
-const STATUS_LABEL: Record<string, string> = { active: 'Active', disabled: 'Paused' };
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', disabled: 'bg-warning' };
+// Paused maps onto this table's existing 'disabled' value (the value sent is unchanged).
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'disabled', label: 'Paused', tone: 'warning' }] as const;
 
 const toDateInput = (iso: string | null) => (iso ? iso.slice(0, 10) : '');
 
@@ -79,22 +72,19 @@ export default function CouponCodeForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Coupon Code' : 'Add Coupon Code'} subtitle={`Partners › Coupon Codes › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
             <Field label="Coupon Code *">
               <input className="input" required value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} />
             </Field>
             <div>
-              <label className="label">Status *</label>
-              <Segmented options={STATUSES} value={form.status} onChange={(v) => setForm((f) => ({ ...f, status: v as FormState['status'] }))} labels={STATUS_LABEL} dots={STATUS_DOT} />
+              <span id="coupon-status-label" className="label">Status *</span>
+              <StatusChoice options={STATUS_OPTIONS} value={form.status} onChange={(v) => setForm((f) => ({ ...f, status: v }))} ariaLabelledby="coupon-status-label" />
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
             <Field label="Offer *">
               <select className="input" required value={form.offerId} onChange={(e) => setForm((f) => ({ ...f, offerId: e.target.value }))}>
                 <option value="">Select an offer…</option>
@@ -109,41 +99,42 @@ export default function CouponCodeForm() {
             </Field>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div>
-              <label className="label">Set Start Date</label>
-              <div className="flex items-center gap-3">
-                <YesNoToggle value={form.setStart} onChange={(v) => setForm((f) => ({ ...f, setStart: v }))} />
+          {/* Optional — create: collapsed; edit: open when the saved coupon has a value (keyed so it
+              re-mounts once the record arrives — the form state is copied in by an effect). */}
+          <FormSection key={`schedule-${existing?.id ?? 'new'}`} id="coupon-schedule" title="Schedule" collapsible summary="Set Start Date · Set End Date"
+            defaultOpen={Boolean(existing?.startsAt || existing?.endsAt)} filledCount={(form.setStart ? 1 : 0) + (form.setEnd ? 1 : 0)}>
+            <div className="grid grid-cols-1 gap-5 pt-2 md:grid-cols-2 md:items-start">
+              <div className="space-y-2">
+                <ToggleRow label="Set Start Date" checked={form.setStart} onChange={(v) => setForm((f) => ({ ...f, setStart: v }))} />
                 {form.setStart && (
-                  <input type="date" className="input" value={form.startsAt} onChange={(e) => setForm((f) => ({ ...f, startsAt: e.target.value }))} />
+                  <input type="date" className="input" aria-label="Start date" value={form.startsAt} onChange={(e) => setForm((f) => ({ ...f, startsAt: e.target.value }))} />
                 )}
               </div>
-            </div>
-            <div>
-              <label className="label">Set End Date</label>
-              <div className="flex items-center gap-3">
-                <YesNoToggle value={form.setEnd} onChange={(v) => setForm((f) => ({ ...f, setEnd: v }))} />
+              <div className="space-y-2">
+                <ToggleRow label="Set End Date" checked={form.setEnd} onChange={(v) => setForm((f) => ({ ...f, setEnd: v }))} />
                 {form.setEnd && (
-                  <input type="date" className="input" value={form.endsAt} onChange={(e) => setForm((f) => ({ ...f, endsAt: e.target.value }))} />
+                  <input type="date" className="input" aria-label="End date" value={form.endsAt} onChange={(e) => setForm((f) => ({ ...f, endsAt: e.target.value }))} />
                 )}
               </div>
             </div>
+          </FormSection>
+
+          <FormSection key={`notes-${existing?.id ?? 'new'}`} id="coupon-notes" title="Notes" collapsible summary="Description · Internal Notes"
+            defaultOpen={Boolean(existing?.description || existing?.notes)} filledCount={[form.description, form.notes].filter((v) => v.trim()).length}>
+            <div className="space-y-4 pt-2">
+              <Field label="Description">
+                <textarea className="input min-h-[90px]" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+              </Field>
+              <Field label="Internal Notes">
+                <input className="input" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+              </Field>
+            </div>
+          </FormSection>
           </div>
-
-          <Field label="Description">
-            <textarea className="input min-h-[90px]" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-          </Field>
-
-          <Field label="Internal Notes">
-            <input className="input" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
-          </Field>
-
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/aff-coupons" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-          </div>
-        </form>
-      </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/aff-coupons" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy }} />
+      </form>
     </>
   );
 }

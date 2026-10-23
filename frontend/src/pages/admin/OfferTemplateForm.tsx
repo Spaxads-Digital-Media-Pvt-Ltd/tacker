@@ -11,6 +11,8 @@ import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 import { HelpIcon } from './controlCenter/shared';
 import { useFieldSpecs, type Template } from '../../data/offerTemplateFields';
 
@@ -59,18 +61,18 @@ export default function OfferTemplateForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Template' : 'Add Template'} subtitle={`Offers › Offer Templates › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="mx-auto max-w-2xl">
-      <div className="card space-y-5">
+      <FormLayout>
+      <div className="space-y-5">
         {error && <p className="text-small text-danger-text">{error}</p>}
-        <div className="flex flex-wrap items-start justify-between gap-6">
-          <div className="max-w-md flex-1"><Field label="Template Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0 flex-1"><Field label="Template Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
           <label className="flex items-center gap-1.5 pt-6 text-small font-medium text-fg">
             Use as default <HelpIcon text="This template will be pre-selected whenever a new offer is created from a template." />
             <input type="checkbox" className="chk ml-1" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
           </label>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 border-t border-border pt-5">
           <label className="text-small font-semibold text-fg">Prefilled Fields</label>
           <button type="button" onClick={addRow} title="Add a field" className="grid h-7 w-7 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-accent-subtle hover:text-fg"><Plus size={14} /></button>
         </div>
@@ -80,33 +82,31 @@ export default function OfferTemplateForm() {
             const spec = specs.find((s) => s.key === row.key);
             return (
               <div key={row.id} className="ml-3 flex items-start gap-2 border-l-2 border-border pl-4">
-                <div className="w-full max-w-md rounded-card border border-border bg-page p-3">
-                  <button type="button" onClick={() => toggleOpen(row.id)} className="mb-2 flex w-full items-center gap-1.5 text-left text-small font-medium text-fg-secondary hover:text-fg">
+                <div className="w-full min-w-0 rounded-card border border-border bg-page p-3">
+                  <button type="button" aria-expanded={row.open} aria-controls={`template-row-${row.id}`} onClick={() => toggleOpen(row.id)} className="mb-2 flex w-full items-center gap-1.5 text-left text-small font-medium text-fg-secondary hover:text-fg">
                     {row.open ? <ChevronDown size={14} className="shrink-0" /> : <ChevronRight size={14} className="shrink-0" />}
                     {spec ? spec.label : <span className="text-fg-muted">New field</span>}
                   </button>
-                  {row.open && (
-                    <div className="space-y-3">
-                      <Field label="Field Type *">
-                        <select className="input" value={row.key} onChange={(e) => setKey(row.id, e.target.value)}>
-                          <option value="">Select…</option>
-                          {specs.filter((s) => !usedKeys.has(s.key) || s.key === row.key).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                        </select>
-                      </Field>
-                      {spec && (
-                        spec.type === 'select' ? (
-                          <Field label="Value">
-                            <select className="input" value={row.value} onChange={(e) => setValue(row.id, e.target.value)}>
-                              <option value="">—</option>
-                              {(spec.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
-                          </Field>
-                        ) : (
-                          <Field label="Value"><input className="input" value={row.value} onChange={(e) => setValue(row.id, e.target.value)} /></Field>
-                        )
-                      )}
-                    </div>
-                  )}
+                  <div id={`template-row-${row.id}`} hidden={!row.open} className="space-y-3">
+                    <Field label="Field Type *">
+                      <select className="input" value={row.key} onChange={(e) => setKey(row.id, e.target.value)}>
+                        <option value="">Select…</option>
+                        {specs.filter((s) => !usedKeys.has(s.key) || s.key === row.key).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                      </select>
+                    </Field>
+                    {spec && (
+                      spec.type === 'select' ? (
+                        <Field label="Value">
+                          <select className="input" value={row.value} onChange={(e) => setValue(row.id, e.target.value)}>
+                            <option value="">—</option>
+                            {(spec.options ?? []).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        </Field>
+                      ) : (
+                        <Field label="Value"><input className="input" value={row.value} onChange={(e) => setValue(row.id, e.target.value)} /></Field>
+                      )
+                    )}
+                  </div>
                 </div>
                 <button type="button" onClick={() => removeRow(row.id)} title="Remove"
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-danger-bg hover:text-danger-text">
@@ -117,12 +117,10 @@ export default function OfferTemplateForm() {
           })}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <button type="button" className="btn-ghost" onClick={() => nav('/app/offers-templates')}>Cancel</button>
-          <button type="button" className="btn-primary" disabled={busy || !name} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-        </div>
       </div>
-      </div>
+      </FormLayout>
+      <FormFooter cancel={<button type="button" className="btn-ghost" onClick={() => nav('/app/offers-templates')}>Cancel</button>}
+        primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', type: 'button', disabled: busy || !name, onClick: submit }} />
     </>
   );
 }

@@ -11,12 +11,19 @@ import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { PageHeader, Field, Segmented, Spinner } from '../../shared-components/primitives/ui';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { Stepper } from '../../shared-components/panels/Stepper';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
 import type { DashboardUser, Publisher } from '../../types';
 
 const STEPS = ['General', 'Address', 'Billing', 'User'];
-const STATUSES = ['active', 'pending', 'inactive'] as const;
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', pending: 'bg-warning', inactive: 'bg-danger' };
+const STATUS_OPTIONS = [
+ { value: 'active', label: 'Active', tone: 'success' }, { value: 'pending', label: 'Pending', tone: 'warning' }, { value: 'inactive', label: 'Inactive', tone: 'danger' },
+] as const;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface FormState {
@@ -146,29 +153,30 @@ export default function PublisherCreate() {
  else { if (validateStep3()) void guard(createPartner); }
  };
 
- const fieldClass = (k: keyof FormState) => (fieldErrors[k] ? 'input !border-danger' : 'input');
- const fieldError = (k: keyof FormState) => (fieldErrors[k] ? <p className="mt-1 text-tiny text-danger-text">{fieldErrors[k]}</p> : null);
+ const isLast = step === STEPS.length - 1;
+ const locked = busy || submitting;
 
  return (
  <>
  <PageHeader title="Add Partner" subtitle="Partners › Add" />
  <Stepper steps={STEPS} current={step} />
- <div className="max-w-2xl mx-auto">
- <form onSubmit={next} className="card space-y-6" noValidate>
+ <form onSubmit={next} noValidate>
+ <FormLayout caption={`Step ${step + 1}`} title={STEPS[step]} requiredNote="Fields with an asterisk (*) are mandatory." layout="centered"
+ upNext={isLast ? undefined : <UpNextCard number={step + 2} name={STEPS[step + 1]!} />}>
+ <div className="space-y-6">
  {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
- <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
  {step === 0 && (
- <div className="space-y-4">
- <Field label="Name *">
- <input className={fieldClass('name')} required value={form.name} onChange={(e) => set('name', e.target.value)} />
- {fieldError('name')}
+ <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
+ <div className="md:col-span-2">
+ <Field label="Name *" error={fieldErrors.name}>
+ <input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} />
  </Field>
- <div>
- <label className="label">Status *</label>
- <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
  </div>
- <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+ <div className="md:col-span-2">
+ <span id="partner-status-label" className="label">Status *</span>
+ <StatusChoice options={STATUS_OPTIONS} value={form.status as (typeof STATUS_OPTIONS)[number]['value']} onChange={(v) => set('status', v)} ariaLabelledby="partner-status-label" />
+ </div>
  <Field label="Partner Manager">
  <select className="input" value={form.partnerManagerId} onChange={(e) => set('partnerManagerId', e.target.value)}>
  <option value="">— Select —</option>
@@ -181,97 +189,64 @@ export default function PublisherCreate() {
  {(channels ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
  </select>
  </Field>
- <div>
- <label className="label">Account Executive</label>
- <div className="flex items-center gap-2">
- <button type="button" onClick={() => setAccountExec(!accountExec)}
- className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${accountExec ? 'text-accent-text' : 'text-fg-secondary'}`}>
- {accountExec ? 'Yes' : 'No'}
- <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${accountExec ? 'bg-success' : 'bg-border'}`}>
- <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${accountExec ? 'translate-x-[18px]' : 'translate-x-0'}`} />
- </span>
- </button>
- {accountExec && <select className="input" value={form.accountExecutiveId} onChange={(e) => set('accountExecutiveId', e.target.value)}>
+ <div className="space-y-2">
+ <ToggleRow label="Account Executive" checked={accountExec} onChange={setAccountExec} />
+ {accountExec && <select className="input" aria-label="Account Executive" value={form.accountExecutiveId} onChange={(e) => set('accountExecutiveId', e.target.value)}>
  <option value="">— Select —</option>
  {(users ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
  </select>}
  </div>
- </div>
- </div>
- <div>
- <label className="label">Referred By</label>
- <div className="flex items-center gap-2">
- <button type="button" onClick={() => setReferredBy(!referredBy)}
- className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${referredBy ? 'text-accent-text' : 'text-fg-secondary'}`}>
- {referredBy ? 'Yes' : 'No'}
- <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${referredBy ? 'bg-success' : 'bg-border'}`}>
- <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${referredBy ? 'translate-x-[18px]' : 'translate-x-0'}`} />
- </span>
- </button>
- {referredBy && <select className="input" value={form.referredById} onChange={(e) => set('referredById', e.target.value)}>
+ <div className="space-y-2">
+ <ToggleRow label="Referred By" checked={referredBy} onChange={setReferredBy} />
+ {referredBy && <select className="input" aria-label="Referred By" value={form.referredById} onChange={(e) => set('referredById', e.target.value)}>
  <option value="">— Select —</option>
  {(publishers ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
  </select>}
  </div>
+ <div className="space-y-2">
+ <ToggleRow label="Partner Tier" checked={partnerTier} onChange={setPartnerTier} />
+ {partnerTier && <input className="input" aria-label="Partner Tier" value={form.tier} onChange={(e) => set('tier', e.target.value)} placeholder="e.g. Gold, Silver, Bronze" />}
  </div>
- <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
- <div>
- <label className="label">Partner Tier</label>
- <div className="flex items-center gap-2">
- <button type="button" onClick={() => setPartnerTier(!partnerTier)}
- className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${partnerTier ? 'text-accent-text' : 'text-fg-secondary'}`}>
- {partnerTier ? 'Yes' : 'No'}
- <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${partnerTier ? 'bg-success' : 'bg-border'}`}>
- <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${partnerTier ? 'translate-x-[18px]' : 'translate-x-0'}`} />
- </span>
- </button>
- {partnerTier && <input className="input" value={form.tier} onChange={(e) => set('tier', e.target.value)} placeholder="e.g. Gold, Silver, Bronze" />}
- </div>
- </div>
- </div>
- <LabelsInput value={labels} onChange={setLabels} />
- <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
- <div className="flex items-center gap-3">
+ <div className="md:col-span-2"><LabelsInput value={labels} onChange={setLabels} /></div>
+ <label className="flex items-center gap-3 text-small text-fg">
  <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="h-4 w-4 rounded border-border" />
- <label className="text-small text-fg">Allow partner to receive notifications</label>
- </div>
- <div className="flex items-center gap-3">
+ Allow partner to receive notifications
+ </label>
+ <label className="flex items-center gap-3 text-small text-fg">
  <input type="checkbox" checked={dynamicPayouts} onChange={(e) => setDynamicPayouts(e.target.checked)} className="h-4 w-4 rounded border-border" />
- <label className="text-small text-fg">Enable CPC/CPM Dynamic Payouts</label>
- </div>
- </div>
- <Field label="Traffic Source">
- <div className="flex items-center gap-3">
- <button type="button" onClick={() => setTrafficSourceEnabled(!trafficSourceEnabled)}
- className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${trafficSourceEnabled ? 'text-accent-text' : 'text-fg-secondary'}`}>
- {trafficSourceEnabled ? 'Yes' : 'No'}
- <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${trafficSourceEnabled ? 'bg-success' : 'bg-border'}`}>
- <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${trafficSourceEnabled ? 'translate-x-[18px]' : 'translate-x-0'}`} />
- </span>
- </button>
+ Enable CPC/CPM Dynamic Payouts
+ </label>
+ {/* Optional fields only — collapsed by default, kept mounted while collapsed. */}
+ <FormSection id="partner-optional" title="Optional details" collapsible className="md:col-span-2"
+ summary="Traffic Source · Internal Notes · Set Macro Parameter Visibility"
+ filledCount={(trafficSourceEnabled ? 1 : 0) + (form.notes.trim() ? 1 : 0)}>
+ <div className="space-y-4 pt-2">
+ <div className="space-y-2">
+ <ToggleRow label="Traffic Source" checked={trafficSourceEnabled} onChange={setTrafficSourceEnabled} />
  {trafficSourceEnabled && (
- <input className="input flex-1" value={form.trafficSource} onChange={(e) => set('trafficSource', e.target.value)} placeholder="Push, Native, Social…" />
+ <input className="input" aria-label="Traffic Source" value={form.trafficSource} onChange={(e) => set('trafficSource', e.target.value)} placeholder="Push, Native, Social…" />
  )}
  </div>
- </Field>
  <Field label="Internal Notes">
  <textarea className="input min-h-[80px]" value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Notes for internal use…" />
  </Field>
  <Field label="Set Macro Parameter Visibility">
  <Segmented options={['None', 'Custom', 'Full access']} value={macroVisibility} onChange={setMacroVisibility} />
  </Field>
- <p className="text-[11px] text-fg-muted">Notification, dynamic-payout and macro-visibility preferences are not stored yet.</p>
+ </div>
+ </FormSection>
+ <p className="text-[11px] text-fg-muted md:col-span-2">Notification, dynamic-payout and macro-visibility preferences are not stored yet.</p>
  </div>
  )}
 
  {step === 1 && (
  <div className="space-y-4">
- <div className="flex items-center gap-3">
+ <label className="flex items-center gap-3 text-small text-fg">
  <input type="checkbox" checked={addressEnabled} onChange={(e) => setAddressEnabled(e.target.checked)} className="h-4 w-4 rounded border-border" />
- <label className="text-small text-fg">Enable Address</label>
- </div>
+ Enable Address
+ </label>
  {addressEnabled && (
- <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+ <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
  <Field label="Country"><input className="input" value={form.country} onChange={(e) => set('country', e.target.value)} /></Field>
  <Field label="Address Line 1"><input className="input" /></Field>
  <Field label="Address Line 2"><input className="input" /></Field>
@@ -285,7 +260,7 @@ export default function PublisherCreate() {
 
  {step === 2 && (
  <div className="space-y-4">
- <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+ <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
  <Field label="Billing Frequency">
  <select className="input" value={form.billingFrequency} onChange={(e) => set('billingFrequency', e.target.value)}>
  <option value="">—</option>
@@ -297,16 +272,16 @@ export default function PublisherCreate() {
  </Field>
  </div>
  <Field label="Payment Method">
- <select className="input !w-auto" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)}>
+ <select className="input md:!w-auto" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)}>
  <option value="">—</option>
  {['Wire', 'Paypal', 'Webmoney', 'Direct Deposit', 'None'].map((m) => <option key={m} value={m}>{m}</option>)}
  </select>
  </Field>
  {form.paymentMethod && form.paymentMethod !== 'None' && (
- <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-2">
+ <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 md:grid-cols-2">
  <Field label="Bank Name"><input className="input" /></Field>
  <Field label="Account Number"><input className="input" /></Field>
- <p className="text-[11px] text-fg-muted sm:col-span-2">Bank details are not stored yet.</p>
+ <p className="text-[11px] text-fg-muted md:col-span-2">Bank details are not stored yet.</p>
  </div>
  )}
  <Field label="Tax ID / VAT or SSN"><input className="input" value={form.taxId} onChange={(e) => set('taxId', e.target.value)} /></Field>
@@ -316,7 +291,7 @@ export default function PublisherCreate() {
  {step === 3 && (
  <div className="space-y-4">
  <p className="text-small text-fg-secondary">Create a login for this partner to access their portal.</p>
- <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+ <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
  <Field label="First Name">
  <input className="input" value={form.contactFirstName} onChange={(e) => set('contactFirstName', e.target.value)} />
  </Field>
@@ -324,24 +299,26 @@ export default function PublisherCreate() {
  <input className="input" value={form.contactLastName} onChange={(e) => set('contactLastName', e.target.value)} />
  </Field>
  </div>
- <Field label="Email">
- <input type="email" className={fieldClass('contactEmail')} value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} />
- {fieldError('contactEmail')}
+ <Field label="Email" error={fieldErrors.contactEmail}>
+ <input type="email" className="input" value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} />
  </Field>
  <p className="text-[11px] text-fg-muted">Portal user creation is handled separately from this form.</p>
  </div>
  )}
+ </div>
+ </FormLayout>
 
- <div className="flex justify-end gap-2 border-t border-border pt-4">
- <button type="button" className="btn-ghost" onClick={() => (step === 0 ? nav('/app/publishers') : setStep(step - 1))}>
+ <FormFooter
+ stepText={`Step ${step + 1} of ${STEPS.length}`}
+ cancel={<button type="button" className="btn-ghost" onClick={() => (step === 0 ? nav('/app/publishers') : setStep(step - 1))}>
  {step === 0 ? 'Cancel' : 'Back'}
- </button>
- <button type="submit" className="btn-primary" disabled={busy || submitting} aria-busy={busy || submitting}>
- {busy || submitting ? <span className="inline-flex items-center gap-2"><Spinner /> Creating…</span> : step === STEPS.length - 1 ? 'Create Partner' : 'Next'}
- </button>
- </div>
+ </button>}
+ primary={{
+ label: locked ? <span className="inline-flex items-center gap-2"><Spinner /> Creating…</span> : isLast ? 'Create Partner' : `Next: ${STEPS[step + 1]}`,
+ shortLabel: locked || isLast ? undefined : 'Next',
+ disabled: locked, busy: locked,
+ }} />
  </form>
- </div>
  </>
  );
 }

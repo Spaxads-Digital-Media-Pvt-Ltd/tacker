@@ -18,6 +18,7 @@ import { PageHeader, Field, Modal, Spinner, StateBlock } from '../../shared-comp
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { ColumnsModal, useDropdown } from '../../shared-components/primitives/TableActionsKit';
+import { ChoiceCards } from '../../shared-components/forms/ChoiceCards';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { api } from '../../lib/api';
 
@@ -72,15 +73,8 @@ function DataPointForm({ initial, onSaved, onCancel }: { initial?: DataPoint; on
       {error && <p className="text-small text-danger-text">{error}</p>}
       <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <div>
-        <label className="label">Data Type *</label>
-        <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-          {(['text', 'number'] as const).map((t) => (
-            <button key={t} type="button" onClick={() => setDataType(t)}
-              className={`flex-1 py-2 text-small font-medium capitalize ${dataType === t ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-              {t === 'text' ? 'Text' : 'Number'}
-            </button>
-          ))}
-        </div>
+        <span id="data-point-type-label" className="label">Data Type *</span>
+        <ChoiceCards options={[{ value: 'text', label: 'Text' }, { value: 'number', label: 'Number' }] as const} value={dataType} onChange={setDataType} ariaLabelledby="data-point-type-label" />
         <p className="mt-1 text-tiny text-fg-muted">
           {dataType === 'text' ? 'Text data points give condition operators like "is an exact match".' : 'Number data points give condition operators like "is greater than".'}
         </p>

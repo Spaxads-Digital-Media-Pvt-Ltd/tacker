@@ -9,7 +9,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
+import { moneyIn } from '../../lib/moneyFormat';
 import { PageHeader, Field, Modal, Table, Spinner, StateBlock, type Column } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 import type { Publisher, Offer, ReportingAdjustmentDetail, ReportingAdjustmentDayOverride } from '../../types';
 
 interface PreviewResponse {
@@ -22,7 +26,8 @@ interface DayRow {
   original: { revenue: number; payout: number; grossSales: number; totalClicks: number; uniqueClicks: number; conversions: number; impressions: number };
 }
 
-const money = (n: number) => `$${n.toFixed(2)}`;
+// Shared formatter in USD: the preview days carry no currency (backend follow-up).
+const money = (n: number) => moneyIn(n, 'USD').text;
 const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
 
 function DayEditModal({
@@ -161,11 +166,12 @@ export default function AdjustmentForm() {
     <>
       <PageHeader title={isEdit ? 'Edit Reporting Adjustment' : 'Add Reporting Adjustment'} subtitle={`Partners › Adjustments › ${isEdit ? 'Edit' : 'Add'}`} />
       <form onSubmit={submit} className="space-y-6">
-        {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-        <div className="card max-w-2xl mx-auto space-y-4">
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
-          <h3 className="text-h3 font-medium text-fg">Settings</h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
+          {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
+          <FormSection id="adjustment-settings" title="Settings">
+          <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Date From *"><input type="date" className="input" required value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></Field>
             <Field label="Date To *"><input type="date" className="input" required value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></Field>
           </div>
@@ -183,11 +189,14 @@ export default function AdjustmentForm() {
           </Field>
           {offer && (
             <p className="text-tiny text-fg-secondary">
-              Offer Base Revenue &amp; Payout: <span className="font-medium text-fg">RPM: ${Number(offer.defaultRevenue).toFixed(3)}</span>{' '}
+              Offer Base Revenue &amp; Payout: <span className="font-medium text-fg">RPM: {moneyIn(offer.defaultRevenue, 'USD', { decimals: 3 }).text}</span>{' '}
               <span className="font-medium text-fg">PRV: {Number(offer.defaultRevenue) > 0 ? ((Number(offer.defaultPayout) / Number(offer.defaultRevenue)) * 100).toFixed(2) : '0.00'}%</span>
             </p>
           )}
-        </div>
+          </div>
+          </FormSection>
+          </div>
+        </FormLayout>
 
         <div className="card">
           <h3 className="mb-3 text-h3 font-medium text-fg">Adjustments</h3>
@@ -198,10 +207,8 @@ export default function AdjustmentForm() {
             : <Table columns={columns} rows={days} rowKey={(d) => d.date} />}
         </div>
 
-        <div className="flex justify-end gap-2">
-          <Link to="/app/aff-adjustments" className="btn-ghost">Cancel</Link>
-          <button type="submit" className="btn-primary" disabled={busy || !days.length}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-        </div>
+        <FormFooter cancel={<Link to="/app/aff-adjustments" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy || !days.length }} />
       </form>
 
       {editingDay && (

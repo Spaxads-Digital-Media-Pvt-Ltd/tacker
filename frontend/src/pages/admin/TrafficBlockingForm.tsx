@@ -6,12 +6,15 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
 import type { Publisher, Offer, TrafficBlocking, TrafficBlockingFieldKey, TrafficBlockingMatchType } from '../../types';
 
-const STATUSES = ['active', 'inactive'] as const;
-const STATUS_LABEL: Record<string, string> = { active: 'Active', inactive: 'Inactive' };
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', inactive: 'bg-warning' };
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'inactive', label: 'Inactive', tone: 'warning' }] as const;
 
 // Only the click fields /click receives (sub1–sub5 + source_id); sub6–sub10 could never match.
 const FIELD_KEYS: TrafficBlockingFieldKey[] = ['sub1', 'sub2', 'sub3', 'sub4', 'sub5', 'sourceId'];
@@ -78,11 +81,12 @@ export default function TrafficBlockingForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Traffic Blocking' : 'Add Traffic Blocking'} subtitle={`Partners › Traffic Blocking › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
           <Field label="Partner *">
             <select className="input" required value={form.publisherId} onChange={(e) => setForm((f) => ({ ...f, publisherId: e.target.value }))}>
               <option value="" disabled>Select Partner…</option>
@@ -90,42 +94,34 @@ export default function TrafficBlockingForm() {
             </select>
           </Field>
 
-          <div>
-            <label className="label">Status *</label>
-            <Segmented options={STATUSES} value={form.status} onChange={(v) => setForm((f) => ({ ...f, status: v }))} labels={STATUS_LABEL} dots={STATUS_DOT} />
-          </div>
-
           <Field label="Offer *">
             <select className="input" required value={form.offerId} onChange={(e) => setForm((f) => ({ ...f, offerId: e.target.value }))}>
               <option value="" disabled>Select Offer…</option>
               {(offers ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </Field>
+          <div className="md:col-span-2">
+            <span id="blocking-status-label" className="label">Status *</span>
+            <StatusChoice options={STATUS_OPTIONS} value={form.status as (typeof STATUS_OPTIONS)[number]['value']} onChange={(v) => setForm((f) => ({ ...f, status: v }))} ariaLabelledby="blocking-status-label" />
+          </div>
+          </div>
 
-          <div className="border-t border-border pt-6">
-            <h3 className="mb-4 text-h3 font-medium text-fg">Sub ID Filters</h3>
-            <div className="space-y-5">
+          <FormSection id="blocking-sub-id-filters" title="Sub ID Filters" className="border-t border-border pt-6">
+            <div className="space-y-4">
               {FIELD_KEYS.map((k) => {
                 const f = form.fields[k];
                 return (
-                  <div key={k}>
-                    <label className="label">{FIELD_LABEL[k]}</label>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <button type="button" role="switch" aria-checked={f.enabled}
-                        onClick={() => setFieldState(k, { enabled: !f.enabled })}
-                        className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${f.enabled ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
-                        <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-medium shadow ${f.enabled ? 'bg-success text-white' : 'bg-white text-fg-secondary'}`}>
-                          {f.enabled ? 'Yes' : 'No'}
-                        </span>
-                      </button>
+                  <div key={k} className="space-y-2">
+                    <ToggleRow label={FIELD_LABEL[k]} checked={f.enabled} onChange={() => setFieldState(k, { enabled: !f.enabled })} />
+                    <div className="flex flex-wrap items-center gap-3 empty:hidden">
                       {f.enabled && (
                         <>
-                          <select className="input !w-44" required value={f.matchType} onChange={(e) => setFieldState(k, { matchType: e.target.value as TrafficBlockingMatchType })}>
+                          <select className="input sm:!w-44" aria-label={`${FIELD_LABEL[k]} match type`} required value={f.matchType} onChange={(e) => setFieldState(k, { matchType: e.target.value as TrafficBlockingMatchType })}>
                             <option value="" disabled>Select Match Type…</option>
                             {MATCH_TYPES.map((m) => <option key={m} value={m}>{MATCH_LABEL[m]}</option>)}
                           </select>
                           {f.matchType && f.matchType !== 'is_empty' && (
-                            <input className="input !w-56" required placeholder="Value" value={f.value} onChange={(e) => setFieldState(k, { value: e.target.value })} />
+                            <input className="input sm:!w-56" aria-label={`${FIELD_LABEL[k]} value`} required placeholder="Value" value={f.value} onChange={(e) => setFieldState(k, { value: e.target.value })} />
                           )}
                         </>
                       )}
@@ -134,14 +130,13 @@ export default function TrafficBlockingForm() {
                 );
               })}
             </div>
-          </div>
+          </FormSection>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/aff-traffic-blocking" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
-        </form>
-      </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/aff-traffic-blocking" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy }} />
+      </form>
     </>
   );
 }

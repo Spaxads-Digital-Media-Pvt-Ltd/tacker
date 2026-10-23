@@ -7,6 +7,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 import type { LinkTemplate, Advertiser } from '../../types';
 
 const MACROS: { token: string; description: string }[] = [
@@ -43,7 +45,7 @@ function AddMacroMenu({ onInsert }: { onInsert: (token: string) => void }) {
         {'{ }'} Add Macro
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-card border border-border bg-elevated shadow-elevated">
+        <div className="absolute right-0 top-full z-popover mt-1 w-72 rounded-card border border-border bg-elevated shadow-elevated">
           <div className="border-b border-border p-2">
             <input className="input" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
           </div>
@@ -106,11 +108,12 @@ export default function LinkTemplateForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Link Template' : 'Add Link Template'} subtitle={`Advertisers › Link Templates › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
           <Field label="Name *">
             <input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
           </Field>
@@ -121,9 +124,10 @@ export default function LinkTemplateForm() {
               {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </Field>
+          </div>
 
           <div>
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <label className="label">Landing Page URL *</label>
               <AddMacroMenu onInsert={insertMacro} />
             </div>
@@ -132,12 +136,11 @@ export default function LinkTemplateForm() {
               value={form.destinationUrl} onChange={(e) => setForm((f) => ({ ...f, destinationUrl: e.target.value }))} />
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/adv-link-templates" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
-        </form>
-      </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/adv-link-templates" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy }} />
+      </form>
     </>
   );
 }

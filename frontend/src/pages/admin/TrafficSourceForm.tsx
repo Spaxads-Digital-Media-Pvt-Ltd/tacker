@@ -9,6 +9,9 @@ import { HelpCircle, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
 import type { TrafficSource, TrafficSourceParam } from '../../types';
 
 const MACROS: { token: string; description: string }[] = [
@@ -50,7 +53,7 @@ function AddMacroMenu({ onInsert }: { onInsert: (token: string) => void }) {
         {'{ }'} Add Macro
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-card border border-border bg-elevated shadow-elevated">
+        <div className="absolute right-0 top-full z-popover mt-1 w-72 rounded-card border border-border bg-elevated shadow-elevated">
           <div className="border-b border-border p-2">
             <input className="input" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
           </div>
@@ -128,36 +131,25 @@ export default function TrafficSourceForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Traffic Source' : 'Add Traffic Source'} subtitle={`Partners › Traffic Sources › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
           <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></Field>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div>
-              <label className="label">Enable Postback URL</label>
-              <button type="button" role="switch" aria-checked={form.enablePostback}
-                onClick={() => setForm((f) => ({ ...f, enablePostback: !f.enablePostback }))}
-                className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${form.enablePostback ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
-                <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-medium shadow ${form.enablePostback ? 'bg-success text-white' : 'bg-white text-fg-secondary'}`}>
-                  {form.enablePostback ? 'Yes' : 'No'}
-                </span>
-              </button>
-            </div>
-            <div>
-              <label className="label flex items-center gap-1.5">
-                Visible to Partners
-                <span title="Partners can see and select this traffic source when generating their own tracking links."><HelpCircle size={13} className="text-fg-muted" /></span>
-              </label>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-center">
+            <ToggleRow label="Enable Postback URL" checked={form.enablePostback} onChange={() => setForm((f) => ({ ...f, enablePostback: !f.enablePostback }))} />
+            <label className="flex items-center gap-2 text-small font-medium text-fg">
               <input type="checkbox" className="chk" checked={form.visibleToPartners} onChange={(e) => setForm((f) => ({ ...f, visibleToPartners: e.target.checked }))} />
-            </div>
+              Visible to Partners
+              <span title="Partners can see and select this traffic source when generating their own tracking links."><HelpCircle size={13} className="text-fg-muted" /></span>
+            </label>
           </div>
 
           {form.enablePostback && (
             <div className="rounded-card border border-border p-4">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <label className="label">Postback URL *</label>
                 <AddMacroMenu onInsert={insertMacro} />
               </div>
@@ -175,7 +167,7 @@ export default function TrafficSourceForm() {
             </div>
             <div className="space-y-3">
               {form.parameters.map((p, i) => (
-                <div key={i} className="flex items-end gap-2 rounded-card border border-border p-3">
+                <div key={i} className="flex items-end gap-2 rounded-card border border-border p-3 [&>div]:min-w-0 [&>div]:flex-1">
                   <Field label="Parameter *"><input className="input" required value={p.parameter} onChange={(e) => setParam(i, { parameter: e.target.value })} /></Field>
                   <Field label="Value *"><input className="input" required value={p.value} onChange={(e) => setParam(i, { value: e.target.value })} /></Field>
                   <button type="button" disabled={form.parameters.length === 1}
@@ -188,12 +180,11 @@ export default function TrafficSourceForm() {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/aff-traffic-sources" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
-        </form>
-      </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/aff-traffic-sources" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy }} />
+      </form>
     </>
   );
 }

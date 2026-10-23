@@ -11,13 +11,26 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { PageHeader, Field } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { Stepper } from '../../shared-components/panels/Stepper';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { FIELD_HELP_EMPTY } from '../../shared-components/forms/FieldHelpPanel';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import { HelpIcon } from './controlCenter/shared';
 import { REDIRECT_MECHANISMS, KPI_METRICS, KPI_RUN_FREQUENCIES, KPI_LOOKBACK_WINDOWS, type SmartLink, type SmartLinkItem } from '../../data/smartLinks';
 import type { Offer, TrackingDomain } from '../../types';
 
 interface Row { id: number; offerId: string; weight: number; position: number; offerUrl: string; country: string; open: boolean }
 type Mechanism = (typeof REDIRECT_MECHANISMS)[number]['value'];
+const STEPS = ['General', 'Settings'];
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active', tone: 'success' }, { value: 'paused', label: 'Paused', tone: 'warning' }, { value: 'deleted', label: 'Deleted', tone: 'danger' },
+] as const;
+const FORCE_SSL_HINT = "Serve this Smart Link's redirects over HTTPS.";
+const SHOW_TO_PARTNERS_HINT = "Make this Smart Link's tracking URL visible to Partners in the Partner Portal.";
 
 export default function SmartLinkForm() {
   const { id } = useParams();
@@ -95,35 +108,20 @@ export default function SmartLinkForm() {
     <>
       <PageHeader title={isEdit ? 'Edit Smart Link' : 'Add Smart Link'} subtitle={`Offers › Smart Links › ${isEdit ? 'Edit' : 'Add'}`} />
 
-      <div className="mx-auto max-w-2xl">
-      <div className="mb-6 flex items-center gap-6 border-b border-border pb-4">
-        {(['General', 'Settings'] as const).map((label, i) => {
-          const n = (i + 1) as 1 | 2;
-          const on = step === n;
-          return (
-            <button key={label} type="button" onClick={() => setStep(n)} className="flex items-center gap-2">
-              <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-semibold ${on ? 'bg-accent text-accent-fg' : 'border border-border text-fg-secondary'}`}>{n}</span>
-              <span className={`text-small font-medium ${on ? 'text-accent-text' : 'text-fg-secondary'}`}>{label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="card space-y-5">
+      <Stepper steps={STEPS} current={step - 1} onStepClick={(i) => setStep((i + 1) as 1 | 2)} />
+      <FormLayout caption={`Step ${step}`} title={STEPS[step - 1]}
+        requiredNote={<span className="flex items-center gap-1.5"><HelpIcon text="Required" /> Fields with an asterisk (*) are mandatory.</span>}
+        layout="aside" stepper help={step === 1 ? {} : { fallback: { title: STEPS[1]!, body: FIELD_HELP_EMPTY } }} upNext={step === 1 ? <UpNextCard number={2} name={STEPS[1]!} required /> : undefined}>
+      <div className="space-y-5">
         {error && <p className="text-small text-danger-text">{error}</p>}
-        <p className="flex items-center gap-1.5 text-tiny text-fg-secondary"><HelpIcon text="Required" /> Fields with an asterisk (*) are mandatory.</p>
 
         {step === 1 ? (
-          <div className="max-w-md space-y-4">
+          <div className="space-y-4">
             <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            <Field label="Status *">
-              <Segmented
-                options={['active', 'paused', 'deleted']}
-                value={status}
-                onChange={(v) => setStatus(v as typeof status)}
-                dots={{ active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' }}
-              />
-            </Field>
+            <div data-help-label="Status *">
+              <span id="smartlink-status-label" className="label">Status *</span>
+              <StatusChoice options={STATUS_OPTIONS} value={status} onChange={setStatus} ariaLabelledby="smartlink-status-label" />
+            </div>
             <Field label="Labels"><textarea className="input min-h-[70px]" value={labels} onChange={(e) => setLabels(e.target.value)} /></Field>
             <Field label="Tracking Domain *">
               <select className="input" required value={trackingDomainId} onChange={(e) => setTrackingDomainId(e.target.value)}>
@@ -131,19 +129,14 @@ export default function SmartLinkForm() {
                 {activeDomains.map((d) => <option key={d.id} value={d.id}>{d.host}</option>)}
               </select>
             </Field>
-            <div className="flex items-center gap-8 pt-1">
-              <label className="flex items-center gap-2 text-small font-medium text-fg">Force SSL <HelpIcon text="Serve this Smart Link's redirects over HTTPS." /><input type="checkbox" className="chk" checked={forceSsl} onChange={(e) => setForceSsl(e.target.checked)} /></label>
-              <label className="flex items-center gap-2 text-small font-medium text-fg">Show to Partners <HelpIcon text="Make this Smart Link's tracking URL visible to Partners in the Partner Portal." /><input type="checkbox" className="chk" checked={showToPartners} onChange={(e) => setShowToPartners(e.target.checked)} /></label>
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-1">
+              <label data-help-label="Force SSL" data-help={FORCE_SSL_HINT} className="flex items-center gap-2 text-small font-medium text-fg">Force SSL <HelpIcon text={FORCE_SSL_HINT} /><input type="checkbox" className="chk" checked={forceSsl} onChange={(e) => setForceSsl(e.target.checked)} /></label>
+              <label data-help-label="Show to Partners" data-help={SHOW_TO_PARTNERS_HINT} className="flex items-center gap-2 text-small font-medium text-fg">Show to Partners <HelpIcon text={SHOW_TO_PARTNERS_HINT} /><input type="checkbox" className="chk" checked={showToPartners} onChange={(e) => setShowToPartners(e.target.checked)} /></label>
             </div>
           </div>
         ) : (
-          <div className="max-w-2xl space-y-5">
-            <Field label="Catch-All Offer">
-              <button type="button" onClick={() => setCatchAll((v) => !v)}
-                className={`flex w-24 items-center rounded-full border border-border p-0.5 text-tiny font-medium ${catchAll ? 'justify-end bg-accent-subtle text-accent-text' : 'justify-start text-fg-secondary'}`}>
-                <span className="rounded-full bg-surface px-2 py-1 shadow-sm">{catchAll ? 'Yes' : 'No'}</span>
-              </button>
-            </Field>
+          <div className="space-y-5">
+            <ToggleRow label="Catch-All Offer" checked={catchAll} onChange={setCatchAll} />
             {catchAll && (
               <Field label="Catch-All Offer *">
                 <select className="input" value={catchAllOfferId} onChange={(e) => setCatchAllOfferId(e.target.value)}>
@@ -180,34 +173,32 @@ export default function SmartLinkForm() {
                 return (
                 <div key={row.id} className="ml-3 flex items-start gap-2 border-l-2 border-border pl-4">
                   <div className="w-full rounded-card border border-border bg-page p-3">
-                    <button type="button" onClick={() => toggleOpen(row.id)} className="mb-2 flex w-full items-center gap-1.5 text-left text-small font-medium text-fg-secondary hover:text-fg">
+                    <button type="button" aria-expanded={row.open} aria-controls={`smartlink-row-${row.id}`} onClick={() => toggleOpen(row.id)} className="mb-2 flex w-full items-center gap-1.5 text-left text-small font-medium text-fg-secondary hover:text-fg">
                       {row.open ? <ChevronDown size={14} className="shrink-0" /> : <ChevronRight size={14} className="shrink-0" />}
                       {rowOffer ? (rowOffer.ref != null ? `${rowOffer.name} (${rowOffer.ref})` : rowOffer.name) : <span className="text-fg-muted">New offer</span>}
                     </button>
-                    {row.open && (
-                      <div className="space-y-3">
-                        {mechanism === 'weight' && (
-                          <Field label="Weight *"><input type="number" min={0} max={9} className="input !w-24" value={row.weight} onChange={(e) => patchRow(row.id, { weight: Number(e.target.value) })} /></Field>
-                        )}
-                        {mechanism === 'priority' && (
-                          <Field label="Position *"><input type="number" min={1} className="input !w-24" value={row.position} onChange={(e) => patchRow(row.id, { position: Number(e.target.value) })} /></Field>
-                        )}
-                        <Field label="Offer *">
-                          <select className="input" value={row.offerId} onChange={(e) => patchRow(row.id, { offerId: e.target.value })}>
-                            <option value="">Select Offer…</option>
-                            {(offers ?? []).map((o) => <option key={o.id} value={o.id}>{o.ref != null ? `${o.name} (${o.ref})` : o.name}</option>)}
-                          </select>
-                        </Field>
-                        {row.offerId && (
-                          <div className="ml-3 rounded-card border border-border bg-surface p-3">
-                            <Field label="Offer URL" hint="Optional per-offer URL override. Stored on the rotation item, but /sl currently redirects to the offer's own landing page — not applied at redirect time yet.">
-                              <input className="input" type="url" placeholder="Uses the offer's default landing page" value={row.offerUrl} onChange={(e) => patchRow(row.id, { offerUrl: e.target.value })} />
-                            </Field>
-                          </div>
-                        )}
-                        <Field label="Country target (optional, ISO-2)"><input className="input !w-24" placeholder="US" value={row.country} onChange={(e) => patchRow(row.id, { country: e.target.value.toUpperCase() })} /></Field>
-                      </div>
-                    )}
+                    <div id={`smartlink-row-${row.id}`} hidden={!row.open} className="space-y-3">
+                      {mechanism === 'weight' && (
+                        <Field label="Weight *"><input type="number" min={0} max={9} className="input !w-24" value={row.weight} onChange={(e) => patchRow(row.id, { weight: Number(e.target.value) })} /></Field>
+                      )}
+                      {mechanism === 'priority' && (
+                        <Field label="Position *"><input type="number" min={1} className="input !w-24" value={row.position} onChange={(e) => patchRow(row.id, { position: Number(e.target.value) })} /></Field>
+                      )}
+                      <Field label="Offer *">
+                        <select className="input" value={row.offerId} onChange={(e) => patchRow(row.id, { offerId: e.target.value })}>
+                          <option value="">Select Offer…</option>
+                          {(offers ?? []).map((o) => <option key={o.id} value={o.id}>{o.ref != null ? `${o.name} (${o.ref})` : o.name}</option>)}
+                        </select>
+                      </Field>
+                      {row.offerId && (
+                        <div className="ml-3 rounded-card border border-border bg-surface p-3">
+                          <Field label="Offer URL" hint="Optional per-offer URL override. Stored on the rotation item, but /sl currently redirects to the offer's own landing page — not applied at redirect time yet.">
+                            <input className="input" type="url" placeholder="Uses the offer's default landing page" value={row.offerUrl} onChange={(e) => patchRow(row.id, { offerUrl: e.target.value })} />
+                          </Field>
+                        </div>
+                      )}
+                      <Field label="Country target (optional, ISO-2)"><input className="input !w-24" placeholder="US" value={row.country} onChange={(e) => patchRow(row.id, { country: e.target.value.toUpperCase() })} /></Field>
+                    </div>
                   </div>
                   <button type="button" onClick={() => removeRow(row.id)} title="Remove"
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-border text-fg-secondary hover:bg-danger-bg hover:text-danger-text">
@@ -221,21 +212,17 @@ export default function SmartLinkForm() {
           </div>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          {step === 1 ? (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => nav('/app/smart-links')}>Cancel</button>
-              <button type="button" className="btn-primary" disabled={!name || !trackingDomainId} onClick={() => setStep(2)}>Next</button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>
-              <button type="button" className="btn-primary" disabled={busy} onClick={submit}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-            </>
-          )}
-        </div>
       </div>
-      </div>
+      </FormLayout>
+      {step === 1 ? (
+        <FormFooter key="general" stepText={`Step 1 of ${STEPS.length}`}
+          cancel={<button type="button" className="btn-ghost" onClick={() => nav('/app/smart-links')}>Cancel</button>}
+          primary={{ label: `Next: ${STEPS[1]}`, shortLabel: 'Next', type: 'button', disabled: !name || !trackingDomainId, onClick: () => setStep(2) }} />
+      ) : (
+        <FormFooter key="settings" stepText={`Step 2 of ${STEPS.length}`}
+          cancel={<button type="button" className="btn-ghost" onClick={() => setStep(1)}>Back</button>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', type: 'button', disabled: busy, onClick: submit }} />
+      )}
     </>
   );
 }

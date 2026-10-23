@@ -11,11 +11,19 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Tabs, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import type { Publisher, DashboardUser } from '../../types';
 
 const TABS = ['General', 'Address', 'Billing'] as const;
-const STATUSES = ['active', 'pending', 'inactive'] as const;
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', pending: 'bg-warning', inactive: 'bg-danger' };
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active', tone: 'success' }, { value: 'pending', label: 'Pending', tone: 'warning' }, { value: 'inactive', label: 'Inactive', tone: 'danger' },
+] as const;
+
 
 interface FormState {
   name: string; status: string; contactEmail: string; trafficSource: string; payoutTerms: string; defaultAttributionWindowS: string;
@@ -23,57 +31,6 @@ interface FormState {
   /** Control Center channel id ('' = none). */
   channelId: string;
   contactName: string; taxId: string; website: string; notes: string;
-}
-
-interface Tag { id: string; name: string; color: string | null; createdAt: string }
-
-/** Real tags editor — chips + add-by-name, using the same /:id/tags assign/unassign endpoints
- * already wired for offers. */
-function LabelsEditor({ base }: { base: string }) {
-  const { data: tags, refetch } = useQuery<Tag[]>(`${base}/tags`);
-  const [name, setName] = useState('');
-  const add = useMutation((n: string) => api.post(`${base}/tags`, { name: n }));
-  const remove = useMutation((tagId: string) => api.del(`${base}/tags/${tagId}`));
-
-  const submit = async () => {
-    const n = name.trim();
-    if (!n) return;
-    setName('');
-    await add.run(n);
-    refetch();
-  };
-
-  return (
-    <Field label="Labels">
-      <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border bg-surface p-2">
-        {(tags ?? []).map((t) => (
-          <span key={t.id} className="inline-flex items-center gap-1 rounded-full bg-accent-subtle px-2.5 py-1 text-tiny font-medium text-accent-text">
-            {t.name}
-            <button type="button" onClick={async () => { await remove.run(t.id); refetch(); }} className="text-accent-text/70 hover:text-accent-text">×</button>
-          </span>
-        ))}
-        <input
-          className="min-w-[120px] flex-1 border-0 bg-transparent px-1 py-1 text-small text-fg outline-none"
-          placeholder="Add label…" value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
-        />
-      </div>
-      {(add.error || remove.error) && <p className="mt-1 text-small text-danger-text">{add.error ?? remove.error}</p>}
-    </Field>
-  );
-}
-
-function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" onClick={() => onChange(!on)}
-      className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${on ? 'text-accent-text' : 'text-fg-secondary'}`}>
-      {on ? 'Yes' : 'No'}
-      <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${on ? 'bg-success' : 'bg-border'}`}>
-        <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0'}`} />
-      </span>
-    </button>
-  );
 }
 
 // ── General (real fields backed by publisher-manage-parity columns, plus a few genuinely
@@ -92,7 +49,7 @@ function GeneralExtras({
   const [dynamicPayouts, setDynamicPayouts] = useState(false);
   const [macroVisibility, setMacroVisibility] = useState('None');
   return (
-    <div className="space-y-4 border-t border-border pt-4">
+    <div className="grid grid-cols-1 gap-5 border-t border-border pt-6 md:grid-cols-2 md:items-start">
       <Field label="Partner Manager">
         <select className="input" value={form.partnerManagerId} onChange={(e) => set('partnerManagerId', e.target.value)}>
           <option value="">—</option>
@@ -119,22 +76,26 @@ function GeneralExtras({
         </select>
       </Field>
       <Field label="Partner Tier"><input className="input" value={form.tier} onChange={(e) => set('tier', e.target.value)} placeholder="e.g. Gold, Silver, Bronze" /></Field>
-      <LabelsEditor base={base} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
-          <label className="label">Allow partner to receive notifications</label>
-          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="h-4 w-4 rounded border-border" />
+      <div className="md:col-span-2"><LabelsEditor base={base} /></div>
+      <label className="flex items-center gap-3 text-small text-fg">
+        <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="h-4 w-4 rounded border-border" />
+        Allow partner to receive notifications
+      </label>
+      <label className="flex items-center gap-3 text-small text-fg">
+        <input type="checkbox" checked={dynamicPayouts} onChange={(e) => setDynamicPayouts(e.target.checked)} className="h-4 w-4 rounded border-border" />
+        Enable CPC/CPM Dynamic Payouts for Partner
+      </label>
+      {/* Optional fields — open on load when one already has a value. */}
+      <FormSection id="partner-edit-optional" title="Optional details" collapsible className="md:col-span-2"
+        summary="Internal Notes · Set Macro Parameter Visibility" defaultOpen={Boolean(form.notes.trim())} filledCount={form.notes.trim() ? 1 : 0}>
+        <div className="space-y-4 pt-2">
+          <Field label="Internal Notes"><textarea className="input min-h-[80px]" value={form.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
+          <div>
+            <label className="label">Set Macro Parameter Visibility</label>
+            <Segmented options={['None', 'Custom', 'Full access']} value={macroVisibility} onChange={setMacroVisibility} />
+          </div>
         </div>
-        <div>
-          <label className="label">Enable CPC/CPM Dynamic Payouts for Partner</label>
-          <input type="checkbox" checked={dynamicPayouts} onChange={(e) => setDynamicPayouts(e.target.checked)} className="h-4 w-4 rounded border-border" />
-        </div>
-      </div>
-      <Field label="Internal Notes"><textarea className="input min-h-[80px]" value={form.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
-      <div>
-        <label className="label">Set Macro Parameter Visibility</label>
-        <Segmented options={['None', 'Custom', 'Full access']} value={macroVisibility} onChange={setMacroVisibility} />
-      </div>
+      </FormSection>
     </div>
   );
 }
@@ -145,12 +106,9 @@ function AddressTab({ form, set }: { form: FormState; set: <K extends keyof Form
   return (
     <div className="space-y-4">
       <Field label="Country"><input className="input" value={form.country} onChange={(e) => set('country', e.target.value)} placeholder="United States" /></Field>
-      <div>
-        <label className="label">Enable Address</label>
-        <YesNoToggle on={enabled} onChange={setEnabled} />
-      </div>
+      <ToggleRow label="Enable Address" checked={enabled} onChange={setEnabled} />
       {enabled && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Address Line 1"><input className="input" /></Field>
           <Field label="Address Line 2"><input className="input" /></Field>
           <Field label="City"><input className="input" /></Field>
@@ -167,7 +125,7 @@ function BillingTab({ form, set }: { form: FormState; set: <K extends keyof Form
   const [autoInvoice, setAutoInvoice] = useState(true);
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field label="Billing Frequency">
           <select className="input" value={form.billingFrequency} onChange={(e) => set('billingFrequency', e.target.value)}>
             <option value="">—</option>
@@ -177,13 +135,13 @@ function BillingTab({ form, set }: { form: FormState; set: <K extends keyof Form
         <Field label="Day *"><select className="input" defaultValue="Monday">{['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((d) => <option key={d}>{d}</option>)}</select></Field>
       </div>
       <Field label="Payment Method">
-        <select className="input !w-auto" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)}>
+        <select className="input md:!w-auto" value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)}>
           <option value="">—</option>
           {['Wire', 'Paypal', 'Webmoney', 'Direct Deposit', 'None'].map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
       </Field>
       {form.paymentMethod && form.paymentMethod !== 'None' && (
-        <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 md:grid-cols-2">
           <Field label="Bank Name *"><input className="input" /></Field>
           <Field label="Bank Address *"><input className="input" /></Field>
           <Field label="Account Name *"><input className="input" /></Field>
@@ -194,12 +152,9 @@ function BillingTab({ form, set }: { form: FormState; set: <K extends keyof Form
       )}
       <Field label="Tax ID / VAT or SSN"><input className="input" value={form.taxId} onChange={(e) => set('taxId', e.target.value)} /></Field>
       <Field label="VAT Percentage"><input className="input" /></Field>
-      <div>
-        <label className="label">Automatic Invoice Creation</label>
-        <YesNoToggle on={autoInvoice} onChange={setAutoInvoice} />
-      </div>
+      <ToggleRow label="Automatic Invoice Creation" checked={autoInvoice} onChange={setAutoInvoice} />
       {autoInvoice && (
-        <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 md:grid-cols-2">
           <Field label="Auto Invoice Start Date"><input type="date" className="input" defaultValue="2019-01-01" /></Field>
           <Field label="Invoice Generation Delay *"><select className="input" defaultValue="No Delay">{['No Delay', '5 Days', '10 Days', '15 Days'].map((d) => <option key={d}>{d}</option>)}</select></Field>
         </div>
@@ -255,24 +210,25 @@ export default function PublisherEdit() {
   return (
     <>
       <PageHeader title={`Edit Partner: ${publisher.name}`} subtitle={`Partners › ${publisher.name} › Edit`} />
-      <div className="max-w-2xl mx-auto">
-      <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
-      <form onSubmit={submit} className="card space-y-6">
+      <div className="mx-auto max-w-[880px]"><Tabs tabs={[...TABS]} active={tab} onChange={setTab} /></div>
+      <form onSubmit={submit}>
+      {/* One hinted field only — centred card on every tab; the hint stays as the field's (?) tooltip. */}
+      <FormLayout title={tab} requiredNote="Fields with an asterisk (*) are mandatory." layout="centered">
+        <div className="space-y-6">
         {saveError && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{saveError}</p>}
-        <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
         {tab === 'General' && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
             <div>
-              <label className="label">Status *</label>
-              <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} />
+              <span id="partner-edit-status-label" className="label">Status *</span>
+              <StatusChoice options={STATUS_OPTIONS} value={form.status as (typeof STATUS_OPTIONS)[number]['value']} onChange={(v) => set('status', v)} ariaLabelledby="partner-edit-status-label" />
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field label="Contact Email"><input type="email" className="input" value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} /></Field>
               <Field label="User Name"><input className="input" value={form.contactName} onChange={(e) => set('contactName', e.target.value)} placeholder="The contact person's name" /></Field>
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field label="Traffic Source"><input className="input" value={form.trafficSource} onChange={(e) => set('trafficSource', e.target.value)} placeholder="Social, Display, SEO…" /></Field>
               <Field label="Website"><input className="input" value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="https://…" /></Field>
             </div>
@@ -284,13 +240,11 @@ export default function PublisherEdit() {
 
         {tab === 'Address' && <AddressTab form={form} set={set} />}
         {tab === 'Billing' && <BillingTab form={form} set={set} />}
-
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <Link to={`/app/publishers/${id}`} className="btn-ghost">Cancel</Link>
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
+      </FormLayout>
+      <FormFooter cancel={<Link to={`/app/publishers/${id}`} className="btn-ghost">Cancel</Link>}
+        primary={{ label: busy ? 'Saving…' : 'Save', disabled: busy }} />
       </form>
-      </div>
     </>
   );
 }

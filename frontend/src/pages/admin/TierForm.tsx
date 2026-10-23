@@ -9,12 +9,16 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import type { PartnerTier, Publisher } from '../../types';
 
-const STATUSES = ['active', 'paused', 'deleted'] as const;
-const STATUS_LABEL: Record<string, string> = { active: 'Active', paused: 'Paused', deleted: 'Deleted' };
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', paused: 'bg-warning', deleted: 'bg-danger' };
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active', tone: 'success' }, { value: 'paused', label: 'Paused', tone: 'warning' }, { value: 'deleted', label: 'Deleted', tone: 'danger' },
+] as const;
 
 function LabelsInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const [draft, setDraft] = useState('');
@@ -30,9 +34,9 @@ function LabelsInput({ value, onChange }: { value: string[]; onChange: (v: strin
   return (
     <div className="input flex min-h-[42px] flex-wrap items-center gap-1.5 !py-1.5">
       {value.map((l) => (
-        <span key={l} className="inline-flex items-center gap-1 rounded-full bg-accent-subtle px-2 py-0.5 text-tiny text-accent-text">
+        <span key={l} className="inline-flex items-center gap-1 rounded-full bg-accent-subtle py-0.5 pl-2.5 pr-1 text-tiny font-medium text-accent-text">
           {l}
-          <button type="button" onClick={() => onChange(value.filter((x) => x !== l))}><X size={11} /></button>
+          <button type="button" aria-label={`Remove ${l}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/15" onClick={() => onChange(value.filter((x) => x !== l))}><X size={12} aria-hidden /></button>
         </span>
       ))}
       <input className="min-w-[80px] flex-1 border-0 bg-transparent p-0.5 text-small outline-none" value={draft}
@@ -134,25 +138,25 @@ export default function TierForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Tier' : 'Add Tier'} subtitle={`Partners › Tiers › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
-          <h3 className="text-h3 font-medium text-fg">General</h3>
-
+          <FormSection id="tier-general" title="General">
+          <div className="space-y-6">
           <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
 
           <div>
-            <label className="label">Status *</label>
-            <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} labels={STATUS_LABEL} dots={STATUS_DOT} />
+            <span id="tier-status-label" className="label">Status *</span>
+            <StatusChoice options={STATUS_OPTIONS} value={form.status as (typeof STATUS_OPTIONS)[number]['value']} onChange={(v) => set('status', v)} ariaLabelledby="tier-status-label" />
           </div>
 
           <Field label="Description"><textarea className="input min-h-[70px]" value={form.description} onChange={(e) => set('description', e.target.value)} /></Field>
 
           <Field label="Labels"><LabelsInput value={form.labels} onChange={(v) => set('labels', v)} /></Field>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Margin *">
               <div className="relative">
                 <input className="input pr-7" required type="number" min={0} max={100} step="0.1" value={form.marginPct} onChange={(e) => set('marginPct', e.target.value)} />
@@ -168,17 +172,18 @@ export default function TierForm() {
             </div>
           </div>
 
-          <div className="border-t border-border pt-6">
-            <h3 className="mb-3 text-h3 font-medium text-fg">Partner Selection</h3>
-            <PartnerSelection selected={form.partnerIds} onChange={(v) => set('partnerIds', v)} />
           </div>
+          </FormSection>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/aff-tiers" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
+          <FormSection id="tier-partners" title="Partner Selection" className="border-t border-border pt-6">
+            <PartnerSelection selected={form.partnerIds} onChange={(v) => set('partnerIds', v)} />
+          </FormSection>
+
           </div>
-        </form>
-      </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/aff-tiers" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy }} />
+      </form>
     </>
   );
 }

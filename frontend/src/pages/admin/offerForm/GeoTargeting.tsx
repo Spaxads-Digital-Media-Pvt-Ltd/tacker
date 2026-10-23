@@ -19,9 +19,9 @@ export function ValueChips({ values, label, onRemove }: { values: string[]; labe
   return (
     <div className="flex flex-wrap gap-1.5">
       {values.map((v) => (
-        <span key={v} className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2.5 py-0.5 text-tiny text-fg">
+        <span key={v} className="inline-flex items-center gap-1 rounded-full bg-accent-subtle py-0.5 pl-2.5 pr-1 text-tiny font-medium text-accent-text">
           {label ? label(v) : v}
-          <button type="button" aria-label={`Remove ${label ? label(v) : v}`} onClick={() => onRemove(v)} className="text-fg-muted hover:text-fg"><X size={11} /></button>
+          <button type="button" aria-label={`Remove ${label ? label(v) : v}`} onClick={() => onRemove(v)} className="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/15"><X size={12} aria-hidden /></button>
         </span>
       ))}
     </div>

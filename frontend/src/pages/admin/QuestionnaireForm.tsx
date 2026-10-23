@@ -3,12 +3,19 @@
  * reorder, per-field Label/Required/Tooltip/Data Field, Select-type fields get an Options list)
  * plus a "Preview Questionnaire" modal that renders the fields as a Partner would see them.
  */
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronUp, GripVertical, Trash2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Modal, Spinner, StateBlock } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'inactive', label: 'Inactive', tone: 'warning' }] as const;
 import type { Questionnaire, QuestionnaireDataField, QuestionnaireField } from '../../types';
 
 const DATA_FIELDS: { value: QuestionnaireDataField; label: string }[] = [
@@ -57,37 +64,32 @@ function FieldCard({
   dragHandlers: { draggable: boolean; onDragStart: () => void; onDragOver: (e: React.DragEvent) => void; onDrop: () => void };
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const bodyId = useId();
   return (
-    <div className="rounded-card border border-border" {...dragHandlers}>
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <button type="button" onClick={() => setCollapsed((c) => !c)} className="flex items-center gap-2 text-small font-medium text-fg">
+    // Collapsing hides the body but keeps it mounted, so its required fields still validate; an
+    // invalid control inside re-opens the card before the browser focuses it.
+    <div className="rounded-card border border-border" {...dragHandlers} onInvalidCapture={() => { if (collapsed) flushSync(() => setCollapsed(false)); }}>
+      <div className={`flex items-center justify-between px-3 py-2 ${collapsed ? '' : 'border-b border-border'}`}>
+        <button type="button" aria-expanded={!collapsed} aria-controls={bodyId} onClick={() => setCollapsed((c) => !c)} className="flex items-center gap-2 text-small font-medium text-fg">
           {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
           <GripVertical size={14} className="cursor-grab text-fg-muted" />
           {index + 1}{field.label ? ` — ${field.label}` : ''}
         </button>
-        <button type="button" onClick={onRemove} className="text-fg-muted hover:text-danger-text"><Trash2 size={14} /></button>
+        <button type="button" onClick={onRemove} aria-label={`Remove field ${index + 1}`} className="text-fg-muted hover:text-danger-text"><Trash2 size={14} /></button>
       </div>
-      {!collapsed && (
-        <div className="space-y-4 p-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
-            <Field label="Label *"><input className="input" required value={field.label} onChange={(e) => onChange({ ...field, label: e.target.value })} /></Field>
-            <div>
-              <label className="label">Required</label>
-              <button type="button" role="switch" aria-checked={field.required} onClick={() => onChange({ ...field, required: !field.required })}
-                className={`relative inline-block h-6 w-11 rounded-full transition-colors ${field.required ? 'bg-success' : 'bg-border'}`}>
-                <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${field.required ? 'translate-x-5' : 'translate-x-0'}`} />
-              </button>
-            </div>
-          </div>
-          <Field label="Tooltip"><textarea className="input min-h-[60px]" value={field.tooltip} onChange={(e) => onChange({ ...field, tooltip: e.target.value })} /></Field>
-          <Field label="Data Field *">
-            <select className="input" required value={field.dataField} onChange={(e) => onChange({ ...field, dataField: e.target.value as QuestionnaireDataField })}>
-              {DATA_FIELDS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-            </select>
-          </Field>
-          {field.dataField === 'select' && <OptionsEditor options={field.options} onChange={(v) => onChange({ ...field, options: v })} />}
+      <div id={bodyId} hidden={collapsed} className="space-y-4 p-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] md:items-end">
+          <Field label="Label *"><input className="input" required value={field.label} onChange={(e) => onChange({ ...field, label: e.target.value })} /></Field>
+          <ToggleRow label="Required" checked={field.required} onChange={() => onChange({ ...field, required: !field.required })} />
         </div>
-      )}
+        <Field label="Tooltip"><textarea className="input min-h-[60px]" value={field.tooltip} onChange={(e) => onChange({ ...field, tooltip: e.target.value })} /></Field>
+        <Field label="Data Field *">
+          <select className="input" required value={field.dataField} onChange={(e) => onChange({ ...field, dataField: e.target.value as QuestionnaireDataField })}>
+            {DATA_FIELDS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+        </Field>
+        {field.dataField === 'select' && <OptionsEditor options={field.options} onChange={(v) => onChange({ ...field, options: v })} />}
+      </div>
     </div>
   );
 }
@@ -173,29 +175,21 @@ export default function QuestionnaireForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Questionnaire' : 'Add Questionnaire'} subtitle={`Partners › Offer Applications › Questionnaires › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
           <Field label="Name *"><input className="input" required value={name} onChange={(e) => setName(e.target.value)} /></Field>
 
           <div>
-            <label className="label">Status *</label>
-            <div className="inline-flex overflow-hidden rounded-[var(--radius)] border border-border">
-              {(['active', 'inactive'] as const).map((s) => (
-                <button key={s} type="button" onClick={() => setStatus(s)}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-small font-medium transition-colors ${status === s ? 'bg-accent-subtle text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
-                  <span className={`h-2 w-2 rounded-full ${s === 'active' ? 'bg-success' : 'bg-warning'}`} />
-                  {s === 'active' ? 'Active' : 'Inactive'}
-                </button>
-              ))}
-            </div>
+            <span id="questionnaire-status-label" className="label">Status *</span>
+            <StatusChoice options={STATUS_OPTIONS} value={status} onChange={setStatus} ariaLabelledby="questionnaire-status-label" />
           </div>
 
-          <div>
-            <label className="label">Fields</label>
-            <button type="button" onClick={() => setFields((f) => [...f, emptyField()])}
+          <div className="flex items-center justify-between border-t border-border pt-6">
+            <label className="label !mb-0">Fields</label>
+            <button type="button" aria-label="Add field" onClick={() => setFields((f) => [...f, emptyField()])}
               className="grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg hover:bg-accent-subtle">+</button>
           </div>
 
@@ -220,12 +214,11 @@ export default function QuestionnaireForm() {
 
           <button type="button" className="btn-ghost" onClick={() => setPreview(true)}>Preview Questionnaire</button>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/aff-applications" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
-        </form>
-      </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/aff-applications" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy }} />
+      </form>
 
       {preview && <PreviewModal name={name} fields={fields} onClose={() => setPreview(false)} />}
     </>

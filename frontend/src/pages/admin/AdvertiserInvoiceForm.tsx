@@ -11,19 +11,12 @@ import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock } from '../../shared-components/primitives/ui';
 import type { AdvertiserInvoice, Advertiser } from '../../types';
 import { InvoiceCurrencyPicker } from './InvoiceCurrencyPicker';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
 
 const PAYMENT_TERMS_OPTIONS = ['None', 'Net 7', 'Net 15', 'Net 30', 'Net 60'];
-
-function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
-      className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${value ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
-      <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-medium shadow ${value ? 'bg-success text-white' : 'bg-white text-fg-secondary'}`}>
-        {value ? 'Yes' : 'No'}
-      </span>
-    </button>
-  );
-}
 
 interface FormState {
   advertiserId: string; periodStart: string; periodEnd: string; currency: string; hidden: boolean; paymentTerms: string; notes: string;
@@ -76,10 +69,10 @@ export default function AdvertiserInvoiceForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Invoice' : 'Add Invoice'} subtitle={`Advertisers › Invoices › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-2xl mx-auto">
-        <form onSubmit={submit} className="card space-y-6">
+        <form onSubmit={submit}>
+        <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
           <Field label="Advertiser *">
             {isEdit ? (
@@ -99,7 +92,7 @@ export default function AdvertiserInvoiceForm() {
             </select>
           </Field>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <Field label="Start Date *">
               {isEdit ? <input className="input" disabled value={existing?.periodStart ?? ''} />
                 : <input type="date" className="input" required value={form.periodStart} onChange={(e) => setForm((f) => ({ ...f, periodStart: e.target.value }))} />}
@@ -120,21 +113,26 @@ export default function AdvertiserInvoiceForm() {
           )}
 
           <div>
-            <label className="label">Invoice Hidden From Advertiser</label>
-            <YesNoToggle value={form.hidden} onChange={(v) => setForm((f) => ({ ...f, hidden: v }))} />
+            <ToggleRow label="Invoice Hidden From Advertiser" checked={form.hidden} onChange={(v) => setForm((f) => ({ ...f, hidden: v }))} />
             <p className="mt-1 text-[11px] text-fg-muted">Saved on the invoice. The advertiser portal doesn't list invoices yet, so it has no visible effect today.</p>
           </div>
 
-          <Field label="Notes">
-            <textarea className="input min-h-[70px]" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
-          </Field>
+          {/* Optional — create: collapsed; edit: open when the saved invoice has text (keyed so it
+              re-mounts once the record arrives — the form state is copied in by an effect). */}
+          <FormSection key={existing?.id ?? 'new'} id="adv-invoice-notes" title="Notes" collapsible summary="Notes"
+            defaultOpen={Boolean(existing?.notes?.trim())} filledCount={form.notes.trim() ? 1 : 0}>
+            <div className="pt-2">
+              <Field label="Notes">
+                <textarea className="input min-h-[70px]" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+              </Field>
+            </div>
+          </FormSection>
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Link to="/app/adv-invoices" className="btn-ghost">Cancel</Link>
-            <button type="submit" className="btn-primary" disabled={busy || (!isEdit && previewPath !== null && !form.currency)}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
           </div>
+        </FormLayout>
+        <FormFooter cancel={<Link to="/app/adv-invoices" className="btn-ghost">Cancel</Link>}
+          primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy || (!isEdit && previewPath !== null && !form.currency) }} />
         </form>
-      </div>
     </>
   );
 }

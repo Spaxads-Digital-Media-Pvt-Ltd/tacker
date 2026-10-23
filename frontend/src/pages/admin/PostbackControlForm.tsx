@@ -13,6 +13,13 @@ import { Plus, Trash2, Search, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock, Segmented } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { Stepper } from '../../shared-components/panels/Stepper';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { ChoiceCards, StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import type { PostbackControl, PostbackControlRule, PostbackControlVariable, PostbackControlOperator, Offer, Publisher, Advertiser } from '../../types';
 
 const STEPS = ['General', 'Rules'] as const;
@@ -36,16 +43,12 @@ const OPERATOR_OPTIONS: { value: PostbackControlOperator; label: string; needsVa
   { value: 'less_than', label: 'Less Than', needsValue: true },
 ];
 
-function YesNoToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
-      className={`relative inline-flex h-8 w-16 items-center rounded-full border transition-colors ${value ? 'border-success bg-success/10 justify-end' : 'border-border bg-surface justify-start'} px-1`}>
-      <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny font-medium shadow ${value ? 'bg-success text-white' : 'bg-white text-fg-secondary'}`}>
-        {value ? 'Yes' : 'No'}
-      </span>
-    </button>
-  );
-}
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'inactive', label: 'Inactive', tone: 'warning' }] as const;
+// Control type is not a status: neutral (accent) selection, with the existing tone dots.
+const CONTROL_TYPE_OPTIONS = [
+  { value: 'accept', label: 'Accept', tone: 'success' }, { value: 'reject', label: 'Reject', tone: 'danger' }, { value: 'hold', label: 'Hold', tone: 'warning' },
+] as const;
+const SET_TARGET_HINT = 'Apply only to selected Offers or Advertisers.';
 
 function MultiSelectPicker({
   label, options, selected, onChange,
@@ -160,38 +163,28 @@ export default function PostbackControlForm() {
   return (
     <>
       <PageHeader title={isEdit ? 'Edit Postback Control' : 'Add Postback Control'} subtitle={`Advertisers › Postback Controls › ${isEdit ? 'Edit' : 'Add'}`} />
-      <div className="max-w-3xl mx-auto">
-        <div className="mb-6 flex items-center gap-3">
-          {STEPS.map((s, i) => (
-            <div key={s} className="flex items-center gap-3">
-              <button type="button" onClick={() => i === 0 || generalValid ? setStep(i) : undefined}
-                className={`flex items-center gap-2 text-small font-medium ${step === i ? 'text-accent-text' : 'text-fg-secondary'}`}>
-                <span className={`grid h-6 w-6 place-items-center rounded-full text-tiny ${step === i ? 'bg-accent-text text-white' : 'border border-border'}`}>{i + 1}</span>
-                {s}
-              </button>
-              {i < STEPS.length - 1 && <div className="h-px w-12 bg-border" />}
-            </div>
-          ))}
-        </div>
-
-        <form onSubmit={submit} className="card space-y-6">
+      <Stepper steps={STEPS} current={step} onStepClick={(i) => (i === 0 || generalValid ? setStep(i) : undefined)} />
+        <form onSubmit={submit}>
+        <FormLayout caption={`Step ${step + 1}`} title={STEPS[step]} requiredNote="Fields with an asterisk (*) are mandatory."
+          layout="centered"
+          upNext={step === 0 ? <UpNextCard number={2} name={STEPS[1]} required /> : undefined}>
+          <div className="space-y-6">
           {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
-          <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
           {step === 0 && (
             <div className="space-y-5">
               <Field label="Name *"><input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} /></Field>
 
               <div>
-                <label className="label">Status *</label>
-                <Segmented options={['active', 'inactive']} value={form.status} onChange={(v) => set('status', v as FormState['status'])} dots={{ active: 'bg-success', inactive: 'bg-warning' }} />
+                <span id="pbc-status-label" className="label">Status *</span>
+                <StatusChoice options={STATUS_OPTIONS} value={form.status} onChange={(v) => set('status', v)} ariaLabelledby="pbc-status-label" />
               </div>
 
               <div>
                 <label className="label">Effective Between *</label>
                 <Segmented options={['Always On', 'Set Specific Period']} value={form.effectiveMode} onChange={(v) => set('effectiveMode', v as FormState['effectiveMode'])} />
                 {form.effectiveMode === 'Set Specific Period' && (
-                  <div className="mt-3 grid grid-cols-2 gap-4">
+                  <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                     <Field label="Start Date *"><input type="date" className="input" required value={form.effectiveStart} onChange={(e) => set('effectiveStart', e.target.value)} /></Field>
                     <Field label="End Date *"><input type="date" className="input" required min={form.effectiveStart || undefined} value={form.effectiveEnd} onChange={(e) => set('effectiveEnd', e.target.value)} /></Field>
                   </div>
@@ -199,14 +192,9 @@ export default function PostbackControlForm() {
               </div>
 
               <div>
-                <label className="label">Control Type *</label>
+                <span id="pbc-control-type-label" className="label">Control Type *</span>
                 <p className="mb-2 text-tiny text-fg-secondary">Automatically manage conversions by accepting, rejecting, or putting them on hold based on incoming variables.</p>
-                <Segmented options={['accept', 'reject', 'hold']} value={form.controlType} onChange={(v) => set('controlType', v as FormState['controlType'])} dots={{ accept: 'bg-success', reject: 'bg-danger-text', hold: 'bg-warning' }} />
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <Link to="/app/adv-postback-controls" className="btn-ghost">Cancel</Link>
-                <button type="button" className="btn-primary" disabled={!generalValid} onClick={() => setStep(1)}>Next</button>
+                <ChoiceCards options={CONTROL_TYPE_OPTIONS} value={form.controlType} onChange={(v) => set('controlType', v)} ariaLabelledby="pbc-control-type-label" />
               </div>
             </div>
           )}
@@ -214,9 +202,8 @@ export default function PostbackControlForm() {
           {step === 1 && (
             <div className="space-y-6">
               <div>
-                <label className="label">Set Specific Target</label>
-                <p className="mb-2 text-tiny text-fg-secondary">Apply only to selected Offers or Advertisers.</p>
-                <YesNoToggle value={form.hasTarget} onChange={(v) => set('hasTarget', v)} />
+                <ToggleRow label="Set Specific Target" checked={form.hasTarget} onChange={(v) => set('hasTarget', v)} hint={SET_TARGET_HINT} />
+                <p className="mt-1 text-tiny text-fg-secondary">{SET_TARGET_HINT}</p>
                 {form.hasTarget && (
                   <div className="mt-3 space-y-3 rounded-card border border-border bg-page p-4">
                     <Segmented options={['offer', 'advertiser']} value={form.targetType} onChange={(v) => { set('targetType', v as FormState['targetType']); set('targetIds', []); }} />
@@ -226,8 +213,7 @@ export default function PostbackControlForm() {
               </div>
 
               <div>
-                <label className="label">Apply Only to Selected Partners</label>
-                <YesNoToggle value={form.hasPartners} onChange={(v) => set('hasPartners', v)} />
+                <ToggleRow label="Apply Only to Selected Partners" checked={form.hasPartners} onChange={(v) => set('hasPartners', v)} />
                 {form.hasPartners && (
                   <div className="mt-3">
                     <MultiSelectPicker label="Partners" options={partnerOptions} selected={form.partnerIds} onChange={(ids) => set('partnerIds', ids)} />
@@ -235,8 +221,7 @@ export default function PostbackControlForm() {
                 )}
               </div>
 
-              <div className="border-t border-border pt-5">
-                <h3 className="mb-3 text-h3 font-medium text-fg">Build Your Rule(s)</h3>
+              <FormSection id="pbc-rules" title="Build Your Rule(s)" className="border-t border-border pt-6">
                 <div>
                   <label className="label">Condition *</label>
                   <Segmented options={['all', 'any']} value={form.conditionLogic} onChange={(v) => set('conditionLogic', v as FormState['conditionLogic'])} />
@@ -254,7 +239,7 @@ export default function PostbackControlForm() {
                   {form.rules.map((rule, i) => {
                     const opDef = OPERATOR_OPTIONS.find((o) => o.value === rule.operator);
                     return (
-                      <div key={i} className="flex items-end gap-2 rounded-card border border-border p-3">
+                      <div key={i} className="flex flex-wrap items-end gap-2 rounded-card border border-border p-3 md:flex-nowrap [&>div]:min-w-[8rem] [&>div]:flex-1">
                         <Field label="Variable *">
                           <select className="input" value={rule.variable} onChange={(e) => updateRule(i, { ...rule, variable: e.target.value as PostbackControlVariable })}>
                             {VARIABLE_OPTIONS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}
@@ -277,16 +262,22 @@ export default function PostbackControlForm() {
                   })}
                   {form.rules.length === 0 && <p className="text-small text-fg-muted">No rules yet — this control matches every conversion in its target/partner scope. Click + to add a condition.</p>}
                 </div>
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-border pt-4">
-                <button type="button" className="btn-ghost" onClick={() => setStep(0)}>Back</button>
-                <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
-              </div>
+              </FormSection>
             </div>
           )}
+          </div>
+        </FormLayout>
+        {/* Keyed per step: Next (type=button) and Save (type=submit) are separate elements, as before. */}
+        {step === 0 ? (
+          <FormFooter key="general" stepText={`Step 1 of ${STEPS.length}`}
+            cancel={<Link to="/app/adv-postback-controls" className="btn-ghost">Cancel</Link>}
+            primary={{ label: `Next: ${STEPS[1]}`, shortLabel: 'Next', type: 'button', disabled: !generalValid, onClick: () => setStep(1) }} />
+        ) : (
+          <FormFooter key="rules" stepText={`Step 2 of ${STEPS.length}`}
+            cancel={<button type="button" className="btn-ghost" onClick={() => setStep(0)}>Back</button>}
+            primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', type: 'submit', disabled: busy }} />
+        )}
         </form>
-      </div>
     </>
   );
 }

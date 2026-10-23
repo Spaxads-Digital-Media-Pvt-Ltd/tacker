@@ -2,18 +2,6 @@
 import { useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
-export function YesNoToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" onClick={() => onChange(!on)} aria-pressed={on}
-      className={`inline-flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-1.5 text-small font-medium ${on ? 'text-accent-text' : 'text-fg-secondary'}`}>
-      {on ? 'Yes' : 'No'}
-      <span className={`relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors ${on ? 'bg-success' : 'bg-border'}`}>
-        <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0'}`} />
-      </span>
-    </button>
-  );
-}
-
 /** Left list + right panel picker (Targeting tab). `badge` shows a count per row. */
 export function CategoryPicker({ categories, panel, badge }: {
   categories: string[]; panel: (c: string) => ReactNode; badge?: (c: string) => number;
@@ -29,7 +17,7 @@ export function CategoryPicker({ categories, panel, badge }: {
               className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-small ${active === c ? 'bg-accent-subtle font-medium text-accent-text' : 'text-fg-secondary hover:bg-page'}`}>
               <span>{c}</span>
               <span className="flex items-center gap-2">
-                {n > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-white">{n}</span>}
+                {n > 0 && <span className="rounded-full bg-accent px-1.5 text-[10px] font-bold text-on-accent">{n}</span>}
                 ›
               </span>
             </button>
@@ -41,7 +29,8 @@ export function CategoryPicker({ categories, panel, badge }: {
   );
 }
 
-/** Type a value, Enter (or Add) to append it as a chip. Invalid values are rejected with a message. */
+/** Type a value, Enter (or Add) to append it as a chip (Concept 05 accent-subtle chips with ×).
+ * Invalid values are rejected with a message. */
 export function ChipInput({ values, onChange, placeholder, suggestions, validate, normalize }: {
   values: string[];
   onChange: (v: string[]) => void;
@@ -75,9 +64,9 @@ export function ChipInput({ values, onChange, placeholder, suggestions, validate
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {values.map((v) => (
-            <span key={v} className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2.5 py-0.5 text-tiny text-fg">
+            <span key={v} className="inline-flex items-center gap-1 rounded-full bg-accent-subtle py-0.5 pl-2.5 pr-1 text-tiny font-medium text-accent-text">
               {v}
-              <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))} className="text-fg-muted hover:text-fg"><X size={11} /></button>
+              <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))} className="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/15"><X size={12} aria-hidden /></button>
             </span>
           ))}
         </div>

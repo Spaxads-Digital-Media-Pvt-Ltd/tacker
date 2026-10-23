@@ -24,7 +24,8 @@ import { Link } from 'react-router-dom';
 import { Search, MoreVertical, Pencil, ChevronRight, HelpCircle, Info, FileCheck } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
-import { PageHeader, Tabs, StateBlock, Spinner, Modal } from '../../shared-components/primitives/ui';
+import { PageHeader, Tabs, StateBlock, Spinner, Modal, Field } from '../../shared-components/primitives/ui';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import { Accordion } from '../../shared-components/panels/Accordion';
 import { Pagination } from '../../shared-components/primitives/ReportPageKit';
 import { ColumnsModal } from '../../shared-components/primitives/TableActionsKit';
@@ -133,6 +134,8 @@ function HelpIcon({ text }: { text: string }) {
 // because it's step 1 of 5 (Remote Offers/Offer Settings/Partner Settings/Controls follow) — this app
 // has no real per-offer selection or partner-visibility model to back those steps, so the footer here
 // honestly says "Save integration" instead of implying more steps that don't exist.
+const FEED_STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'paused', label: 'Paused', tone: 'warning' }] as const;
+
 function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<string, unknown>; advertisers: { id: string; name: string }[]; onSaved: () => void; onCancel: () => void }) {
   const [name, setName] = useState((cur['offerFeedName'] as string) ?? '');
   const [status, setStatus] = useState((cur['offerFeedStatus'] as string) ?? 'active');
@@ -163,46 +166,35 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
       </div>
       {error && <p className="text-small text-danger-text">{error}</p>}
 
-      <div>
-        <label className="label flex items-center gap-1.5">Name <span className="text-danger-text">*</span> <HelpIcon text="Shown as this integration's name in the Feeds table." /></label>
+      <Field label="Name *" hint="Shown as this integration's name in the Feeds table.">
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
-      </div>
+      </Field>
 
       <div>
-        <label className="label">Status <span className="text-danger-text">*</span></label>
-        <div className="flex overflow-hidden rounded-[var(--radius)] border border-border">
-          {(['active', 'paused'] as const).map((s) => (
-            <button key={s} type="button" onClick={() => setStatus(s)}
-              className={`flex flex-1 items-center justify-center gap-2 py-2 text-small font-medium ${status === s ? 'bg-surface text-fg' : 'bg-page text-fg-secondary'}`}>
-              <span className={`h-2 w-2 rounded-full ${s === 'active' ? 'bg-success' : 'bg-warning'}`} />
-              {s === 'active' ? 'Active' : 'Paused'}
-            </button>
-          ))}
-        </div>
+        <span id="feed-status-label" className="label">Status *</span>
+        <StatusChoice options={FEED_STATUS_OPTIONS} value={status as (typeof FEED_STATUS_OPTIONS)[number]['value']} onChange={setStatus} ariaLabelledby="feed-status-label" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="space-y-4">
-          <div>
-            <label className="label">Default Advertiser <span className="text-danger-text">*</span></label>
+          <Field label="Default Advertiser *">
             <select className="input" value={advertiserId} onChange={(e) => setAdvertiserId(e.target.value)} required>
               <option value="">Select Default Advertiser…</option>
               {advertisers.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
-          </div>
-          <div>
-            <label className="label flex items-center gap-1.5">Sync Frequency <span className="text-danger-text">*</span> <HelpIcon text="How often this feed would refresh." /></label>
+          </Field>
+          <Field label="Sync Frequency *" hint="How often this feed would refresh.">
             <select className="input" value={syncFrequency} onChange={(e) => setSyncFrequency(e.target.value)}>
               {SYNC_FREQUENCIES.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
-          </div>
+          </Field>
           <label className="flex cursor-pointer items-center gap-2 text-small text-fg">
             <input type="checkbox" className="chk" checked={useAdvertiserCurrency} onChange={(e) => setUseAdvertiserCurrency(e.target.checked)} />
             Using Advertiser Currency <HelpIcon text="Report this feed's payouts in the default advertiser's currency." />
           </label>
         </div>
         <div>
-          <label className="label">Thumbnail</label>
+          <span className="label">Thumbnail</span>
           <div className="flex h-full min-h-32 flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-border">
             <FileCheck size={22} className="text-fg-muted" />
             <span className="text-small font-medium text-fg">Custom Feed</span>
@@ -213,14 +205,12 @@ function FeedConfigForm({ cur, advertisers, onSaved, onCancel }: { cur: Record<s
       <div className="border-t border-border pt-4">
         <h3 className="mb-3 text-small font-semibold text-fg">Custom Feed</h3>
         <div className="space-y-3">
-          <div>
-            <label className="label">Feed URL <span className="text-danger-text">*</span>{urlSet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
+          <Field label={`Feed URL *${urlSet ? ' (set — leave blank to keep)' : ''}`}>
             <input className="input" value={url} placeholder={urlSet ? '••••••••' : 'https://… or demo://offer-feed'} onChange={(e) => setUrl(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Feed API Key <span className="text-danger-text">*</span>{keySet ? <span className="text-fg-muted"> (set — leave blank to keep)</span> : null}</label>
+          </Field>
+          <Field label={`Feed API Key *${keySet ? ' (set — leave blank to keep)' : ''}`}>
             <input className="input" type="password" value={key} placeholder={keySet ? '••••••••' : ''} onChange={(e) => setKey(e.target.value)} />
-          </div>
+          </Field>
         </div>
       </div>
 

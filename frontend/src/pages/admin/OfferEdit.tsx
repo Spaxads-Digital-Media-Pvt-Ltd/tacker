@@ -16,12 +16,18 @@ import { useOfferCategories } from '../../lib/useOfferCategories';
 import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { advertiserPostbackUrl, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Tabs, Spinner, StateBlock, type Column, Segmented } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { FIELD_HELP_EMPTY } from '../../shared-components/forms/FieldHelpPanel';
+import { ChoiceCards, StatusChoice } from '../../shared-components/forms/ChoiceCards';
+import { OFFER_STATUS_LABEL, OFFER_STATUS_TONE } from '../../lib/offerStatus';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsEditor } from '../../shared-components/panels/LabelsEditor';
 import { CollectionTab, type FieldDef } from '../../shared-components/panels/CollectionTab';
 import { CopyBox } from '../../shared-components/panels/CopyBox';
-import { YesNoToggle } from './offerForm/controls';
 import { TargetingPanel } from './offerForm/TargetingPanel';
 import { targetingErrors } from './offerForm/targetingValidation';
 import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
@@ -35,13 +41,18 @@ import type {
 } from '../../types';
 
 const TABS = ['General', 'Tracking & Controls', 'Postback Configuration', 'Revenue & Payout (Events)', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'] as const;
-// Everflow-reference order (Active · Paused · Pending). Edit keeps "Deleted" (archived) as a 4th
-// segment — unlike the create form — so an already-archived offer still shows its current status.
+// Everflow-reference order (Active · Paused · Draft). Edit keeps Archived as a 4th card — unlike the
+// create form — so an already-archived offer still shows its current status. Labels and tones come
+// from lib/offerStatus; the API value stays the raw enum member.
 const STATUSES = ['active', 'paused', 'draft', 'archived'] as const;
-const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-success', paused: 'bg-warning', archived: 'bg-danger' };
-// Display labels for the real backend enum — matches the Offers list vocabulary; API value stays raw.
-const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
+const STATUS_OPTIONS = STATUSES.map((v) => ({ value: v, label: OFFER_STATUS_LABEL[v] ?? v, tone: OFFER_STATUS_TONE[v] ?? ('neutral' as const) }));
+const STATUS_HINT = 'Draft = setup in progress (not live). Active = running. Paused = temporarily stopped. Archived = hidden from partners.';
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
+const VISIBILITY_OPTIONS = VISIBILITIES.map((v) => ({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1) }));
+const VISIBILITY_HINT = 'Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval.';
+const GROUP_HINT = "Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side.";
+/** Tabs whose fields carry existing hints (Field help). Every tab keeps the aside column so the card never changes width. */
+const HINT_TABS = new Set<string>(['General', 'Tracking & Controls', 'Postback Configuration', 'Revenue & Payout (Events)', 'Attribution', 'Email']);
 const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
 /** CPC pays per click, CPM per 1,000 impressions (backend lib/offer-settings/billing.ts); the rest per conversion. */
 const PAYOUT_LABEL: Record<string, string> = { CPC: 'Payout Per Click', CPM: 'Payout Per 1,000 Impressions' };
@@ -223,43 +234,44 @@ export default function OfferEdit() {
   const currentDomainId: string | null | undefined = offer?.trackingDomainId;
   const domainGroups = groupTrackingDomains(domains);
 
+  const optionalFilled = [form.appIdentifier, form.previewUrl, form.internalNotes, form.productId, form.description].filter((v) => v.trim()).length;
+
   return (
     <>
       <PageHeader title={`Edit Offer: ${offer.name}`} subtitle={`Offers › ${offer.name} › Edit`} />
-      <div className="max-w-3xl mx-auto">
       <Tabs tabs={[...TABS]} active={tab} onChange={setTab} />
-      <form onSubmit={submit} className="card space-y-6">
+      <form onSubmit={submit}>
+      <FormLayout title={tab} layout="aside"
+        requiredNote={<span className="flex items-center gap-1.5"><Info size={13} className="shrink-0 text-fg-muted" /> Fields with an asterisk (*) are mandatory.</span>}
+        help={HINT_TABS.has(tab) ? { fallback: { title: tab, body: FIELD_HELP_EMPTY } } : undefined}>
+        <div className="space-y-6">
         {saveError && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{saveError}</p>}
         {formErrors.length > 0 && (
           <ul className="space-y-0.5 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">
             {formErrors.map((m) => <li key={m}>{m}</li>)}
           </ul>
         )}
-        <p className="flex items-center gap-1.5 text-tiny text-fg-secondary">
-          <Info size={13} className="shrink-0 text-fg-muted" /> Fields with an asterisk (*) are mandatory.
-        </p>
 
         {tab === 'General' && (
-          <div className="max-w-2xl space-y-4">
-            <Field label="Name *" hint="Shown to partners in the offer list and on their tracking links — not the internal ID.">
-              <input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} />
-            </Field>
-            <div>
-              <label className="label mb-2 block">Status *<HelpHint text="Pending = setup in progress (not live). Active = running. Paused = temporarily stopped. Deleted = archived, hidden from partners." /></label>
-              <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} labels={STATUS_LABEL} />
-            </div>
-            <div>
-              <label className="label mb-2 block">Visibility *<HelpHint text="Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval." /></label>
-              <Segmented options={VISIBILITIES} value={form.visibility} onChange={(v) => set('visibility', v)} />
-            </div>
-            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
-              <Field label="Advertiser *" hint="The company that owns this offer. Payout & revenue roll up to them for reporting and invoicing, and their account / sales managers apply to it. Every offer belongs to exactly one.">
-                <select className="input" required value={form.advertiserId} onChange={(e) => set('advertiserId', e.target.value)}>
-                  {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
+            <div className="md:col-span-2">
+              <Field label="Name *" hint="Shown to partners in the offer list and on their tracking links — not the internal ID.">
+                <input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} />
               </Field>
-              <ThumbnailField offerId={id} url={form.thumbnailUrl} onUrlChange={(v) => set('thumbnailUrl', v)} />
             </div>
+            <div className="md:col-span-2" data-help-label="Status *" data-help={STATUS_HINT}>
+              <div className="mb-1.5 flex items-center"><span id="offer-edit-status-label" className="label !mb-0">Status *</span><HelpHint text={STATUS_HINT} /></div>
+              <StatusChoice options={STATUS_OPTIONS} value={form.status as (typeof STATUSES)[number]} onChange={(v) => set('status', v)} ariaLabelledby="offer-edit-status-label" />
+            </div>
+            <div className="md:col-span-2" data-help-label="Visibility *" data-help={VISIBILITY_HINT}>
+              <div className="mb-1.5 flex items-center"><span id="offer-edit-visibility-label" className="label !mb-0">Visibility *</span><HelpHint text={VISIBILITY_HINT} /></div>
+              <ChoiceCards options={VISIBILITY_OPTIONS} value={form.visibility as (typeof VISIBILITIES)[number]} onChange={(v) => set('visibility', v)} ariaLabelledby="offer-edit-visibility-label" />
+            </div>
+            <Field label="Advertiser *" hint="The company that owns this offer. Payout & revenue roll up to them for reporting and invoicing, and their account / sales managers apply to it. Every offer belongs to exactly one.">
+              <select className="input" required value={form.advertiserId} onChange={(e) => set('advertiserId', e.target.value)}>
+                {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
             <Field label="Category" hint="Grouping label used for list filtering and marketplace facets. Pick an existing one, or choose “＋ New category…” to add a new label.">
               {catNew ? (
                 <div className="flex gap-2">
@@ -285,45 +297,54 @@ export default function OfferEdit() {
             </Field>
             <Field label="Currency *" hint="ISO 4217 3-letter code (e.g. USD). All payout, revenue and ledger amounts for this offer are recorded in it. Not validated server-side yet — enter a real code.">
               <input className="input" list="offer-currency-options" maxLength={3} pattern="[A-Za-z]{3}" title="Three-letter ISO 4217 code, e.g. USD" required value={form.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} />
-              <datalist id="offer-currency-options">
-                {COMMON_CURRENCIES.map((c) => <option key={c} value={c} />)}
-              </datalist>
             </Field>
-            <div>
-              <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
-              <div className="flex flex-wrap items-center gap-2">
-                <YesNoToggle on={assignGroup} onChange={setAssignGroup} />
-                {assignGroup && (
-                  <select className="input !w-auto" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-                    <option value="" disabled>Select Offer Group…</option>
-                    {(groups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                )}
-              </div>
+            <datalist id="offer-currency-options">
+              {COMMON_CURRENCIES.map((c) => <option key={c} value={c} />)}
+            </datalist>
+            <div className="space-y-2">
+              <span aria-hidden className="label mb-1.5 hidden md:block">&nbsp;</span>
+              <ToggleRow label="Assign To Offer Group" checked={assignGroup} onChange={setAssignGroup} hint={GROUP_HINT} hintIcon />
+              {assignGroup && (
+                <select className="input" aria-label="Offer group" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+                  <option value="" disabled>Select Offer Group…</option>
+                  {(groups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              )}
             </div>
-            <LabelsEditor base={base} />
-            <Field label="App Identifier" hint="Store bundle / package ID for app offers (e.g. com.acme.app or id123456789).">
-              <input className="input" placeholder="e.g. com.acme.app" maxLength={255} value={form.appIdentifier} onChange={(e) => set('appIdentifier', e.target.value)} />
-            </Field>
-            <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
-              <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
-            </Field>
-            <Field label="Internal Notes" hint="Visible to your team only — never shown to partners or advertisers.">
-              <textarea className="input min-h-[80px]" value={form.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} />
-            </Field>
-            <Field label="Product ID" hint="Your own or the advertiser's product / SKU reference for this offer.">
-              <input className="input" maxLength={255} value={form.productId} onChange={(e) => set('productId', e.target.value)} />
-            </Field>
-            <Field label="Description" hint="Notes about the offer for your team and partners. Plain text.">
-              <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} />
-            </Field>
+            <ThumbnailField offerId={id} url={form.thumbnailUrl} onUrlChange={(v) => set('thumbnailUrl', v)} />
+            <div className="md:col-span-2"><LabelsEditor base={base} /></div>
+            {/* Optional fields — an edit page opens this when any of them already has a value. */}
+            <FormSection id="offer-edit-optional" title="Optional details" collapsible defaultOpen={optionalFilled > 0} filledCount={optionalFilled}
+              summary="App Identifier · Preview URL · Internal Notes · Product ID · Description" className="md:col-span-2">
+              <div className="grid grid-cols-1 gap-5 pt-2 md:grid-cols-2">
+                <Field label="App Identifier" hint="Store bundle / package ID for app offers (e.g. com.acme.app or id123456789).">
+                  <input className="input" placeholder="e.g. com.acme.app" maxLength={255} value={form.appIdentifier} onChange={(e) => set('appIdentifier', e.target.value)} />
+                </Field>
+                <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
+                  <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
+                </Field>
+                <div className="md:col-span-2">
+                  <Field label="Internal Notes" hint="Visible to your team only — never shown to partners or advertisers.">
+                    <textarea className="input min-h-[80px]" value={form.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} />
+                  </Field>
+                </div>
+                <Field label="Product ID" hint="Your own or the advertiser's product / SKU reference for this offer.">
+                  <input className="input" maxLength={255} value={form.productId} onChange={(e) => set('productId', e.target.value)} />
+                </Field>
+                <div className="md:col-span-2">
+                  <Field label="Description" hint="Notes about the offer for your team and partners. Plain text.">
+                    <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} />
+                  </Field>
+                </div>
+              </div>
+            </FormSection>
           </div>
         )}
 
         {tab === 'Tracking & Controls' && (
-          <div className="max-w-2xl space-y-6">
+          <div className="space-y-6">
+            <FormSection id="offer-edit-tracking" title="Tracking">
             <div className="space-y-4">
-              <h3 className="text-h3 font-medium text-fg">Tracking</h3>
               <p className="text-small font-semibold text-fg">Default Landing Page</p>
               <Field label="Default Landing Page URL *"><textarea className="input min-h-[80px] font-mono text-tiny" required value={form.destinationUrl} onChange={(e) => set('destinationUrl', e.target.value)} /></Field>
 
@@ -363,13 +384,11 @@ export default function OfferEdit() {
                 <span><strong>Support Deep Links</strong> — Allow Partners to direct traffic to alternate landing pages without additional Offer URLs.</span>
               </label>
             </div>
+            </FormSection>
 
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Caps</h3>
-              <div>
-                <label className="label mb-2 block">Enable Caps</label>
-                <YesNoToggle on={capsEnabled} onChange={setCapsEnabled} />
-              </div>
+            <FormSection id="offer-edit-caps" title="Caps" className="border-t border-border pt-6">
+            <div className="space-y-4">
+              <ToggleRow label="Enable Caps" checked={capsEnabled} onChange={setCapsEnabled} />
               {capsEnabled && (
                 <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-3">
                   <Field label="Daily Click Cap"><input type="number" min={0} className="input" value={form.dailyClickCap} onChange={(e) => set('dailyClickCap', e.target.value)} placeholder="Unlimited" /></Field>
@@ -383,11 +402,12 @@ export default function OfferEdit() {
                   inheritLabel={`Network default — ${netSettings?.general.capTimezone ?? 'UTC'}`} />
               </Field>
             </div>
+            </FormSection>
           </div>
         )}
 
         {tab === 'Postback Configuration' && (
-          <div className="max-w-2xl space-y-6">
+          <div className="space-y-6">
             <p className="text-small text-fg-secondary">Give this URL to the advertiser. They should fire it from their server when a user converts. The click_id is passed automatically via the redirect.</p>
             <div className="space-y-4">
               <Field label="S2S Postback URL" hint="The advertiser replaces {click_id} and {txn_id} with their own values. The secure code is already filled in.">
@@ -397,6 +417,7 @@ export default function OfferEdit() {
               </Field>
               <div>
                 <p className="label mb-2 block">Postback Parameters</p>
+                <div className="overflow-x-auto">
                 <table className="premium-table w-full">
                   <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Parameter</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Meaning</th></tr></thead>
                   <tbody>
@@ -405,11 +426,12 @@ export default function OfferEdit() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Per-Offer Security Code</h3>
+            <FormSection id="offer-edit-security-code" title="Per-Offer Security Code" className="border-t border-border pt-6">
+            <div className="space-y-4">
               <p className="text-small text-fg-secondary">Overrides the network-wide code when set. The advertiser must include the per-offer security code in their postback. Leave empty to use the network default.</p>
               {offer.securityCodeHidden ? (
                 <p className="text-small text-fg-secondary">{offer.securityCodeSet ? 'This offer has its own security code — hidden for your role.' : 'This offer uses the network default code.'}</p>
@@ -424,9 +446,9 @@ export default function OfferEdit() {
               )}
               {(regenCode.error || clearCode.error) && <p className="text-small text-danger-text">{regenCode.error ?? clearCode.error}</p>}
             </div>
+            </FormSection>
 
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Publisher Postback</h3>
+            <FormSection id="offer-edit-publisher-postback" title="Publisher Postback" className="border-t border-border pt-6">
               <div>
                 <label className="flex items-start gap-2 text-small text-fg">
                   <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={form.firePartnerPostback} onChange={(e) => set('firePartnerPostback', e.target.checked)} />
@@ -434,18 +456,18 @@ export default function OfferEdit() {
                 </label>
                 <p className="mt-1 text-tiny text-fg-secondary">Publisher postback URLs and macros are configured separately on each publisher's postback settings. When enabled, approved conversions trigger an outbound call to the publisher with their configured macro template.</p>
               </div>
-            </div>
+            </FormSection>
           </div>
         )}
 
         {tab === 'Revenue & Payout (Events)' && (
-          <div className="max-w-2xl space-y-6">
+          <div className="space-y-6">
             <RevenueSettingsPanel value={form.revenue} onChange={(v) => set('revenue', v)}
               firePartnerPostback={form.firePartnerPostback} onFirePartnerPostbackChange={(v) => set('firePartnerPostback', v)}
               revenue={form.defaultRevenue} onRevenueChange={(v) => set('defaultRevenue', v)} />
 
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Base Payout</h3>
+            <FormSection id="offer-edit-base-payout" title="Base Payout" className="border-t border-border pt-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field label="Model">
                 <select className="input" value={form.payoutModel} onChange={(e) => set('payoutModel', e.target.value)}>
                   {['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
@@ -453,12 +475,13 @@ export default function OfferEdit() {
               </Field>
               <Field label={`${PAYOUT_LABEL[form.payoutModel] ?? 'Payout Per Action'} *`}><input className="input" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} /></Field>
             </div>
+            </FormSection>
           </div>
         )}
 
         {tab === 'Attribution' && (
-          <div className="max-w-2xl space-y-6">
-            <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-2">
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 md:grid-cols-2">
               <Field label="Attribution Window (seconds)"><input type="number" min={0} className="input" value={form.attributionWindowS} onChange={(e) => set('attributionWindowS', e.target.value)} placeholder="2592000" /></Field>
               <Field label="Dedup Window (seconds)"><input type="number" min={0} className="input" value={form.dedupWindowS} onChange={(e) => set('dedupWindowS', e.target.value)} placeholder="86400" /></Field>
             </div>
@@ -472,11 +495,8 @@ export default function OfferEdit() {
         )}
 
         {tab === 'Fail Traffic' && (
-          <div className="max-w-2xl space-y-4">
-            <div>
-              <label className="label mb-2 block">Enable Fail Traffic</label>
-              <YesNoToggle on={failTrafficEnabled} onChange={setFailTrafficEnabled} />
-            </div>
+          <div className="space-y-4">
+            <ToggleRow label="Enable Fail Traffic" checked={failTrafficEnabled} onChange={setFailTrafficEnabled} />
             {failTrafficEnabled ? (
               <div className="rounded-card border border-border bg-page p-4">
                 <Field label="Fallback URL *"><input className="input" value={form.fallbackUrl} onChange={(e) => set('fallbackUrl', e.target.value)} placeholder="https://…" /></Field>
@@ -508,13 +528,12 @@ export default function OfferEdit() {
         )}
 
         {tab === 'Email' && <EmailSettingsPanel value={form.email} onChange={(v) => set('email', v)} />}
-
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <button type="button" className="btn-ghost" onClick={() => nav(`/app/offers/${id}`)}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy || saving} aria-busy={busy || saving}>{busy || saving ? 'Saving…' : 'Save'}</button>
         </div>
+      </FormLayout>
+      <FormFooter
+        cancel={<button type="button" className="btn-ghost" onClick={() => nav(`/app/offers/${id}`)}>Cancel</button>}
+        primary={{ label: busy || saving ? 'Saving…' : 'Save', disabled: busy || saving, busy: busy || saving }} />
       </form>
-      </div>
     </>
   );
 }

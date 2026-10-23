@@ -7,12 +7,14 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useQuery, useMutation } from '../../lib/useApi';
 import { PageHeader, Field, Spinner, StateBlock, Segmented, DurationField } from '../../shared-components/primitives/ui';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { StatusChoice } from '../../shared-components/forms/ChoiceCards';
 import { MacroTokenPicker } from '../../features/postback/MacroTokenPicker';
+import { POSTBACK_MACROS } from '../../data/creatives';
 import type { Postback, Publisher, Offer } from '../../types';
 
-const STATUSES = ['active', 'disabled'] as const;
-const STATUS_LABEL: Record<string, string> = { active: 'Active', disabled: 'Inactive' };
-const STATUS_DOT: Record<string, string> = { active: 'bg-success', disabled: 'bg-warning' };
+const STATUS_OPTIONS = [{ value: 'active', label: 'Active', tone: 'success' }, { value: 'disabled', label: 'Inactive', tone: 'warning' }] as const;
 const TYPES = ['conversion', 'event', 'cpc'] as const;
 const TYPE_LABEL: Record<string, string> = { conversion: 'Conversion', event: 'Event', cpc: 'CPC' };
 const LEVELS = ['global', 'specific', 'global_offer'] as const;
@@ -76,14 +78,14 @@ export default function PostbackForm() {
  return (
  <>
  <PageHeader title={isEdit ? 'Edit Postback' : 'Add Postback'} subtitle={`Partners › Postbacks › ${isEdit ? 'Edit' : 'Add'}`} />
- <div className="max-w-2xl mx-auto">
- <form onSubmit={submit} className="card space-y-6">
+ <form onSubmit={submit}>
+ <FormLayout requiredNote="Fields with an asterisk (*) are mandatory.">
+ <div className="space-y-6">
  {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
- <p className="text-tiny text-fg-secondary">Fields with an asterisk (*) are mandatory.</p>
 
  <div>
- <label className="label">Status *</label>
- <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} labels={STATUS_LABEL} dots={STATUS_DOT} />
+ <span id="postback-status-label" className="label">Status *</span>
+ <StatusChoice options={STATUS_OPTIONS} value={form.status as (typeof STATUS_OPTIONS)[number]['value']} onChange={(v) => set('status', v)} ariaLabelledby="postback-status-label" />
  </div>
 
  <Field label="Description"><textarea className="input min-h-[70px]" value={form.description} onChange={(e) => set('description', e.target.value)} /></Field>
@@ -129,8 +131,8 @@ export default function PostbackForm() {
  ) : (
  <>
  <Field label="Postback URL *"><input className="input font-mono text-small" required value={form.url} onChange={(e) => set('url', e.target.value)} placeholder="https://example.com/pb?click_id={click_id}&payout={payout}" /></Field>
- <MacroTokenPicker value={form.url} onChange={(v) => set('url', v)} />
- <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+ <MacroTokenPicker value={form.url} onChange={(v) => set('url', v)} macros={POSTBACK_MACROS} />
+ <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
  <Field label="HTTP Method"><select className="input" value={form.method} onChange={(e) => set('method', e.target.value)}><option>GET</option><option>POST</option></select></Field>
  <Field label="Event"><input className="input" value={form.event} onChange={(e) => set('event', e.target.value)} placeholder="e.g. purchase" /></Field>
  <Field label="Delay"><DurationField value={form.delay} onChange={(v) => set('delay', v)} /></Field>
@@ -138,12 +140,11 @@ export default function PostbackForm() {
  </>
  )}
 
- <div className="flex justify-end gap-2 border-t border-border pt-4">
- <Link to="/app/aff-postbacks" className="btn-ghost">Cancel</Link>
- <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : isEdit ? 'Save' : 'Add'}</button>
  </div>
+ </FormLayout>
+ <FormFooter cancel={<Link to="/app/aff-postbacks" className="btn-ghost">Cancel</Link>}
+ primary={{ label: busy ? 'Saving…' : isEdit ? 'Save' : 'Add', disabled: busy }} />
  </form>
- </div>
  </>
  );
 }

@@ -17,12 +17,19 @@ import { useOfferCategories } from '../../lib/useOfferCategories';
 import { useSubmitGuard } from '../../lib/useSubmitGuard';
 import { advertiserPostbackUrl, defaultTrackingDomain, groupTrackingDomains, POSTBACK_PARAMS, resolveTrackingHost } from '../../lib/trackingLinks';
 import { PageHeader, Field, Segmented } from '../../shared-components/primitives/ui';
+import { ToggleRow } from '../../shared-components/primitives/ToggleRow';
+import { FormLayout } from '../../shared-components/forms/FormLayout';
+import { FormSection } from '../../shared-components/forms/FormSection';
+import { FormFooter } from '../../shared-components/forms/FormFooter';
+import { FIELD_HELP_EMPTY } from '../../shared-components/forms/FieldHelpPanel';
+import { UpNextCard } from '../../shared-components/forms/UpNextCard';
+import { ChoiceCards, StatusChoice } from '../../shared-components/forms/ChoiceCards';
+import { OFFER_STATUS_LABEL, OFFER_STATUS_TONE } from '../../lib/offerStatus';
 import { useConfirm } from '../../shared-components/primitives/confirm';
 import { CopyBox } from '../../shared-components/panels/CopyBox';
 import { HelpHint } from '../../shared-components/panels/HelpHint';
 import { LabelsInput } from '../../shared-components/panels/LabelsEditor';
-import { Stepper } from '../../shared-components/panels/Stepper';
-import { YesNoToggle } from './offerForm/controls';
+import { Stepper, type StepGroup } from '../../shared-components/panels/Stepper';
 import { TargetingPanel } from './offerForm/TargetingPanel';
 import { targetingErrors } from './offerForm/targetingValidation';
 import { AttributionSettingsPanel, EmailSettingsPanel, RevenueSettingsPanel } from './offerForm/SettingsPanels';
@@ -34,16 +41,25 @@ import type { Advertiser, Offer, OfferTargeting, TrackingDomain } from '../../ty
 
 const STEPS = ['General', 'Tracking & Controls', 'Postback Configuration', 'Revenue & Payout', 'Attribution', 'Targeting', 'Fail Traffic', 'Creatives', 'Email'];
 const TARGETING_STEP = STEPS.indexOf('Targeting');
-// Exactly the Everflow "Add Offer" reference: Active · Paused · Pending. `archived` is a lifecycle
+// Concept 05 phase groups + shorter chip labels (display only — the STEPS values are unchanged).
+const STEP_LABELS = ['General', 'Tracking', 'Postback', 'Revenue', 'Attribution', 'Targeting', 'Fail traffic', 'Creatives', 'Email'];
+const STEP_GROUPS: StepGroup[] = [
+  { label: 'Setup', steps: [0, 1, 2] }, { label: 'Money', steps: [3, 4] }, { label: 'Rules', steps: [5, 6] }, { label: 'Assets', steps: [7, 8] },
+];
+/** Steps with a required (*) field — the Up next card's Required badge. */
+const REQUIRED_STEPS = new Set([1, 3]);
+/** Steps whose fields carry existing hints. Any → the wizard keeps the aside layout on every step. */
+const HINT_STEPS = new Set([0, 1, 3, 4, 8]);
+// Exactly the Everflow "Add Offer" reference: Active · Paused · Draft. `archived` is a lifecycle
 // state you reach later (via the Offers list), never one you pick at creation — so it's not offered
-// here. STATUS_DOT/STATUS_LABEL keep the `archived` key so existing rows still resolve elsewhere.
+// here. Labels and tones come from lib/offerStatus; the value sent to the API is the raw enum member.
 const STATUSES = ['active', 'paused', 'draft'] as const;
-const STATUS_DOT: Record<string, string> = { draft: 'bg-fg-muted', active: 'bg-success', paused: 'bg-warning', archived: 'bg-danger' };
-// Display labels for the real backend enum (draft/active/paused/archived) — matches the vocabulary
-// the Offers list already uses (draft → "Pending", archived → "Deleted"); the value sent to the
-// API is still the raw enum member.
-const STATUS_LABEL: Record<string, string> = { draft: 'Pending', active: 'Active', paused: 'Paused', archived: 'Deleted' };
+const STATUS_OPTIONS = STATUSES.map((v) => ({ value: v, label: OFFER_STATUS_LABEL[v] ?? v, tone: OFFER_STATUS_TONE[v] ?? ('neutral' as const) }));
+const STATUS_HINT = 'Active = running. Paused = temporarily stopped. Draft = setup in progress (not live).';
 const VISIBILITIES = ['public', 'private', 'ask'] as const;
+const VISIBILITY_OPTIONS = VISIBILITIES.map((v) => ({ value: v, label: v.charAt(0).toUpperCase() + v.slice(1) }));
+const VISIBILITY_HINT = 'Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval.';
+const GROUP_HINT = "Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side.";
 const LINKING_TYPES = [{ value: 'redirect', label: 'Redirect Linking' }, { value: 'redirect_direct', label: 'Redirect + Direct Linking' }];
 /** CPC pays per click, CPM per 1,000 impressions (backend lib/offer-settings/billing.ts); the rest per conversion. */
 const PAYOUT_LABEL: Record<string, string> = { CPC: 'Payout Per Click', CPM: 'Payout Per 1,000 Impressions' };
@@ -217,113 +233,126 @@ export default function OfferCreate() {
   const currentDomainId: string | null | undefined = null;
   const domainGroups = groupTrackingDomains(domains);
 
+  const isLast = step === STEPS.length - 1;
+  const locked = busy || submitting;
+  const optionalFilled = [form.previewUrl, form.appIdentifier, form.productId, form.internalNotes, form.description].filter((v) => v.trim()).length;
+  const group = STEP_GROUPS.find((g) => g.steps.includes(step));
+
   return (
     <>
       <PageHeader title="Add Offer" subtitle="Offers › Add" />
-      <Stepper steps={STEPS} current={step} />
-      <div className="max-w-2xl mx-auto">
-      <form onSubmit={next} className="card space-y-6">
+      <Stepper steps={STEPS} labels={STEP_LABELS} groups={STEP_GROUPS} current={step} />
+      <form onSubmit={next}>
+      <FormLayout
+        caption={`Step ${step + 1}${group ? ` · ${group.label}` : ''}`}
+        title={STEPS[step]}
+        requiredNote={<span className="flex items-center gap-1.5"><Info size={13} className="shrink-0 text-fg-muted" /> Fields with an asterisk (*) are mandatory.</span>}
+        layout="aside" stepper
+        help={!HINT_STEPS.has(step) ? undefined : isLast ? { fallback: { title: STEPS[step], body: FIELD_HELP_EMPTY } } : {}}
+        upNext={isLast ? undefined : <UpNextCard number={step + 2} name={STEPS[step + 1]!} required={REQUIRED_STEPS.has(step + 1)} />}>
+        <div className="space-y-6">
         {error && <p className="rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">{error}</p>}
         {formErrors.length > 0 && (
           <ul className="space-y-0.5 rounded-lg bg-danger-bg px-4 py-3 text-small text-danger-text">
             {formErrors.map((m) => <li key={m}>{m}</li>)}
           </ul>
         )}
-        <p className="flex items-center gap-1.5 text-tiny text-fg-secondary">
-          <Info size={13} className="shrink-0 text-fg-muted" /> Fields with an asterisk (*) are mandatory.
-        </p>
 
         {step === 0 && (
-          <div className="space-y-4">
-            <Field label="Name *" hint="Shown to partners in the offer list and on their tracking links — not the internal ID.">
-              <input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} />
-            </Field>
-            {/* Status — segmented state control (Everflow "Add Offer" parity). */}
-            <div>
-              <label className="label mb-2 block">Status *<HelpHint text="Active = running. Paused = temporarily stopped. Pending = setup in progress (not live)." /></label>
-              <Segmented options={STATUSES} value={form.status} onChange={(v) => set('status', v)} dots={STATUS_DOT} labels={STATUS_LABEL} />
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:items-start">
+            <div className="md:col-span-2">
+              <Field label="Name *" hint="Shown to partners in the offer list and on their tracking links — not the internal ID.">
+                <input className="input" required value={form.name} onChange={(e) => set('name', e.target.value)} />
+              </Field>
             </div>
-            {/* Advertiser / Category / Currency stacked on the left, Thumbnail on the right — matches the Everflow "Add Offer" General layout. */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-start">
-              <div className="space-y-4">
-                <Field label="Advertiser *" hint="The company that owns this offer. Payout & revenue roll up to them for reporting and invoicing, and their account / sales managers apply to it. Every offer belongs to exactly one.">
-                  <select className="input" required value={form.advertiserId} onChange={(e) => set('advertiserId', e.target.value)}>
-                    <option value="" disabled>Select Advertiser…</option>
-                    {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
+            <Field label="Advertiser *" hint="The company that owns this offer. Payout & revenue roll up to them for reporting and invoicing, and their account / sales managers apply to it. Every offer belongs to exactly one.">
+              <select className="input" required value={form.advertiserId} onChange={(e) => set('advertiserId', e.target.value)}>
+                <option value="" disabled>Select Advertiser…</option>
+                {(advertisers ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Category *" hint="Grouping label used for list filtering and marketplace facets. Pick an existing one, or choose “＋ New category…” to add a new label.">
+              {catNew ? (
+                <div className="flex gap-2">
+                  <input className="input" autoFocus required value={form.category} placeholder="New category name"
+                    onChange={(e) => set('category', e.target.value)} />
+                  <button type="button" className="btn-ghost shrink-0"
+                    onClick={() => { setCatNew(false); set('category', ''); }}>Cancel</button>
+                </div>
+              ) : (
+                <SearchablePicker single required ariaLabel="Category" placeholder="Select Category…" searchPlaceholder="Search categories…"
+                  value={form.category ? [form.category] : []}
+                  options={[
+                    ...(form.category && !categoryOptions.includes(form.category) ? [{ value: form.category, label: form.category }] : []),
+                    ...categoryOptions.map((c) => ({ value: c, label: c })),
+                    { value: NEW_CATEGORY, label: '＋ New category…' },
+                  ]}
+                  onChange={([v = '']) => {
+                    if (v === NEW_CATEGORY) { setCatNew(true); set('category', ''); }
+                    else set('category', v);
+                  }} />
+              )}
+            </Field>
+            <Field label="Currency *" hint="ISO 4217 3-letter code (e.g. USD). All payout, revenue and ledger amounts for this offer are recorded in it. Not validated server-side yet — enter a real code.">
+              <input className="input" list="offer-currency-options" maxLength={3} pattern="[A-Za-z]{3}" title="Three-letter ISO 4217 code, e.g. USD" required value={form.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} />
+            </Field>
+            <datalist id="offer-currency-options">
+              {COMMON_CURRENCIES.map((c) => <option key={c} value={c} />)}
+            </datalist>
+            {/* Status — radio cards (Concept 05). Values are the raw enum members. */}
+            <div data-help-label="Status *" data-help={STATUS_HINT}>
+              <div className="mb-1.5 flex items-center"><span id="offer-status-label" className="label !mb-0">Status *</span><HelpHint text={STATUS_HINT} /></div>
+              <StatusChoice options={STATUS_OPTIONS} value={form.status as (typeof STATUSES)[number]} onChange={(v) => set('status', v)} ariaLabelledby="offer-status-label" />
+            </div>
+            <ThumbnailField url={form.thumbnailUrl} onUrlChange={(v) => set('thumbnailUrl', v)} onPendingFile={setPendingThumb} />
+            <div className="space-y-2">
+              <span aria-hidden className="label mb-1.5 hidden md:block">&nbsp;</span>
+              <ToggleRow label="Assign To Offer Group" checked={assignGroup} onChange={setAssignGroup} hint={GROUP_HINT} hintIcon />
+              {assignGroup && (
+                <select className="input" aria-label="Offer group" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+                  <option value="" disabled>Select Offer Group…</option>
+                  {(offerGroups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              )}
+            </div>
+            {/* Visibility — a real offer field (always set), so it stays visible. */}
+            <div className="md:col-span-2" data-help-label="Visibility *" data-help={VISIBILITY_HINT}>
+              <div className="mb-1.5 flex items-center"><span id="offer-visibility-label" className="label !mb-0">Visibility *</span><HelpHint text={VISIBILITY_HINT} /></div>
+              <ChoiceCards options={VISIBILITY_OPTIONS} value={form.visibility as (typeof VISIBILITIES)[number]} onChange={(v) => set('visibility', v)} ariaLabelledby="offer-visibility-label" />
+            </div>
+            <div className="md:col-span-2"><LabelsInput value={labels} onChange={setLabels} /></div>
+            {/* Optional fields only — collapsed by default, kept mounted while collapsed. */}
+            <FormSection id="offer-optional" title="Optional details" collapsible filledCount={optionalFilled}
+              summary="Preview URL · App Identifier · Product ID · Internal Notes · Description" className="md:col-span-2">
+              <div className="grid grid-cols-1 gap-5 pt-2 md:grid-cols-2">
+                <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
+                  <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
                 </Field>
-                <Field label="Category *" hint="Grouping label used for list filtering and marketplace facets. Pick an existing one, or choose “＋ New category…” to add a new label.">
-                  {catNew ? (
-                    <div className="flex gap-2">
-                      <input className="input" autoFocus required value={form.category} placeholder="New category name"
-                        onChange={(e) => set('category', e.target.value)} />
-                      <button type="button" className="btn-ghost shrink-0"
-                        onClick={() => { setCatNew(false); set('category', ''); }}>Cancel</button>
-                    </div>
-                  ) : (
-                    <SearchablePicker single required ariaLabel="Category" placeholder="Select Category…" searchPlaceholder="Search categories…"
-                      value={form.category ? [form.category] : []}
-                      options={[
-                        ...(form.category && !categoryOptions.includes(form.category) ? [{ value: form.category, label: form.category }] : []),
-                        ...categoryOptions.map((c) => ({ value: c, label: c })),
-                        { value: NEW_CATEGORY, label: '＋ New category…' },
-                      ]}
-                      onChange={([v = '']) => {
-                        if (v === NEW_CATEGORY) { setCatNew(true); set('category', ''); }
-                        else set('category', v);
-                      }} />
-                  )}
+                <Field label="App Identifier" hint="Store bundle / package ID for app offers (e.g. com.acme.app or id123456789).">
+                  <input className="input" placeholder="e.g. com.acme.app" maxLength={255} value={form.appIdentifier} onChange={(e) => set('appIdentifier', e.target.value)} />
                 </Field>
-                <Field label="Currency *" hint="ISO 4217 3-letter code (e.g. USD). All payout, revenue and ledger amounts for this offer are recorded in it. Not validated server-side yet — enter a real code.">
-                  <input className="input" list="offer-currency-options" maxLength={3} pattern="[A-Za-z]{3}" title="Three-letter ISO 4217 code, e.g. USD" required value={form.currency} onChange={(e) => set('currency', e.target.value.toUpperCase())} />
-                  <datalist id="offer-currency-options">
-                    {COMMON_CURRENCIES.map((c) => <option key={c} value={c} />)}
-                  </datalist>
+                <Field label="Product ID" hint="Your own or the advertiser's product / SKU reference for this offer.">
+                  <input className="input" maxLength={255} value={form.productId} onChange={(e) => set('productId', e.target.value)} />
                 </Field>
+                <div className="md:col-span-2">
+                  <Field label="Internal Notes" hint="Visible to your team only — never shown to partners or advertisers.">
+                    <textarea className="input min-h-[80px]" value={form.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} />
+                  </Field>
+                </div>
+                <div className="md:col-span-2">
+                  <Field label="Description" hint="Notes about the offer for your team and partners. Plain text.">
+                    <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Detailed description of your offer…" />
+                  </Field>
+                </div>
               </div>
-              <ThumbnailField url={form.thumbnailUrl} onUrlChange={(v) => set('thumbnailUrl', v)} onPendingFile={setPendingThumb} />
-            </div>
-            <div>
-              <label className="label mb-2 block">Assign To Offer Group<HelpHint text="Adds this offer to a group for shared reporting and curation. Group-level caps are stored for reference but not enforced at the click level yet — only the offer's own caps enforce. Change this later from either side." /></label>
-              <div className="flex flex-wrap items-center gap-2">
-                <YesNoToggle on={assignGroup} onChange={setAssignGroup} />
-                {assignGroup && (
-                  <select className="input !w-auto" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-                    <option value="" disabled>Select Offer Group…</option>
-                    {(offerGroups ?? []).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                )}
-              </div>
-            </div>
-            <LabelsInput value={labels} onChange={setLabels} />
-            <Field label="App Identifier" hint="Store bundle / package ID for app offers (e.g. com.acme.app or id123456789).">
-              <input className="input" placeholder="e.g. com.acme.app" maxLength={255} value={form.appIdentifier} onChange={(e) => set('appIdentifier', e.target.value)} />
-            </Field>
-            <Field label="Preview URL" hint="A no-tracking link partners can open to see the landing page before running traffic.">
-              <input className="input" value={form.previewUrl} onChange={(e) => set('previewUrl', e.target.value)} />
-            </Field>
-            <Field label="Internal Notes" hint="Visible to your team only — never shown to partners or advertisers.">
-              <textarea className="input min-h-[80px]" value={form.internalNotes} onChange={(e) => set('internalNotes', e.target.value)} />
-            </Field>
-            <Field label="Product ID" hint="Your own or the advertiser's product / SKU reference for this offer.">
-              <input className="input" maxLength={255} value={form.productId} onChange={(e) => set('productId', e.target.value)} />
-            </Field>
-            <Field label="Description" hint="Notes about the offer for your team and partners. Plain text.">
-              <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Detailed description of your offer…" />
-            </Field>
-            {/* Visibility lives below the fold — the Everflow "Add Offer" General step doesn't surface it
-                up top, but it's a real offer field so it stays settable here. */}
-            <div>
-              <label className="label mb-2 block">Visibility *<HelpHint text="Public = any partner can find and run it. Private = only partners you grant access. Ask = partners must request approval." /></label>
-              <Segmented options={VISIBILITIES} value={form.visibility} onChange={(v) => set('visibility', v)} />
-            </div>
+            </FormSection>
           </div>
         )}
 
         {step === 1 && (
           <div className="space-y-6">
+            <FormSection id="offer-tracking" title="Tracking">
             <div className="space-y-4">
-              <h3 className="text-h3 font-medium text-fg">Tracking</h3>
               <Field label="Default Landing Page URL *"><textarea className="input min-h-[80px] font-mono text-tiny" required value={form.destinationUrl} onChange={(e) => set('destinationUrl', e.target.value)} placeholder="https://xyz.domain.com/click/?click_id={click_id}" /></Field>
               <Field label="Tracking Domain *" hint="Tracking links and the S2S postback URL for this offer use this domain.">
                 <select className="input" required value={form.trackingDomainId} onChange={(e) => set('trackingDomainId', e.target.value)}>
@@ -355,12 +384,10 @@ export default function OfferCreate() {
                 <span><strong>Support Deep Links</strong> — Allow Partners to direct traffic to alternate landing pages without additional Offer URLs.</span>
               </label>
             </div>
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Caps</h3>
-              <div>
-                <label className="label mb-2 block">Enable Caps</label>
-                <YesNoToggle on={capsEnabled} onChange={setCapsEnabled} />
-              </div>
+            </FormSection>
+            <FormSection id="offer-caps" title="Caps" className="border-t border-border pt-6">
+            <div className="space-y-4">
+              <ToggleRow label="Enable Caps" checked={capsEnabled} onChange={setCapsEnabled} />
               {capsEnabled && (
                 <div className="grid grid-cols-1 gap-4 rounded-card border border-border bg-page p-4 sm:grid-cols-3">
                   <Field label="Daily Click Cap"><input type="number" min={0} className="input" value={caps.dailyClickCap} onChange={(e) => setCaps((c) => ({ ...c, dailyClickCap: e.target.value }))} placeholder="Unlimited" /></Field>
@@ -372,11 +399,12 @@ export default function OfferCreate() {
                 <CapTimeZoneSelect value={capTimezone} onChange={setCapTimezone} inheritLabel={`Network default — ${netSettings?.general.capTimezone ?? 'UTC'}`} />
               </Field>
             </div>
+            </FormSection>
           </div>
         )}
 
         {step === 2 && (
-          <div className="max-w-2xl space-y-6">
+          <div className="space-y-6">
             <p className="text-small text-fg-secondary">Give this URL to the advertiser. They should fire it from their server when a user converts. The {`{click_id}`} is passed automatically via the redirect.</p>
             <div className="space-y-4">
               <div className="space-y-2">
@@ -386,6 +414,7 @@ export default function OfferCreate() {
               </div>
               <div>
                 <p className="label mb-2 block">Postback Parameters</p>
+                <div className="overflow-x-auto">
                 <table className="premium-table w-full">
                   <thead><tr><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Parameter</th><th className="py-1.5 text-left text-tiny uppercase text-fg-muted">Meaning</th></tr></thead>
                   <tbody>
@@ -394,16 +423,16 @@ export default function OfferCreate() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Publisher Postback</h3>
+            <FormSection id="offer-publisher-postback" title="Publisher Postback" className="border-t border-border pt-6">
               <label className="flex items-start gap-2 text-small text-fg">
                 <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border" checked={firePartnerPostback} onChange={(e) => setFirePartnerPostback(e.target.checked)} />
                 <span><strong>Fire Partner Postback</strong> — automatically notify publishers via their configured postback URL when a conversion is approved.</span>
               </label>
-            </div>
+            </FormSection>
           </div>
         )}
 
@@ -412,8 +441,8 @@ export default function OfferCreate() {
             <RevenueSettingsPanel value={revenue} onChange={setRevenue}
               firePartnerPostback={firePartnerPostback} onFirePartnerPostbackChange={setFirePartnerPostback}
               revenue={form.defaultRevenue} onRevenueChange={(v) => set('defaultRevenue', v)} />
-            <div className="space-y-4 border-t border-border pt-4">
-              <h3 className="text-h3 font-medium text-fg">Base Payout</h3>
+            <FormSection id="offer-base-payout" title="Base Payout" className="border-t border-border pt-6">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field label="Model">
                 <select className="input" value={form.payoutModel} onChange={(e) => set('payoutModel', e.target.value)}>
                   {['CPA', 'CPL', 'CPC', 'CPI', 'CPM', 'RevShare'].map((m) => <option key={m}>{m}</option>)}
@@ -421,12 +450,13 @@ export default function OfferCreate() {
               </Field>
               <Field label={`${PAYOUT_LABEL[form.payoutModel] ?? 'Payout Per Action'} *`}><input className="input" required inputMode="decimal" pattern="-?\d{1,10}(\.\d{1,4})?" title="A number with up to 4 decimals" value={form.defaultPayout} onChange={(e) => set('defaultPayout', e.target.value)} placeholder="5.00" /></Field>
             </div>
+            </FormSection>
           </div>
         )}
 
         {step === 4 && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field label="Attribution Window (seconds)"><input type="number" min={0} className="input" value={form.attributionWindowS} onChange={(e) => set('attributionWindowS', e.target.value)} /></Field>
               <Field label="Dedup Window (seconds)"><input type="number" min={0} className="input" value={form.dedupWindowS} onChange={(e) => set('dedupWindowS', e.target.value)} /></Field>
             </div>
@@ -442,10 +472,7 @@ export default function OfferCreate() {
 
         {step === 6 && (
           <div className="space-y-4">
-            <div>
-              <label className="label mb-2 block">Enable Fail Traffic</label>
-              <YesNoToggle on={failTrafficEnabled} onChange={setFailTrafficEnabled} />
-            </div>
+            <ToggleRow label="Enable Fail Traffic" checked={failTrafficEnabled} onChange={setFailTrafficEnabled} />
             {failTrafficEnabled ? (
               <div className="rounded-card border border-border bg-page p-4">
                 <Field label="Fallback URL *"><input className="input" value={form.fallbackUrl} onChange={(e) => set('fallbackUrl', e.target.value)} placeholder="https://…" /></Field>
@@ -462,16 +489,21 @@ export default function OfferCreate() {
         )}
 
         {step === 8 && <EmailSettingsPanel value={email} onChange={setEmail} />}
-
-        <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
-          <button type="button" className="text-small font-medium text-fg-muted hover:text-fg-secondary" onClick={() => nav('/app/offers')}>Cancel</button>
-          <div className="flex gap-2">
-            {step > 0 && <button type="button" className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button>}
-            <button type="submit" className="btn-primary" disabled={busy || submitting} aria-busy={busy || submitting}>{busy || submitting ? 'Creating…' : step === STEPS.length - 1 ? 'Create Offer' : 'Next'}</button>
-          </div>
         </div>
+      </FormLayout>
+
+      <FormFooter
+        stepText={`Step ${step + 1} of ${STEPS.length}`}
+        cancel={<>
+          <button type="button" className="btn-ghost" onClick={() => nav('/app/offers')}>Cancel</button>
+          {step > 0 && <button type="button" className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button>}
+        </>}
+        primary={{
+          label: locked ? 'Creating…' : isLast ? 'Create Offer' : `Next: ${STEPS[step + 1]}`,
+          shortLabel: locked || isLast ? undefined : 'Next',
+          disabled: locked, busy: locked,
+        }} />
       </form>
-      </div>
     </>
   );
 }

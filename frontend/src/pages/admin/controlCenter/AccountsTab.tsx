@@ -12,8 +12,14 @@
  * own real History Log, confirmed against a pasted screenshot.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Calendar, Search, Filter, MoreVertical, ChevronDown, ChevronRight } from 'lucide-react';
 import { Tabs, Badge, Spinner, StateBlock, Field } from '../../../shared-components/primitives/ui';
+import { StatusChoice } from '../../../shared-components/forms/ChoiceCards';
+
+const ACCOUNT_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active', tone: 'success' }, { value: 'invited', label: 'Invited', tone: 'warning' }, { value: 'disabled', label: 'Disabled (no access)', tone: 'danger' },
+] as const;
 import { ColumnsModal } from '../../../shared-components/primitives/TableActionsKit';
 import { Pagination, daysAgo, todayStr, toIso, DASH } from '../../../shared-components/primitives/ReportPageKit';
 import { downloadCsv, downloadXlsx } from '../../../lib/export';
@@ -199,13 +205,10 @@ function EditAccountForm({ user, onCancel, onSaved }: { user: DashboardUser; onC
             <option value="read_only">Read Only</option>
           </select>
         </Field>
-        <Field label="Status *">
-          <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="active">Active</option>
-            <option value="invited">Invited</option>
-            <option value="disabled">Disabled (no access)</option>
-          </select>
-        </Field>
+        <div className="sm:col-span-2">
+          <span id="account-status-label" className="label">Status *</span>
+          <StatusChoice options={ACCOUNT_STATUS_OPTIONS} value={status as (typeof ACCOUNT_STATUS_OPTIONS)[number]['value']} onChange={setStatus} ariaLabelledby="account-status-label" />
+        </div>
         <Field label="Business Unit"><input className="input" value={businessUnit} onChange={(e) => setBusinessUnit(e.target.value)} /></Field>
         <Field label="Primary Phone"><input className="input" value={primaryPhone} onChange={(e) => setPrimaryPhone(e.target.value)} /></Field>
         <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
@@ -374,7 +377,7 @@ function MoreFiltersButton({ portal, method, onApply }: { portal: string; method
       <button type="button" title="Filters" onClick={() => { setDraftPortal(portal); setDraftMethod(method); setOpen((o) => !o); }}
         className="relative grid h-9 w-9 place-items-center rounded-[var(--radius)] border border-border bg-surface text-fg-secondary hover:bg-accent-subtle hover:text-fg">
         <Filter size={15} />
-        {count > 0 && <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">{count}</span>}
+        {count > 0 && <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent">{count}</span>}
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-64 space-y-3 rounded-card border border-border bg-elevated p-3 shadow-elevated">
@@ -496,7 +499,7 @@ function HistoryLog() {
       case 'Changes': return (
         <span className="flex items-center gap-2">
           {r.changes}
-          {r.isNew && <span className="rounded-full bg-success px-2 py-0.5 text-[10px] font-bold uppercase text-white">New!</span>}
+          {r.isNew && <span className="rounded-full bg-success-bg px-2 py-0.5 text-[10px] font-bold uppercase text-success-text">New!</span>}
         </span>
       );
       case 'Employee': return r.employee;
@@ -578,7 +581,10 @@ function HistoryLog() {
 }
 
 export default function AccountsTab() {
-  const [sub, setSub] = useState('Accounts');
+  // `?view=history` (the dashboard's Recent changes and the notifications "Browse all") opens the History Log.
+  const wantHistory = useSearchParams()[0].get('view') === 'history';
+  const [sub, setSub] = useState(wantHistory ? 'History Log' : 'Accounts');
+  useEffect(() => { if (wantHistory) setSub('History Log'); }, [wantHistory]);
   return (
     <>
       <Tabs tabs={['Accounts', 'History Log']} active={sub} onChange={setSub} />
